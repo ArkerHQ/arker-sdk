@@ -1737,6 +1737,13 @@ export class VM {
     return this._client._request("GET", buildQuery(`${vmPath(this.id)}/sessions`, query), undefined, this.baseUrl);
   }
 
+  /** Create a new session on this VM.
+   *
+   * `cwd` is optional. Omit it to start the session in the VM's own default
+   * working directory (a fresh Ubuntu VM's default account home directory),
+   * rather than a value this SDK picks. That account has passwordless sudo,
+   * so package installs and other privileged commands don't need a
+   * separate authentication step. */
   async createSession(request: CreateSessionRequest = {}): Promise<Session> {
     return this._client._request("POST", `${vmPath(this.id)}/sessions`, request, this.baseUrl);
   }

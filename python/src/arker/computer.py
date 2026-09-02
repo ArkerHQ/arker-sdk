@@ -1375,6 +1375,14 @@ class VM:
         return _decode_model(ListSessionsResponse, payload)
 
     def create_session(self, *, env: dict[str, str] | None = None, cwd: str | None = None) -> Session:
+        """Create a new session on this VM.
+
+        ``cwd`` is optional. Omit it to start the session in the VM's own
+        default working directory (a fresh Ubuntu VM's default account home
+        directory), rather than a value this SDK picks. That account has
+        passwordless sudo, so package installs and other privileged commands
+        don't need a separate authentication step.
+        """
         request = CreateSessionRequest(env=env, cwd=cwd)
         payload = self._client._request(
             "POST", f"{_vm_path(self.id)}/sessions", request, base_url=self.base_url
