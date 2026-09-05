@@ -223,7 +223,7 @@ export interface paths {
         };
         /**
          * Get a run
-         * @description Return one recorded run, including its current state and available output.
+         * @description Return one recorded run, including its current state and available output. `stdout`/`stderr` reflect the run's live in-progress output while it is still `running`, not just its output after completion, so a client polling a long command sees what it has printed as it prints it. Each response carries the run's full output so far, not a delta since the previous poll. A cancelled run keeps whatever it had already produced.
          */
         get: operations["getRun"];
         put?: never;
@@ -609,7 +609,7 @@ export interface components {
         VmState: "idle" | "running";
         SessionState: components["schemas"]["VmState"];
         /**
-         * @description Lifecycle state for a run. `pending` means the run was accepted but has not started yet because an earlier run on the same session is still in flight; it is not terminal, and a client should keep polling. `running` means the command is in progress. `completed` means the command finished; `exit_code` reports its result. `failed` means the service could not start or finish the command, with a client-safe explanation in `fail_reason`. `cancelled` means the client cancelled the run.
+         * @description Lifecycle state for a run. `pending` means the run was accepted but has not started yet because an earlier run on the same session is still in flight; it is not terminal, and a client should keep polling. `running` means the command is in progress. `completed` means the command finished; `exit_code` reports its result. `failed` means the service could not start or finish the command, with a client-safe explanation in `fail_reason`. `cancelled` means the client cancelled the run — a run cancelled while still `pending` never executes, and one cancelled while running keeps the output it had already produced.
          * @enum {string}
          */
         RunState: "pending" | "running" | "completed" | "failed" | "cancelled";
@@ -767,6 +767,8 @@ export interface components {
             disk?: boolean | null;
             /** @description Whether the VM should preserve recoverable state across compute interruptions. */
             durable?: boolean | null;
+            /** @description Self-checkpoint instead of forking: convert the source VM's own current-plus-queued runs to a resumable `pending` queue in place and return that same VM, unchanged. Mints no new vm_id and creates no new VM at all. Default false = a normal fork (a distinct child VM is created). Requires an existing VM to act upon: combining `true` with `image`, `dockerfile` or `layers: ["disk"]` is refused with a 400. */
+            inplace?: boolean | null;
             /** @description Preferred compute platforms for a public template, such as `["graviton3"]`. Supply multiple values to allow any listed platform. Omit or pass an empty list for automatic selection. A fork of an existing VM inherits its source platform. */
             platforms?: string[] | null;
             /** @description State to inherit from the source VM. Omit this field or pass `["disk", "memory"]` for a warm fork that resumes the source's filesystem and running processes. Pass `["disk"]` for a filesystem-only fork that cold-boots without the source's running processes. The list must include `disk`; supported values are `disk` and `memory`. */
@@ -1040,6 +1042,7 @@ export interface components {
         Run: {
             /** @description Unique run identifier. */
             run_id: string;
+            type: components["schemas"]["RunType"];
             /** @description Unique session identifier. */
             session_id?: string | null;
             /** @description Command submitted for execution. */
@@ -1086,6 +1089,7 @@ export interface components {
         RunSummary: {
             /** @description Unique run identifier. */
             run_id: string;
+            type: components["schemas"]["RunType"];
             /** @description Unique session identifier. */
             session_id?: string | null;
             /** @description Command submitted for execution. */
@@ -1632,6 +1636,11 @@ export interface components {
              */
             password: string;
         };
+        /**
+         * @description How an execution on a VM was started. `command` is a run submitted to `POST /v1/vms/{id}/runs`. `pty` is an interactive terminal opened over the WebSocket PTY; one run spans the whole attachment. `ssh` is work arriving over SSH — an exec, an interactive shell, git or scp; one run spans the channel. Every execution on a VM is a run and carries exactly one of these, so `GET /v1/vms/{id}/runs` shows interactive and SSH work alongside submitted commands rather than omitting it.
+         * @enum {string}
+         */
+        RunType: "command" | "pty" | "ssh";
     };
     responses: {
         /** @description The organization must complete billing setup or payment before starting new compute. */

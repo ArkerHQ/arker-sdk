@@ -800,7 +800,7 @@
           "Runs"
         ],
         "summary": "Get a run",
-        "description": "Return one recorded run, including its current state and available output.",
+        "description": "Return one recorded run, including its current state and available output. `stdout`/`stderr` reflect the run's live in-progress output while it is still `running`, not just its output after completion, so a client polling a long command sees what it has printed as it prints it. Each response carries the run's full output so far, not a delta since the previous poll. A cancelled run keeps whatever it had already produced.",
         "responses": {
           "200": {
             "description": "Run status.",
@@ -1947,7 +1947,7 @@
           "failed",
           "cancelled"
         ],
-        "description": "Lifecycle state for a run. `pending` means the run was accepted but has not started yet because an earlier run on the same session is still in flight; it is not terminal, and a client should keep polling. `running` means the command is in progress. `completed` means the command finished; `exit_code` reports its result. `failed` means the service could not start or finish the command, with a client-safe explanation in `fail_reason`. `cancelled` means the client cancelled the run."
+        "description": "Lifecycle state for a run. `pending` means the run was accepted but has not started yet because an earlier run on the same session is still in flight; it is not terminal, and a client should keep polling. `running` means the command is in progress. `completed` means the command finished; `exit_code` reports its result. `failed` means the service could not start or finish the command, with a client-safe explanation in `fail_reason`. `cancelled` means the client cancelled the run — a run cancelled while still `pending` never executes, and one cancelled while running keeps the output it had already produced."
       },
       "Provider": {
         "type": "string",
@@ -2530,6 +2530,13 @@
               "null"
             ]
           },
+          "inplace": {
+            "description": "Self-checkpoint instead of forking: convert the source VM's own current-plus-queued runs to a resumable `pending` queue in place and return that same VM, unchanged. Mints no new vm_id and creates no new VM at all. Default false = a normal fork (a distinct child VM is created). Requires an existing VM to act upon: combining `true` with `image`, `dockerfile` or `layers: [\"disk\"]` is refused with a 400.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "platforms": {
             "description": "Preferred compute platforms for a public template, such as `[\"graviton3\"]`. Supply multiple values to allow any listed platform. Omit or pass an empty list for automatic selection. A fork of an existing VM inherits its source platform.",
             "type": [
@@ -3027,7 +3034,7 @@
             "minimum": 0
           },
           "background": {
-            "description": "Alias for `time_to_background`. `true` is exactly `time_to_background: 0` (return a pollable run immediately); `false` leaves the default sync window. Send only one of the two \u2014 supplying both is rejected, because they can disagree. Prefer `time_to_background`, which can also bound the wait instead of only switching it off.",
+            "description": "Alias for `time_to_background`. `true` is exactly `time_to_background: 0` (return a pollable run immediately); `false` leaves the default sync window. Send only one of the two — supplying both is rejected, because they can disagree. Prefer `time_to_background`, which can also bound the wait instead of only switching it off.",
             "type": [
               "boolean",
               "null"
@@ -3265,6 +3272,7 @@
         "type": "object",
         "required": [
           "run_id",
+          "type",
           "state",
           "started_at",
           "exit_code",
@@ -3278,6 +3286,9 @@
           "run_id": {
             "description": "Unique run identifier.",
             "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/RunType"
           },
           "session_id": {
             "description": "Unique session identifier.",
@@ -3396,6 +3407,7 @@
         "type": "object",
         "required": [
           "run_id",
+          "type",
           "state",
           "started_at",
           "exit_code"
@@ -3405,6 +3417,9 @@
           "run_id": {
             "description": "Unique run identifier.",
             "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/RunType"
           },
           "session_id": {
             "description": "Unique session identifier.",
@@ -5013,6 +5028,15 @@
             "format": "password"
           }
         }
+      },
+      "RunType": {
+        "type": "string",
+        "enum": [
+          "command",
+          "pty",
+          "ssh"
+        ],
+        "description": "How an execution on a VM was started. `command` is a run submitted to `POST /v1/vms/{id}/runs`. `pty` is an interactive terminal opened over the WebSocket PTY; one run spans the whole attachment. `ssh` is work arriving over SSH — an exec, an interactive shell, git or scp; one run spans the channel. Every execution on a VM is a run and carries exactly one of these, so `GET /v1/vms/{id}/runs` shows interactive and SSH work alongside submitted commands rather than omitting it."
       }
     }
   }

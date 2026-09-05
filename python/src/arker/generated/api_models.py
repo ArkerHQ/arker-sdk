@@ -208,51 +208,6 @@ class BackgroundRunResponse:
 
 
 @dataclass(frozen=True)
-class Run:
-    run_id: str
-    state: RunState
-    started_at: str
-    exit_code: int | None
-    stdout: str
-    stdout_encoding: Literal['utf-8', 'base64']
-    stderr: str
-    stderr_encoding: Literal['utf-8', 'base64']
-    session_id: str | None = None
-    command: str | None = None
-    completed_at: str | None = None
-    fail_reason: str | None = None
-    retry_count: int | None = 0
-    vm_id: str | None = None
-    vm_name: str | None = None
-    source_org_id: str | None = None
-    region: str | None = None
-    provider: Provider | None = None
-
-
-@dataclass(frozen=True)
-class RunSummary:
-    run_id: str
-    state: RunState
-    started_at: str
-    exit_code: int | None
-    session_id: str | None = None
-    command: str | None = None
-    completed_at: str | None = None
-    fail_reason: str | None = None
-    vm_id: str | None = None
-    vm_name: str | None = None
-    source_org_id: str | None = None
-    region: str | None = None
-    provider: Provider | None = None
-
-
-@dataclass(frozen=True)
-class ListRunsResponse:
-    runs: list[RunSummary]
-    next_cursor: str | None = None
-
-
-@dataclass(frozen=True)
 class OrgRunListRow:
     t_ms: int
     request_id: str
@@ -530,6 +485,9 @@ class RegistryAuth:
     password: str
 
 
+RunType: TypeAlias = Literal['command', 'pty', 'ssh']
+
+
 @dataclass(frozen=True)
 class ListVmsParameters:
     cursor: str | None = None
@@ -734,6 +692,53 @@ PolicyAction: TypeAlias = Literal['allow', 'deny'] | PolicyAction1
 RunResponse: TypeAlias = CompletedRunResponse | BackgroundRunResponse
 
 
+@dataclass(frozen=True)
+class Run:
+    run_id: str
+    type: RunType
+    state: RunState
+    started_at: str
+    exit_code: int | None
+    stdout: str
+    stdout_encoding: Literal['utf-8', 'base64']
+    stderr: str
+    stderr_encoding: Literal['utf-8', 'base64']
+    session_id: str | None = None
+    command: str | None = None
+    completed_at: str | None = None
+    fail_reason: str | None = None
+    retry_count: int | None = 0
+    vm_id: str | None = None
+    vm_name: str | None = None
+    source_org_id: str | None = None
+    region: str | None = None
+    provider: Provider | None = None
+
+
+@dataclass(frozen=True)
+class RunSummary:
+    run_id: str
+    type: RunType
+    state: RunState
+    started_at: str
+    exit_code: int | None
+    session_id: str | None = None
+    command: str | None = None
+    completed_at: str | None = None
+    fail_reason: str | None = None
+    vm_id: str | None = None
+    vm_name: str | None = None
+    source_org_id: str | None = None
+    region: str | None = None
+    provider: Provider | None = None
+
+
+@dataclass(frozen=True)
+class ListRunsResponse:
+    runs: list[RunSummary]
+    next_cursor: str | None = None
+
+
 SyncWriteEntry: TypeAlias = (
     SyncChunkWrite | SyncPresignedWriteRequest | SyncPresignedWriteCommit
 )
@@ -884,6 +889,7 @@ class ForkRequest1:
     ssh_public_keys: list[str] | None = None
     disk: bool | None = None
     durable: bool | None = None
+    inplace: bool | None = None
     platforms: list[str] | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
@@ -907,6 +913,7 @@ class ForkRequest2:
     ssh_public_keys: list[str] | None = None
     disk: bool | None = None
     durable: bool | None = None
+    inplace: bool | None = None
     platforms: list[str] | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
@@ -930,6 +937,7 @@ class ForkRequest3:
     ssh_public_keys: list[str] | None = None
     disk: bool | None = None
     durable: bool | None = None
+    inplace: bool | None = None
     platforms: list[str] | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
@@ -953,6 +961,7 @@ class ForkRequest4:
     ssh_public_keys: list[str] | None = None
     disk: bool | None = None
     durable: bool | None = None
+    inplace: bool | None = None
     platforms: list[str] | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
@@ -976,6 +985,7 @@ class ForkRequest5:
     ssh_public_keys: list[str] | None = None
     disk: bool | None = None
     durable: bool | None = None
+    inplace: bool | None = None
     platforms: list[str] | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
@@ -999,6 +1009,7 @@ class ForkRequest6:
     ssh_public_keys: list[str] | None = None
     disk: bool | None = None
     durable: bool | None = None
+    inplace: bool | None = None
     platforms: list[str] | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
