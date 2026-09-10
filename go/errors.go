@@ -6,16 +6,13 @@ import (
 	"net/http"
 )
 
-// Error is an arkerd API failure. arkerd answers with a FLAT envelope --
-// {"error":{"code","message","retryable","retry_after"}} -- with no nested
-// detail object, and `retryable` is frequently ABSENT rather than false.
-// Callers should branch on Code, never on substrings of Message.
+// Error is an arkerd API failure. The envelope is flat, and `retryable` is
+// often absent -- absent means unspecified, not false. Branch on Code, never
+// on Message.
 type Error struct {
 	Code       string
 	Message    string
 	StatusCode int
-	// Retryable is what the SERVER said. Absent means "unspecified", not
-	// "no" -- see Retry.shouldRetry for how that is resolved.
 	Retryable  *bool
 	RetryAfter *float64
 }
@@ -24,27 +21,22 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("arker api status %d: %s: %s", e.StatusCode, e.Code, e.Message)
 }
 
-// IsNotFound reports a 404. Note this is ORG-SCOPED: a resource in another
-// org is indistinguishable from one that never existed, by design.
-func IsNotFound(err error) bool {
+func statusIs(err error, status int) bool {
 	var apiErr *Error
-	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
+	return errors.As(err, &apiErr) && apiErr.StatusCode == status
 }
 
-// IsConflict reports a 409 -- for a fork, an Idempotency-Key reused for a
-// DIFFERENT request.
-func IsConflict(err error) bool {
-	var apiErr *Error
-	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict
-}
+// IsNotFound reports a 404, which is ORG-SCOPED: another org's resource is
+// indistinguishable from one that never existed.
+func IsNotFound(err error) bool { return statusIs(err, http.StatusNotFound) }
 
-// UnknownOutcomeError is returned when a MUTATION failed at the transport
-// layer, so whether the server acted is genuinely unknown.
-//
-// This is not a retryable error and must not be treated as one. The server
-// may have completed the work; retrying blind is how a fork becomes two VMs,
-// one of them orphaned and billable. Retry only with the SAME
-// IdempotencyKey, which lets the server recognise the replay.
+// IsConflict reports a 409 -- for a fork, a key reused for a different request.
+func IsConflict(err error) bool { return statusIs(err, http.StatusConflict) }
+
+// UnknownOutcomeError means a MUTATION failed at the transport layer, so
+// whether the server acted is unknown. Not retryable: the work may be done,
+// and retrying blind is how one fork becomes two VMs. Retry only with the same
+// IdempotencyKey.
 type UnknownOutcomeError struct {
 	Method string
 	Path   string
@@ -53,10 +45,8 @@ type UnknownOutcomeError struct {
 
 func (e *UnknownOutcomeError) Error() string {
 	return fmt.Sprintf(
-		"network failure during %s %s: the operation outcome is unknown. "+
-			"Retry with the same IdempotencyKey, or reconcile state before retrying",
-		e.Method, e.Path,
-	)
+		"network failure during %s %s: outcome unknown. Retry with the same "+
+			"IdempotencyKey, or reconcile state first", e.Method, e.Path)
 }
 
 func (e *UnknownOutcomeError) Unwrap() error { return e.Err }

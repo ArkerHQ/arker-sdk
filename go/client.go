@@ -1,9 +1,6 @@
 // Package arker is the Go client for the Arker API.
 //
-// Arker runs hyper-elastic, durable virtual machines for agent workloads; its
-// core primitives are fork, run, and sync.
-//
-//	client, err := arker.New(arker.Options{APIKey: os.Getenv("ARKER_API_KEY")})
+//	client, _ := arker.New(arker.Options{APIKey: os.Getenv("ARKER_API_KEY")})
 //	vm, err := client.Fork(ctx, arker.ForkRequest{SourceVMName: "ubuntu-base"})
 package arker
 
@@ -22,31 +19,19 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://api.arker.ai/api"
-	defaultTimeout = 120 * time.Second
-
-	// Matches the Python and TypeScript SDKs: four total wire attempts, not
-	// four retries on top of the first.
-	defaultRetryAttempts = 4
+	defaultBaseURL       = "https://api.arker.ai/api"
+	defaultTimeout       = 120 * time.Second
+	defaultRetryAttempts = 4 // TOTAL wire attempts, not four on top of the first
 	defaultBaseDelay     = 200 * time.Millisecond
 	defaultMaxDelay      = 2 * time.Second
 )
 
-// retryableStatus is the set arkerd and its gateways use to mean "try again".
-//
-// 429 and 503 are REFUSALS -- the origin did no work, so retrying is
-// unambiguously safe. 502 and 504 are gateway errors, where the origin may
-// already have acted; those are only safe to retry because Fork carries an
-// Idempotency-Key (see Client.Fork).
-var retryableStatus = map[int]bool{
-	http.StatusTooManyRequests:    true, // 429
-	http.StatusBadGateway:         true, // 502
-	http.StatusServiceUnavailable: true, // 503
-	http.StatusGatewayTimeout:     true, // 504
-}
+// 429 and 503 are refusals -- the origin did no work. 502 and 504 are gateway
+// errors where it may already have acted, and are only safe to retry because
+// Fork carries an Idempotency-Key.
+var retryableStatus = map[int]bool{429: true, 502: true, 503: true, 504: true}
 
-// Retry bounds how hard the client tries. Attempts is the TOTAL number of
-// wire attempts; 1 disables retrying.
+// Retry bounds the client. Attempts is the total wire attempts; 1 disables it.
 type Retry struct {
 	Attempts  int
 	BaseDelay time.Duration
@@ -69,8 +54,7 @@ type Client struct {
 	retry   Retry
 }
 
-// New builds a Client. BaseURL defaults to production; point it at a feature
-// or staging environment by setting it explicitly.
+// New builds a Client. BaseURL defaults to production.
 func New(opts Options) (*Client, error) {
 	if strings.TrimSpace(opts.APIKey) == "" {
 		return nil, fmt.Errorf("arker: APIKey is required")
@@ -83,43 +67,30 @@ func New(opts Options) (*Client, error) {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: defaultTimeout}
 	}
-	retry := Retry{Attempts: defaultRetryAttempts, BaseDelay: defaultBaseDelay, MaxDelay: defaultMaxDelay}
+	retry := Retry{defaultRetryAttempts, defaultBaseDelay, defaultMaxDelay}
 	if opts.Retry != nil {
 		retry = *opts.Retry
-		if retry.Attempts < 1 {
-			retry.Attempts = 1
-		}
+		retry.Attempts = max(retry.Attempts, 1)
 	}
-	return &Client{apiKey: opts.APIKey, baseURL: base, http: httpClient, retry: retry}, nil
+	return &Client{opts.APIKey, base, httpClient, retry}, nil
 }
 
-// newIdempotencyKey mints a key for one logical operation.
-//
-// 41 characters, inside the server's 64-character limit, and the same
-// `sdk-fork-<hex>` shape the Python and TypeScript SDKs emit.
+// newIdempotencyKey mints a key for one logical operation: 41 chars, inside
+// the server's 64 limit, same shape as the Python and TypeScript SDKs.
 func newIdempotencyKey(prefix string) string {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
-		// crypto/rand failing is not recoverable and not maskable: a
-		// predictable key would collide across callers and replay the wrong
-		// VM, which is worse than failing the call.
+		// A predictable key would replay the wrong VM across callers, which is
+		// worse than failing the call.
 		panic("arker: crypto/rand unavailable: " + err.Error())
 	}
 	return prefix + hex.EncodeToString(buf)
 }
 
-// do performs one API call with retries.
-//
-// idempotencyKey is bound ONCE, before the loop, so every attempt of a single
-// call presents the same key and the server replays instead of repeating the
-// work.
-func (c *Client) do(
-	ctx context.Context,
-	method, path string,
-	body any,
-	idempotencyKey string,
-	out any,
-) (int, error) {
+// do performs one API call with retries. idempotencyKey is bound once, before
+// the loop, so every attempt presents the same key and the server replays
+// instead of repeating the work.
+func (c *Client) do(ctx context.Context, method, path string, body any, idempotencyKey string, out any) (int, error) {
 	var payload []byte
 	if body != nil {
 		var err error
@@ -127,79 +98,76 @@ func (c *Client) do(
 			return 0, fmt.Errorf("arker: encode request: %w", err)
 		}
 	}
-
-	// A transport failure on a MUTATION leaves the outcome unknown, so it is
-	// not retried -- retrying blind is how one fork becomes two VMs. Reads are
-	// safe to repeat.
+	// A transport failure on a mutation leaves the outcome unknown, so it is
+	// not retried. Reads are safe to repeat.
 	isRead := method == http.MethodGet || method == http.MethodHead
 
 	var lastErr error
-	for attempt := 0; attempt < c.retry.Attempts; attempt++ {
-		var reader io.Reader
-		if payload != nil {
-			reader = bytes.NewReader(payload)
-		}
-		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
-		if err != nil {
-			return 0, err
-		}
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-		if payload != nil {
-			req.Header.Set("Content-Type", "application/json")
-		}
-		if idempotencyKey != "" {
-			req.Header.Set("Idempotency-Key", idempotencyKey)
-		}
-
-		resp, err := c.http.Do(req)
+	for attempt := range c.retry.Attempts {
+		resp, err := c.send(ctx, method, path, payload, idempotencyKey)
 		if err != nil {
 			if ctx.Err() != nil {
 				return 0, ctx.Err()
 			}
 			if !isRead {
-				// Do NOT retry: the server may already have acted.
-				return 0, &UnknownOutcomeError{Method: method, Path: path, Err: err}
+				return 0, &UnknownOutcomeError{method, path, err}
 			}
 			lastErr = err
-			if !c.sleepBeforeRetry(ctx, attempt, nil) {
+			if !c.backoff(ctx, attempt, nil) {
 				return 0, err
 			}
 			continue
 		}
 
-		status, raw, err := readAll(resp)
+		status, raw, err := drain(resp)
 		if err != nil {
 			return status, err
 		}
-		if status >= http.StatusBadRequest {
-			apiErr := decodeError(status, raw)
-			if retryable(apiErr) && attempt < c.retry.Attempts-1 {
-				lastErr = apiErr
-				if !c.sleepBeforeRetry(ctx, attempt, apiErr) {
-					return status, apiErr
+		if status < http.StatusBadRequest {
+			if out != nil && len(bytes.TrimSpace(raw)) > 0 {
+				if err := json.Unmarshal(raw, out); err != nil {
+					return status, fmt.Errorf("arker: decode response: %w", err)
 				}
-				continue
 			}
+			return status, nil
+		}
+
+		apiErr := decodeError(status, raw)
+		if !retryable(apiErr) || attempt == c.retry.Attempts-1 || !c.backoff(ctx, attempt, apiErr) {
 			return status, apiErr
 		}
-		if out != nil && len(bytes.TrimSpace(raw)) > 0 {
-			if err := json.Unmarshal(raw, out); err != nil {
-				return status, fmt.Errorf("arker: decode response: %w", err)
-			}
-		}
-		return status, nil
+		lastErr = apiErr
 	}
 	return 0, lastErr
 }
 
-func readAll(resp *http.Response) (int, []byte, error) {
+func (c *Client) send(ctx context.Context, method, path string, payload []byte, key string) (*http.Response, error) {
+	var reader io.Reader
+	if payload != nil {
+		reader = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
+	return c.http.Do(req)
+}
+
+func drain(resp *http.Response) (int, []byte, error) {
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)
 	return resp.StatusCode, raw, err
 }
 
-// retryable resolves the server's intent. An explicit `retryable` wins; the
-// status is the fallback, because the field is often absent entirely.
+// retryable resolves the server's intent; the status is only the fallback,
+// because `retryable` is frequently absent.
 func retryable(err *Error) bool {
 	if err.Retryable != nil {
 		return *err.Retryable
@@ -207,14 +175,10 @@ func retryable(err *Error) bool {
 	return retryableStatus[err.StatusCode]
 }
 
-// sleepBeforeRetry honours the server's retry_after hint over local backoff --
-// it knows about capacity, the client does not. Returns false if the context
-// ended first.
-func (c *Client) sleepBeforeRetry(ctx context.Context, attempt int, err *Error) bool {
-	delay := time.Duration(float64(c.retry.BaseDelay) * math.Pow(2, float64(attempt)))
-	if delay > c.retry.MaxDelay {
-		delay = c.retry.MaxDelay
-	}
+// backoff waits, preferring the server's retry_after hint -- it knows about
+// capacity, the client does not. False if the context ended first.
+func (c *Client) backoff(ctx context.Context, attempt int, err *Error) bool {
+	delay := min(time.Duration(float64(c.retry.BaseDelay)*math.Pow(2, float64(attempt))), c.retry.MaxDelay)
 	if err != nil && err.RetryAfter != nil {
 		delay = time.Duration(*err.RetryAfter * float64(time.Second))
 	}
@@ -227,7 +191,7 @@ func (c *Client) sleepBeforeRetry(ctx context.Context, attempt int, err *Error) 
 }
 
 func decodeError(status int, raw []byte) *Error {
-	out := &Error{StatusCode: status}
+	out := &Error{StatusCode: status, Code: "internal"}
 	var envelope struct {
 		Error struct {
 			Code       string   `json:"code"`
@@ -236,7 +200,7 @@ func decodeError(status int, raw []byte) *Error {
 			RetryAfter *float64 `json:"retry_after"`
 		} `json:"error"`
 	}
-	if json.Unmarshal(raw, &envelope) == nil {
+	if json.Unmarshal(raw, &envelope) == nil && envelope.Error.Code != "" {
 		out.Code = envelope.Error.Code
 		out.Message = envelope.Error.Message
 		out.Retryable = envelope.Error.Retryable
@@ -244,9 +208,6 @@ func decodeError(status int, raw []byte) *Error {
 	}
 	if out.Message == "" {
 		out.Message = strings.TrimSpace(string(raw))
-	}
-	if out.Code == "" {
-		out.Code = "internal"
 	}
 	return out
 }

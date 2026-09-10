@@ -5,8 +5,7 @@ import (
 	"net/http"
 )
 
-// Session is one shell in a VM. Arker's run interface works like a terminal:
-// sessions are tabs, each keeping its own state.
+// Session is one shell in a VM. Sessions are tabs: each keeps its own state.
 type Session struct {
 	SessionID  string            `json:"session_id"`
 	SessionIdx int               `json:"session_idx"`
@@ -21,13 +20,12 @@ type CreateSessionRequest struct {
 	CWD     string            `json:"cwd,omitempty"`
 }
 
-// ListSessions returns this VM's sessions. A 404 yields an empty slice rather
-// than an error, so callers can treat "gone" and "none" alike.
+// ListSessions returns this VM's sessions; a 404 reads as empty.
 func (v *VM) ListSessions(ctx context.Context) ([]Session, error) {
 	var out struct {
 		Sessions []Session `json:"sessions"`
 	}
-	status, err := v.client.do(ctx, http.MethodGet, "/v1/vms/"+v.ID+"/sessions", nil, "", &out)
+	status, err := v.client.do(ctx, http.MethodGet, v.path("/sessions"), nil, "", &out)
 	if status == http.StatusNotFound {
 		return nil, nil
 	}
@@ -40,8 +38,6 @@ func (v *VM) ListSessions(ctx context.Context) ([]Session, error) {
 // CreateSession opens a session on this VM.
 func (v *VM) CreateSession(ctx context.Context, req CreateSessionRequest) (*Session, error) {
 	var out Session
-	if _, err := v.client.do(ctx, http.MethodPost, "/v1/vms/"+v.ID+"/sessions", req, "", &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
+	_, err := v.client.do(ctx, http.MethodPost, v.path("/sessions"), req, "", &out)
+	return &out, err
 }

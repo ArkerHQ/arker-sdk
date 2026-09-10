@@ -3,6 +3,7 @@ package arker_test
 import (
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -96,11 +97,29 @@ func TestLiveSmoke(t *testing.T) {
 	}
 
 	// ── sessions, refresh, get ──────────────────────────────────────────
-	sessions, err := vm.ListSessions(ctx)
+	before, err := vm.ListSessions(ctx)
 	if err != nil {
 		t.Fatalf("list sessions: %v", err)
 	}
-	t.Logf("sessions: %d", len(sessions))
+	if _, err := vm.CreateSession(ctx, arker.CreateSessionRequest{Env: map[string]string{"SDK_LIVE": "1"}}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	after, err := vm.ListSessions(ctx)
+	if err != nil {
+		t.Fatalf("list sessions after create: %v", err)
+	}
+	if len(after) <= len(before) {
+		t.Fatalf("create added no session: %d then %d", len(before), len(after))
+	}
+	t.Logf("sessions: %d -> %d", len(before), len(after))
+
+	listed, _, err := client.ListVMs(ctx, arker.ListVMsOptions{Limit: 50})
+	if err != nil {
+		t.Fatalf("list vms: %v", err)
+	}
+	if !slices.ContainsFunc(listed, func(v *arker.VM) bool { return v.ID == vm.ID }) {
+		t.Fatalf("a live VM (%s) is missing from a %d-row listing", vm.ID, len(listed))
+	}
 
 	if err := vm.Refresh(ctx); err != nil {
 		t.Fatalf("refresh: %v", err)
