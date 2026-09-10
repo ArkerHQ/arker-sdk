@@ -116,6 +116,10 @@ type call struct {
 	key     string // Idempotency-Key, bound once so every retry presents it
 	headers map[string]string
 	out     any
+	// retryNetwork overrides the method-based rule. A few endpoints are reads
+	// carried over POST (the sync `read` and `manifest` ops), and there is no
+	// outcome to be unknown about on a read.
+	retryNetwork bool
 }
 
 func (c *Client) get(ctx context.Context, base, path string, out any) (int, error) {
@@ -144,10 +148,13 @@ func (c *Client) do(ctx context.Context, cl call) (int, error) {
 	}
 	// A transport failure on a mutation leaves the outcome unknown, so it is
 	// not retried. Reads are safe to repeat.
-	isRead := cl.method == http.MethodGet || cl.method == http.MethodHead
+	isRead := cl.retryNetwork || cl.method == http.MethodGet || cl.method == http.MethodHead
 
 	var lastErr error
-	for attempt := range c.retry.Attempts {
+	// max(1): a Client built by hand rather than by New could carry a zero
+	// budget, and a loop that never runs would return (0, nil) with out
+	// untouched -- success, with no response.
+	for attempt := range max(1, c.retry.Attempts) {
 		resp, err := c.send(ctx, base, cl, payload)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -156,10 +163,14 @@ func (c *Client) do(ctx context.Context, cl call) (int, error) {
 			if !isRead {
 				return 0, &UnknownOutcomeError{cl.method, cl.path, err}
 			}
-			lastErr = err
-			if !c.backoff(ctx, attempt, nil) {
+			// Same last-attempt guard the API-error branch has below. Without
+			// it the final failure still sleeps a full backoff before giving
+			// up, adding up to MaxDelay of pure dead latency to every read
+			// that exhausts its attempts.
+			if attempt == c.retry.Attempts-1 || !c.backoff(ctx, attempt, nil) {
 				return 0, err
 			}
+			lastErr = err
 			continue
 		}
 
@@ -208,7 +219,12 @@ func (c *Client) send(ctx context.Context, base string, cl call, payload []byte)
 }
 
 func (c *Client) auth(h http.Header) {
-	h.Set("Authorization", "Bearer "+c.apiKey)
+	// A malformed "Bearer " with no token is worse than no header: a gateway
+	// can reject it where an anonymous request would pass. DiscoverRegions
+	// reads the public catalog with no key at all.
+	if c.apiKey != "" {
+		h.Set("Authorization", "Bearer "+c.apiKey)
+	}
 	h.Set("User-Agent", "arker-go/"+Version)
 }
 

@@ -128,9 +128,21 @@ func TestOrgSurface(t *testing.T) {
 	}
 	t.Logf("%d placements", len(regions))
 
-	if _, err := h.client.ListRuns(ctx, arker.ListOrgRunsOptions{Limit: 5}); err != nil {
+	// Asserted on the DECODED page, not just the status: a wrong envelope field
+	// returns an empty list forever and every err-only check stays green.
+	activity, err := h.client.ListRuns(ctx, arker.ListOrgRunsOptions{Limit: 5})
+	if err != nil {
 		t.Fatalf("list org runs: %v", err)
 	}
+	if activity.Limit != 5 {
+		t.Fatalf("the server echoed limit %d, want the 5 that was asked for", activity.Limit)
+	}
+	for _, row := range activity.Rows {
+		if row.RequestID == "" || row.TMs == 0 {
+			t.Fatalf("an activity row decoded empty: %+v", row)
+		}
+	}
+	t.Logf("%d activity rows", len(activity.Rows))
 }
 
 func TestDiscoverRegionsNeedsNoCredentials(t *testing.T) {

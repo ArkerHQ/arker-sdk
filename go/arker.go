@@ -9,7 +9,6 @@ package arker
 
 import (
 	"crypto/rand"
-	"encoding/binary"
 	"encoding/hex"
 	"net/url"
 	"time"
@@ -35,8 +34,6 @@ const (
 	defaultBaseDelay  = 200 * time.Millisecond
 	defaultMaxDelay   = 2 * time.Second
 	defaultJitter     = 50 * time.Millisecond
-	inlineWriteLimit  = 16 << 20 // server budget: 4 chunks of 4 MiB
-	syncChunkSize     = 4 << 20
 	streamMaxBytes    = 64 << 20 // the router's proxy body cap; 413 above it
 	compressSampleMin = 256 << 10
 	compressRatio     = 0.9
@@ -76,28 +73,6 @@ func vmPath(vmID, suffix string) string { return "/v1/vms/" + segment(vmID) + su
 
 func computeBaseURL(provider, region string) string {
 	return "https://" + provider + "-" + region + ".arker.ai/api"
-}
-
-const ulidAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-
-// ulid is the upload id shared by the chunks of one inline write, so a retry
-// resends the same byte ranges and the server's chunk ledger merges them.
-func ulid() string {
-	var buf [10]byte
-	mustRandom(buf[:])
-	ms := uint64(time.Now().UnixMilli()) & (1<<48 - 1)
-	var raw [16]byte
-	binary.BigEndian.PutUint64(raw[0:8], ms<<16|uint64(buf[0])<<8|uint64(buf[1]))
-	copy(raw[8:], buf[2:])
-	out := make([]byte, 26)
-	for i := 25; i >= 0; i-- {
-		out[i] = ulidAlphabet[raw[15]&31]
-		for j := 15; j > 0; j-- {
-			raw[j] = raw[j]>>5 | raw[j-1]<<3
-		}
-		raw[0] >>= 5
-	}
-	return string(out)
 }
 
 // newIdempotencyKey mints a key for one logical operation: inside the server's

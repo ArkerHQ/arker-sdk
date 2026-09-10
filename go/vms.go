@@ -251,17 +251,22 @@ func (v *VM) Fork(ctx context.Context, req ForkRequest) (*VM, error) {
 	return v.client.Fork(ctx, req)
 }
 
-// UpdateRequest patches a VM. Every field is optional; omitted fields are left
-// unchanged. An empty, non-nil SSHPublicKeys removes all authorized keys, and a
-// non-nil Policies replaces the network policy wholesale.
+// UpdateRequest patches a VM. Every field is optional and a nil one is left
+// unchanged.
+//
+// The pointers are what make "clear it" expressible. A plain slice with
+// omitempty cannot: the empty slice the API reads as "remove every key" is
+// exactly the value encoding/json drops. Ptr("") clears the description and
+// &[]string{} removes all authorized keys; nil leaves either alone.
 type UpdateRequest struct {
 	Description   *string    `json:"description,omitempty"`
 	Resources     *Resources `json:"resources,omitempty"`
-	SSHPublicKeys []string   `json:"ssh_public_keys,omitempty"`
+	SSHPublicKeys *[]string  `json:"ssh_public_keys,omitempty"`
 	Policies      *PolicyDoc `json:"policies,omitempty"`
 
-	// ClearDescription sends an explicit null, which is how the API is told to
-	// clear the field rather than leave it alone.
+	// ClearDescription sends an explicit null. Ptr("") does the same thing --
+	// the API accepts either -- so this is only for callers who prefer to say
+	// it structurally.
 	ClearDescription bool `json:"-"`
 }
 
@@ -270,12 +275,13 @@ type UpdateRequest struct {
 func (v *VM) Update(ctx context.Context, req UpdateRequest) (*VMInfo, error) {
 	body := any(req)
 	if req.ClearDescription {
-		shadow := struct {
+		// The outer Description shadows the embedded one (Go picks the
+		// shallower field), so it serializes as an explicit null while every
+		// other field promotes normally.
+		body = struct {
 			UpdateRequest
 			Description *string `json:"description"`
 		}{UpdateRequest: req}
-		shadow.UpdateRequest.Description = nil
-		body = shadow
 	}
 	var info VMInfo
 	if _, err := v.do(ctx, http.MethodPatch, v.path(""), body, &info); err != nil {

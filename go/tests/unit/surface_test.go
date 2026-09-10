@@ -23,6 +23,16 @@ import (
 
 var fastRetry = &arker.Retry{Attempts: 4, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond}
 
+// The real GET /v1/runs envelope. Writing a stub the API cannot produce is how
+// a decode bug reaches production behind a green test.
+const orgRunsBody = `{"since":1,"until":2,"limit":50,"offset":0,"lite":false,"rows":[` +
+	`{"t_ms":1700000000000,"request_id":"req_1","run_id":"run_1","vm_id":"vm_1","session_id":"s1",` +
+	`"region":"us-west-2","provider":"aws","status":200,"total_ms":12.5,"queue_ms":1.5,` +
+	`"executor_duration_ms":9,"executor_kind":"fc","executor_cpu_ms":8,"executor_mem_mb":64,` +
+	`"vm_vcpus":2,"vm_memory_mib":4096,"path":"/v1/vms/vm_1/runs","method":"POST","command":"echo hi",` +
+	`"source_vm_id":"vm_0","exit_code":0,"endpoint":"runs","api_key_prefix":"ark_live_ab",` +
+	`"body_bytes_in":10,"body_bytes_out":20,"body_in":"","body_out":""}]}`
+
 // twoPlane starts a regional and a control-plane server so a test can assert
 // which one a call reached. Mixing them up is invisible against one server and
 // fatal in production: the control host does not route the regional paths.
@@ -60,7 +70,7 @@ func TestOrgWideCallsGoToTheControlPlane(t *testing.T) {
 			_, err := c.ListVMs(context.Background(), arker.ListVMsOptions{})
 			return err
 		}},
-		{"ListRuns", "/v1/runs", `{"runs":[]}`, func(c *arker.Client) error {
+		{"ListRuns", "/v1/runs", orgRunsBody, func(c *arker.Client) error {
 			_, err := c.ListRuns(context.Background(), arker.ListOrgRunsOptions{})
 			return err
 		}},
@@ -220,6 +230,9 @@ func TestRunPollsABackgroundedRunToCompletion(t *testing.T) {
 	var polls int32
 	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
+			// 202 Accepted is how the API says "backgrounded"; a completed run
+			// comes back 200.
+			w.WriteHeader(http.StatusAccepted)
 			fmt.Fprint(w, `{"run_id":"run_1","state":"running","session_id":"s1"}`)
 			return
 		}
@@ -251,6 +264,7 @@ func TestExplicitBackgroundReturnsTheAckWithoutPolling(t *testing.T) {
 		if r.Method == http.MethodGet {
 			atomic.AddInt32(&polls, 1)
 		}
+		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprint(w, `{"run_id":"run_1","state":"running","session_id":"s1"}`)
 	}, reject(t, "control"))
 
@@ -589,4 +603,206 @@ func tarNames(t *testing.T, body io.Reader, mode string) []string {
 func sha256Hex(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
+}
+
+// ── Regressions ─────────────────────────────────────────────────────────
+
+func TestListRunsDecodesTheRowsEnvelope(t *testing.T) {
+	// GET /v1/runs answers {since,until,limit,offset,lite,rows} -- there is no
+	// "runs" key and no cursor. Decoding the wrong field is silent: the call
+	// succeeds and returns an empty page forever.
+	c := twoPlane(t, reject(t, "regional"), func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, orgRunsBody)
+	})
+	list, err := c.ListRuns(context.Background(), arker.ListOrgRunsOptions{})
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(list.Rows) != 1 {
+		t.Fatalf("decoded %d rows from a 1-row page", len(list.Rows))
+	}
+	row := list.Rows[0]
+	if row.RunID != "run_1" || row.RequestID != "req_1" || row.Status != 200 {
+		t.Fatalf("row did not decode: %+v", row)
+	}
+	if row.ExecutorKind != "fc" || row.TotalMs != 12.5 {
+		t.Fatalf("telemetry fields lost: %+v", row)
+	}
+	// The server fills in the window it actually used.
+	if list.Limit != 50 || list.Since != 1 {
+		t.Fatalf("echoed window lost: %+v", list)
+	}
+}
+
+func TestBackgroundAckWithoutStateIsNotReportedAsCompleted(t *testing.T) {
+	// `state` is OPTIONAL on BackgroundRunResponse -- only run_id is required.
+	// Sniffing the body cannot tell that ack apart from a completed run with no
+	// output, so the 202 is the discriminator. Getting this wrong hands the
+	// caller a "successful run" with empty output and no exit code.
+	var polls int32
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusAccepted)
+			fmt.Fprint(w, `{"run_id":"run_1","session_id":"s1"}`)
+			return
+		}
+		atomic.AddInt32(&polls, 1)
+		fmt.Fprint(w, `{"run_id":"run_1","state":"completed","exit_code":0,"stdout":"done\n","stdout_encoding":"utf-8"}`)
+	}, reject(t, "control"))
+
+	out, err := c.VM("vm_1").Run(context.Background(), arker.RunRequest{Command: "sleep 1"})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !out.Completed() || out.Stdout != "done\n" {
+		t.Fatalf("a stateless 202 ack was not polled to completion: %+v", out)
+	}
+	if polls == 0 {
+		t.Fatal("never polled; the ack was mistaken for a finished run")
+	}
+}
+
+func TestExplicitBackgroundHandlesAStatelessAck(t *testing.T) {
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{"run_id":"run_1","session_id":"s1"}`)
+	}, reject(t, "control"))
+
+	out, err := c.VM("vm_1").Run(context.Background(), arker.RunRequest{
+		Command: "sleep 600", TimeToBackground: arker.Ptr(0),
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out.Completed() {
+		t.Fatalf("a 202 ack was typed %q", out.Type)
+	}
+	if out.State != "running" {
+		t.Fatalf("state %q; an ack with no state is running", out.State)
+	}
+}
+
+func TestNegativeExitCodeIsAFailure(t *testing.T) {
+	// A negative exit code means no process status was obtained -- killed, or
+	// the compute was lost. Python and TypeScript both call that failed.
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"run_id":"r","state":"completed","exit_code":-9,"stdout":"","stdout_encoding":"utf-8"}`)
+	}, reject(t, "control"))
+
+	out, err := c.VM("vm_1").Run(context.Background(), arker.RunRequest{Command: "sleep 999"})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out.State != "failed" {
+		t.Fatalf("exit -9 reported as %q", out.State)
+	}
+}
+
+func TestEmptySSHKeyListClearsRatherThanOmits(t *testing.T) {
+	// The API reads an empty array as "remove all keys". A plain slice with
+	// omitempty drops exactly that value, making the documented behavior
+	// unreachable.
+	var body map[string]any
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, forkVM)
+	}, reject(t, "control"))
+
+	if _, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{
+		SSHPublicKeys: &[]string{},
+	}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	keys, present := body["ssh_public_keys"]
+	if !present {
+		t.Fatal("an empty key list was omitted, so the keys are left unchanged")
+	}
+	if list, ok := keys.([]any); !ok || len(list) != 0 {
+		t.Fatalf("ssh_public_keys was %v, want an empty array", keys)
+	}
+}
+
+func TestNilSSHKeyListLeavesKeysAlone(t *testing.T) {
+	var body map[string]any
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, forkVM)
+	}, reject(t, "control"))
+
+	if _, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{
+		Description: arker.Ptr("just a rename"),
+	}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if _, present := body["ssh_public_keys"]; present {
+		t.Fatal("a rename sent ssh_public_keys, which would rewrite the keys")
+	}
+}
+
+func TestSyncReadIsRetriedOnATransportFailure(t *testing.T) {
+	// The sync read and manifest ops are READS carried over POST. There is no
+	// outcome to be unknown about, so a dropped connection must be retried
+	// rather than surfaced as UnknownOutcomeError.
+	var n int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&n, 1) == 1 {
+			hj, _ := w.(http.Hijacker)
+			conn, _, _ := hj.Hijack()
+			_ = conn.Close()
+			return
+		}
+		fmt.Fprint(w, `{"ok":true,"op":"read","path":"/f","size":5,"content":"hello","encoding":"utf-8"}`)
+	}))
+	defer srv.Close()
+	c, _ := arker.New(arker.Options{APIKey: "k", BaseURL: srv.URL, Retry: fastRetry})
+
+	data, err := c.VM("vm_1").ReadFile(context.Background(), "/f")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Fatalf("got %q", data)
+	}
+	if atomic.LoadInt32(&n) != 2 {
+		t.Fatalf("a read gave up after %d attempt(s)", n)
+	}
+}
+
+func TestDiscoverRegionsSendsNoAuthorization(t *testing.T) {
+	// It reads the PUBLIC catalog. A "Bearer " with no token is worse than an
+	// absent header: a gateway can reject it where anonymous would pass.
+	var header string
+	var present bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		header, present = r.Header.Get("Authorization"), r.Header.Values("Authorization") != nil
+		fmt.Fprint(w, `{"regions":[]}`)
+	}))
+	defer srv.Close()
+
+	if _, err := arker.DiscoverRegions(context.Background(), srv.URL); err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if present {
+		t.Fatalf("sent Authorization: %q", header)
+	}
+}
+
+func TestExhaustedTransportRetriesDoNotSleepPastTheLastAttempt(t *testing.T) {
+	// The final failure used to sleep a full backoff before giving up, adding
+	// up to MaxDelay of dead latency to every read that exhausts its budget.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, _ := w.(http.Hijacker)
+		conn, _, _ := hj.Hijack()
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+	c, _ := arker.New(arker.Options{APIKey: "k", BaseURL: srv.URL,
+		Retry: &arker.Retry{Attempts: 3, BaseDelay: 300 * time.Millisecond, MaxDelay: time.Second}})
+
+	start := time.Now()
+	_, _, _ = c.GetVM(context.Background(), "vm_1")
+	// Two sleeps (300ms + 600ms) between three attempts, not three.
+	if elapsed := time.Since(start); elapsed > 1500*time.Millisecond {
+		t.Fatalf("exhausted retries took %v; it slept after the final attempt", elapsed)
+	}
 }

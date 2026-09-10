@@ -30,8 +30,10 @@ func (v *VM) ReadFile(ctx context.Context, path string) ([]byte, error) {
 		Encoding     string `json:"encoding"`
 		PresignedURL string `json:"presigned_url"`
 	}
-	if _, err := v.do(ctx, http.MethodPost, v.path("/sync"),
-		map[string]string{"op": "read", "path": path}, &out); err != nil {
+	if _, err := v.client.do(ctx, call{
+		method: http.MethodPost, path: v.path("/sync"), base: v.baseURL,
+		body: map[string]string{"op": "read", "path": path}, out: &out, retryNetwork: true,
+	}); err != nil {
 		return nil, err
 	}
 	if out.PresignedURL == "" {
@@ -298,8 +300,10 @@ func (v *VM) remoteManifest(ctx context.Context, path string) (map[string]string
 		} `json:"entries"`
 		Truncated bool `json:"truncated"`
 	}
-	if _, err := v.do(ctx, http.MethodPost, v.path("/sync"),
-		map[string]string{"op": "manifest", "path": path}, &out); err != nil {
+	if _, err := v.client.do(ctx, call{
+		method: http.MethodPost, path: v.path("/sync"), base: v.baseURL,
+		body: map[string]string{"op": "manifest", "path": path}, out: &out, retryNetwork: true,
+	}); err != nil {
 		return nil, false, err
 	}
 	manifest := make(map[string]string, len(out.Entries))

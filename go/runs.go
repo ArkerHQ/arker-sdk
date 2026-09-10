@@ -132,7 +132,13 @@ func decodeOutput(text, encoding string) []byte {
 	return []byte(text)
 }
 
-func (w runWire) result() *RunResult {
+// result decodes a run. background says the server answered 202 Accepted,
+// which is the API's OWN discriminator between CompletedRunResponse and
+// BackgroundRunResponse -- and the only reliable one. Sniffing the body cannot
+// work: `state` is optional on a background ack (only `run_id` is required),
+// so an ack that omits it is indistinguishable from a completed run with no
+// output.
+func (w runWire) result(background bool) *RunResult {
 	out := &RunResult{
 		Type: "completed", RunID: w.RunID, SessionID: w.SessionID, State: w.State,
 		ExitCode: w.ExitCode, FailReason: w.FailReason, Dispatch: w.Dispatch,
@@ -142,12 +148,22 @@ func (w runWire) result() *RunResult {
 	out.StdoutBytes = decodeOutput(w.Stdout, w.StdoutEncoding)
 	out.StderrBytes = decodeOutput(w.Stderr, w.StderrEncoding)
 	out.Stdout, out.Stderr = string(out.StdoutBytes), string(out.StderrBytes)
-	// A background ack carries a run_id and a state and no output at all.
-	if w.State == "running" && w.ExitCode == nil && w.Stdout == "" && w.StdoutEncoding == "" {
+	if background {
 		out.Type = "background"
+		if out.State == "" {
+			out.State = "running"
+		}
+		return out
 	}
 	if out.State == "" {
 		out.State = "completed"
+	}
+	// A NEGATIVE exit code means no process status was obtained -- the run was
+	// killed or the compute was lost -- which is a failure, not a completion.
+	// Python and TypeScript both do this; without it Run() and GetRun() would
+	// report different states for the same run.
+	if w.ExitCode != nil && *w.ExitCode < 0 {
+		out.State = "failed"
 	}
 	return out
 }
@@ -172,14 +188,14 @@ type RunRecord struct {
 // "timeout" while the run keeps executing server-side.
 func (v *VM) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 	var wire runWire
-	_, err := v.client.do(ctx, call{
+	status, err := v.client.do(ctx, call{
 		method: http.MethodPost, path: v.path("/runs"), base: v.baseURL,
 		body: req.wire(), key: strings.TrimSpace(req.IdempotencyKey), out: &wire,
 	})
 	if err != nil {
 		return nil, err
 	}
-	result := wire.result()
+	result := wire.result(status == http.StatusAccepted)
 	// The server backgrounds a run that outlived its sync window. Poll it to a
 	// terminal state unless the caller explicitly asked to background.
 	if result.Type == "background" && !(req.TimeToBackground != nil && *req.TimeToBackground == 0) {
@@ -209,7 +225,13 @@ func (v *VM) awaitRun(ctx context.Context, runID string, timeout *int) (*RunResu
 			// transient blip both survive; only a service that has stopped
 			// responding ends the wait.
 			if failures++; failures >= runPollMaxFailures {
-				return nil, fmt.Errorf("arker: run %s: %d consecutive poll failures (last: %w); it may still be going server-side -- poll GetRun to retrieve it", runID, failures, err)
+				// Typed, and NOT wrapping err: errors.As would otherwise walk
+				// into the last poll's *Error and report its code, so a caller
+				// branching on Code would see e.g. "not_found" when the real
+				// condition is that the service stopped answering.
+				return nil, &Error{Code: "unavailable", Message: fmt.Sprintf(
+					"run %s: %d consecutive poll failures (last: %v); it may still be going server-side -- poll GetRun to retrieve it",
+					runID, failures, err)}
 			}
 		} else {
 			failures = 0
@@ -233,7 +255,7 @@ func (v *VM) GetRun(ctx context.Context, runID string) (*RunRecord, error) {
 		return nil, err
 	}
 	return &RunRecord{
-		RunResult: *wire.result(), Command: wire.Command, StartedAt: wire.StartedAt,
+		RunResult: *wire.result(false), Command: wire.Command, StartedAt: wire.StartedAt,
 		CompletedAt: wire.CompletedAt, RetryCount: wire.RetryCount, VMID: wire.VMID,
 	}, nil
 }
@@ -294,6 +316,52 @@ func (v *VM) ListRuns(ctx context.Context, opts ListRunsOptions) (*RunList, erro
 	return &out, err
 }
 
+// OrgRunRow is one row of the org-wide activity listing. It is NOT a
+// RunSummary: /v1/runs answers with request-level telemetry (timings, sizes,
+// which executor served it), while a VM's own listing answers with runs.
+type OrgRunRow struct {
+	Source             string  `json:"source,omitempty"`
+	TMs                int64   `json:"t_ms"`
+	RequestID          string  `json:"request_id"`
+	RunID              string  `json:"run_id"`
+	VMID               string  `json:"vm_id"`
+	SessionID          string  `json:"session_id"`
+	Region             string  `json:"region"`
+	Provider           string  `json:"provider"`
+	Status             int     `json:"status"`
+	TotalMs            float64 `json:"total_ms"`
+	QueueMs            float64 `json:"queue_ms"`
+	ExecutorDurationMs int64   `json:"executor_duration_ms"`
+	ExecutorKind       string  `json:"executor_kind"`
+	ExecutorCPUMs      int64   `json:"executor_cpu_ms"`
+	ExecutorMemMB      int64   `json:"executor_mem_mb"`
+	VMVCPUs            int     `json:"vm_vcpus"`
+	VMMemoryMiB        int     `json:"vm_memory_mib"`
+	Path               string  `json:"path"`
+	Method             string  `json:"method"`
+	Command            string  `json:"command"`
+	SourceVMID         string  `json:"source_vm_id"`
+	ExitCode           *int    `json:"exit_code"`
+	Endpoint           string  `json:"endpoint"`
+	APIKeyPrefix       string  `json:"api_key_prefix"`
+	BodyBytesIn        int64   `json:"body_bytes_in"`
+	BodyBytesOut       int64   `json:"body_bytes_out"`
+	BodyIn             string  `json:"body_in"`
+	BodyOut            string  `json:"body_out"`
+}
+
+// OrgRunList is one page of org-wide activity. It echoes the window it was
+// resolved with -- the server fills in defaults the caller left unset, so this
+// is the only way to learn what window actually answered.
+type OrgRunList struct {
+	Since  int64       `json:"since"`
+	Until  int64       `json:"until"`
+	Limit  int         `json:"limit"`
+	Offset int         `json:"offset"`
+	Lite   bool        `json:"lite"`
+	Rows   []OrgRunRow `json:"rows"`
+}
+
 // ListOrgRunsOptions narrows the org-wide run listing.
 type ListOrgRunsOptions struct {
 	Since     *int
@@ -317,8 +385,8 @@ type ListOrgRunsOptions struct {
 }
 
 // ListRuns lists run activity across every VM in the org, through the control
-// plane.
-func (c *Client) ListRuns(ctx context.Context, opts ListOrgRunsOptions) (*RunList, error) {
+// plane. Paging is by Offset; this endpoint has no cursor.
+func (c *Client) ListRuns(ctx context.Context, opts ListOrgRunsOptions) (*OrgRunList, error) {
 	q := newQuery()
 	q.numPtr("since", opts.Since)
 	q.numPtr("until", opts.Until)
@@ -338,7 +406,7 @@ func (c *Client) ListRuns(ctx context.Context, opts ListOrgRunsOptions) (*RunLis
 	q.numPtr("status_max", opts.StatusMax)
 	q.str("sort", opts.Sort)
 	q.str("dir", opts.Dir)
-	var out RunList
+	var out OrgRunList
 	_, err := c.control(ctx, q.on("/v1/runs"), &out)
 	return &out, err
 }
