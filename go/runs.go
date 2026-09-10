@@ -18,16 +18,17 @@ type RunRequest struct {
 	SessionIdx *int   `json:"session_idx,omitempty"`
 	SessionID  string `json:"session_id,omitempty"`
 
-	// Timeout in seconds. Omitted means no limit.
+	// Timeout in seconds; omitted means no limit.
 	Timeout *int `json:"timeout,omitempty"`
-	// TimeToBackground is the sync window; 0 returns a pollable run as soon as
-	// it is dispatched.
+	// TimeToBackground is the sync window. 0 returns a pollable run as soon as
+	// it is dispatched. Anything long-lived should also get its own
+	// SessionIdx, or the next run in that session interrupts it.
 	TimeToBackground *int `json:"time_to_background,omitempty"`
 	QueueingTimeout  *int `json:"queueing_timeout,omitempty"`
 
 	// IdempotencyKey deduplicates the run server-side. Unlike Fork this is NOT
-	// auto-generated: a run is usually cheap to repeat and the caller knows
-	// whether theirs is.
+	// auto-generated: a run is usually cheap to repeat, and only the caller
+	// knows whether theirs is.
 	IdempotencyKey string `json:"-"`
 }
 
@@ -42,14 +43,14 @@ type RunResult struct {
 	State    string `json:"state,omitempty"`
 }
 
-// Run executes a command in the VM, restoring it first if it is suspended.
+// Run executes a command in this VM, restoring it first if it is suspended.
 //
-// There is no separate wake endpoint: a suspended VM restores lazily on its
-// next run, so a no-op run IS a wake.
-func (c *Client) Run(ctx context.Context, vmID string, req RunRequest) (*RunResult, error) {
+// There is no separate wake endpoint and none is needed: a suspended VM
+// restores lazily on its next run, so a no-op run IS a wake.
+func (v *VM) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 	var out RunResult
 	key := strings.TrimSpace(req.IdempotencyKey)
-	if _, err := c.do(ctx, http.MethodPost, "/v1/vms/"+vmID+"/runs", req, key, &out); err != nil {
+	if _, err := v.client.do(ctx, http.MethodPost, "/v1/vms/"+v.ID+"/runs", req, key, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

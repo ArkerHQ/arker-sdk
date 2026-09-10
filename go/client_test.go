@@ -214,7 +214,7 @@ func TestDeleteTreatsAbsentAsSuccess(t *testing.T) {
 	})
 	defer done()
 
-	if err := c.DeleteVM(context.Background(), "vm_gone"); err != nil {
+	if err := c.VM("vm_gone").Delete(context.Background()); err != nil {
 		t.Fatalf("delete of an absent VM must be success, got: %v", err)
 	}
 }
@@ -229,5 +229,68 @@ func TestConflictIsTyped(t *testing.T) {
 	_, err := c.Fork(context.Background(), ForkRequest{SourceVMName: "base"})
 	if !IsConflict(err) {
 		t.Fatalf("want a typed conflict, got %T: %v", err, err)
+	}
+}
+
+// ── VM handle ───────────────────────────────────────────────────────────
+//
+// The handle mirrors `vm` in the Python and TypeScript SDKs: methods hang off
+// the object, not off the client with an id argument.
+
+func TestVMHandleRunTargetsTheRightVM(t *testing.T) {
+	var path string
+	var body map[string]any
+	c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, `{"exit_code":0,"stdout":"hi\n"}`)
+	})
+	defer done()
+
+	idx := 7
+	out, err := c.VM("vm_1").Run(context.Background(), RunRequest{Command: "echo hi", SessionIdx: &idx})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if path != "/v1/vms/vm_1/runs" {
+		t.Fatalf("posted to %q", path)
+	}
+	if got := body["session_idx"]; got != float64(7) {
+		t.Fatalf("session_idx was %v; an omitted one means index 0, where a run interrupts the foreground", got)
+	}
+	if out.ExitCode == nil || *out.ExitCode != 0 {
+		t.Fatalf("exit code %v", out.ExitCode)
+	}
+}
+
+func TestForkFromAHandleSetsTheSource(t *testing.T) {
+	var body map[string]any
+	c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, forkVM)
+	})
+	defer done()
+
+	if _, err := c.VM("vm_parent").Fork(context.Background(), ForkRequest{}); err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+	if body["source_vm_id"] != "vm_parent" {
+		t.Fatalf("source_vm_id was %v, want vm_parent", body["source_vm_id"])
+	}
+}
+
+func TestListSessionsTreatsAbsentAsEmpty(t *testing.T) {
+	c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"error":{"code":"not_found","message":"gone"}}`)
+	})
+	defer done()
+
+	sessions, err := c.VM("vm_gone").ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("a 404 must read as empty, got: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("got %d sessions", len(sessions))
 	}
 }

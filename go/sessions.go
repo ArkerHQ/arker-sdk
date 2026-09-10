@@ -21,13 +21,13 @@ type CreateSessionRequest struct {
 	CWD     string            `json:"cwd,omitempty"`
 }
 
-// ListSessions returns the VM's sessions. A 404 yields an empty slice rather
+// ListSessions returns this VM's sessions. A 404 yields an empty slice rather
 // than an error, so callers can treat "gone" and "none" alike.
-func (c *Client) ListSessions(ctx context.Context, vmID string) ([]Session, error) {
+func (v *VM) ListSessions(ctx context.Context) ([]Session, error) {
 	var out struct {
 		Sessions []Session `json:"sessions"`
 	}
-	status, err := c.do(ctx, http.MethodGet, "/v1/vms/"+vmID+"/sessions", nil, "", &out)
+	status, err := v.client.do(ctx, http.MethodGet, "/v1/vms/"+v.ID+"/sessions", nil, "", &out)
 	if status == http.StatusNotFound {
 		return nil, nil
 	}
@@ -37,10 +37,10 @@ func (c *Client) ListSessions(ctx context.Context, vmID string) ([]Session, erro
 	return out.Sessions, nil
 }
 
-// CreateSession opens a session on the VM.
-func (c *Client) CreateSession(ctx context.Context, vmID string, req CreateSessionRequest) (*Session, error) {
+// CreateSession opens a session on this VM.
+func (v *VM) CreateSession(ctx context.Context, req CreateSessionRequest) (*Session, error) {
 	var out Session
-	if _, err := c.do(ctx, http.MethodPost, "/v1/vms/"+vmID+"/sessions", req, "", &out); err != nil {
+	if _, err := v.client.do(ctx, http.MethodPost, "/v1/vms/"+v.ID+"/sessions", req, "", &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
