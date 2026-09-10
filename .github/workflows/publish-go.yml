@@ -12,10 +12,16 @@ name: Publish Go
 # this tags `go/v<version>`. The tag is the record that the version shipped,
 # which is also what makes a re-run of an already released version a no-op.
 
+# MANUAL ONLY, deliberately. A Go tag is immutable the moment the module proxy
+# fetches it -- there is no yanking a Go release, only superseding it -- so
+# publishing must not be a side effect of merging. Run this from the Actions
+# tab when the SERVICE is deployed and the version is actually meant to ship.
 on:
-  push:
-    branches: [main]
-    paths: ["go/**"]
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type the version from go/VERSION to publish it'
+        required: true
 
 concurrency:
   group: publish-go
@@ -37,9 +43,15 @@ jobs:
           cache-dependency-path: go/go.sum
 
       - id: decide
+        env:
+          CONFIRM: ${{ inputs.confirm }}
         run: |
           version="$(tr -d '[:space:]' < go/VERSION)"
           [ -n "$version" ] || { echo "go/VERSION is empty"; exit 1; }
+          # The typed version must match the file, so publishing is never a
+          # stray click on the wrong branch.
+          [ "$CONFIRM" = "$version" ] || {
+            echo "confirm '$CONFIRM' does not match go/VERSION '$version'"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if git rev-parse -q --verify "refs/tags/go/v$version" >/dev/null; then
             echo "go/v$version is already tagged; nothing to do"

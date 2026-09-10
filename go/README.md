@@ -9,9 +9,10 @@ go get github.com/ArkerHQ/arker-sdk/go
 ```
 
 There is no registry upload: `proxy.golang.org` fetches straight from the repo,
-and a git tag is what makes a version exist. Releasing is a bump to `go/VERSION`
-on `main`, which `.github/workflows/publish-go.yml` turns into a `go/vX.Y.Z`
-tag. That prefix is required — Go resolves a module in a subdirectory only from
+and a git tag is what makes a version exist. Releasing is deliberately MANUAL: bump `go/VERSION`, then run the
+`Publish Go` workflow from the Actions tab and type that version to confirm.
+It is not a side effect of merging, because a Go tag is immutable the moment
+the proxy fetches it — there is no yanking a Go release, only superseding it. That prefix is required — Go resolves a module in a subdirectory only from
 `<subdir>/vX.Y.Z`, so the hyphenated form the other SDKs use would be invisible.
 
 ```go
