@@ -67,6 +67,36 @@ jobs:
       - run: bun run test
         working-directory: typescript
 
+  # Runs from go/ -- its own module, so nothing above it is on the build path.
+  go:
+    name: go
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # Tracks go.mod, so the lane compiles against the floor the SDK
+          # declares rather than whatever the runner happens to ship.
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
+      # Type-checks TEST files too, which is the only thing that compiles
+      # tests/e2e -- it is never run here (no credentials, and it would create
+      # real VMs), so vet is what keeps it from rotting.
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./tests/unit/ -count=1
+      - name: go.mod and go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
   cli:
     name: cli
     runs-on: ubuntu-latest

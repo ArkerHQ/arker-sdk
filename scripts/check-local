@@ -28,6 +28,17 @@ uv run --project python --locked --group dev --extra test python -m pytest tests
   bun run test
 )
 (
+  cd go
+  test -z "$(gofmt -l .)" || { gofmt -l .; echo "gofmt: files above need formatting"; exit 1; }
+  # vet, not just build: it type-checks test files, which is the only thing
+  # that compiles tests/e2e (never run here -- it creates real VMs).
+  go vet ./...
+  go build ./...
+  go test ./tests/unit/ -count=1
+  go mod tidy
+  git diff --exit-code go.mod go.sum
+)
+(
   cd cli
   bun run typecheck
   bun run test
