@@ -318,7 +318,17 @@ export type ForkRequest = ApiSchema<"ForkRequest">;
  * is a 409, and reusing it once that VM is deleted is a 404 — never a second
  * machine. Maximum 64 characters.
  */
-export type ForkIdempotency = { idempotencyKey?: string };
+export type ForkIdempotency = {
+  /** Use this key verbatim. The only form that survives across processes, so
+   * it is what makes YOUR retry after an unknown outcome converge instead of
+   * building a second machine. Wins over `idempotency`. */
+  idempotencyKey?: string;
+  /** Generate a key for this call. Bound once, before the retry loop, so every
+   * attempt of a single fork presents the same one -- which is what makes the
+   * SDK's OWN retry safe, since a 502/504 is a *response* and is retried even
+   * on a mutation. Omitted, a fork sends no key and is never deduplicated. */
+  idempotency?: boolean;
+};
 export type ForkOptions = ForkRequest & { context?: string } & ForkIdempotency;
 export type VmResources = ApiSchema<"VmResources">;
 export type ResourcesInput = ApiSchema<"ResourcesInput">;
@@ -716,13 +726,14 @@ export class Arker {
     // Without a key that retry builds a SECOND machine while the first runs
     // on, unnamed and billable. The header object is bound once, before the
     // retry loop, so every attempt of one call presents the same key.
-    const { idempotencyKey, ...request } = options;
+    const { idempotencyKey, idempotency, ...request } = options;
+    const key = forkIdempotencyKey(idempotencyKey, idempotency);
     const wire = await this._request<Vm>(
       "POST",
       "/v1/fork",
       request,
       baseUrl,
-      { "Idempotency-Key": idempotencyKey || `sdk-fork-${ulid()}` },
+      key ? { "Idempotency-Key": key } : undefined,
       request.queueing_timeout,
     );
     return new VM(this, wire.vm_id, baseUrl, wire);
@@ -938,6 +949,18 @@ export class Arker {
 export interface ListOpts {
   cursor?: ListVmsParameters["cursor"];
   limit?: ListVmsParameters["limit"];
+}
+
+
+/** Resolve the `Idempotency-Key` for one fork, or undefined to send no header.
+ *
+ * Three states, and OFF is the default: an unkeyed fork is never deduplicated,
+ * which is the API's own behaviour and what a caller who says nothing gets.
+ * An explicit key wins over the flag -- it is the more specific instruction,
+ * and the only one the caller can act on later. */
+function forkIdempotencyKey(key: string | undefined, idempotency: boolean | undefined): string | undefined {
+  if (key) return key;
+  return idempotency ? `sdk-fork-${ulid()}` : undefined;
 }
 
 export class VM {

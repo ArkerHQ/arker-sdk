@@ -79,22 +79,18 @@ async function withCapturedServer(
 // has one more field than the body under test. Asserted here rather than
 // stripped: a fork that stops sending a key is exactly the regression the key
 // exists to prevent, and dropping the field quietly would let that pass.
-/// Every fork carries an SDK-generated `Idempotency-Key`. It is asserted on its
-/// own rather than folded into the request comparison: the value is random, so
-/// it cannot be written into an expected object, and a fork that stops sending
-/// one is the exact regression the key exists to prevent.
-function assertForkKeys(requests: CapturedRequest[]): void {
+/// Fork idempotency is opt-in, so a plain `arker fork` must send no key at all
+/// -- an unkeyed fork is never deduplicated, which is the API's own behaviour.
+/// Asserted rather than ignored: a key appearing here would mean the CLI had
+/// started opting callers in without being asked.
+function assertNoForkKeys(requests: CapturedRequest[]): void {
   for (const [index, { idempotencyKey }] of requests.entries()) {
-    assert.match(
-      idempotencyKey ?? "",
-      /^sdk-fork-[0-9A-Za-z]+$/,
-      `request ${index} sent no generated Idempotency-Key (got ${JSON.stringify(idempotencyKey)})`,
-    );
+    assert.equal(idempotencyKey, undefined, `request ${index} sent an unrequested Idempotency-Key`);
   }
 }
 
-/// The captured requests with the key dropped, so the rest can be compared
-/// against a literal.
+/// The captured requests with the key field dropped, so the rest can be
+/// compared against a literal.
 function requestsWithoutKeys(requests: CapturedRequest[]): CapturedRequest[] {
   return requests.map(({ idempotencyKey: _key, ...rest }) => rest);
 }
@@ -355,7 +351,7 @@ async function testForkOmitsRetiredGpuResourceKeys(): Promise<void> {
       ]);
 
       assert.equal(result.code, 0, result.stderr);
-      assertForkKeys(requests);
+      assertNoForkKeys(requests);
       assert.deepEqual(requestsWithoutKeys(requests), [{
         method: "POST",
         url: "/api/v1/fork",
@@ -400,7 +396,7 @@ async function testForkForwardsImageOptionsAndRedactsSecrets(): Promise<void> {
           "--policies-file", policiesFile,
         ]);
         assert.equal(result.code, 0, result.stderr);
-        assertForkKeys(requests);
+        assertNoForkKeys(requests);
         assert.deepEqual(requestsWithoutKeys(requests), [{
           method: "POST",
           url: "/api/v1/fork",
@@ -453,7 +449,7 @@ async function testForkUsesDockerfileAndContext(): Promise<void> {
       async (baseUrl, requests) => {
         const result = await runCli(baseUrl, ["fork", "--dockerfile", dockerfile, "--context", dir]);
         assert.equal(result.code, 0, result.stderr);
-        assertForkKeys(requests);
+        assertNoForkKeys(requests);
         assert.deepEqual(requestsWithoutKeys(requests), [{
           method: "POST",
           url: "/api/v1/fork",

@@ -2806,13 +2806,28 @@ def _retrying_client() -> sdk.Arker:
     )
 
 
-def test_fork_sends_an_idempotency_key_without_being_asked() -> None:
+def test_fork_sends_no_key_unless_asked() -> None:
+    """OFF is the default. An unkeyed fork is never deduplicated, which is the
+    API's own behaviour -- so a caller who says nothing must get exactly that,
+    not a key the SDK decided to add."""
     t = _fork_transport(200)
 
     with use_transport(t):
         client().fork(source_vm_id="source-vm-id")
 
-    assert t.calls[0]["headers"]["idempotency-key"]
+    assert "idempotency-key" not in t.calls[0]["headers"]
+
+
+def test_fork_generates_a_key_when_idempotency_is_requested() -> None:
+    t = _fork_transport(200)
+
+    with use_transport(t):
+        client().fork(source_vm_id="source-vm-id", idempotency=True)
+
+    assert t.calls[0]["headers"]["idempotency-key"].startswith("sdk-fork-")
+    # A header, not a contract field: `idempotency` must not reach the body
+    # either, or the server's validator rejects the unknown key.
+    assert "idempotency" not in json.loads(t.calls[0]["body"])
     # A header, not a contract field. `fork(**options)` passes everything into
     # the body, so a key left in there would 400 on the server's validator.
     assert "idempotency_key" not in json.loads(t.calls[0]["body"])
@@ -2828,7 +2843,7 @@ def test_fork_retry_reuses_the_same_idempotency_key() -> None:
     t = _fork_transport(502, 200)
 
     with use_transport(t):
-        _retrying_client().fork(source_vm_id="source-vm-id")
+        _retrying_client().fork(source_vm_id="source-vm-id", idempotency=True)
 
     assert len(t.calls) == 2, f"expected a retry, got {len(t.calls)} call(s)"
     first = t.calls[0]["headers"]["idempotency-key"]
@@ -2847,6 +2862,17 @@ def test_fork_uses_an_explicit_idempotency_key_verbatim() -> None:
     assert t.calls[0]["headers"]["idempotency-key"] == "caller-chosen"
 
 
+def test_an_explicit_key_wins_over_the_flag() -> None:
+    """The key is the more specific instruction, and the only one the caller
+    can act on later."""
+    t = _fork_transport(200)
+
+    with use_transport(t):
+        client().fork(source_vm_id="source-vm-id", idempotency=True, idempotency_key="caller-chosen")
+
+    assert t.calls[0]["headers"]["idempotency-key"] == "caller-chosen"
+
+
 def test_two_forks_do_not_share_a_generated_key() -> None:
     """Generated keys scope to ONE call; sharing one across separate forks
     would collapse two deliberate machines into one."""
@@ -2854,8 +2880,8 @@ def test_two_forks_do_not_share_a_generated_key() -> None:
 
     with use_transport(t):
         arker = client()
-        arker.fork(source_vm_id="source-vm-id")
-        arker.fork(source_vm_id="source-vm-id")
+        arker.fork(source_vm_id="source-vm-id", idempotency=True)
+        arker.fork(source_vm_id="source-vm-id", idempotency=True)
 
     assert t.calls[0]["headers"]["idempotency-key"] != t.calls[1]["headers"]["idempotency-key"]
 
@@ -2866,6 +2892,6 @@ def test_generated_fork_key_fits_the_server_limit() -> None:
     t = _fork_transport(200)
 
     with use_transport(t):
-        client().fork(source_vm_id="source-vm-id")
+        client().fork(source_vm_id="source-vm-id", idempotency=True)
 
     assert 0 < len(t.calls[0]["headers"]["idempotency-key"]) <= 64

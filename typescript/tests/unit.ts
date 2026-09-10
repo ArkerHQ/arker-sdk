@@ -1836,16 +1836,36 @@ function forkFetch(...statuses: number[]): FakeFetch {
   return fetch;
 }
 
-async function testForkSendsAnIdempotencyKeyWithoutBeingAsked(): Promise<void> {
+async function testForkSendsNoKeyUnlessAsked(): Promise<void> {
+  // OFF is the default. An unkeyed fork is never deduplicated, which is the
+  // API's own behaviour -- a caller who says nothing must get exactly that.
   const fetch = forkFetch(200);
 
   await client(fetch).fork({ source_vm_id: "source-vm-id" });
 
+  assert.equal(fetch.calls[0]!.headers["idempotency-key"], undefined);
+}
+
+async function testForkGeneratesAKeyWhenIdempotencyIsRequested(): Promise<void> {
+  const fetch = forkFetch(200);
+
+  await client(fetch).fork({ source_vm_id: "source-vm-id", idempotency: true });
+
   const call = fetch.calls[0]!;
-  assert.ok(call.headers["idempotency-key"], "fork sent no Idempotency-Key");
-  // A header, not a contract field: the server's validator rejects unknown
-  // body keys, so a leak here would 400 every fork.
-  assert.equal(JSON.parse(call.body!).idempotencyKey, undefined);
+  assert.match(call.headers["idempotency-key"] ?? "", /^sdk-fork-/);
+  // Headers, not contract fields: the server's validator rejects unknown body
+  // keys, so a leak of either would 400 every fork.
+  const body = JSON.parse(call.body!);
+  assert.equal(body.idempotencyKey, undefined);
+  assert.equal(body.idempotency, undefined);
+}
+
+async function testAnExplicitKeyWinsOverTheFlag(): Promise<void> {
+  const fetch = forkFetch(200);
+
+  await client(fetch).fork({ source_vm_id: "source-vm-id", idempotency: true, idempotencyKey: "caller-chosen" });
+
+  assert.equal(fetch.calls[0]!.headers["idempotency-key"], "caller-chosen");
 }
 
 async function testForkRetryReusesTheSameIdempotencyKey(): Promise<void> {
@@ -1854,7 +1874,7 @@ async function testForkRetryReusesTheSameIdempotencyKey(): Promise<void> {
   // builds the duplicate.
   const fetch = forkFetch(502, 200);
 
-  await clientWithRetry(fetch, 2).fork({ source_vm_id: "source-vm-id" });
+  await clientWithRetry(fetch, 2).fork({ source_vm_id: "source-vm-id", idempotency: true });
 
   assert.equal(fetch.calls.length, 2, "expected a retry");
   const first = fetch.calls[0]!.headers["idempotency-key"];
@@ -1887,26 +1907,29 @@ async function testTwoForksDoNotShareAGeneratedKey(): Promise<void> {
   const fetch = forkFetch(200, 200);
   const arker = client(fetch);
 
-  await arker.fork({ source_vm_id: "source-vm-id" });
-  await arker.fork({ source_vm_id: "source-vm-id" });
+  await arker.fork({ source_vm_id: "source-vm-id", idempotency: true });
+  await arker.fork({ source_vm_id: "source-vm-id", idempotency: true });
 
-  assert.notEqual(
-    fetch.calls[0]!.headers["idempotency-key"],
-    fetch.calls[1]!.headers["idempotency-key"],
-  );
+  const [a, b] = [fetch.calls[0]!.headers["idempotency-key"], fetch.calls[1]!.headers["idempotency-key"]];
+  // Non-empty as well as distinct: two absent keys are also "not equal", which
+  // would let a generator that emits nothing pass this.
+  assert.ok(a && b, "a requested fork sent no key");
+  assert.notEqual(a, b);
 }
 
 async function testGeneratedForkKeyFitsTheServerLimit(): Promise<void> {
   // The handler rejects anything over 64 characters before it forks.
   const fetch = forkFetch(200);
 
-  await client(fetch).fork({ source_vm_id: "source-vm-id" });
+  await client(fetch).fork({ source_vm_id: "source-vm-id", idempotency: true });
 
   const key = fetch.calls[0]!.headers["idempotency-key"]!;
   assert.ok(key.length > 0 && key.length <= 64, `generated key is ${key.length} chars`);
 }
 
-await testForkSendsAnIdempotencyKeyWithoutBeingAsked();
+await testForkSendsNoKeyUnlessAsked,
+  testForkGeneratesAKeyWhenIdempotencyIsRequested,
+  testAnExplicitKeyWinsOverTheFlag();
 await testForkRetryReusesTheSameIdempotencyKey();
 await testForkUsesAnExplicitIdempotencyKeyVerbatim();
 await testVmForkAlsoCarriesAKey();
