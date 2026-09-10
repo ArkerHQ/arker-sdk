@@ -1646,7 +1646,7 @@ async function testForkForwardsQueueingTimeout(): Promise<void> {
   const fetchImpl = new FakeFetch();
   fetchImpl.addJson((m, u) => m === "POST" && u.includes("/fork"), 200, { vm_id: "vm-9", state: "running" });
   const client = new Arker({ apiKey: "k", baseUrl: "http://x", fetch: fetchImpl.fetch, retry: false });
-  await client.fork({ source_vm_name: "arkuntu", queueing_timeout: 30 });
+  await client.fork({ source_vm_name: "ubuntu-coding", queueing_timeout: 30 });
   const body = JSON.parse(fetchImpl.calls[0]!.body ?? "{}") as { queueing_timeout?: number };
   assert.equal(body.queueing_timeout, 30);
 }

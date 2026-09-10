@@ -92,6 +92,53 @@ def session(session_id: str = "s0") -> dict[str, str]:
     return {"session_id": session_id, "state": "ready", "cwd": "/home/user"}
 
 
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ("https://extra.invalid/api",),
+        (None, "https://control.invalid/api"),
+    ],
+)
+def test_constructor_rejects_extra_positional_arguments(extra: tuple[Any, ...]) -> None:
+    with pytest.raises(TypeError, match="positional"):
+        sdk.Arker("key", "https://compute.invalid/api", *extra)
+
+
+def test_constructor_routes_with_keyword_control_url() -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "GET" and url == "https://control.invalid/api/v1/vms",
+        200,
+        {"vms": []},
+    )
+    t.add_json(
+        lambda method, url: method == "POST" and url == "https://compute.invalid/api/v1/fork",
+        200,
+        {
+            "vm_id": "vm-child",
+            "state": "running",
+            "owner_org_id": "owner",
+            "created_at": "now",
+            "description": None,
+            "public": False,
+            "network": {},
+            "sessions": [],
+            "resources": {},
+        },
+    )
+    arker = sdk.Arker(
+        "key",
+        "https://compute.invalid/api",
+        control_base_url="https://control.invalid/api",
+        retry=False,
+    )
+    with use_transport(t):
+        arker.list_vms()
+        vm = arker.fork(source_vm_name="ubuntu-coding")
+    assert vm.base_url == "https://compute.invalid/api"
+    assert len(t.calls) == 2
+
+
 def test_api_key_from_argument_beats_env(monkeypatch) -> None:
     monkeypatch.setenv("ARKER_API_KEY", "ark_live_env")
     assert sdk.Arker(api_key="ark_live_arg")._api_key == "ark_live_arg"

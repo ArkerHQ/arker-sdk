@@ -43,6 +43,13 @@ print(vm.sync("/tmp/hello.txt").decode())
 vm.delete()
 ```
 
+Only `api_key` and `base_url` accept positional arguments in `Arker(...)`.
+Pass `control_base_url`, `region`, `provider`, and `retry` by keyword:
+
+```python
+arker = Arker(api_key="your-api-key", provider="aws", region="us-west-2")
+```
+
 ## Documentation and examples
 
 Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [examples](../examples).
