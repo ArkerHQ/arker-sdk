@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -183,9 +186,17 @@ func (p *PTY) Ping() error { return p.control(map[string]any{"type": "ping"}) }
 
 // Close detaches. With Persist the shell keeps running and can be reattached
 // through the same SessionID.
+//
+// Closing a connection the peer already closed is success, not an error: the
+// shell ending on its own is the normal way a terminal finishes, and a caller
+// deferring Close should not have to distinguish that from a real failure.
 func (p *PTY) Close() error {
 	err := p.conn.Close(websocket.StatusNormalClosure, "")
 	p.finish(PTYCloseEvent{Code: int(websocket.StatusNormalClosure)})
+	if err != nil && (errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) ||
+		websocket.CloseStatus(err) != -1 || strings.Contains(err.Error(), "already")) {
+		return nil
+	}
 	return err
 }
 

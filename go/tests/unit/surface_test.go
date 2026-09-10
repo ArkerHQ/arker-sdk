@@ -182,24 +182,27 @@ func TestListedVMsCarryTheirOwnEndpoint(t *testing.T) {
 
 // ── VM lifecycle ────────────────────────────────────────────────────────
 
-func TestUpdateClearsDescriptionWithAnExplicitNull(t *testing.T) {
-	// Omitting the field means "leave it alone"; only an explicit null clears
-	// it. Without the distinction there is no way to remove a description.
+func TestUpdateClearsDescriptionWithAnEmptyString(t *testing.T) {
+	// Omitting the field means "leave it alone"; an empty string clears it.
+	// NOT a null -- openapi documents null as equivalent, but a live
+	// deployment ignores it, so sending one would silently do nothing.
 	var body map[string]any
 	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		fmt.Fprint(w, forkVM)
 	}, reject(t, "control"))
 
-	if _, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{ClearDescription: true}); err != nil {
+	if _, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{
+		Description: arker.Ptr(""),
+	}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	value, present := body["description"]
 	if !present {
-		t.Fatal("ClearDescription sent no description key, so the field is left unchanged")
+		t.Fatal("an empty description was dropped, so the field is left unchanged")
 	}
-	if value != nil {
-		t.Fatalf("description was %v, want an explicit null", value)
+	if value != "" {
+		t.Fatalf("description was %v, want an empty string", value)
 	}
 }
 
@@ -804,5 +807,42 @@ func TestExhaustedTransportRetriesDoNotSleepPastTheLastAttempt(t *testing.T) {
 	// Two sleeps (300ms + 600ms) between three attempts, not three.
 	if elapsed := time.Since(start); elapsed > 1500*time.Millisecond {
 		t.Fatalf("exhausted retries took %v; it slept after the final attempt", elapsed)
+	}
+}
+
+func TestForkedVMStaysOnTheConfiguredEndpoint(t *testing.T) {
+	// A fork response carries provider and region. Turning those back into a
+	// public URL would silently redirect every later per-VM call away from the
+	// endpoint the caller configured -- for a feature env or a private
+	// deployment, straight to production.
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"vm_id":"vm_1","owner_org_id":"org","state":"idle","provider":"aws","region":"us-west-2"}`)
+	}, reject(t, "control"))
+
+	vm, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base"})
+	if err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+	configured, err := c.BaseURL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vm.BaseURL() != configured {
+		t.Fatalf("fork bound the VM to %q, not the configured %q", vm.BaseURL(), configured)
+	}
+}
+
+func TestGetVMStaysOnTheConfiguredEndpoint(t *testing.T) {
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"vm_id":"vm_1","owner_org_id":"org","state":"idle","provider":"gcp","region":"us-central1"}`)
+	}, reject(t, "control"))
+
+	vm, found, err := c.GetVM(context.Background(), "vm_1")
+	if err != nil || !found {
+		t.Fatalf("get: found=%v err=%v", found, err)
+	}
+	configured, _ := c.BaseURL()
+	if vm.BaseURL() != configured {
+		t.Fatalf("GetVM bound the VM to %q, not the configured %q", vm.BaseURL(), configured)
 	}
 }

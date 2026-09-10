@@ -221,7 +221,7 @@ func TestVMLifecycle(t *testing.T) {
 	if updated.Description != description {
 		t.Fatalf("description is %q, want %q", updated.Description, description)
 	}
-	cleared, err := vm.Update(ctx, arker.UpdateRequest{ClearDescription: true})
+	cleared, err := vm.Update(ctx, arker.UpdateRequest{Description: arker.Ptr("")})
 	if err != nil {
 		t.Fatalf("clear description: %v", err)
 	}

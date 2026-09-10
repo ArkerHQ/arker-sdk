@@ -40,6 +40,48 @@ type SSHPublicKeyInfo struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
+// GPUResourceBand is the allowed range for one GPU resource.
+type GPUResourceBand struct {
+	Min     int `json:"min"`
+	Max     int `json:"max"`
+	Default int `json:"default"`
+}
+
+// PlatformGPULimits is the GPU sizing offered on one compatible platform.
+type PlatformGPULimits struct {
+	Name    string           `json:"name,omitempty"`
+	VRAMMiB *GPUResourceBand `json:"vram_mib,omitempty"`
+	SMs     *GPUResourceBand `json:"sms,omitempty"`
+}
+
+// CompatiblePlatform is one platform a source can be forked onto, with the
+// limits that apply there. When an entry carries bounds they WIN over the flat
+// Min*/Max* fields on VMInfo, which are a single-platform projection of the
+// same data.
+type CompatiblePlatform struct {
+	ID               string             `json:"id"`
+	DisplayName      string             `json:"display_name"`
+	Architecture     string             `json:"architecture"`
+	MinVCPUs         *int               `json:"min_vcpus,omitempty"`
+	MaxVCPUs         *int               `json:"max_vcpus,omitempty"`
+	MinMemoryMiB     *int               `json:"min_memory_mib,omitempty"`
+	MaxMemoryMiB     *int               `json:"max_memory_mib,omitempty"`
+	MinDiskMiB       *int               `json:"min_disk_mib,omitempty"`
+	MaxDiskMiB       *int               `json:"max_disk_mib,omitempty"`
+	DefaultVCPUs     *int               `json:"default_vcpus,omitempty"`
+	DefaultMemoryMiB *int               `json:"default_memory_mib,omitempty"`
+	DefaultDiskMiB   *int               `json:"default_disk_mib,omitempty"`
+	GPU              *PlatformGPULimits `json:"gpu,omitempty"`
+}
+
+// GPUPlatformLimits is the GPU sizing for one platform this VM can fork onto.
+type GPUPlatformLimits struct {
+	Platform string           `json:"platform"`
+	GPU      string           `json:"gpu,omitempty"`
+	VRAMMiB  *GPUResourceBand `json:"vram_mib,omitempty"`
+	SMs      *GPUResourceBand `json:"sms,omitempty"`
+}
+
 // VMNetwork carries the VM's authorized SSH keys.
 type VMNetwork struct {
 	SSHPublicKeys []SSHPublicKeyInfo `json:"ssh_public_keys,omitempty"`
@@ -88,27 +130,27 @@ type ForkRequest struct {
 
 // VMInfo is a virtual machine as the API reports it, mirroring the contract Vm.
 type VMInfo struct {
-	VMID                string   `json:"vm_id"`
-	Name                string   `json:"name,omitempty"`
-	Description         string   `json:"description,omitempty"`
-	OwnerOrgID          string   `json:"owner_org_id,omitempty"`
-	Hostname            string   `json:"hostname,omitempty"`
-	CreatedAt           string   `json:"created_at,omitempty"`
-	LastActiveAt        string   `json:"last_active_at,omitempty"`
-	Public              bool     `json:"public,omitempty"`
-	Region              string   `json:"region,omitempty"`
-	Provider            string   `json:"provider,omitempty"`
-	Platform            string   `json:"platform,omitempty"`
-	RootSourceVMID      string   `json:"root_source_vm_id,omitempty"`
-	RootSourceVMName    string   `json:"root_source_vm_name,omitempty"`
-	CompatiblePlatforms []string `json:"compatible_platforms,omitempty"`
-	GPUPlatforms        []string `json:"gpu_platforms,omitempty"`
-	MaxVCPUs            *int     `json:"max_vcpus,omitempty"`
-	MinVCPUs            *int     `json:"min_vcpus,omitempty"`
-	MaxMemoryMiB        *int     `json:"max_memory_mib,omitempty"`
-	MinMemoryMiB        *int     `json:"min_memory_mib,omitempty"`
-	MaxDiskMiB          *int     `json:"max_disk_mib,omitempty"`
-	MinDiskMiB          *int     `json:"min_disk_mib,omitempty"`
+	VMID                string               `json:"vm_id"`
+	Name                string               `json:"name,omitempty"`
+	Description         string               `json:"description,omitempty"`
+	OwnerOrgID          string               `json:"owner_org_id,omitempty"`
+	Hostname            string               `json:"hostname,omitempty"`
+	CreatedAt           string               `json:"created_at,omitempty"`
+	LastActiveAt        string               `json:"last_active_at,omitempty"`
+	Public              bool                 `json:"public,omitempty"`
+	Region              string               `json:"region,omitempty"`
+	Provider            string               `json:"provider,omitempty"`
+	Platform            string               `json:"platform,omitempty"`
+	RootSourceVMID      string               `json:"root_source_vm_id,omitempty"`
+	RootSourceVMName    string               `json:"root_source_vm_name,omitempty"`
+	CompatiblePlatforms []CompatiblePlatform `json:"compatible_platforms,omitempty"`
+	GPUPlatforms        []GPUPlatformLimits  `json:"gpu_platforms,omitempty"`
+	MaxVCPUs            *int                 `json:"max_vcpus,omitempty"`
+	MinVCPUs            *int                 `json:"min_vcpus,omitempty"`
+	MaxMemoryMiB        *int                 `json:"max_memory_mib,omitempty"`
+	MinMemoryMiB        *int                 `json:"min_memory_mib,omitempty"`
+	MaxDiskMiB          *int                 `json:"max_disk_mib,omitempty"`
+	MinDiskMiB          *int                 `json:"min_disk_mib,omitempty"`
 	// State is exactly {"idle","running"} and means "is a command in flight",
 	// not "is the VM awake": a suspended VM also reports "idle".
 	State     string       `json:"state,omitempty"`
@@ -141,14 +183,16 @@ func (c *Client) VM(vmID string) *VM {
 	return &VM{ID: vmID, client: c, baseURL: c.baseURL}
 }
 
-// newVM binds a decoded VMInfo to the endpoint that serves it. A VM listed from
-// the control plane carries its own placement, which is the only way a handle
-// from ListVMs can address a machine in another region.
-func (c *Client) newVM(info *VMInfo, fallback string) *VM {
-	base := fallback
-	if info.Provider != "" && info.Region != "" {
-		base = computeBaseURL(info.Provider, info.Region)
-	}
+// newVM binds a decoded VMInfo to base VERBATIM.
+//
+// It deliberately does not derive an endpoint from the VM's provider/region.
+// Fork and GetVM already went to the endpoint the caller configured, and that
+// endpoint is what serves the machine; recomputing a public URL from the
+// response would send every later per-VM call for a feature env or a private
+// deployment to production instead. Only ListVMs, which aggregates across
+// regions through the control plane, needs a per-VM endpoint -- and it derives
+// one itself.
+func (c *Client) newVM(info *VMInfo, base string) *VM {
 	return &VM{ID: info.VMID, Info: info, client: c, baseURL: base}
 }
 
@@ -230,7 +274,13 @@ func (c *Client) ListVMs(ctx context.Context, opts ListVMsOptions) (*VMList, err
 	}
 	list := &VMList{VMs: make([]*VM, 0, len(out.VMs)), NextCursor: out.NextCursor}
 	for i := range out.VMs {
-		list.VMs = append(list.VMs, c.newVM(&out.VMs[i], c.baseURL))
+		// This listing spans regions, so a placed VM is addressed at its own
+		// regional endpoint rather than the client's.
+		base := c.baseURL
+		if info := &out.VMs[i]; info.Provider != "" && info.Region != "" {
+			base = computeBaseURL(info.Provider, info.Region)
+		}
+		list.VMs = append(list.VMs, c.newVM(&out.VMs[i], base))
 	}
 	return list, nil
 }
@@ -254,37 +304,29 @@ func (v *VM) Fork(ctx context.Context, req ForkRequest) (*VM, error) {
 // UpdateRequest patches a VM. Every field is optional and a nil one is left
 // unchanged.
 //
-// The pointers are what make "clear it" expressible. A plain slice with
-// omitempty cannot: the empty slice the API reads as "remove every key" is
-// exactly the value encoding/json drops. Ptr("") clears the description and
-// &[]string{} removes all authorized keys; nil leaves either alone.
+// The pointers are what make "clear it" expressible. A plain value with
+// omitempty cannot: the empty string and empty slice the API reads as "clear
+// this" are exactly the values encoding/json drops.
+//
+//	Description:   arker.Ptr("")   // clears it
+//	SSHPublicKeys: &[]string{}     // removes every authorized key
+//
+// Use the empty string, NOT a JSON null, to clear the description. openapi
+// documents null as equivalent, but a null is silently ignored -- verified
+// against a live deployment: PATCH {"description":null} left the value intact
+// while {"description":""} cleared it.
 type UpdateRequest struct {
 	Description   *string    `json:"description,omitempty"`
 	Resources     *Resources `json:"resources,omitempty"`
 	SSHPublicKeys *[]string  `json:"ssh_public_keys,omitempty"`
 	Policies      *PolicyDoc `json:"policies,omitempty"`
-
-	// ClearDescription sends an explicit null. Ptr("") does the same thing --
-	// the API accepts either -- so this is only for callers who prefer to say
-	// it structurally.
-	ClearDescription bool `json:"-"`
 }
 
 // Update changes this VM's description, resources, authorized SSH keys and/or
 // network policy, and returns the updated record.
 func (v *VM) Update(ctx context.Context, req UpdateRequest) (*VMInfo, error) {
-	body := any(req)
-	if req.ClearDescription {
-		// The outer Description shadows the embedded one (Go picks the
-		// shallower field), so it serializes as an explicit null while every
-		// other field promotes normally.
-		body = struct {
-			UpdateRequest
-			Description *string `json:"description"`
-		}{UpdateRequest: req}
-	}
 	var info VMInfo
-	if _, err := v.do(ctx, http.MethodPatch, v.path(""), body, &info); err != nil {
+	if _, err := v.do(ctx, http.MethodPatch, v.path(""), req, &info); err != nil {
 		return nil, err
 	}
 	v.Info = &info
