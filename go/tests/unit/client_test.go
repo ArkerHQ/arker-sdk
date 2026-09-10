@@ -32,7 +32,47 @@ func testClient(t *testing.T, h http.HandlerFunc) (*arker.Client, func()) {
 
 // ── Idempotency ─────────────────────────────────────────────────────────
 
-func TestForkSendsAnIdempotencyKeyWithoutBeingAsked(t *testing.T) {
+func TestForkSendsNoKeyUnlessAsked(t *testing.T) {
+	// OFF is the default. An unkeyed fork is never deduplicated, which is the
+	// API's own behaviour -- a caller who says nothing must get exactly that,
+	// not a key the SDK decided to add.
+	var key string
+	var present bool
+	c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		key = r.Header.Get("Idempotency-Key")
+		present = r.Header.Values("Idempotency-Key") != nil
+		fmt.Fprint(w, forkVM)
+	})
+	defer done()
+
+	if _, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base"}); err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+	if present {
+		t.Fatalf("an unrequested fork sent Idempotency-Key %q", key)
+	}
+}
+
+func TestAnExplicitKeyWinsOverTheFlag(t *testing.T) {
+	var key string
+	c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		key = r.Header.Get("Idempotency-Key")
+		fmt.Fprint(w, forkVM)
+	})
+	defer done()
+
+	_, err := c.Fork(context.Background(), arker.ForkRequest{
+		SourceVMName: "base", Idempotency: true, IdempotencyKey: "caller-chosen",
+	})
+	if err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+	if key != "caller-chosen" {
+		t.Fatalf("key was %q; the explicit key must win over the flag", key)
+	}
+}
+
+func TestForkGeneratesAKeyWhenIdempotencyIsRequested(t *testing.T) {
 	var key string
 	var body map[string]any
 	c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +82,7 @@ func TestForkSendsAnIdempotencyKeyWithoutBeingAsked(t *testing.T) {
 	})
 	defer done()
 
-	if _, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base"}); err != nil {
+	if _, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base", Idempotency: true}); err != nil {
 		t.Fatalf("fork: %v", err)
 	}
 	if key == "" {
@@ -78,7 +118,7 @@ func TestForkRetryReusesTheSameIdempotencyKey(t *testing.T) {
 	})
 	defer done()
 
-	if _, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base"}); err != nil {
+	if _, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base", Idempotency: true}); err != nil {
 		t.Fatalf("fork: %v", err)
 	}
 	if len(keys) != 2 {
@@ -119,7 +159,7 @@ func TestTwoForksDoNotShareAGeneratedKey(t *testing.T) {
 	defer done()
 
 	for range 2 {
-		if _, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base"}); err != nil {
+		if _, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base", Idempotency: true}); err != nil {
 			t.Fatalf("fork: %v", err)
 		}
 	}

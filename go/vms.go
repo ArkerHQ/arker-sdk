@@ -120,12 +120,20 @@ type ForkRequest struct {
 	// client-side. Go does not implement that build yet; see Client.Fork.
 	Dockerfile string `json:"-"`
 
-	// IdempotencyKey makes the fork replayable. Empty generates one per call,
-	// enough to make the SDK's own retries safe. Set it to survive across
-	// processes -- the only form that protects your retry after an
-	// UnknownOutcomeError, since a fresh Fork otherwise mints a new key.
-	// A header, never a body field: unknown body fields are rejected.
+	// IdempotencyKey is used verbatim. The only form that survives across
+	// processes, so it is what makes YOUR retry after an UnknownOutcomeError
+	// converge instead of building a second machine. Wins over Idempotency.
+	//
+	// Idempotency generates a key for this call instead. Bound once, before the
+	// retry loop, so every attempt of a single fork presents the same one --
+	// which is what makes the SDK's OWN retry safe, since a 502/504 is a
+	// *response* and is retried even on a mutation.
+	//
+	// Neither set is the default: the fork sends no key and is never
+	// deduplicated, matching the API. Both are headers, never body fields --
+	// unknown body fields are rejected.
 	IdempotencyKey string `json:"-"`
+	Idempotency    bool   `json:"-"`
 }
 
 // VMInfo is a virtual machine as the API reports it, mirroring the contract Vm.
@@ -198,17 +206,14 @@ func (c *Client) newVM(info *VMInfo, base string) *VM {
 
 // Fork creates a VM from a source.
 //
-// Every fork carries an Idempotency-Key because the retry it guards against is
-// the SDK's own: a 502/504 is a response, so it is retried even on a mutation,
-// and the origin may already have built the VM.
+// Idempotency is opt-in: see ForkRequest.IdempotencyKey and .Idempotency. A
+// fork with neither sends no key and is never deduplicated, which is the API's
+// own behaviour.
 func (c *Client) Fork(ctx context.Context, req ForkRequest) (*VM, error) {
 	if strings.TrimSpace(req.Dockerfile) != "" {
 		return nil, errors.New("arker: Dockerfile forks are not implemented in the Go SDK; fork the base image and apply steps with VM.Run, or use the Python or TypeScript SDK")
 	}
-	key := req.IdempotencyKey
-	if strings.TrimSpace(key) == "" {
-		key = newIdempotencyKey("sdk-fork-")
-	}
+	key := forkIdempotencyKey(req)
 	base, err := c.BaseURL()
 	if err != nil {
 		return nil, err
@@ -223,6 +228,19 @@ func (c *Client) Fork(ctx context.Context, req ForkRequest) (*VM, error) {
 		return nil, errors.New("arker: fork returned no vm_id")
 	}
 	return c.newVM(&info, base), nil
+}
+
+// forkIdempotencyKey resolves the header for one fork, or "" to send none.
+// An explicit key wins over the flag: it is the more specific instruction, and
+// the only one the caller can act on later.
+func forkIdempotencyKey(req ForkRequest) string {
+	if key := strings.TrimSpace(req.IdempotencyKey); key != "" {
+		return key
+	}
+	if req.Idempotency {
+		return newIdempotencyKey("sdk-fork-")
+	}
+	return ""
 }
 
 // GetVM fetches one VM. found is false on 404.
