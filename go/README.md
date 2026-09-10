@@ -8,6 +8,12 @@ handle for everything scoped to one machine.
 go get github.com/ArkerHQ/arker-sdk/go
 ```
 
+There is no registry upload: `proxy.golang.org` fetches straight from the repo,
+and a git tag is what makes a version exist. Releasing is a bump to `go/VERSION`
+on `main`, which `.github/workflows/publish-go.yml` turns into a `go/vX.Y.Z`
+tag. That prefix is required — Go resolves a module in a subdirectory only from
+`<subdir>/vX.Y.Z`, so the hyphenated form the other SDKs use would be invisible.
+
 ```go
 client, err := arker.New(arker.Options{})       // ARKER_API_KEY + ARKER_BASE_URL
 vm, err := client.Fork(ctx, arker.ForkRequest{SourceVMName: "ubuntu-base"})
