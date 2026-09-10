@@ -1823,7 +1823,11 @@ def _build_query(
     values = _drop_none(parameters)
     if not isinstance(values, dict):
         raise TypeError("operation parameters must serialize to an object")
-    pairs = [(key, str(value)) for key, value in values.items() if key not in path_fields]
+    pairs = [
+        (key, str(value).lower() if isinstance(value, bool) else str(value))
+        for key, value in values.items()
+        if key not in path_fields
+    ]
     qs = urllib.parse.urlencode(pairs)
     return f"{path}?{qs}" if qs else path
 

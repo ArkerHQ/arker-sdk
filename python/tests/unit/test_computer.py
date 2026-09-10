@@ -554,7 +554,7 @@ def test_list_uses_configured_base_url() -> None:
     t.add_json(
         lambda method, url: (
             method == "GET"
-            and url == "https://arker.ai/api/v1/vms?region=us-west-2&provider=aws&org_id=ArkerHQ&public=True&state=idle"
+            and url == "https://arker.ai/api/v1/vms?region=us-west-2&provider=aws&org_id=ArkerHQ&public=true&state=idle"
         ),
         200,
         {
@@ -598,6 +598,27 @@ def test_list_uses_configured_base_url() -> None:
     assert result.vms[0].network is not None
     assert result.vms[0].network.ssh_public_keys is None
     assert result.vms[0].resources == sdk.VmResources(vcpu=2, memory_mib=1024, disk_mib=4096)
+
+
+@pytest.mark.parametrize(
+    ("public", "public_query"),
+    [(True, "&public=true"), (False, "&public=false"), (None, "")],
+)
+def test_list_vms_serializes_boolean_filters_on_the_wire(public: bool | None, public_query: str) -> None:
+    t = FakeTransport()
+    expected_url = f"https://arker.ai/api/v1/vms?cursor=next%2Bpage%2F%3D&limit=25&org_id=True{public_query}"
+    t.add_json(
+        lambda method, url: method == "GET" and url == expected_url,
+        200,
+        {"vms": [], "next_cursor": "last-page"},
+    )
+
+    with use_transport(t):
+        result = client().list_vms(cursor="next+page/=", limit=25, org_id="True", public=public)
+
+    assert len(t.calls) == 1
+    assert result.vms == []
+    assert result.next_cursor == "last-page"
 
 
 def test_listed_vm_uses_its_placement_endpoint() -> None:
@@ -656,7 +677,7 @@ def test_list_runs_uses_control_plane_and_filters() -> None:
         lambda method, url: (
             method == "GET"
             and url
-            == "https://control.invalid/api/v1/runs?since=10&until=20&vm=vm_1&vms=vm_2%2Cvm_3&region=us-west-2&provider=aws&search=pytest&limit=25&offset=5&lite=True&runtime=fc&endpoint=run&actions=run%2Cfork&status=success%2Cinternal&status_min=200&status_max=599&sort=when&dir=asc"
+            == "https://control.invalid/api/v1/runs?since=10&until=20&vm=vm_1&vms=vm_2%2Cvm_3&region=us-west-2&provider=aws&search=pytest&limit=25&offset=5&lite=true&runtime=fc&endpoint=run&actions=run%2Cfork&status=success%2Cinternal&status_min=200&status_max=599&sort=when&dir=asc"
         ),
         200,
         {
