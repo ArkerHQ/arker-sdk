@@ -2764,3 +2764,134 @@ def test_the_shared_client_does_not_multiplex_requests_over_one_socket() -> None
     pool = sdk._http_client._transport._pool
     assert pool._http2 is False
     assert pool._http1 is True
+
+
+# ── fork Idempotency-Key ────────────────────────────────────────────────
+#
+# The prod failure: the gateway answered a fork with 502/504 AFTER the worker
+# had already built the VM, `_request` re-POSTed, and the caller got a SECOND
+# machine while the first ran on, unnamed and billable. Transport failures on a
+# mutation are not retried, but a 502/504 is a *response* and still is --
+# so this is the window that remains, and the key is what closes it.
+
+_FORK_VM = {
+    "vm_id": "vm_child",
+    "owner_org_id": "owner",
+    "created_at": "now",
+    "description": None,
+    "public": False,
+    "state": "idle",
+    "sessions": [],
+    "network": {},
+    "resources": {},
+}
+
+
+def _fork_transport(*statuses: int) -> FakeTransport:
+    t = FakeTransport()
+    for status in statuses:
+        t.add_json(
+            lambda method, url: method == "POST" and url.endswith("/v1/fork"),
+            status,
+            _FORK_VM if status < 400 else {"error": {"code": "bad_gateway", "message": "lost"}},
+        )
+    return t
+
+
+def _retrying_client() -> sdk.Arker:
+    return sdk.Arker(
+        api_key="ark_live_test",
+        base_url="https://test.invalid/api",
+        retry={"attempts": 2, "base_delay_s": 0, "jitter_s": 0},
+    )
+
+
+def test_fork_sends_no_key_unless_asked() -> None:
+    """OFF is the default. An unkeyed fork is never deduplicated, which is the
+    API's own behaviour -- so a caller who says nothing must get exactly that,
+    not a key the SDK decided to add."""
+    t = _fork_transport(200)
+
+    with use_transport(t):
+        client().fork(source_vm_id="source-vm-id")
+
+    assert "idempotency-key" not in t.calls[0]["headers"]
+
+
+def test_fork_generates_a_key_when_idempotency_is_requested() -> None:
+    t = _fork_transport(200)
+
+    with use_transport(t):
+        client().fork(source_vm_id="source-vm-id", idempotency=True)
+
+    assert t.calls[0]["headers"]["idempotency-key"].startswith("sdk-fork-")
+    # A header, not a contract field: `idempotency` must not reach the body
+    # either, or the server's validator rejects the unknown key.
+    assert "idempotency" not in json.loads(t.calls[0]["body"])
+    # A header, not a contract field. `fork(**options)` passes everything into
+    # the body, so a key left in there would 400 on the server's validator.
+    assert "idempotency_key" not in json.loads(t.calls[0]["body"])
+
+
+def test_fork_retry_reuses_the_same_idempotency_key() -> None:
+    """The load-bearing one: the retried attempt must present the FIRST key.
+
+    A fresh key per attempt looks identical in every other test -- a key is
+    sent, it is well formed, the fork succeeds -- and still builds the
+    duplicate VM this exists to prevent.
+    """
+    t = _fork_transport(502, 200)
+
+    with use_transport(t):
+        _retrying_client().fork(source_vm_id="source-vm-id", idempotency=True)
+
+    assert len(t.calls) == 2, f"expected a retry, got {len(t.calls)} call(s)"
+    first = t.calls[0]["headers"]["idempotency-key"]
+    # Non-empty as well as equal: two blank keys are also "the same key", and
+    # would let a broken generator pass this test.
+    assert first, "the fork sent an empty Idempotency-Key"
+    assert first == t.calls[1]["headers"]["idempotency-key"]
+
+
+def test_fork_uses_an_explicit_idempotency_key_verbatim() -> None:
+    t = _fork_transport(200)
+
+    with use_transport(t):
+        client().fork(source_vm_id="source-vm-id", idempotency_key="caller-chosen")
+
+    assert t.calls[0]["headers"]["idempotency-key"] == "caller-chosen"
+
+
+def test_an_explicit_key_wins_over_the_flag() -> None:
+    """The key is the more specific instruction, and the only one the caller
+    can act on later."""
+    t = _fork_transport(200)
+
+    with use_transport(t):
+        client().fork(source_vm_id="source-vm-id", idempotency=True, idempotency_key="caller-chosen")
+
+    assert t.calls[0]["headers"]["idempotency-key"] == "caller-chosen"
+
+
+def test_two_forks_do_not_share_a_generated_key() -> None:
+    """Generated keys scope to ONE call; sharing one across separate forks
+    would collapse two deliberate machines into one."""
+    t = _fork_transport(200, 200)
+
+    with use_transport(t):
+        arker = client()
+        arker.fork(source_vm_id="source-vm-id", idempotency=True)
+        arker.fork(source_vm_id="source-vm-id", idempotency=True)
+
+    assert t.calls[0]["headers"]["idempotency-key"] != t.calls[1]["headers"]["idempotency-key"]
+
+
+def test_generated_fork_key_fits_the_server_limit() -> None:
+    """The handler rejects anything over 64 characters before it forks, so a
+    generated key that outgrew the cap would 400 every unkeyed fork."""
+    t = _fork_transport(200)
+
+    with use_transport(t):
+        client().fork(source_vm_id="source-vm-id", idempotency=True)
+
+    assert 0 < len(t.calls[0]["headers"]["idempotency-key"]) <= 64

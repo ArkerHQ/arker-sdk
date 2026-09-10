@@ -75,6 +75,26 @@ async function withCapturedServer(
   }, async (baseUrl) => fn(baseUrl, requests), options);
 }
 
+// Every fork carries a generated `Idempotency-Key`, so a captured fork request
+// has one more field than the body under test. Asserted here rather than
+// stripped: a fork that stops sending a key is exactly the regression the key
+// exists to prevent, and dropping the field quietly would let that pass.
+/// Fork idempotency is opt-in, so a plain `arker fork` must send no key at all
+/// -- an unkeyed fork is never deduplicated, which is the API's own behaviour.
+/// Asserted rather than ignored: a key appearing here would mean the CLI had
+/// started opting callers in without being asked.
+function assertNoForkKeys(requests: CapturedRequest[]): void {
+  for (const [index, { idempotencyKey }] of requests.entries()) {
+    assert.equal(idempotencyKey, undefined, `request ${index} sent an unrequested Idempotency-Key`);
+  }
+}
+
+/// The captured requests with the key field dropped, so the rest can be
+/// compared against a literal.
+function requestsWithoutKeys(requests: CapturedRequest[]): CapturedRequest[] {
+  return requests.map(({ idempotencyKey: _key, ...rest }) => rest);
+}
+
 async function runCli(baseUrl: string | undefined, args: string[], options: CliOptions = {}): Promise<CliResult> {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -331,7 +351,8 @@ async function testForkOmitsRetiredGpuResourceKeys(): Promise<void> {
       ]);
 
       assert.equal(result.code, 0, result.stderr);
-      assert.deepEqual(requests, [{
+      assertNoForkKeys(requests);
+      assert.deepEqual(requestsWithoutKeys(requests), [{
         method: "POST",
         url: "/api/v1/fork",
         body: {
@@ -375,7 +396,8 @@ async function testForkForwardsImageOptionsAndRedactsSecrets(): Promise<void> {
           "--policies-file", policiesFile,
         ]);
         assert.equal(result.code, 0, result.stderr);
-        assert.deepEqual(requests, [{
+        assertNoForkKeys(requests);
+        assert.deepEqual(requestsWithoutKeys(requests), [{
           method: "POST",
           url: "/api/v1/fork",
           body: {
@@ -427,7 +449,8 @@ async function testForkUsesDockerfileAndContext(): Promise<void> {
       async (baseUrl, requests) => {
         const result = await runCli(baseUrl, ["fork", "--dockerfile", dockerfile, "--context", dir]);
         assert.equal(result.code, 0, result.stderr);
-        assert.deepEqual(requests, [{
+        assertNoForkKeys(requests);
+        assert.deepEqual(requestsWithoutKeys(requests), [{
           method: "POST",
           url: "/api/v1/fork",
           body: { image: "ubuntu:24.04" },

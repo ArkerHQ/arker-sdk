@@ -384,7 +384,17 @@ class Arker:
         return VM(self, vm_id)
 
     def fork(self, **options: Any) -> VM:
-        """Create a VM from exactly one source accepted by POST /v1/fork."""
+        """Create a VM from exactly one source accepted by POST /v1/fork.
+
+        ``idempotency_key`` makes the fork replayable: a repeat of the same key
+        returns the VM the first call created rather than building another one.
+        You do not need it for this SDK's own retries -- a fresh key is
+        generated per call for exactly that -- so supply one only to dedupe
+        across processes or restarts, where you can reconstruct the same key.
+        The key is one-shot and bound to the VM it made: reusing it for a
+        different request is a 409, and reusing it once that VM is deleted is a
+        404, never a second machine. Maximum 64 characters.
+        """
         has_context = "context" in options
         context = options.pop("context", None)
         dockerfile = options.get("dockerfile")
@@ -404,12 +414,16 @@ class Arker:
 
     def _fork(self, options: dict[str, Any], *, base_url: str) -> VM:
         queueing_timeout = options.get("queueing_timeout")
+        # Headers, not contract fields: pop both before the body is built, or
+        # the server's validator rejects the unknown keys and every fork 400s.
+        idempotency_key = _fork_idempotency_key(options.pop("idempotency_key", None), options.pop("idempotency", None))
         info = _vm_info(
             self._request(
                 "POST",
                 "/v1/fork",
                 options,
                 base_url=base_url,
+                extra_headers=({"Idempotency-Key": idempotency_key} if idempotency_key else None),
                 max_queueing_s=(queueing_timeout if type(queueing_timeout) is int else None),
                 preserve_nulls=True,
             )
@@ -1857,6 +1871,31 @@ def _normalize_retry(
             jitter_s=max(0.0, float(retry.get("jitter_s", DEFAULT_RETRY_JITTER_S))),
         )
     return RetryOptions()
+
+
+def _fork_idempotency_key(key: str | None, idempotency: bool | None) -> str | None:
+    """Resolve the `Idempotency-Key` for one fork, or None to send no header.
+
+    Three states, and OFF is the default: an unkeyed fork is never
+    deduplicated, which is the API's own behaviour and what a caller who says
+    nothing should get.
+
+    * `idempotency_key="..."` -- use it verbatim. This is the only form that
+      survives across processes, so it is the one that makes YOUR retry after
+      an `ArkerError` with an unknown outcome converge instead of building a
+      second machine.
+    * `idempotency=True` -- generate one for this call. Bound once, before the
+      retry loop, so every attempt of a single fork presents the same key. That
+      covers the SDK's OWN retry: a 502/504 is a *response*, so it is retried
+      even on a mutation, and the origin may already have built the VM.
+    * neither -- no header.
+
+    An explicit key wins over the flag: it is the more specific instruction,
+    and it is what the caller can act on later.
+    """
+    if key:
+        return key
+    return f"sdk-fork-{secrets.token_hex(16)}" if idempotency else None
 
 
 def _vm_path(vm_id: str) -> str:

@@ -306,7 +306,30 @@ export type Rewrite = ApiSchema<"Rewrite">;
  * range (`[1000, 2000]`). A `ports` list may mix the two. */
 export type PortSpec = NonNullable<PolicyMatch["ports"]>[number];
 export type ForkRequest = ApiSchema<"ForkRequest">;
-export type ForkOptions = ForkRequest & { context?: string };
+/**
+ * A fork's `Idempotency-Key`, sent as an HTTP header rather than a body field.
+ *
+ * You do not need to set this for this SDK's own retries: `fork()` generates a
+ * key per call, so a 502/504 retry replays the original fork instead of
+ * building a second machine. Set it to extend that guarantee across processes,
+ * where you can reconstruct the same key.
+ *
+ * One-shot and bound to the VM it created: reusing it for a different request
+ * is a 409, and reusing it once that VM is deleted is a 404 — never a second
+ * machine. Maximum 64 characters.
+ */
+export type ForkIdempotency = {
+  /** Use this key verbatim. The only form that survives across processes, so
+   * it is what makes YOUR retry after an unknown outcome converge instead of
+   * building a second machine. Wins over `idempotency`. */
+  idempotencyKey?: string;
+  /** Generate a key for this call. Bound once, before the retry loop, so every
+   * attempt of a single fork presents the same one -- which is what makes the
+   * SDK's OWN retry safe, since a 502/504 is a *response* and is retried even
+   * on a mutation. Omitted, a fork sends no key and is never deduplicated. */
+  idempotency?: boolean;
+};
+export type ForkOptions = ForkRequest & { context?: string } & ForkIdempotency;
 export type VmResources = ApiSchema<"VmResources">;
 export type ResourcesInput = ApiSchema<"ResourcesInput">;
 export type VmNetwork = ApiSchema<"VmNetwork">;
@@ -693,14 +716,25 @@ export class Arker {
   }
 
   /** @internal */
-  async _fork(options: ForkRequest, baseUrl: string): Promise<VM> {
+  async _fork(options: ForkRequest & ForkIdempotency, baseUrl: string): Promise<VM> {
+    // A header, not a contract field: strip it before the body is built, or
+    // the server's validator rejects the unknown key and every fork 400s.
+    //
+    // Generated per call rather than required from the caller, because the
+    // retry it guards against is OURS: a 502/504 is a RESPONSE, so it is still
+    // retried on a mutation, and the origin may already have built the VM.
+    // Without a key that retry builds a SECOND machine while the first runs
+    // on, unnamed and billable. The header object is bound once, before the
+    // retry loop, so every attempt of one call presents the same key.
+    const { idempotencyKey, idempotency, ...request } = options;
+    const key = forkIdempotencyKey(idempotencyKey, idempotency);
     const wire = await this._request<Vm>(
       "POST",
       "/v1/fork",
-      options,
+      request,
       baseUrl,
-      undefined,
-      options.queueing_timeout,
+      key ? { "Idempotency-Key": key } : undefined,
+      request.queueing_timeout,
     );
     return new VM(this, wire.vm_id, baseUrl, wire);
   }
@@ -917,6 +951,18 @@ export interface ListOpts {
   limit?: ListVmsParameters["limit"];
 }
 
+
+/** Resolve the `Idempotency-Key` for one fork, or undefined to send no header.
+ *
+ * Three states, and OFF is the default: an unkeyed fork is never deduplicated,
+ * which is the API's own behaviour and what a caller who says nothing gets.
+ * An explicit key wins over the flag -- it is the more specific instruction,
+ * and the only one the caller can act on later. */
+function forkIdempotencyKey(key: string | undefined, idempotency: boolean | undefined): string | undefined {
+  if (key) return key;
+  return idempotency ? `sdk-fork-${ulid()}` : undefined;
+}
+
 export class VM {
   readonly id: string;
   readonly baseUrl: string;
@@ -965,7 +1011,7 @@ export class VM {
   }
 
   /** Fork this VM and return its child. */
-  async fork(options: Partial<ForkRequest> = {}): Promise<VM> {
+  async fork(options: Partial<ForkRequest> & ForkIdempotency = {}): Promise<VM> {
     return this._client._fork(
       { ...options, source_vm_id: this.id } as ForkRequest,
       this.baseUrl,

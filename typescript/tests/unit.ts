@@ -1804,6 +1804,138 @@ async function testAssumeEmptySkipsTheManifestRoundTrip(): Promise<void> {
 
 await testAssumeEmptySkipsTheManifestRoundTrip();
 
+// ── fork Idempotency-Key ────────────────────────────────────────────────
+//
+// The prod failure: the gateway answered a fork with 502/504 AFTER the worker
+// had already built the VM, the retry re-POSTed, and the caller got a SECOND
+// machine while the first ran on, unnamed and billable. Transport failures on
+// a mutation are not retried, but a 502/504 is a *response* and still
+// is -- so this is the window that remains.
+
+const FORK_VM = {
+  vm_id: "vm_child",
+  owner_org_id: "owner",
+  created_at: "now",
+  description: null,
+  public: false,
+  state: "idle",
+  sessions: [],
+  network: {},
+  resources: {},
+};
+
+function forkFetch(...statuses: number[]): FakeFetch {
+  const fetch = new FakeFetch();
+  for (const status of statuses) {
+    fetch.addJson(
+      (method, url) => method === "POST" && url.endsWith("/v1/fork"),
+      status,
+      status < 400 ? FORK_VM : { error: { code: "bad_gateway", message: "lost" } },
+    );
+  }
+  return fetch;
+}
+
+async function testForkSendsNoKeyUnlessAsked(): Promise<void> {
+  // OFF is the default. An unkeyed fork is never deduplicated, which is the
+  // API's own behaviour -- a caller who says nothing must get exactly that.
+  const fetch = forkFetch(200);
+
+  await client(fetch).fork({ source_vm_id: "source-vm-id" });
+
+  assert.equal(fetch.calls[0]!.headers["idempotency-key"], undefined);
+}
+
+async function testForkGeneratesAKeyWhenIdempotencyIsRequested(): Promise<void> {
+  const fetch = forkFetch(200);
+
+  await client(fetch).fork({ source_vm_id: "source-vm-id", idempotency: true });
+
+  const call = fetch.calls[0]!;
+  assert.match(call.headers["idempotency-key"] ?? "", /^sdk-fork-/);
+  // Headers, not contract fields: the server's validator rejects unknown body
+  // keys, so a leak of either would 400 every fork.
+  const body = JSON.parse(call.body!);
+  assert.equal(body.idempotencyKey, undefined);
+  assert.equal(body.idempotency, undefined);
+}
+
+async function testAnExplicitKeyWinsOverTheFlag(): Promise<void> {
+  const fetch = forkFetch(200);
+
+  await client(fetch).fork({ source_vm_id: "source-vm-id", idempotency: true, idempotencyKey: "caller-chosen" });
+
+  assert.equal(fetch.calls[0]!.headers["idempotency-key"], "caller-chosen");
+}
+
+async function testForkRetryReusesTheSameIdempotencyKey(): Promise<void> {
+  // The load-bearing one: the retried attempt must present the FIRST key. A
+  // fresh key per attempt looks identical in every other test and still
+  // builds the duplicate.
+  const fetch = forkFetch(502, 200);
+
+  await clientWithRetry(fetch, 2).fork({ source_vm_id: "source-vm-id", idempotency: true });
+
+  assert.equal(fetch.calls.length, 2, "expected a retry");
+  const first = fetch.calls[0]!.headers["idempotency-key"];
+  // Non-empty as well as equal: two blank keys are also "the same key".
+  assert.ok(first, "the fork sent an empty Idempotency-Key");
+  assert.equal(first, fetch.calls[1]!.headers["idempotency-key"]);
+}
+
+async function testForkUsesAnExplicitIdempotencyKeyVerbatim(): Promise<void> {
+  const fetch = forkFetch(200);
+
+  await client(fetch).fork({ source_vm_id: "source-vm-id", idempotencyKey: "caller-chosen" });
+
+  assert.equal(fetch.calls[0]!.headers["idempotency-key"], "caller-chosen");
+}
+
+async function testVmForkAlsoCarriesAKey(): Promise<void> {
+  // `vm.fork()` is a second entry point; it delegates to _fork, and this is
+  // what proves the option survives that hop rather than being dropped.
+  const fetch = forkFetch(200);
+
+  await client(fetch).vm("vm_1").fork({ idempotencyKey: "from-a-handle" });
+
+  const call = fetch.calls[0]!;
+  assert.equal(call.headers["idempotency-key"], "from-a-handle");
+  assert.equal(JSON.parse(call.body!).idempotencyKey, undefined);
+}
+
+async function testTwoForksDoNotShareAGeneratedKey(): Promise<void> {
+  const fetch = forkFetch(200, 200);
+  const arker = client(fetch);
+
+  await arker.fork({ source_vm_id: "source-vm-id", idempotency: true });
+  await arker.fork({ source_vm_id: "source-vm-id", idempotency: true });
+
+  const [a, b] = [fetch.calls[0]!.headers["idempotency-key"], fetch.calls[1]!.headers["idempotency-key"]];
+  // Non-empty as well as distinct: two absent keys are also "not equal", which
+  // would let a generator that emits nothing pass this.
+  assert.ok(a && b, "a requested fork sent no key");
+  assert.notEqual(a, b);
+}
+
+async function testGeneratedForkKeyFitsTheServerLimit(): Promise<void> {
+  // The handler rejects anything over 64 characters before it forks.
+  const fetch = forkFetch(200);
+
+  await client(fetch).fork({ source_vm_id: "source-vm-id", idempotency: true });
+
+  const key = fetch.calls[0]!.headers["idempotency-key"]!;
+  assert.ok(key.length > 0 && key.length <= 64, `generated key is ${key.length} chars`);
+}
+
+await testForkSendsNoKeyUnlessAsked,
+  testForkGeneratesAKeyWhenIdempotencyIsRequested,
+  testAnExplicitKeyWinsOverTheFlag();
+await testForkRetryReusesTheSameIdempotencyKey();
+await testForkUsesAnExplicitIdempotencyKeyVerbatim();
+await testVmForkAlsoCarriesAKey();
+await testTwoForksDoNotShareAGeneratedKey();
+await testGeneratedForkKeyFitsTheServerLimit();
+
 console.log("PASS unit");
 
 // ── syncDir stat cache ───────────────────────────────────────────────────────
