@@ -1,4 +1,4 @@
-package arker
+package unit
 
 import (
 	"context"
@@ -10,17 +10,19 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ArkerHQ/arker-sdk/go"
 )
 
 const forkVM = `{"vm_id":"vm_child","owner_org_id":"org","state":"idle"}`
 
-func testClient(t *testing.T, h http.HandlerFunc) (*Client, func()) {
+func testClient(t *testing.T, h http.HandlerFunc) (*arker.Client, func()) {
 	t.Helper()
 	srv := httptest.NewServer(h)
-	c, err := New(Options{
+	c, err := arker.New(arker.Options{
 		APIKey:  "ark_live_test",
 		BaseURL: srv.URL,
-		Retry:   &Retry{Attempts: 4, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond},
+		Retry:   &arker.Retry{Attempts: 4, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond},
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
@@ -40,7 +42,7 @@ func TestForkSendsAnIdempotencyKeyWithoutBeingAsked(t *testing.T) {
 	})
 	defer done()
 
-	if _, err := c.Fork(context.Background(), ForkRequest{SourceVMName: "base"}); err != nil {
+	if _, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base"}); err != nil {
 		t.Fatalf("fork: %v", err)
 	}
 	if key == "" {
@@ -76,7 +78,7 @@ func TestForkRetryReusesTheSameIdempotencyKey(t *testing.T) {
 	})
 	defer done()
 
-	if _, err := c.Fork(context.Background(), ForkRequest{SourceVMName: "base"}); err != nil {
+	if _, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base"}); err != nil {
 		t.Fatalf("fork: %v", err)
 	}
 	if len(keys) != 2 {
@@ -99,7 +101,7 @@ func TestForkUsesAnExplicitKeyVerbatim(t *testing.T) {
 	})
 	defer done()
 
-	_, err := c.Fork(context.Background(), ForkRequest{SourceVMName: "base", IdempotencyKey: "caller-chosen"})
+	_, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base", IdempotencyKey: "caller-chosen"})
 	if err != nil {
 		t.Fatalf("fork: %v", err)
 	}
@@ -117,7 +119,7 @@ func TestTwoForksDoNotShareAGeneratedKey(t *testing.T) {
 	defer done()
 
 	for range 2 {
-		if _, err := c.Fork(context.Background(), ForkRequest{SourceVMName: "base"}); err != nil {
+		if _, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base"}); err != nil {
 			t.Fatalf("fork: %v", err)
 		}
 	}
@@ -126,7 +128,7 @@ func TestTwoForksDoNotShareAGeneratedKey(t *testing.T) {
 	}
 }
 
-// ── Retry safety ────────────────────────────────────────────────────────
+// ── arker.Retry safety ────────────────────────────────────────────────────────
 
 func TestMutationIsNotRetriedOnTransportFailure(t *testing.T) {
 	// The 2026-07-31 shape: the server acts, the response is lost. Retrying
@@ -145,16 +147,16 @@ func TestMutationIsNotRetriedOnTransportFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, _ := New(Options{APIKey: "k", BaseURL: srv.URL,
-		Retry: &Retry{Attempts: 4, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond}})
+	c, _ := arker.New(arker.Options{APIKey: "k", BaseURL: srv.URL,
+		Retry: &arker.Retry{Attempts: 4, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond}})
 
-	_, err := c.Fork(context.Background(), ForkRequest{SourceVMName: "base"})
+	_, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base"})
 	if err == nil {
 		t.Fatal("a lost response reported success")
 	}
-	var unknown *UnknownOutcomeError
+	var unknown *arker.UnknownOutcomeError
 	if !errors.As(err, &unknown) {
-		t.Fatalf("want UnknownOutcomeError, got %T: %v", err, err)
+		t.Fatalf("want arker.UnknownOutcomeError, got %T: %v", err, err)
 	}
 	if got := atomic.LoadInt32(&n); got != 1 {
 		t.Fatalf("mutation was retried %d times; the outcome was unknown", got)
@@ -175,8 +177,8 @@ func TestReadIsRetriedOnTransportFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, _ := New(Options{APIKey: "k", BaseURL: srv.URL,
-		Retry: &Retry{Attempts: 4, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond}})
+	c, _ := arker.New(arker.Options{APIKey: "k", BaseURL: srv.URL,
+		Retry: &arker.Retry{Attempts: 4, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond}})
 
 	if _, _, err := c.GetVM(context.Background(), "vm_1"); err != nil {
 		t.Fatalf("get: %v", err)
@@ -226,8 +228,8 @@ func TestConflictIsTyped(t *testing.T) {
 	})
 	defer done()
 
-	_, err := c.Fork(context.Background(), ForkRequest{SourceVMName: "base"})
-	if !IsConflict(err) {
+	_, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base"})
+	if !arker.IsConflict(err) {
 		t.Fatalf("want a typed conflict, got %T: %v", err, err)
 	}
 }
@@ -248,7 +250,7 @@ func TestVMHandleRunTargetsTheRightVM(t *testing.T) {
 	defer done()
 
 	idx := 7
-	out, err := c.VM("vm_1").Run(context.Background(), RunRequest{Command: "echo hi", SessionIdx: &idx})
+	out, err := c.VM("vm_1").Run(context.Background(), arker.RunRequest{Command: "echo hi", SessionIdx: &idx})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -271,7 +273,7 @@ func TestForkFromAHandleSetsTheSource(t *testing.T) {
 	})
 	defer done()
 
-	if _, err := c.VM("vm_parent").Fork(context.Background(), ForkRequest{}); err != nil {
+	if _, err := c.VM("vm_parent").Fork(context.Background(), arker.ForkRequest{}); err != nil {
 		t.Fatalf("fork: %v", err)
 	}
 	if body["source_vm_id"] != "vm_parent" {
@@ -286,11 +288,11 @@ func TestListSessionsTreatsAbsentAsEmpty(t *testing.T) {
 	})
 	defer done()
 
-	sessions, err := c.VM("vm_gone").ListSessions(context.Background())
+	list, err := c.VM("vm_gone").ListSessions(context.Background(), arker.ListSessionsOptions{})
 	if err != nil {
 		t.Fatalf("a 404 must read as empty, got: %v", err)
 	}
-	if len(sessions) != 0 {
-		t.Fatalf("got %d sessions", len(sessions))
+	if len(list.Sessions) != 0 {
+		t.Fatalf("got %d sessions", len(list.Sessions))
 	}
 }
