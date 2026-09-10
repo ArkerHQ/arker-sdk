@@ -384,7 +384,17 @@ class Arker:
         return VM(self, vm_id)
 
     def fork(self, **options: Any) -> VM:
-        """Create a VM from exactly one source accepted by POST /v1/fork."""
+        """Create a VM from exactly one source accepted by POST /v1/fork.
+
+        ``idempotency_key`` makes the fork replayable: a repeat of the same key
+        returns the VM the first call created rather than building another one.
+        You do not need it for this SDK's own retries -- a fresh key is
+        generated per call for exactly that -- so supply one only to dedupe
+        across processes or restarts, where you can reconstruct the same key.
+        The key is one-shot and bound to the VM it made: reusing it for a
+        different request is a 409, and reusing it once that VM is deleted is a
+        404, never a second machine. Maximum 64 characters.
+        """
         has_context = "context" in options
         context = options.pop("context", None)
         dockerfile = options.get("dockerfile")
@@ -404,12 +414,25 @@ class Arker:
 
     def _fork(self, options: dict[str, Any], *, base_url: str) -> VM:
         queueing_timeout = options.get("queueing_timeout")
+        # A header, not a contract field: pop it before the body is built, or
+        # the server's validator rejects the unknown key and every fork 400s.
+        #
+        # Generated per call rather than required from the caller, because the
+        # retry it guards against is OURS. A transport failure on a mutation is
+        # no longer retried, but a 502/504 is a RESPONSE, so it still goes
+        # through `_is_retryable` -- and the origin may already have built the
+        # VM. Without a key that retry builds a SECOND machine while the first
+        # runs on, unnamed and billable. `extra_headers` is bound once, before
+        # the retry loop, so every attempt of one call presents the same key
+        # and the server replays instead of forking again.
+        idempotency_key = options.pop("idempotency_key", None) or f"sdk-fork-{secrets.token_hex(16)}"
         info = _vm_info(
             self._request(
                 "POST",
                 "/v1/fork",
                 options,
                 base_url=base_url,
+                extra_headers={"Idempotency-Key": idempotency_key},
                 max_queueing_s=(queueing_timeout if type(queueing_timeout) is int else None),
                 preserve_nulls=True,
             )

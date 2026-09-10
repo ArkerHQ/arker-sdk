@@ -306,7 +306,20 @@ export type Rewrite = ApiSchema<"Rewrite">;
  * range (`[1000, 2000]`). A `ports` list may mix the two. */
 export type PortSpec = NonNullable<PolicyMatch["ports"]>[number];
 export type ForkRequest = ApiSchema<"ForkRequest">;
-export type ForkOptions = ForkRequest & { context?: string };
+/**
+ * A fork's `Idempotency-Key`, sent as an HTTP header rather than a body field.
+ *
+ * You do not need to set this for this SDK's own retries: `fork()` generates a
+ * key per call, so a 502/504 retry replays the original fork instead of
+ * building a second machine. Set it to extend that guarantee across processes,
+ * where you can reconstruct the same key.
+ *
+ * One-shot and bound to the VM it created: reusing it for a different request
+ * is a 409, and reusing it once that VM is deleted is a 404 — never a second
+ * machine. Maximum 64 characters.
+ */
+export type ForkIdempotency = { idempotencyKey?: string };
+export type ForkOptions = ForkRequest & { context?: string } & ForkIdempotency;
 export type VmResources = ApiSchema<"VmResources">;
 export type ResourcesInput = ApiSchema<"ResourcesInput">;
 export type VmNetwork = ApiSchema<"VmNetwork">;
@@ -693,14 +706,24 @@ export class Arker {
   }
 
   /** @internal */
-  async _fork(options: ForkRequest, baseUrl: string): Promise<VM> {
+  async _fork(options: ForkRequest & ForkIdempotency, baseUrl: string): Promise<VM> {
+    // A header, not a contract field: strip it before the body is built, or
+    // the server's validator rejects the unknown key and every fork 400s.
+    //
+    // Generated per call rather than required from the caller, because the
+    // retry it guards against is OURS: a 502/504 is a RESPONSE, so it is still
+    // retried on a mutation, and the origin may already have built the VM.
+    // Without a key that retry builds a SECOND machine while the first runs
+    // on, unnamed and billable. The header object is bound once, before the
+    // retry loop, so every attempt of one call presents the same key.
+    const { idempotencyKey, ...request } = options;
     const wire = await this._request<Vm>(
       "POST",
       "/v1/fork",
-      options,
+      request,
       baseUrl,
-      undefined,
-      options.queueing_timeout,
+      { "Idempotency-Key": idempotencyKey || `sdk-fork-${ulid()}` },
+      request.queueing_timeout,
     );
     return new VM(this, wire.vm_id, baseUrl, wire);
   }
@@ -965,7 +988,7 @@ export class VM {
   }
 
   /** Fork this VM and return its child. */
-  async fork(options: Partial<ForkRequest> = {}): Promise<VM> {
+  async fork(options: Partial<ForkRequest> & ForkIdempotency = {}): Promise<VM> {
     return this._client._fork(
       { ...options, source_vm_id: this.id } as ForkRequest,
       this.baseUrl,
