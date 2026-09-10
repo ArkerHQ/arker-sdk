@@ -75,6 +75,19 @@ async function withCapturedServer(
   }, async (baseUrl) => fn(baseUrl, requests), options);
 }
 
+// Every fork carries a generated `Idempotency-Key`, so a captured fork request
+// has one more field than the body under test. Asserted here rather than
+// stripped: a fork that stops sending a key is exactly the regression the key
+// exists to prevent, and dropping the field quietly would let that pass.
+function withoutForkKey(request: CapturedRequest): CapturedRequest {
+  const { idempotencyKey, ...rest } = request;
+  assert.ok(
+    idempotencyKey && idempotencyKey.startsWith("sdk-fork-"),
+    `fork sent no generated Idempotency-Key (got ${JSON.stringify(idempotencyKey)})`,
+  );
+  return rest as CapturedRequest;
+}
+
 async function runCli(baseUrl: string | undefined, args: string[], options: CliOptions = {}): Promise<CliResult> {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -331,7 +344,7 @@ async function testForkOmitsRetiredGpuResourceKeys(): Promise<void> {
       ]);
 
       assert.equal(result.code, 0, result.stderr);
-      assert.deepEqual(requests, [{
+      assert.deepEqual(requests.map(withoutForkKey), [{
         method: "POST",
         url: "/api/v1/fork",
         body: {
@@ -375,7 +388,7 @@ async function testForkForwardsImageOptionsAndRedactsSecrets(): Promise<void> {
           "--policies-file", policiesFile,
         ]);
         assert.equal(result.code, 0, result.stderr);
-        assert.deepEqual(requests, [{
+        assert.deepEqual(requests.map(withoutForkKey), [{
           method: "POST",
           url: "/api/v1/fork",
           body: {
@@ -427,7 +440,7 @@ async function testForkUsesDockerfileAndContext(): Promise<void> {
       async (baseUrl, requests) => {
         const result = await runCli(baseUrl, ["fork", "--dockerfile", dockerfile, "--context", dir]);
         assert.equal(result.code, 0, result.stderr);
-        assert.deepEqual(requests, [{
+        assert.deepEqual(requests.map(withoutForkKey), [{
           method: "POST",
           url: "/api/v1/fork",
           body: { image: "ubuntu:24.04" },

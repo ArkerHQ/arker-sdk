@@ -418,8 +418,8 @@ class Arker:
         # the server's validator rejects the unknown key and every fork 400s.
         #
         # Generated per call rather than required from the caller, because the
-        # retry it guards against is OURS. A transport failure on a mutation is
-        # no longer retried, but a 502/504 is a RESPONSE, so it still goes
+        # retry it guards against is OURS. A transport failure on a mutation
+        # is not retried, but a 502/504 is a RESPONSE, so it still goes
         # through `_is_retryable` -- and the origin may already have built the
         # VM. Without a key that retry builds a SECOND machine while the first
         # runs on, unnamed and billable. `extra_headers` is bound once, before

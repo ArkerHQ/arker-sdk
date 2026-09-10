@@ -2771,7 +2771,7 @@ def test_the_shared_client_does_not_multiplex_requests_over_one_socket() -> None
 # The prod failure: the gateway answered a fork with 502/504 AFTER the worker
 # had already built the VM, `_request` re-POSTed, and the caller got a SECOND
 # machine while the first ran on, unnamed and billable. Transport failures on a
-# mutation are no longer retried, but a 502/504 is a *response* and still is --
+# mutation are not retried, but a 502/504 is a *response* and still is --
 # so this is the window that remains, and the key is what closes it.
 
 _FORK_VM = {
