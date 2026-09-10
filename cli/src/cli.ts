@@ -131,13 +131,11 @@ const FORK_OPTIONS: OptionSpecs = {
 const RUN_OPTIONS: OptionSpecs = {
   ...GLOBAL_OPTIONS,
   ...RESOURCE_OPTIONS,
-  acquire: { type: "string" },
   "end-symbol": { type: "string" },
   "idempotency-key": { type: "string" },
   "memory-backend": { type: "string", values: ["file", "uffd"] },
   "policies-file": { type: "string" },
   "queueing-timeout": { type: "integer", min: 0 },
-  release: { type: "string" },
   "session-id": { type: "string" },
   "session-idx": { type: "integer", min: 0 },
   timeout: { type: "integer", min: 0 },
@@ -879,8 +877,6 @@ async function cmdRun(args: ParsedArgs, client: Arker): Promise<void> {
       timeout: numFlag(args, "timeout"),
       time_to_background: numFlag(args, "time-to-background"),
       queueing_timeout: numFlag(args, "queueing-timeout"),
-      acquire: args.flags.acquire as string | undefined,
-      release: args.flags.release as string | undefined,
       session_id: args.flags["session-id"] as string | undefined,
       ...(sessionIdx !== undefined ? { session_idx: sessionIdx } : {}),
       end_symbol: args.flags["end-symbol"] as string | undefined,
@@ -1582,7 +1578,6 @@ async function readAllStdinWithFirstByteDeadline(ms: number): Promise<Uint8Array
 // for a command are read from COMMAND_OPTIONS, which keeps this honest when
 // a command gains an option.
 const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
-  acquire: { placeholder: "<list>", desc: "warm resources before the run (cpu,memory,disk)" },
   actions: { placeholder: "<action[,action...]>", desc: "filter organization-wide activity by action" },
   "assume-empty": { desc: "skip the remote manifest; treat the destination as empty" },
   "cancel-ttl": { placeholder: "<seconds>", desc: "grace period before a disconnected PTY is reaped" },
@@ -1634,7 +1629,6 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   "registry-auth-file": { placeholder: "<path>", desc: "JSON registry credentials for an image pull" },
   read: { desc: "read the file, ignoring stdin" },
   region: { placeholder: "<region>", desc: "service region or activity filter (or env ARKER_REGION)" },
-  release: { placeholder: "<list>", desc: "release resources after the run (cpu,memory,disk)" },
   rows: { placeholder: "<n>", desc: "initial terminal height" },
   runtime: { placeholder: "<runtime>", desc: "filter organization-wide activity by runtime" },
   search: { placeholder: "<text>", desc: "search organization-wide run metadata" },
@@ -1939,8 +1933,6 @@ function usage(command?: string, sub?: string): void {
       "  --timeout <seconds>             exec/kill bound in seconds (omitted or 0 = unbounded)",
       "  --time-to-background <seconds>  sync window; 0 returns a run id immediately (default 120)",
       "  --queueing-timeout <seconds>    queue up to this long instead of failing fast (also a fork flag)",
-      "  --acquire <list>           warm resources before the run (cpu,memory,disk)",
-      "  --release <list>           release resources after the run (cpu,memory,disk)",
       "  --vcpu <n> --memory-mib <n> --disk-mib <n>",
       "  --memory-backend <file|uffd>  select the restore memory backend",
       "  --end-symbol <text>        stop synchronous output after this marker",

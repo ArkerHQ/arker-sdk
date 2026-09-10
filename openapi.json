@@ -693,7 +693,7 @@
             }
           },
           "202": {
-            "description": "Accepted — the run is still executing. The body carries `run_id` and `state: \"running\"`, not output; poll `GET /v1/vms/{id}/runs/{run_id}` for the result. Returned for `time_to_background: 0` and whenever the command outstays `time_to_background`. A 2xx here means the request was accepted, not that the work is done.",
+            "description": "Accepted \u2014 the run is still executing. The body carries `run_id` and `state: \"running\"`, not output; poll `GET /v1/vms/{id}/runs/{run_id}` for the result. Returned for `time_to_background: 0` and whenever the command outstays `time_to_background`. A 2xx here means the request was accepted, not that the work is done.",
             "content": {
               "application/json": {
                 "schema": {
@@ -977,7 +977,7 @@
           "Sessions"
         ],
         "summary": "Update a session (resize PTY / set timeout)",
-        "description": "Resize the session's PTY (cols/rows) and/or update its idle timeout. Resize is delivered to a LIVE attached PTY in-band; if the PTY is detached, it is applied directly to the session's runtime; if no PTY has ever attached, the call is accepted as a no-op. REST equivalent of the WebSocket {\"type\":\"resize\"} control frame — usable from any client, attached or not.",
+        "description": "Resize the session's PTY (cols/rows) and/or update its idle timeout. Resize is delivered to a LIVE attached PTY in-band; if the PTY is detached, it is applied directly to the session's runtime; if no PTY has ever attached, the call is accepted as a no-op. REST equivalent of the WebSocket {\"type\":\"resize\"} control frame \u2014 usable from any client, attached or not.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1117,7 +1117,7 @@
         ],
         "responses": {
           "101": {
-            "description": "Switching Protocols — the WebSocket PTY stream is established."
+            "description": "Switching Protocols \u2014 the WebSocket PTY stream is established."
           },
           "401": {
             "$ref": "#/components/responses/Error"
@@ -1222,7 +1222,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "description": "Create a persistent sync: ensure a Filesystem exists (creating\none if requested) and bind-mount it into this VM at `path`.\nBidirectional by virtue of being a mount — there is no separate\nsync-direction parameter. Returns `ErrorResponse` code\n`conflict` if a sync already exists at `path`.\n"
+        "description": "Create a persistent sync: ensure a Filesystem exists (creating\none if requested) and bind-mount it into this VM at `path`.\nBidirectional by virtue of being a mount \u2014 there is no separate\nsync-direction parameter. Returns `ErrorResponse` code\n`conflict` if a sync already exists at `path`.\n"
       },
       "get": {
         "operationId": "listSyncs",
@@ -1826,7 +1826,7 @@
           "stale_route",
           "unrecoverable"
         ],
-        "description": "Stable machine-readable error code. `unsupported_operation` means the requested optional feature is unavailable in the selected region or provider. `payment_required` means billing setup or payment is required before new compute can start. `rate_limited` means the organization exceeded its request rate. `upstream_rate_limited` means a third-party service the request directed Arker to contact — a registry named by `image`, today — rate limited Arker while acting on the caller's behalf; unlike `rate_limited`, the limit is not Arker's and not the organization's request rate, so the remedy is with that service (authenticate, or pull less from it); `message` carries the upstream's own words, including which host refused. `budget_exceeded` means the organization reached its monthly spending limit. `concurrency_limit_exceeded` means the organization reached a global concurrent compute-resource limit. `regional_concurrency_limit_exceeded` means the organization reached a concurrent compute-resource limit in the selected region. `resource_pressure` means the serving infrastructure is temporarily at capacity. `capacity_unavailable` means no worker can currently serve the requested platform and one is being brought up; unlike `unavailable`, which signals a fault, this is an expected transient state and the accompanying `retry_after` says when to try again."
+        "description": "Stable machine-readable error code. `unsupported_operation` means the requested optional feature is unavailable in the selected region or provider. `payment_required` means billing setup or payment is required before new compute can start. `rate_limited` means the organization exceeded its request rate. `upstream_rate_limited` means a third-party service the request directed Arker to contact \u2014 a registry named by `image`, today \u2014 rate limited Arker while acting on the caller's behalf; unlike `rate_limited`, the limit is not Arker's and not the organization's request rate, so the remedy is with that service (authenticate, or pull less from it); `message` carries the upstream's own words, including which host refused. `budget_exceeded` means the organization reached its monthly spending limit. `concurrency_limit_exceeded` means the organization reached a global concurrent compute-resource limit. `regional_concurrency_limit_exceeded` means the organization reached a concurrent compute-resource limit in the selected region. `resource_pressure` means the serving infrastructure is temporarily at capacity. `capacity_unavailable` means no worker can currently serve the requested platform and one is being brought up; unlike `unavailable`, which signals a fault, this is an expected transient state and the accompanying `retry_after` says when to try again."
       },
       "ErrorBody": {
         "type": "object",
@@ -2050,7 +2050,7 @@
           "action"
         ],
         "additionalProperties": false,
-        "description": "One policy rule. `match` AND's its present fields (absent ⇒ catch-all).",
+        "description": "One policy rule. `match` AND's its present fields (absent \u21d2 catch-all).",
         "properties": {
           "type": {
             "type": "string",
@@ -2072,7 +2072,7 @@
               "open",
               "arker"
             ],
-            "description": "Authentication for an inbound rule that exposes a port — `allow`, or a scaling-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges."
+            "description": "Authentication for an inbound rule that exposes a port \u2014 `allow`, or a scaling-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges."
           }
         }
       },
@@ -2141,7 +2141,7 @@
                 "type": "string"
               }
             },
-            "description": "Header name → any-of values (names AND'd, a name's values OR'd)."
+            "description": "Header name \u2192 any-of values (names AND'd, a name's values OR'd)."
           },
           "body_contains": {
             "description": "Substrings that must appear in the request body.",
@@ -2188,7 +2188,7 @@
           "suspend": {
             "type": "boolean",
             "default": false,
-            "description": "Suspend the VM (snapshot and free CPU/RAM). On an `outbound` rule: while a matched upstream request is blocked, resuming when the response arrives. On an `inbound` rule: once a matched request's response has been fully delivered and nothing else is in flight, so the next matched request wakes it again. The suspended window remains part of the VM's Running interval until the VM is paused or stopped. On an `outbound` rule, matched responses are delivered only once the upstream response is COMPLETE: a suspended VM has no running guest to receive bytes, so the proxy holds the whole body and hands it over at the end. Total latency is unchanged, but a response whose fragments are individually usable — an SSE token stream, for example — stops arriving incrementally, so a client rendering tokens as they arrive will see nothing until the response finishes. Enabling this is a deliberate trade of incremental delivery for the memory saving."
+            "description": "Suspend the VM (snapshot and free CPU/RAM). On an `outbound` rule: while a matched upstream request is blocked, resuming when the response arrives. On an `inbound` rule: once a matched request's response has been fully delivered and nothing else is in flight, so the next matched request wakes it again. The suspended window remains part of the VM's Running interval until the VM is paused or stopped. On an `outbound` rule, matched responses are delivered only once the upstream response is COMPLETE: a suspended VM has no running guest to receive bytes, so the proxy holds the whole body and hands it over at the end. Total latency is unchanged, but a response whose fragments are individually usable \u2014 an SSE token stream, for example \u2014 stops arriving incrementally, so a client rendering tokens as they arrive will see nothing until the response finishes. Enabling this is a deliberate trade of incremental delivery for the memory saving."
           },
           "wake": {
             "type": "boolean",
@@ -2199,7 +2199,7 @@
       "Rewrite": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${…}`-braced), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged.",
+        "description": "Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${\u2026}`-braced), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged.",
         "properties": {
           "host": {
             "description": "Replacement request host.",
@@ -2456,7 +2456,7 @@
               "string",
               "null"
             ],
-            "description": "OCI image reference to fork from — for example `ubuntu:24.04`, `ghcr.io/org/image:v1`, or `image@sha256:...`. An unqualified name resolves against Docker Hub. Give a bare reference, not a URI. The new VM boots a rootfs converted from that image rather than from an existing VM, so neither `source_vm_id` nor `source_vm_name` is given."
+            "description": "OCI image reference to fork from \u2014 for example `ubuntu:24.04`, `ghcr.io/org/image:v1`, or `image@sha256:...`. An unqualified name resolves against Docker Hub. Give a bare reference, not a URI. The new VM boots a rootfs converted from that image rather than from an existing VM, so neither `source_vm_id` nor `source_vm_name` is given."
           },
           "dockerfile": {
             "type": [
@@ -2797,7 +2797,7 @@
             ]
           },
           "last_active_at": {
-            "description": "RFC 3339 timestamp of the machine's most recent activity — a run, an SSH session, an open tunnel, a resume, or being used as the source of a fork. Recorded when a stretch of activity begins and refreshed at most once a minute while it continues, so it is a recent-activity marker rather than a precise heartbeat. Null if the machine has not been active since it was created.",
+            "description": "RFC 3339 timestamp of the machine's most recent activity \u2014 a run, an SSH session, an open tunnel, a resume, or being used as the source of a fork. Recorded when a stretch of activity begins and refreshed at most once a minute while it continues, so it is a recent-activity marker rather than a precise heartbeat. Null if the machine has not been active since it was created.",
             "type": [
               "string",
               "null"
@@ -2805,7 +2805,7 @@
           },
           "network": {
             "$ref": "#/components/schemas/VmNetwork",
-            "description": "The VM's network object — SSH keys only. Inbound reachability and per-port exposure are derived from `policies`, not from this object."
+            "description": "The VM's network object \u2014 SSH keys only. Inbound reachability and per-port exposure are derived from `policies`, not from this object."
           },
           "max_vcpus": {
             "type": [
@@ -2849,7 +2849,7 @@
             "items": {
               "$ref": "#/components/schemas/GpuPlatformLimits"
             },
-            "description": "GPU sizing bounds for each GPU platform this VM can be forked onto; absent when it has no GPU platform. A base VM is GPU-agnostic and may be offered on several GPUs at once, so this is a list — clients pick the entry matching the platform they intend to request."
+            "description": "GPU sizing bounds for each GPU platform this VM can be forked onto; absent when it has no GPU platform. A base VM is GPU-agnostic and may be offered on several GPUs at once, so this is a list \u2014 clients pick the entry matching the platform they intend to request."
           },
           "min_disk_mib": {
             "type": [
@@ -2992,7 +2992,7 @@
         "additionalProperties": false,
         "properties": {
           "session_id": {
-            "description": "The session to run in. Arker's run interface works like a terminal: sessions are tabs, each keeps its own state — working directory, environment, shell history — and each handles one run at a time. Create a session with `POST /v1/vms/{id}/sessions`, which also sets its starting directory and environment, then pass its id here. Run sequential commands in one session; for a long-running task, use `time_to_background: 0` in a session of its own so later work does not interrupt it. Distinct sessions run concurrently. A session that no longer exists is a 404. Omitted, the run uses the VM's default session, which every caller that omits it shares.",
+            "description": "The session to run in. Arker's run interface works like a terminal: sessions are tabs, each keeps its own state \u2014 working directory, environment, shell history \u2014 and each handles one run at a time. Create a session with `POST /v1/vms/{id}/sessions`, which also sets its starting directory and environment, then pass its id here. Run sequential commands in one session; for a long-running task, use `time_to_background: 0` in a session of its own so later work does not interrupt it. Distinct sessions run concurrently. A session that no longer exists is a 404. Omitted, the run uses the VM's default session, which every caller that omits it shares.",
             "type": [
               "string",
               "null"
@@ -3007,7 +3007,7 @@
             "minimum": 0
           },
           "command": {
-            "description": "Command submitted for execution. Omit it only for a resource operation (`acquire` or `release`) or a `signal` request.",
+            "description": "Command submitted for execution. Omit it only for a signal request.",
             "type": "string"
           },
           "timeout": {
@@ -3087,20 +3087,6 @@
               null
             ]
           },
-          "acquire": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Comma-separated list of resources to ensure are\npre-allocated (warm) before the run starts. Values: `cpu`,\n`memory`, `disk`. Example: `\"cpu,memory\"`.\n"
-          },
-          "release": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Comma-separated list of resources to release after the run\nfinishes. Values: `cpu`, `memory`, `disk`. `\"cpu\"` frees\nvCPU but keeps memory hot for the next run on this VM;\n`\"cpu,memory,disk\"` is a full release (closest to a\nsuspend).\n"
-          },
           "signal": {
             "type": [
               "string",
@@ -3157,14 +3143,14 @@
             ]
           },
           "run_id": {
-            "description": "The run's own id. Present for executed runs; absent for operation acks (release/signal) with no run record.",
+            "description": "The run's own id. Present for executed runs; absent for operation acks (signal) with no run record.",
             "type": [
               "string",
               "null"
             ]
           },
           "state": {
-            "description": "Lifecycle state — \"completed\" for this shape. Read this (not the variant) for completion, uniformly with the run-status (`Run`) shape.",
+            "description": "Lifecycle state \u2014 \"completed\" for this shape. Read this (not the variant) for completion, uniformly with the run-status (`Run`) shape.",
             "type": "string"
           },
           "stdout": {
@@ -3224,7 +3210,7 @@
             "type": "boolean"
           },
           "memory_backend": {
-            "description": "Which guest-memory mode this VM is restored with: `file` maps the memory image from the host page cache, `uffd` supplies pages on demand through a userfaultfd handler. Absent when this run involved no Firecracker restore — a `brush` dispatch, or a VM that was already running. Informational only: the mode is chosen per restore from the image's resident size, and an image reconstructed from object storage always uses `uffd`, which is a correctness requirement rather than a tuning choice.",
+            "description": "Which guest-memory mode this VM is restored with: `file` maps the memory image from the host page cache, `uffd` supplies pages on demand through a userfaultfd handler. Absent when this run involved no Firecracker restore \u2014 a `brush` dispatch, or a VM that was already running. Informational only: the mode is chosen per restore from the image's resident size, and an image reconstructed from object storage always uses `uffd`, which is a correctness requirement rather than a tuning choice.",
             "type": [
               "string",
               "null"
@@ -3256,7 +3242,7 @@
             "type": "string"
           },
           "state": {
-            "description": "Lifecycle state — \"running\" for a backgrounded run.",
+            "description": "Lifecycle state \u2014 \"running\" for a backgrounded run.",
             "type": "string"
           }
         }
@@ -3446,7 +3432,7 @@
               "string",
               "null"
             ],
-            "description": "System failure explanation when `state` is `failed` — see `Run.fail_reason`. Distinct from the program's `stderr`."
+            "description": "System failure explanation when `state` is `failed` \u2014 see `Run.fail_reason`. Distinct from the program's `stderr`."
           },
           "vm_id": {
             "description": "Unique VM identifier.",
@@ -3828,7 +3814,7 @@
             ]
           },
           "status": {
-            "description": "Mount status. Creating a sync returns `attaching`; poll this resource for the outcome.\n\n`attaching` — the mount is pending. A stopped VM remains in this state until it resumes.\n\n`mounted` — the filesystem is available in the VM.\n\n`failed` — the VM cannot mount the filesystem. `status_detail` explains the cause. Transient errors remain in `attaching` while the service retries them.",
+            "description": "Mount status. Creating a sync returns `attaching`; poll this resource for the outcome.\n\n`attaching` \u2014 the mount is pending. A stopped VM remains in this state until it resumes.\n\n`mounted` \u2014 the filesystem is available in the VM.\n\n`failed` \u2014 the VM cannot mount the filesystem. `status_detail` explains the cause. Transient errors remain in `attaching` while the service retries them.",
             "type": [
               "string",
               "null"
@@ -4079,7 +4065,7 @@
           },
           "path": {
             "type": "string",
-            "description": "The sanitized destination — the file for a write, the directory for an extract."
+            "description": "The sanitized destination \u2014 the file for a write, the directory for an extract."
           },
           "size": {
             "type": "integer",
@@ -4723,7 +4709,7 @@
         "maximum": 1,
         "multipleOf": 0.125,
         "minimum": 0.125,
-        "description": "A slice of ONE physical GPU, in eighths of a card: 0.125 through 1. The constraints are the contract — an off-ladder fraction is rejected on the wire, not by the worker that later resolves it."
+        "description": "A slice of ONE physical GPU, in eighths of a card: 0.125 through 1. The constraints are the contract \u2014 an off-ladder fraction is rejected on the wire, not by the worker that later resolves it."
       },
       "ResourcesInput": {
         "type": "object",
@@ -4763,7 +4749,7 @@
                 "type": "null"
               }
             ],
-            "description": "Fraction of one physical GPU to allocate, in eighths of a card: 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, or 1. Resolved against the serving platform's GPU (`vgpu: 0.25` on `x86_64-l40s` is 35 SMs and 11517 MiB), so the same fraction is a different amount of silicon on a different card — see the per-platform table in the docs. Mutually exclusive with `gpu_sms` and `gpu_vram_mib`. Request-only: responses report the resolved `gpu_sms`/`gpu_vram_mib` and never this field."
+            "description": "Fraction of one physical GPU to allocate, in eighths of a card: 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, or 1. Resolved against the serving platform's GPU (`vgpu: 0.25` on `x86_64-l40s` is 35 SMs and 11517 MiB), so the same fraction is a different amount of silicon on a different card \u2014 see the per-platform table in the docs. Mutually exclusive with `gpu_sms` and `gpu_vram_mib`. Request-only: responses report the resolved `gpu_sms`/`gpu_vram_mib` and never this field."
           }
         },
         "description": "Resource shape a caller asks for. GPU size is set with `vgpu`, in eighths of one card; the resolved per-GPU `gpu_sms`/`gpu_vram_mib` are reported back on the machine."
@@ -4932,7 +4918,7 @@
           "max": {
             "type": "integer",
             "minimum": 0,
-            "description": "Largest value accepted — the whole physical GPU. Requests above this return 400 rather than being clamped."
+            "description": "Largest value accepted \u2014 the whole physical GPU. Requests above this return 400 rather than being clamped."
           },
           "default": {
             "type": "integer",
@@ -4959,7 +4945,7 @@
               "string",
               "null"
             ],
-            "description": "Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing — use the bands."
+            "description": "Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing \u2014 use the bands."
           },
           "vram_mib": {
             "$ref": "#/components/schemas/GpuResourceBand"
@@ -4983,7 +4969,7 @@
               "string",
               "null"
             ],
-            "description": "Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing — use the bands."
+            "description": "Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing \u2014 use the bands."
           },
           "vram_mib": {
             "$ref": "#/components/schemas/GpuResourceBand"
@@ -5000,7 +4986,7 @@
           "username",
           "password"
         ],
-        "description": "Credentials for pulling `image` from a private registry. Used only for this one pull and never stored. Redacted from logs and telemetry.\n\nFor AWS ECR use username `AWS` with the output of `aws ecr get-login-password`; for Google Artifact Registry use `oauth2accesstoken` with an access token; for Docker Hub or GHCR use your username and a personal access token. Short-lived tokens are fine — the pull happens once, at fork time.",
+        "description": "Credentials for pulling `image` from a private registry. Used only for this one pull and never stored. Redacted from logs and telemetry.\n\nFor AWS ECR use username `AWS` with the output of `aws ecr get-login-password`; for Google Artifact Registry use `oauth2accesstoken` with an access token; for Docker Hub or GHCR use your username and a personal access token. Short-lived tokens are fine \u2014 the pull happens once, at fork time.",
         "properties": {
           "username": {
             "type": "string",

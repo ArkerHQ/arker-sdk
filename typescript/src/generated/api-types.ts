@@ -940,7 +940,7 @@ export interface components {
             session_id?: string | null;
             /** @description Numeric session selector. `session_id` takes precedence when both selectors are sent. */
             session_idx?: number | null;
-            /** @description Command submitted for execution. Omit it only for a resource operation (`acquire` or `release`) or a `signal` request. */
+            /** @description Command submitted for execution. Omit it only for a signal request. */
             command?: string;
             /** @description Maximum command runtime in seconds. Omitted means no limit; the run is killed only if you set a `timeout`. `0` is an explicit spelling of the same thing. This is separate from `time_to_background`, which controls how long the request waits for completion. A run is not complete until everything it spawned has exited, so this is also the bound on a run that leaves a daemon behind; when it fires, the run's processes are killed. */
             timeout?: number | null;
@@ -970,20 +970,6 @@ export interface components {
              */
             memory_backend?: "file" | "uffd" | null;
             /**
-             * @description Comma-separated list of resources to ensure are
-             *     pre-allocated (warm) before the run starts. Values: `cpu`,
-             *     `memory`, `disk`. Example: `"cpu,memory"`.
-             */
-            acquire?: string | null;
-            /**
-             * @description Comma-separated list of resources to release after the run
-             *     finishes. Values: `cpu`, `memory`, `disk`. `"cpu"` frees
-             *     vCPU but keeps memory hot for the next run on this VM;
-             *     `"cpu,memory,disk"` is a full release (closest to a
-             *     suspend).
-             */
-            release?: string | null;
-            /**
              * @description Deliver a signal to the selected persistent session's foreground process group. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. Use `session_id` or `session_idx` to select the session.
              * @enum {string|null}
              */
@@ -995,7 +981,7 @@ export interface components {
         CompletedRunResponse: {
             /** @description Session used by this run. Use this identifier to inspect or stop work that continues after the initial response. Absent for resource and signal requests that execute no command. */
             session_id?: string | null;
-            /** @description The run's own id. Present for executed runs; absent for operation acks (release/signal) with no run record. */
+            /** @description The run's own id. Present for executed runs; absent for operation acks (signal) with no run record. */
             run_id?: string | null;
             /** @description Lifecycle state — "completed" for this shape. Read this (not the variant) for completion, uniformly with the run-status (`Run`) shape. */
             state?: string;

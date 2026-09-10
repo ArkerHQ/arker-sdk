@@ -707,8 +707,6 @@ class VM:
         memory_mib: int | None = None,
         disk_mib: int | None = None,
         policies: PolicyDoc | dict[str, Any] | None = None,
-        acquire: str | list[str] | None = None,
-        release: str | list[str] | None = None,
         signal: str | None = None,
         idempotency_key: str | None = None,
     ) -> RunResult:
@@ -789,8 +787,6 @@ class VM:
             vcpu_count=vcpu_count,
             memory_mib=memory_mib,
             disk_mib=disk_mib,
-            acquire=",".join(acquire) if isinstance(acquire, list) else acquire,
-            release=",".join(release) if isinstance(release, list) else release,
             signal=signal,
             policies=policies,
         )
