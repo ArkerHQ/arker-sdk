@@ -444,29 +444,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/vms/{id}/sync-stream": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
-                id: components["parameters"]["VmId"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Stream a file or archive into the VM
-         * @description Stream raw bytes directly into the VM as they arrive, avoiding an intermediate copy. With `extract` set, the body is a tar archive and `path` is the destination directory: the archive is unpacked into `path`, so a whole directory syncs in a single request.
-         */
-        post: operations["syncStream"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/filesystems": {
         parameters: {
             query?: never;
@@ -1293,28 +1270,6 @@ export interface components {
         };
         SyncRequest: components["schemas"]["SyncReadOperationRequest"] | components["schemas"]["SyncWriteOperationRequest"] | components["schemas"]["SyncManifestOperationRequest"];
         SyncResponse: components["schemas"]["SyncReadResponse"] | components["schemas"]["SyncWriteResponse"] | components["schemas"]["SyncManifestResponse"];
-        SyncStreamResponse: {
-            /** @description True when the operation succeeded. */
-            ok: boolean;
-            /**
-             * @description `write_stream` for a plain file write, `extract_stream` when `extract` was set.
-             * @enum {string}
-             */
-            op: "write_stream" | "extract_stream";
-            /** @description The sanitized destination — the file for a write, the directory for an extract. */
-            path: string;
-            /**
-             * Format: int64
-             * @description Bytes streamed, matching the declared `size`.
-             */
-            size: number;
-            /** @description True when all data for this operation has been received and applied. */
-            complete: boolean;
-            /** @description Present on `write_stream`. */
-            written?: boolean;
-            /** @description Present on `extract_stream`. */
-            extracted?: boolean;
-        };
         SyncWriteEntry: components["schemas"]["SyncChunkWrite"] | components["schemas"]["SyncPresignedWriteRequest"] | components["schemas"]["SyncPresignedWriteCommit"];
         SyncChunkWrite: {
             /** @description Path inside the VM. */
@@ -2468,44 +2423,6 @@ export interface operations {
             };
             402: components["responses"]["PaymentRequired"];
             422: components["responses"]["UnsupportedOperation"];
-            default: components["responses"]["Error"];
-        };
-    };
-    syncStream: {
-        parameters: {
-            query: {
-                /** @description Absolute destination path. With `extract` set this is the destination DIRECTORY. */
-                path: string;
-                /** @description Exact byte length of the streamed body. The request fails if the stream does not match. */
-                size: number;
-                /** @description Optional checksum, verified on the write that completes the file. */
-                sha256?: string;
-                /** @description Treat the body as a tar archive and extract it into `path` server-side, so a whole directory syncs in one request. Use `tar` for already-compressed data and `tar.gz` when compression reduces the upload size. */
-                extract?: "tar.gz" | "tgz" | "tar";
-            };
-            header?: never;
-            path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
-                id: components["parameters"]["VmId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/octet-stream": string;
-            };
-        };
-        responses: {
-            /** @description Write or extract result. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SyncStreamResponse"];
-                };
-            };
-            402: components["responses"]["PaymentRequired"];
             default: components["responses"]["Error"];
         };
     };
