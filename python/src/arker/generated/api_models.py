@@ -372,17 +372,6 @@ class SyncManifestResponse:
 
 
 @dataclass(frozen=True)
-class SyncStreamResponse:
-    ok: bool
-    op: Literal['write_stream', 'extract_stream']
-    path: str
-    size: int
-    complete: bool
-    written: bool | None = None
-    extracted: bool | None = None
-
-
-@dataclass(frozen=True)
 class SyncChunkWrite:
     path: str
     size: int
@@ -693,15 +682,6 @@ class DeleteMountParameters:
 @dataclass(frozen=True)
 class SyncParameters:
     id: str
-
-
-@dataclass(frozen=True)
-class SyncStreamParameters:
-    path: str
-    size: int
-    id: str
-    sha256: str | None = None
-    extract: Literal['tar.gz', 'tgz', 'tar'] | None = None
 
 
 @dataclass(frozen=True)
@@ -1346,16 +1326,6 @@ class SyncOperation(TypedDict):
     errors: ErrorResponse
 
 
-class SyncStreamOperation(TypedDict):
-    operation_id: Literal['syncStream']
-    method: Literal['POST']
-    path: Literal['/v1/vms/{id}/sync-stream']
-    parameters: SyncStreamParameters
-    request: None
-    success: SyncStreamResponse
-    errors: ErrorResponse
-
-
 class WhoamiOperation(TypedDict):
     operation_id: Literal['whoami']
     method: Literal['GET']
@@ -1396,6 +1366,5 @@ ApiOperation: TypeAlias = (
     AttachSessionPtyOperation |
     MintSessionPtyTicketOperation |
     SyncOperation |
-    SyncStreamOperation |
     WhoamiOperation
 )
