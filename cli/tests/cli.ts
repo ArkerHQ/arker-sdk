@@ -268,7 +268,7 @@ async function testKnownButIrrelevantNestedOptionsFail(): Promise<void> {
     ["vms", "get", "--timeout", "1", "vm_1"],
     ["runs", "get", "--state", "failed", "vm_1", "run_1"],
     ["sessions", "get", "--cwd", "/tmp", "vm_1", "session_1"],
-    ["syncs", "rm", "--path", "/mnt", "vm_1", "sync_1"],
+    ["mounts", "rm", "--path", "/mnt", "vm_1", "sync_1"],
     ["fs", "get", "--name", "data", "fs_1"],
   ]) {
     await withCapturedServer((_request, res) => jsonResponse(res, {}), async (baseUrl, requests) => {
@@ -642,7 +642,7 @@ async function testPerCommandHelpIsCommandSpecific(): Promise<void> {
   for (const command of [
     "delete", "filesystems", "fork", "fs", "list", "ls", "policies", "regions",
     "rm", "run", "runs", "sessions", "shell", "signal", "sync", "sync-dir",
-    "syncs", "update", "vms", "whoami",
+    "mounts", "update", "vms", "whoami",
   ]) {
     const result = await runCli(undefined, [command, "--help"], { authenticated: false });
     assert.equal(result.code, 0, `${command} --help should succeed`);
@@ -956,7 +956,7 @@ async function testFalseMutationResultsExitNonzero(): Promise<void> {
   const cases = [
     { args: ["runs", "rm", "vm_1", "run_1"], response: { cancelled: false } },
     { args: ["sessions", "rm", "vm_1", "session_1"], response: { deleted: false } },
-    { args: ["syncs", "rm", "vm_1", "sync_1"], response: { deleted: false } },
+    { args: ["mounts", "rm", "vm_1", "sync_1"], response: { deleted: false } },
     { args: ["fs", "rm", "fs_1"], response: { deleted: false } },
   ];
   for (const testCase of cases) {
@@ -1088,18 +1088,18 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
       },
     },
     {
-      name: "syncs ls",
-      args: ["syncs", "ls", "vm_1"],
-      response: { syncs: [] },
+      name: "mounts ls",
+      args: ["mounts", "ls", "vm_1"],
+      response: { mounts: [] },
       method: "GET",
-      url: "/api/v1/vms/vm_1/syncs",
+      url: "/api/v1/vms/vm_1/mounts",
     },
     {
-      name: "syncs create",
-      args: ["syncs", "create", "--filesystem-id", "fs_1", "--path", "/mnt", "vm_1"],
-      response: { sync_id: "sync_1", filesystem_id: "fs_1", path: "/mnt" },
+      name: "mounts create",
+      args: ["mounts", "create", "--filesystem-id", "fs_1", "--path", "/mnt", "vm_1"],
+      response: { mount_id: "sync_1", filesystem_id: "fs_1", path: "/mnt" },
       method: "POST",
-      url: "/api/v1/vms/vm_1/syncs",
+      url: "/api/v1/vms/vm_1/mounts",
       body: { filesystem_id: "fs_1", path: "/mnt" },
     },
     {

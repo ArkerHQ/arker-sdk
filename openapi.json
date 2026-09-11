@@ -149,6 +149,11 @@
           "field": "queueing_timeout",
           "unit": "seconds"
         },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -172,6 +177,9 @@
           },
           "402": {
             "$ref": "#/components/responses/PaymentRequired"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "422": {
             "$ref": "#/components/responses/UnsupportedOperation"
@@ -705,6 +713,9 @@
           "402": {
             "$ref": "#/components/responses/PaymentRequired"
           },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
           "422": {
             "$ref": "#/components/responses/UnsupportedOperation"
           },
@@ -1179,14 +1190,14 @@
         }
       }
     },
-    "/v1/vms/{id}/syncs": {
+    "/v1/vms/{id}/mounts": {
       "parameters": [
         {
           "$ref": "#/components/parameters/VmId"
         }
       ],
       "post": {
-        "operationId": "createSync",
+        "operationId": "createMount",
         "tags": [
           "Filesystems"
         ],
@@ -1196,18 +1207,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SyncCreateRequest"
+                "$ref": "#/components/schemas/MountCreateRequest"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Created sync.",
+            "description": "Created mount.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Sync"
+                  "$ref": "#/components/schemas/Mount"
                 }
               }
             }
@@ -1222,10 +1233,10 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "description": "Create a persistent sync: ensure a Filesystem exists (creating\none if requested) and bind-mount it into this VM at `path`.\nBidirectional by virtue of being a mount \u2014 there is no separate\nsync-direction parameter. Returns `ErrorResponse` code\n`conflict` if a sync already exists at `path`.\n"
+        "description": "Mount an existing filesystem into this VM at `path`. Repeating the same filesystem and path returns the existing mount. Returns `ErrorResponse` code `conflict` if another filesystem occupies the path or this filesystem is mounted at another path on the VM."
       },
       "get": {
-        "operationId": "listSyncs",
+        "operationId": "listMounts",
         "tags": [
           "Filesystems"
         ],
@@ -1250,11 +1261,11 @@
         ],
         "responses": {
           "200": {
-            "description": "Syncs on this VM.",
+            "description": "Mounts on this VM.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ListSyncsResponse"
+                  "$ref": "#/components/schemas/ListMountsResponse"
                 }
               }
             }
@@ -1265,17 +1276,17 @@
         }
       }
     },
-    "/v1/vms/{id}/syncs/{sync_id}": {
+    "/v1/vms/{id}/mounts/{mount_id}": {
       "parameters": [
         {
           "$ref": "#/components/parameters/VmId"
         },
         {
-          "$ref": "#/components/parameters/SyncId"
+          "$ref": "#/components/parameters/MountId"
         }
       ],
       "delete": {
-        "operationId": "deleteSync",
+        "operationId": "deleteMount",
         "tags": [
           "Filesystems"
         ],
@@ -1287,7 +1298,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DeleteSyncResponse"
+                  "$ref": "#/components/schemas/DeleteMountResponse"
                 }
               }
             }
@@ -1341,7 +1352,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "description": "Read or write files in the VM filesystem. Op-discriminated:\n`{op:\"read\",path}` reads a file (inline content for small files, a\npresigned GET URL for large ones); `{op:\"write\",writes:[...]}` writes,\neach entry an inline chunk or a presigned-upload step. Binding a\nfilesystem into the VM is the separate `/v1/vms/{id}/syncs` resource.\n"
+        "description": "Read or write files in the VM filesystem. Op-discriminated:\n`{op:\"read\",path}` reads a file (inline content for small files, a\npresigned GET URL for large ones); `{op:\"write\",writes:[...]}` writes,\neach entry an inline chunk or a presigned-upload step. Binding a\nfilesystem into the VM is the separate `/v1/vms/{id}/mounts` resource.\n"
       }
     },
     "/v1/vms/{id}/sync-stream": {
@@ -1548,7 +1559,7 @@
         "description": "Delete a shared filesystem after all VM mounts have been removed.",
         "responses": {
           "200": {
-            "description": "Delete result. The filesystem must not be mounted by any VM (no remaining `Sync` referencing it).",
+            "description": "Delete result. The filesystem must not be mounted by any VM (no remaining `Mount` referencing it).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1583,7 +1594,7 @@
         "name": "Idempotency-Key",
         "in": "header",
         "required": false,
-        "description": "Makes run submission safely retryable. Reusing a key with the same request returns the original result; reusing it with a different request returns a conflict.",
+        "description": "Makes the request safely retryable. Reusing a key with the same request returns the original result — the same run, or the same VM for a fork — instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet.",
         "schema": {
           "type": "string",
           "minLength": 1,
@@ -1618,8 +1629,8 @@
           "type": "string"
         }
       },
-      "SyncId": {
-        "name": "sync_id",
+      "MountId": {
+        "name": "mount_id",
         "in": "path",
         "required": true,
         "description": "Filesystem mount identifier.",
@@ -1670,6 +1681,16 @@
       }
     },
     "responses": {
+      "Conflict": {
+        "description": "The `Idempotency-Key` was already used for a different request. Reusing a key is only meaningful for retrying the SAME request; a key that arrives with different semantic content is refused rather than answered with the earlier result, which would silently hand back something the caller did not ask for.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
       "PaymentRequired": {
         "description": "The organization must complete billing setup or payment before starting new compute.",
         "content": {
@@ -3780,18 +3801,18 @@
           }
         }
       },
-      "Sync": {
+      "Mount": {
         "type": "object",
         "required": [
-          "sync_id",
+          "mount_id",
           "vm_id",
           "filesystem_id",
           "path"
         ],
         "additionalProperties": false,
         "properties": {
-          "sync_id": {
-            "description": "Unique sync identifier.",
+          "mount_id": {
+            "description": "Unique mount identifier.",
             "type": "string"
           },
           "vm_id": {
@@ -3814,7 +3835,7 @@
             ]
           },
           "status": {
-            "description": "Mount status. Creating a sync returns `attaching`; poll this resource for the outcome.\n\n`attaching` \u2014 the mount is pending. A stopped VM remains in this state until it resumes.\n\n`mounted` \u2014 the filesystem is available in the VM.\n\n`failed` \u2014 the VM cannot mount the filesystem. `status_detail` explains the cause. Transient errors remain in `attaching` while the service retries them.",
+            "description": "Mount status. Creating a mount returns `attaching`; poll this resource for the outcome.\n\n`attaching` \u2014 the mount is pending. A stopped VM remains in this state until it resumes.\n\n`mounted` \u2014 the filesystem is available in the VM.\n\n`failed` \u2014 the VM cannot mount the filesystem. `status_detail` explains the cause. Transient errors remain in `attaching` while the service retries them.",
             "type": [
               "string",
               "null"
@@ -3835,18 +3856,18 @@
           }
         }
       },
-      "ListSyncsResponse": {
+      "ListMountsResponse": {
         "type": "object",
         "required": [
-          "syncs"
+          "mounts"
         ],
         "additionalProperties": false,
         "properties": {
-          "syncs": {
-            "description": "Sync mounts matching the request.",
+          "mounts": {
+            "description": "Filesystem mounts matching the request.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Sync"
+              "$ref": "#/components/schemas/Mount"
             }
           },
           "next_cursor": {
@@ -3858,7 +3879,7 @@
           }
         }
       },
-      "DeleteSyncResponse": {
+      "DeleteMountResponse": {
         "type": "object",
         "required": [
           "deleted"
@@ -3871,7 +3892,7 @@
           }
         }
       },
-      "SyncCreateRequest": {
+      "MountCreateRequest": {
         "type": "object",
         "required": [
           "filesystem_id"
@@ -4682,24 +4703,24 @@
               "integer",
               "null"
             ],
-            "minimum": 1,
-            "description": "Number of GPU streaming multiprocessors available to the VM on EACH of its GPUs (a per-GPU value, uniform across the VM's devices; see `gpu_count`). Reported on GPU platforms such as `x86_64-l40s`. Response-only: a fork sizes GPU with `vgpu`."
+            "minimum": 0,
+            "description": "Number of GPU streaming multiprocessors available to the VM on EACH of its GPUs (a per-GPU value, uniform across the VM's devices; see `gpu_count`). Reported on GPU platforms such as `x86_64-l40s`. Response-only: a fork sizes GPU with `vgpu`. `0` means the VM was forked with `vgpu: 0` and holds no GPU; an absent field means the VM has no GPU at all."
           },
           "gpu_vram_mib": {
             "type": [
               "integer",
               "null"
             ],
-            "minimum": 1,
-            "description": "GPU memory available to the VM, in MiB, on EACH of its GPUs (a per-GPU value; see `gpu_count`). Reported on GPU platforms. Response-only: a fork sizes GPU with `vgpu`."
+            "minimum": 0,
+            "description": "GPU memory available to the VM, in MiB, on EACH of its GPUs (a per-GPU value; see `gpu_count`). Reported on GPU platforms. Response-only: a fork sizes GPU with `vgpu`. `0` means the VM was forked with `vgpu: 0` and holds no GPU; an absent field means the VM has no GPU at all."
           },
           "gpu_count": {
             "type": [
               "integer",
               "null"
             ],
-            "minimum": 1,
-            "description": "Number of physical GPUs attached to the VM. `gpu_sms`/`gpu_vram_mib` are per-GPU values applied uniformly to every attached device, so the VM's total GPU allocation (and quota charge) is `gpu_count x per-GPU`. Reported on GPU platforms; absent means 1. Response-only: a fork sizes GPU with `vgpu`, which allocates at most one card."
+            "minimum": 0,
+            "description": "Number of physical GPUs attached to the VM. `gpu_sms`/`gpu_vram_mib` are per-GPU values applied uniformly to every attached device, so the VM's total GPU allocation (and quota charge) is `gpu_count x per-GPU`. Reported on GPU platforms. Response-only: a fork sizes GPU with `vgpu`, which allocates at most one card. `0` means the VM was forked with `vgpu: 0` and holds no GPU; an absent field means the VM has no GPU at all."
           }
         },
         "description": "Resources a VM actually holds. GPU values are per-GPU; see `gpu_count` for the VM's total."
@@ -4708,8 +4729,8 @@
         "type": "number",
         "maximum": 1,
         "multipleOf": 0.125,
-        "minimum": 0.125,
-        "description": "A slice of ONE physical GPU, in eighths of a card: 0.125 through 1. The constraints are the contract \u2014 an off-ladder fraction is rejected on the wire, not by the worker that later resolves it."
+        "minimum": 0,
+        "description": "A slice of ONE physical GPU, in eighths of a card: 0.125 through 1 — plus 0, which declines a GPU entirely and yields a CPU-only VM. The constraints are the contract — an off-ladder fraction is rejected on the wire, not by the worker that later resolves it."
       },
       "ResourcesInput": {
         "type": "object",
