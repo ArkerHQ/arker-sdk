@@ -321,7 +321,7 @@ func TestRunRequestOffersNoResourceControls(t *testing.T) {
 	// Control: a misspelt type or an empty struct would make every lookup below
 	// report "absent" and pass for the wrong reason.
 	if _, ok := rt.FieldByName("Command"); !ok {
-		t.Fatalf("RunRequest has no Command field; the absence checks below would be vacuous")
+		t.Fatal("RunRequest has no Command field; the absence checks below would be vacuous")
 	}
 	for _, gone := range []string{"Acquire", "Release"} {
 		if _, present := rt.FieldByName(gone); present {

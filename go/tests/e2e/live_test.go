@@ -143,6 +143,12 @@ func TestOrgSurface(t *testing.T) {
 	// required by openapi.json, and `run_id`/`session_id`/`vm_id` are blank on
 	// fork rows, which are not runs. `t_ms` and `path` are the two that survive
 	// both endpoints, and a wrong envelope field would leave both zero.
+	// Without this the loop below is skipped on an empty page and the test
+	// passes having checked nothing -- which is the very failure the envelope
+	// canary exists to catch.
+	if len(activity.Rows) == 0 {
+		t.Fatal("activity decoded zero rows, so the canary below never ran")
+	}
 	for _, row := range activity.Rows {
 		if row.TMs == 0 || row.Path == "" {
 			// Not %+v: a row carries BodyIn/BodyOut, which is customer command
@@ -188,10 +194,15 @@ func TestForkIsIdempotentUnderOneKey(t *testing.T) {
 		t.Fatalf("one key built a SECOND machine: %s then %s", first.ID, replay.ID)
 	}
 
-	// The same key naming a DIFFERENT request must conflict, not fork.
-	_, err = h.client.Fork(ctx, arker.ForkRequest{
+	// The same key naming a DIFFERENT request must conflict, not fork. Owned
+	// first: if it ever forks, that machine is real and billable, and this is
+	// the path that would leak it.
+	stray, err := h.client.Fork(ctx, arker.ForkRequest{
 		SourceVMName: h.golden, IdempotencyKey: key, Description: "a different fork",
 	})
+	if stray != nil {
+		h.own(stray)
+	}
 	if !arker.IsConflict(err) {
 		t.Fatalf("want a 409 for a reused key on a different request, got %v", err)
 	}
@@ -360,15 +371,17 @@ func TestBackgroundRunAndCancel(t *testing.T) {
 	// So the caller is told the cancel did not happen AND the work continues.
 	//
 	// Retried here so this test covers the SDK's cancel plumbing rather than the
-	// platform's spawn timing. The race itself is a product bug and wants fixing
-	// server-side -- either by making the ack wait for the process, or by having
-	// cancel mark an un-spawned run cancelled instead of 404ing.
+	// platform's spawn timing. Only the 404 is retried: any other error is a
+	// real cancel failure and must not be spent down to a green pass.
 	var cancelled bool
 	cancelDeadline := time.Now().Add(30 * time.Second)
 	for {
 		cancelled, err = vm.CancelRun(ctx, started.RunID)
 		if err == nil {
 			break
+		}
+		if !arker.IsNotFound(err) {
+			t.Fatalf("cancel failed for something other than the spawn race: %v", err)
 		}
 		if time.Now().After(cancelDeadline) {
 			t.Fatalf("cancel never took, last error: %v", err)

@@ -18,6 +18,8 @@ import (
 //   - inspect must report absence as a value, not an error
 //   - wake must be idempotent
 //   - delete must be retry-safe and succeed when the resource is already gone
+//   - a SPENT key -- one whose machine was deleted -- must stay spent
+//   - a fresh key must provision again after a teardown
 //
 // Each is exercised against a live deployment here, because every one of them
 // is a property of the SERVICE that the SDK only passes through.
@@ -28,7 +30,7 @@ func TestMachinePoolProviderContract(t *testing.T) {
 	// A deterministic name plus an idempotency key is what makes a retried
 	// provision converge instead of building a second machine.
 	name := unique("pool-machine")
-	key := "pool-" + name
+	key := "key-" + name
 
 	req := arker.ForkRequest{SourceVMName: h.golden, Name: name, IdempotencyKey: key}
 	first, err := h.client.Fork(ctx, req)
@@ -47,10 +49,16 @@ func TestMachinePoolProviderContract(t *testing.T) {
 	}
 
 	// Name is part of the identity hash, so the same key naming a different
-	// machine must conflict rather than hand back the wrong sandbox.
-	_, err = h.client.Fork(ctx, arker.ForkRequest{
+	// machine must conflict rather than hand back the wrong sandbox. Owned
+	// before the assertion: if this ever forks instead of conflicting, the
+	// machine it built is real and billable, and the failing path is exactly
+	// the one that would otherwise leak it.
+	stray, err := h.client.Fork(ctx, arker.ForkRequest{
 		SourceVMName: h.golden, Name: unique("pool-machine"), IdempotencyKey: key,
 	})
+	if stray != nil {
+		h.own(stray)
+	}
 	if !arker.IsConflict(err) {
 		t.Fatalf("a reused key on a different machine must 409, got %v", err)
 	}
@@ -94,19 +102,25 @@ func TestMachinePoolProviderContract(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 	h.disown(first.ID)
-	if err := first.Delete(context.Background()); err != nil && !arker.IsNotFound(err) {
+	// Its own budget rather than ctx: this is the retry a reconciler makes after
+	// the machine is already gone, and it must not inherit a context the
+	// provisioning steps above may have nearly exhausted.
+	retryCtx, cancel := context.WithTimeout(context.Background(), cleanupBudget)
+	defer cancel()
+	if err := first.Delete(retryCtx); err != nil && !arker.IsNotFound(err) {
 		t.Fatalf("delete on an already-absent machine must be nil or NotFound, got %v", err)
 	}
 
 	// A key is one-shot, as an idempotency key should be: it names one
 	// operation, not a machine. Once the VM it named is deleted the key is
 	// spent, and re-forking under it would let one logical operation produce a
-	// second machine -- so the API answers 404.
-	//
-	// The corollary is just the ordinary rule: a key is minted per provisioning
-	// attempt, never derived from a stable machine identity that outlives a
-	// teardown. Pinned so the "spent key" answer stays 404 and not a fresh fork.
-	if _, err := h.client.Fork(ctx, req); !arker.IsNotFound(err) {
+	// second machine -- so the API answers 404. Owned before the assertion for
+	// the same reason as the conflict case above: a fork here is a real machine.
+	spent, err := h.client.Fork(ctx, req)
+	if spent != nil {
+		h.own(spent)
+	}
+	if !arker.IsNotFound(err) {
 		t.Fatalf("re-provisioning under a spent key must 404, got %v", err)
 	}
 
