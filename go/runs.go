@@ -44,8 +44,6 @@ type RunRequest struct {
 	VCPUCount *int       `json:"vcpu_count,omitempty"`
 	MemoryMiB *int       `json:"memory_mib,omitempty"`
 	DiskMiB   *int       `json:"disk_mib,omitempty"`
-	Acquire   []string   `json:"-"`
-	Release   []string   `json:"-"`
 	Signal    string     `json:"signal,omitempty"`
 	Policies  *PolicyDoc `json:"policies,omitempty"`
 
@@ -54,16 +52,6 @@ type RunRequest struct {
 	// caller knows whether theirs is. It does not make an ambiguous network
 	// failure safe to retry automatically.
 	IdempotencyKey string `json:"-"`
-}
-
-// wire flattens the list fields the API takes as comma-separated strings.
-func (r RunRequest) wire() any {
-	type alias RunRequest
-	return struct {
-		alias
-		Acquire string `json:"acquire,omitempty"`
-		Release string `json:"release,omitempty"`
-	}{alias(r), strings.Join(r.Acquire, ","), strings.Join(r.Release, ",")}
 }
 
 // RunResult is a run as VM.Run returns it.
@@ -190,7 +178,7 @@ func (v *VM) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 	var wire runWire
 	status, err := v.client.do(ctx, call{
 		method: http.MethodPost, path: v.path("/runs"), base: v.baseURL,
-		body: req.wire(), key: strings.TrimSpace(req.IdempotencyKey), out: &wire,
+		body: req, key: strings.TrimSpace(req.IdempotencyKey), out: &wire,
 	})
 	if err != nil {
 		return nil, err
