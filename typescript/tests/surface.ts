@@ -45,7 +45,7 @@ function summarize(r: unknown): string {
   if (Array.isArray((r as any)?.runs)) return `${(r as any).runs.length} runs`;
   if (Array.isArray((r as any)?.sessions)) return `${(r as any).sessions.length} sessions`;
   if (Array.isArray((r as any)?.tunnels)) return `${(r as any).tunnels.length} tunnels`;
-  if (Array.isArray((r as any)?.mounts)) return `${(r as any).mounts.length} syncs`;
+  if (Array.isArray((r as any)?.mounts)) return `${(r as any).mounts.length} mounts`;
   if (Array.isArray((r as any)?.filesystems)) return `${(r as any).filesystems.length} filesystems`;
   if ((r as any)?.type) return `run:${(r as any).type}`;
   if ((r as any)?.id) return `id=${(r as any).id}`;

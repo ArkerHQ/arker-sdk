@@ -1765,7 +1765,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   mounts: {
     synopsis: ["arker mounts <ls|create|rm> <vm_id> [args] [flags]"],
-    summary: "Manage a VM's sync mounts.",
+    summary: "Manage a VM's filesystem mounts.",
     subs: { ls: "list mounts", create: "create a mount", rm: "delete a mount" },
   },
   update: {
