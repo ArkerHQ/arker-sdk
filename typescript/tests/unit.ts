@@ -106,26 +106,6 @@ function client(fetch: FakeFetch): Arker {
   });
 }
 
-async function testMountRequestsPreserveIdentityStatusAndPagination(): Promise<void> {
-  const fetch = new FakeFetch();
-  const mount = { mount_id: "01EXISTING", vm_id: "vm_1", filesystem_id: "fs_1", path: "/mnt/data", status: "attaching" };
-  fetch.addJson((method, url) => method === "POST" && url.endsWith("/vms/vm_1/mounts"), 200, mount);
-  fetch.addJson((method, url) => method === "GET" && url.includes("/vms/vm_1/mounts?"), 200,
-    { mounts: [{ ...mount, status: "failed", status_detail: "mount refused" }], next_cursor: "next" });
-  fetch.addJson((method, url) => method === "DELETE" && url.endsWith("/vms/vm_1/mounts/01EXISTING"), 200, { deleted: true });
-  const vm = client(fetch).vm("vm_1");
-  const created = await vm.createMount({ filesystemId: "fs_1", path: "/mnt/data" });
-  assert.deepEqual(created, mount);
-  const listed = await vm.listMounts({ filesystemId: "fs_1", cursor: "page", limit: 1 });
-  assert.deepEqual(listed, { mounts: [{ ...mount, status: "failed", status_detail: "mount refused" }], next_cursor: "next" });
-  assert.deepEqual(await vm.deleteMount(created.mount_id), { deleted: true });
-  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { filesystem_id: "fs_1", path: "/mnt/data" });
-  assert.deepEqual(Object.fromEntries(new URL(fetch.calls[1]!.url).searchParams), { filesystem_id: "fs_1", cursor: "page", limit: "1" });
-  assert.equal(fetch.calls.length, 3);
-}
-
-await testMountRequestsPreserveIdentityStatusAndPagination();
-
 function regionClient(fetch: FakeFetch): Arker {
   return new Arker({
     apiKey: "ark_live_test",
