@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -305,21 +306,27 @@ func TestBase64OutputIsDecoded(t *testing.T) {
 	}
 }
 
-func TestRunSendsAcquireAndReleaseAsCSV(t *testing.T) {
-	var body map[string]any
-	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		fmt.Fprint(w, `{"run_id":"r","state":"completed","exit_code":0}`)
-	}, reject(t, "control"))
-
-	_, err := c.VM("vm_1").Run(context.Background(), arker.RunRequest{
-		Command: "true", Acquire: []string{"gpu", "net"},
-	})
-	if err != nil {
-		t.Fatalf("run: %v", err)
+// RunRequest must not offer `Acquire`/`Release`. openapi.json dropped both
+// (#166) and the service rejects an unknown field outright rather than ignoring
+// it, so a caller who set either would get a 400 from a field the SDK invited
+// them to use.
+//
+// This asserts on the TYPE, not on a request. A wire-level check cannot catch
+// the regression: the fields serialised with `omitempty`, so a request that
+// leaves them unset omits them either way, and a request that sets them stops
+// compiling the moment the fields are gone. Reflection is the only form that
+// fails against the old struct and compiles against both.
+func TestRunRequestOffersNoResourceControls(t *testing.T) {
+	rt := reflect.TypeOf(arker.RunRequest{})
+	// Control: a misspelt type or an empty struct would make every lookup below
+	// report "absent" and pass for the wrong reason.
+	if _, ok := rt.FieldByName("Command"); !ok {
+		t.Fatalf("RunRequest has no Command field; the absence checks below would be vacuous")
 	}
-	if body["acquire"] != "gpu,net" {
-		t.Fatalf("acquire was %v, want the comma-joined form the API takes", body["acquire"])
+	for _, gone := range []string{"Acquire", "Release"} {
+		if _, present := rt.FieldByName(gone); present {
+			t.Errorf("RunRequest still offers %s; openapi.json has no such field and the service 400s on it", gone)
+		}
 	}
 }
 
