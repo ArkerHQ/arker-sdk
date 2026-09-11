@@ -45,7 +45,7 @@ placement at all; everything else needs one.
 | `GetFilesystem` `DeleteFilesystem` | `UpdateSession` `DeleteSession` |
 | `BaseURL` `ControlBaseURL` `Provider` `Region` | `GetPolicies` `SetPolicies` |
 | package-level `DiscoverRegions` | `ReadFile` `WriteFile` `SyncDir` |
-| | `ListSyncs` `CreateSync` `DeleteSync` `ConnectPTY` |
+| | `ListMounts` `CreateMount` `DeleteMount` `ConnectPTY` |
 
 Two deliberate differences from Python and TypeScript, both because Go has no
 optional arguments and no union return:

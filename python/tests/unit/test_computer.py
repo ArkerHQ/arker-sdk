@@ -92,6 +92,44 @@ def session(session_id: str = "s0") -> dict[str, str]:
     return {"session_id": session_id, "state": "ready", "cwd": "/home/user"}
 
 
+def test_mount_create_list_delete_preserves_identity_and_status() -> None:
+    mount = {
+        "mount_id": "01EXISTING",
+        "vm_id": "vm_1",
+        "filesystem_id": "fs_1",
+        "path": "/mnt/data",
+        "status": "attaching",
+    }
+    transport = FakeTransport()
+    transport.add_json(lambda method, url: method == "POST" and url.endswith("/vms/vm_1/mounts"), 200, mount)
+    transport.add_json(
+        lambda method, url: method == "GET" and "/vms/vm_1/mounts?" in url,
+        200,
+        {"mounts": [{**mount, "status": "failed", "status_detail": "mount refused"}], "next_cursor": "next"},
+    )
+    transport.add_json(
+        lambda method, url: method == "DELETE" and url.endswith("/vms/vm_1/mounts/01EXISTING"),
+        200,
+        {"deleted": True},
+    )
+    with use_transport(transport):
+        vm = client().vm("vm_1")
+        created = vm.create_mount(filesystem_id="fs_1", path="/mnt/data")
+        assert created.mount_id == "01EXISTING"
+        assert created.status == "attaching"
+        listed = vm.list_mounts(filesystem_id="fs_1", cursor="page", limit=1)
+        assert listed.mounts[0].mount_id == created.mount_id
+        assert listed.mounts[0].status == "failed"
+        assert listed.mounts[0].status_detail == "mount refused"
+        assert listed.next_cursor == "next"
+        assert vm.delete_mount(created.mount_id).deleted is True
+
+    assert json.loads(transport.calls[0]["body"]) == {"filesystem_id": "fs_1", "path": "/mnt/data"}
+    query = httpx.URL(transport.calls[1]["url"]).params
+    assert dict(query) == {"filesystem_id": "fs_1", "cursor": "page", "limit": "1"}
+    assert len(transport.calls) == 3
+
+
 def test_api_key_from_argument_beats_env(monkeypatch) -> None:
     monkeypatch.setenv("ARKER_API_KEY", "ark_live_env")
     assert sdk.Arker(api_key="ark_live_arg")._api_key == "ark_live_arg"

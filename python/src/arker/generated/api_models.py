@@ -316,8 +316,8 @@ class PtyTicketResponse:
 
 
 @dataclass(frozen=True)
-class Sync:
-    sync_id: str
+class Mount:
+    mount_id: str
     vm_id: str
     filesystem_id: str
     path: str
@@ -327,18 +327,18 @@ class Sync:
 
 
 @dataclass(frozen=True)
-class ListSyncsResponse:
-    syncs: list[Sync]
+class ListMountsResponse:
+    mounts: list[Mount]
     next_cursor: str | None = None
 
 
 @dataclass(frozen=True)
-class DeleteSyncResponse:
+class DeleteMountResponse:
     deleted: bool
 
 
 @dataclass(frozen=True)
-class SyncCreateRequest:
+class MountCreateRequest:
     filesystem_id: str
     path: str | None = None
 
@@ -672,12 +672,12 @@ class MintSessionPtyTicketParameters:
 
 
 @dataclass(frozen=True)
-class CreateSyncParameters:
+class CreateMountParameters:
     id: str
 
 
 @dataclass(frozen=True)
-class ListSyncsParameters:
+class ListMountsParameters:
     id: str
     cursor: str | None = None
     limit: int | None = None
@@ -685,9 +685,9 @@ class ListSyncsParameters:
 
 
 @dataclass(frozen=True)
-class DeleteSyncParameters:
+class DeleteMountParameters:
     id: str
-    sync_id: str
+    mount_id: str
 
 
 @dataclass(frozen=True)
@@ -1100,7 +1100,7 @@ class ForkOperation(TypedDict):
     operation_id: Literal['fork']
     method: Literal['POST']
     path: Literal['/v1/fork']
-    parameters: None
+    parameters: ForkParameters
     request: ForkRequest
     success: Vm
     errors: ErrorResponse
@@ -1173,6 +1173,36 @@ class DeleteVmOperation(TypedDict):
     parameters: DeleteVmParameters
     request: None
     success: DeleteVmResponse
+    errors: ErrorResponse
+
+
+class ListMountsOperation(TypedDict):
+    operation_id: Literal['listMounts']
+    method: Literal['GET']
+    path: Literal['/v1/vms/{id}/mounts']
+    parameters: ListMountsParameters
+    request: None
+    success: ListMountsResponse
+    errors: ErrorResponse
+
+
+class CreateMountOperation(TypedDict):
+    operation_id: Literal['createMount']
+    method: Literal['POST']
+    path: Literal['/v1/vms/{id}/mounts']
+    parameters: CreateMountParameters
+    request: MountCreateRequest
+    success: Mount
+    errors: ErrorResponse
+
+
+class DeleteMountOperation(TypedDict):
+    operation_id: Literal['deleteMount']
+    method: Literal['DELETE']
+    path: Literal['/v1/vms/{id}/mounts/{mount_id}']
+    parameters: DeleteMountParameters
+    request: None
+    success: DeleteMountResponse
     errors: ErrorResponse
 
 
@@ -1326,36 +1356,6 @@ class SyncStreamOperation(TypedDict):
     errors: ErrorResponse
 
 
-class ListSyncsOperation(TypedDict):
-    operation_id: Literal['listSyncs']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/syncs']
-    parameters: ListSyncsParameters
-    request: None
-    success: ListSyncsResponse
-    errors: ErrorResponse
-
-
-class CreateSyncOperation(TypedDict):
-    operation_id: Literal['createSync']
-    method: Literal['POST']
-    path: Literal['/v1/vms/{id}/syncs']
-    parameters: CreateSyncParameters
-    request: SyncCreateRequest
-    success: Sync
-    errors: ErrorResponse
-
-
-class DeleteSyncOperation(TypedDict):
-    operation_id: Literal['deleteSync']
-    method: Literal['DELETE']
-    path: Literal['/v1/vms/{id}/syncs/{sync_id}']
-    parameters: DeleteSyncParameters
-    request: None
-    success: DeleteSyncResponse
-    errors: ErrorResponse
-
-
 class WhoamiOperation(TypedDict):
     operation_id: Literal['whoami']
     method: Literal['GET']
@@ -1379,6 +1379,9 @@ ApiOperation: TypeAlias = (
     GetVmOperation |
     PatchVmOperation |
     DeleteVmOperation |
+    ListMountsOperation |
+    CreateMountOperation |
+    DeleteMountOperation |
     GetVmPoliciesOperation |
     PutVmPoliciesOperation |
     ListRunsOperation |
@@ -1394,8 +1397,5 @@ ApiOperation: TypeAlias = (
     MintSessionPtyTicketOperation |
     SyncOperation |
     SyncStreamOperation |
-    ListSyncsOperation |
-    CreateSyncOperation |
-    DeleteSyncOperation |
     WhoamiOperation
 )

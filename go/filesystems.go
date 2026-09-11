@@ -72,9 +72,9 @@ func (c *Client) DeleteFilesystem(ctx context.Context, filesystemID string) erro
 	return err
 }
 
-// Sync is a filesystem bound into a VM at a path.
-type Sync struct {
-	SyncID       string `json:"sync_id"`
+// Mount is a filesystem bound into a VM at a path.
+type Mount struct {
+	MountID      string `json:"mount_id"`
 	VMID         string `json:"vm_id,omitempty"`
 	FilesystemID string `json:"filesystem_id"`
 	Path         string `json:"path"`
@@ -83,45 +83,45 @@ type Sync struct {
 	StatusDetail string `json:"status_detail,omitempty"`
 }
 
-// SyncList is one page of a VM's filesystem bindings.
-type SyncList struct {
-	Syncs      []Sync `json:"syncs"`
-	NextCursor string `json:"next_cursor,omitempty"`
+// MountList is one page of a VM's filesystem bindings.
+type MountList struct {
+	Mounts     []Mount `json:"mounts"`
+	NextCursor string  `json:"next_cursor,omitempty"`
 }
 
-// ListSyncsOptions narrows a sync listing.
-type ListSyncsOptions struct {
+// ListMountsOptions narrows a mount listing.
+type ListMountsOptions struct {
 	Cursor       string
 	Limit        int
 	FilesystemID string
 }
 
-// ListSyncs pages the filesystems bound into this VM.
-func (v *VM) ListSyncs(ctx context.Context, opts ListSyncsOptions) (*SyncList, error) {
+// ListMounts pages the filesystems bound into this VM.
+func (v *VM) ListMounts(ctx context.Context, opts ListMountsOptions) (*MountList, error) {
 	q := newQuery()
 	q.str("cursor", opts.Cursor)
 	q.num("limit", opts.Limit)
 	q.str("filesystem_id", opts.FilesystemID)
-	var out SyncList
-	_, err := v.do(ctx, http.MethodGet, q.on(v.path("/syncs")), nil, &out)
+	var out MountList
+	_, err := v.do(ctx, http.MethodGet, q.on(v.path("/mounts")), nil, &out)
 	return &out, err
 }
 
-// CreateSync binds a filesystem into this VM at path.
-func (v *VM) CreateSync(ctx context.Context, filesystemID, path string) (*Sync, error) {
+// CreateMount binds a filesystem into this VM at path.
+func (v *VM) CreateMount(ctx context.Context, filesystemID, path string) (*Mount, error) {
 	body := map[string]string{"filesystem_id": filesystemID}
 	if path != "" {
 		body["path"] = path
 	}
-	var out Sync
-	_, err := v.do(ctx, http.MethodPost, v.path("/syncs"), body, &out)
+	var out Mount
+	_, err := v.do(ctx, http.MethodPost, v.path("/mounts"), body, &out)
 	return &out, err
 }
 
-// DeleteSync unbinds a filesystem. Retry-safe: an already-absent binding is
+// DeleteMount unbinds a filesystem. Retry-safe: an already-absent binding is
 // success.
-func (v *VM) DeleteSync(ctx context.Context, syncID string) error {
-	status, err := v.do(ctx, http.MethodDelete, v.path("/syncs/"+segment(syncID)), nil, nil)
+func (v *VM) DeleteMount(ctx context.Context, mountID string) error {
+	status, err := v.do(ctx, http.MethodDelete, v.path("/mounts/"+segment(mountID)), nil, nil)
 	if status == http.StatusNotFound {
 		return nil
 	}

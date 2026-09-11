@@ -346,11 +346,11 @@ export type ListFilesystemsResponse = ApiSchema<"ListFilesystemsResponse">;
 export type DeleteFilesystemResponse = ApiSchema<"DeleteFilesystemResponse">;
 export type FilesystemCreateRequest = ApiSchema<"FilesystemCreateRequest">;
 
-// ── Syncs ──────────────────────────────────────────────────────────
-export type Sync = ApiSchema<"Sync">;
-export type ListSyncsResponse = ApiSchema<"ListSyncsResponse">;
-export type DeleteSyncResponse = ApiSchema<"DeleteSyncResponse">;
-export type SyncCreateRequest = ApiSchema<"SyncCreateRequest">;
+// ── Mounts ──────────────────────────────────────────────────────────
+export type Mount = ApiSchema<"Mount">;
+export type ListMountsResponse = ApiSchema<"ListMountsResponse">;
+export type DeleteMountResponse = ApiSchema<"DeleteMountResponse">;
+export type MountCreateRequest = ApiSchema<"MountCreateRequest">;
 export type SyncReadOperationRequest = ApiSchema<"SyncReadOperationRequest">;
 export type SyncWriteOperationRequest = ApiSchema<"SyncWriteOperationRequest">;
 export type SyncWriteEntry = ApiSchema<"SyncWriteEntry">;
@@ -425,7 +425,7 @@ export type PtyTicketResponse = ApiSchema<"PtyTicketResponse">;
 export type ListVmsParameters = ApiQuery<"listVms">;
 export type ListOrgRunsParameters = ApiQuery<"listOrgRuns">;
 export type ListFilesystemsParameters = ApiQuery<"listFilesystems">;
-export type ListSyncsParameters = ApiQuery<"listSyncs">;
+export type ListMountsParameters = ApiQuery<"listMounts">;
 export type ListRunsParameters = ApiQuery<"listRuns">;
 export type ListSessionsParameters = ApiQuery<"listSessions">;
 
@@ -500,8 +500,8 @@ export type ListFilesystemsOptions = Omit<ListFilesystemsParameters, "name_prefi
   namePrefix?: ListFilesystemsParameters["name_prefix"];
 };
 
-export type ListSyncsOptions = Omit<ListSyncsParameters, "filesystem_id"> & {
-  filesystemId?: ListSyncsParameters["filesystem_id"];
+export type ListMountsOptions = Omit<ListMountsParameters, "filesystem_id"> & {
+  filesystemId?: ListMountsParameters["filesystem_id"];
 };
 
 export type ListRunsOptions = Omit<
@@ -1188,7 +1188,7 @@ export class VM {
    *     const bytes = await vm.sync("/home/user/out.txt");   // read
    *     await vm.sync("/home/user/in.txt", "hello\n");       // write
    *
-   * To mount a standalone filesystem into the VM, use `vm.syncs.create`.
+   * To mount a standalone filesystem into the VM, use `vm.createMount`.
    */
   async sync(path: string): Promise<Uint8Array>;
   async sync(path: string, data: Uint8Array | string): Promise<void>;
@@ -1758,27 +1758,27 @@ export class VM {
     return this._client._request<PolicyDoc>("PUT", `${vmPath(this.id)}/policies`, doc, this.baseUrl);
   }
 
-  // ── Syncs: bindings of a filesystem into this VM at a path ────────
-  async listSyncs(opts: ListSyncsOptions = {}): Promise<ListSyncsResponse> {
-    const query: ListSyncsParameters = {
+  // ── Mounts: bindings of a filesystem into this VM at a path ────────
+  async listMounts(opts: ListMountsOptions = {}): Promise<ListMountsResponse> {
+    const query: ListMountsParameters = {
       cursor: opts.cursor, limit: opts.limit, filesystem_id: opts.filesystemId,
     };
-    return this._client._request("GET", buildQuery(`${vmPath(this.id)}/syncs`, query), undefined, this.baseUrl);
+    return this._client._request("GET", buildQuery(`${vmPath(this.id)}/mounts`, query), undefined, this.baseUrl);
   }
 
-  async createSync(request: {
-    filesystemId: SyncCreateRequest["filesystem_id"];
-    path?: SyncCreateRequest["path"];
-  }): Promise<Sync> {
-    const body: SyncCreateRequest = {
+  async createMount(request: {
+    filesystemId: MountCreateRequest["filesystem_id"];
+    path?: MountCreateRequest["path"];
+  }): Promise<Mount> {
+    const body: MountCreateRequest = {
       filesystem_id: request.filesystemId,
       path: request.path,
     };
-    return this._client._request<Sync>("POST", `${vmPath(this.id)}/syncs`, body, this.baseUrl);
+    return this._client._request<Mount>("POST", `${vmPath(this.id)}/mounts`, body, this.baseUrl);
   }
 
-  async deleteSync(syncId: string): Promise<DeleteSyncResponse> {
-    return this._client._request("DELETE", `${vmPath(this.id)}/syncs/${pathSegment(syncId)}`, undefined, this.baseUrl);
+  async deleteMount(mountId: string): Promise<DeleteMountResponse> {
+    return this._client._request("DELETE", `${vmPath(this.id)}/mounts/${pathSegment(mountId)}`, undefined, this.baseUrl);
   }
 
   // ── Runs ──────────────────────────────────────────────────────────
