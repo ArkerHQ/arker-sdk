@@ -88,7 +88,7 @@ def test_generation_is_deterministic_for_both_languages() -> None:
             "operation_id": "Literal['fork']",
             "method": "Literal['POST']",
             "path": "Literal['/v1/fork']",
-            "parameters": "None",
+            "parameters": "ForkParameters",
             "request": "ForkRequest",
             "success": "Vm",
             "errors": "ErrorResponse",

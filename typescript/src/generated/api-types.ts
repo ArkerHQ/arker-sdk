@@ -379,11 +379,7 @@ export interface paths {
         put?: never;
         /**
          * Mount a filesystem
-         * @description Create a persistent sync: ensure a Filesystem exists (creating
-         *     one if requested) and bind-mount it into this VM at `path`.
-         *     Bidirectional by virtue of being a mount — there is no separate
-         *     sync-direction parameter. Returns `ErrorResponse` code
-         *     `conflict` if a sync already exists at `path`.
+         * @description Mount an existing filesystem into this VM at `path`. Repeating the same filesystem and path returns the existing mount. Returns `ErrorResponse` code `conflict` if another filesystem occupies the path or this filesystem is mounted at another path on the VM.
          */
         post: operations["createMount"];
         delete?: never;

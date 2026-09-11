@@ -1233,7 +1233,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "description": "Create a persistent sync: ensure a Filesystem exists (creating\none if requested) and bind-mount it into this VM at `path`.\nBidirectional by virtue of being a mount \u2014 there is no separate\nsync-direction parameter. Returns `ErrorResponse` code\n`conflict` if a sync already exists at `path`.\n"
+        "description": "Mount an existing filesystem into this VM at `path`. Repeating the same filesystem and path returns the existing mount. Returns `ErrorResponse` code `conflict` if another filesystem occupies the path or this filesystem is mounted at another path on the VM."
       },
       "get": {
         "operationId": "listMounts",
