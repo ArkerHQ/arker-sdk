@@ -361,7 +361,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/vms/{id}/syncs": {
+    "/v1/vms/{id}/mounts": {
         parameters: {
             query?: never;
             header?: never;
@@ -375,24 +375,20 @@ export interface paths {
          * List filesystem mounts
          * @description List persistent filesystem mounts for one VM, optionally filtered by filesystem.
          */
-        get: operations["listSyncs"];
+        get: operations["listMounts"];
         put?: never;
         /**
          * Mount a filesystem
-         * @description Create a persistent sync: ensure a Filesystem exists (creating
-         *     one if requested) and bind-mount it into this VM at `path`.
-         *     Bidirectional by virtue of being a mount — there is no separate
-         *     sync-direction parameter. Returns `ErrorResponse` code
-         *     `conflict` if a sync already exists at `path`.
+         * @description Mount an existing filesystem into this VM at `path`. Repeating the same filesystem and path returns the existing mount. Returns `ErrorResponse` code `conflict` if another filesystem occupies the path or this filesystem is mounted at another path on the VM.
          */
-        post: operations["createSync"];
+        post: operations["createMount"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/v1/vms/{id}/syncs/{sync_id}": {
+    "/v1/vms/{id}/mounts/{mount_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -400,7 +396,7 @@ export interface paths {
                 /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Filesystem mount identifier. */
-                sync_id: components["parameters"]["SyncId"];
+                mount_id: components["parameters"]["MountId"];
             };
             cookie?: never;
         };
@@ -411,7 +407,7 @@ export interface paths {
          * Unmount a filesystem
          * @description Remove a persistent filesystem mount from a VM.
          */
-        delete: operations["deleteSync"];
+        delete: operations["deleteMount"];
         options?: never;
         head?: never;
         patch?: never;
@@ -435,7 +431,7 @@ export interface paths {
          *     `{op:"read",path}` reads a file (inline content for small files, a
          *     presigned GET URL for large ones); `{op:"write",writes:[...]}` writes,
          *     each entry an inline chunk or a presigned-upload step. Binding a
-         *     filesystem into the VM is the separate `/v1/vms/{id}/syncs` resource.
+         *     filesystem into the VM is the separate `/v1/vms/{id}/mounts` resource.
          */
         post: operations["sync"];
         delete?: never;
@@ -1177,9 +1173,9 @@ export interface components {
             /** @description Seconds until expiry. */
             expires_in: number;
         };
-        Sync: {
-            /** @description Unique sync identifier. */
-            sync_id: string;
+        Mount: {
+            /** @description Unique mount identifier. */
+            mount_id: string;
             /** @description Unique VM identifier. */
             vm_id: string;
             /** @description Unique filesystem identifier. */
@@ -1189,7 +1185,7 @@ export interface components {
             /** @description Region containing the resource or activity. */
             region?: string | null;
             /**
-             * @description Mount status. Creating a sync returns `attaching`; poll this resource for the outcome.
+             * @description Mount status. Creating a mount returns `attaching`; poll this resource for the outcome.
              *
              *     `attaching` — the mount is pending. A stopped VM remains in this state until it resumes.
              *
@@ -1202,17 +1198,17 @@ export interface components {
             /** @description Why the mount will not converge. Present only when `status` is `failed`. */
             status_detail?: string | null;
         };
-        ListSyncsResponse: {
-            /** @description Sync mounts matching the request. */
-            syncs: components["schemas"]["Sync"][];
+        ListMountsResponse: {
+            /** @description Filesystem mounts matching the request. */
+            mounts: components["schemas"]["Mount"][];
             /** @description Cursor for the next page, or null when no further page is available. */
             next_cursor?: string | null;
         };
-        DeleteSyncResponse: {
+        DeleteMountResponse: {
             /** @description True when the resource has been deleted. */
             deleted: boolean;
         };
-        SyncCreateRequest: {
+        MountCreateRequest: {
             /** @description Unique filesystem identifier. */
             filesystem_id: string;
             /** @description Path inside the VM. */
@@ -1465,14 +1461,14 @@ export interface components {
             memory_mib?: number | null;
             /** @description Disk allocation in mebibytes. */
             disk_mib?: number | null;
-            /** @description Number of GPU streaming multiprocessors available to the VM on EACH of its GPUs (a per-GPU value, uniform across the VM's devices; see `gpu_count`). Reported on GPU platforms such as `x86_64-l40s`. Response-only: a fork sizes GPU with `vgpu`. */
+            /** @description Number of GPU streaming multiprocessors available to the VM on EACH of its GPUs (a per-GPU value, uniform across the VM's devices; see `gpu_count`). Reported on GPU platforms such as `x86_64-l40s`. Response-only: a fork sizes GPU with `vgpu`. `0` means the VM was forked with `vgpu: 0` and holds no GPU; an absent field means the VM has no GPU at all. */
             gpu_sms?: number | null;
-            /** @description GPU memory available to the VM, in MiB, on EACH of its GPUs (a per-GPU value; see `gpu_count`). Reported on GPU platforms. Response-only: a fork sizes GPU with `vgpu`. */
+            /** @description GPU memory available to the VM, in MiB, on EACH of its GPUs (a per-GPU value; see `gpu_count`). Reported on GPU platforms. Response-only: a fork sizes GPU with `vgpu`. `0` means the VM was forked with `vgpu: 0` and holds no GPU; an absent field means the VM has no GPU at all. */
             gpu_vram_mib?: number | null;
-            /** @description Number of physical GPUs attached to the VM. `gpu_sms`/`gpu_vram_mib` are per-GPU values applied uniformly to every attached device, so the VM's total GPU allocation (and quota charge) is `gpu_count x per-GPU`. Reported on GPU platforms; absent means 1. Response-only: a fork sizes GPU with `vgpu`, which allocates at most one card. */
+            /** @description Number of physical GPUs attached to the VM. `gpu_sms`/`gpu_vram_mib` are per-GPU values applied uniformly to every attached device, so the VM's total GPU allocation (and quota charge) is `gpu_count x per-GPU`. Reported on GPU platforms. Response-only: a fork sizes GPU with `vgpu`, which allocates at most one card. `0` means the VM was forked with `vgpu: 0` and holds no GPU; an absent field means the VM has no GPU at all. */
             gpu_count?: number | null;
         };
-        /** @description A slice of ONE physical GPU, in eighths of a card: 0.125 through 1. The constraints are the contract — an off-ladder fraction is rejected on the wire, not by the worker that later resolves it. */
+        /** @description A slice of ONE physical GPU, in eighths of a card: 0.125 through 1 — plus 0, which declines a GPU entirely and yields a CPU-only VM. The constraints are the contract — an off-ladder fraction is rejected on the wire, not by the worker that later resolves it. */
         Vgpu: number;
         /** @description Resource shape a caller asks for. GPU size is set with `vgpu`, in eighths of one card; the resolved per-GPU `gpu_sms`/`gpu_vram_mib` are reported back on the machine. */
         ResourcesInput: {
@@ -1575,6 +1571,15 @@ export interface components {
         };
     };
     responses: {
+        /** @description The `Idempotency-Key` was already used for a different request. Reusing a key is only meaningful for retrying the SAME request; a key that arrives with different semantic content is refused rather than answered with the earlier result, which would silently hand back something the caller did not ask for. */
+        Conflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
         /** @description The organization must complete billing setup or payment before starting new compute. */
         PaymentRequired: {
             headers: {
@@ -1605,7 +1610,7 @@ export interface components {
         };
     };
     parameters: {
-        /** @description Makes run submission safely retryable. Reusing a key with the same request returns the original result; reusing it with a different request returns a conflict. */
+        /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result — the same run, or the same VM for a fork — instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
         IdempotencyKey: string;
         /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
         VmId: string;
@@ -1614,7 +1619,7 @@ export interface components {
         /** @description Session identifier. */
         SessionId: string;
         /** @description Filesystem mount identifier. */
-        SyncId: string;
+        MountId: string;
         /** @description Filesystem identifier. */
         FilesystemId: string;
         /** @description Opaque pagination cursor returned by the previous page's `next_cursor`. */
@@ -1706,7 +1711,10 @@ export interface operations {
     fork: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result — the same run, or the same VM for a fork — instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -1726,6 +1734,7 @@ export interface operations {
                 };
             };
             402: components["responses"]["PaymentRequired"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["UnsupportedOperation"];
             default: components["responses"]["Error"];
         };
@@ -2000,7 +2009,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Makes run submission safely retryable. Reusing a key with the same request returns the original result; reusing it with a different request returns a conflict. */
+                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result — the same run, or the same VM for a fork — instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
@@ -2034,6 +2043,7 @@ export interface operations {
                 };
             };
             402: components["responses"]["PaymentRequired"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["UnsupportedOperation"];
             default: components["responses"]["Error"];
         };
@@ -2309,7 +2319,7 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
-    listSyncs: {
+    listMounts: {
         parameters: {
             query?: {
                 /** @description Opaque pagination cursor returned by the previous page's `next_cursor`. */
@@ -2328,19 +2338,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Syncs on this VM. */
+            /** @description Mounts on this VM. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ListSyncsResponse"];
+                    "application/json": components["schemas"]["ListMountsResponse"];
                 };
             };
             default: components["responses"]["Error"];
         };
     };
-    createSync: {
+    createMount: {
         parameters: {
             query?: never;
             header?: never;
@@ -2352,17 +2362,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SyncCreateRequest"];
+                "application/json": components["schemas"]["MountCreateRequest"];
             };
         };
         responses: {
-            /** @description Created sync. */
+            /** @description Created mount. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Sync"];
+                    "application/json": components["schemas"]["Mount"];
                 };
             };
             402: components["responses"]["PaymentRequired"];
@@ -2370,7 +2380,7 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
-    deleteSync: {
+    deleteMount: {
         parameters: {
             query?: never;
             header?: never;
@@ -2378,7 +2388,7 @@ export interface operations {
                 /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Filesystem mount identifier. */
-                sync_id: components["parameters"]["SyncId"];
+                mount_id: components["parameters"]["MountId"];
             };
             cookie?: never;
         };
@@ -2390,7 +2400,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeleteSyncResponse"];
+                    "application/json": components["schemas"]["DeleteMountResponse"];
                 };
             };
             default: components["responses"]["Error"];
@@ -2516,7 +2526,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Delete result. The filesystem must not be mounted by any VM (no remaining `Sync` referencing it). */
+            /** @description Delete result. The filesystem must not be mounted by any VM (no remaining `Mount` referencing it). */
             200: {
                 headers: {
                     [name: string]: unknown;

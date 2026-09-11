@@ -12,10 +12,10 @@
  *     arker rm <vm>            → arker vms rm <vm>
  *     arker fork <source>      → arker vms fork --image|--vm-id <source>
  *     arker run  <vm> <cmd>    → arker vms run <vm> <cmd>
- *     arker sync <vm> ...      → arker syncs create/read/write on <vm>
+ *     arker sync <vm> ...      → read or write files on <vm>
  *     arker shell [vm]         → native PTY shell over WebSocket
  *
- * Resources: vms, runs, sessions, syncs, filesystems (alias `fs`).
+ * Resources: vms, runs, sessions, mounts, filesystems (alias `fs`).
  * Each supports `ls`, `get`, `rm`, and the resource-specific verbs.
  *
  * Auth: reads `ARKER_API_KEY` from the environment (or `~/.arker/config`).
@@ -254,7 +254,7 @@ const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
     ...GLOBAL_OPTIONS,
     "assume-empty": { type: "boolean" },
   },
-  syncs: {
+  mounts: {
     ...GLOBAL_OPTIONS,
     ...PAGINATION_OPTIONS,
     "filesystem-id": { type: "string" },
@@ -357,8 +357,8 @@ function validateInvocationOptions(command: string, args: ParsedArgs): void {
               "timeout-secs": { type: "integer", min: 0 },
             }
           : GLOBAL_OPTIONS;
-  } else if (command === "syncs") {
-    context = `syncs ${subcommand ?? ""}`.trim();
+  } else if (command === "mounts") {
+    context = `mounts ${subcommand ?? ""}`.trim();
     allowed = subcommand === "ls" || subcommand === "list"
       ? { ...GLOBAL_OPTIONS, ...PAGINATION_OPTIONS, "filesystem-id": { type: "string" } }
       : subcommand === "create"
@@ -1206,31 +1206,31 @@ async function cmdPolicies(args: ParsedArgs, client: Arker): Promise<void> {
   }
 }
 
-async function cmdSyncs(args: ParsedArgs, client: Arker): Promise<void> {
+async function cmdMounts(args: ParsedArgs, client: Arker): Promise<void> {
   const sub = args.positional[0];
   const rest = args.positional.slice(1);
   const vm = rest[0];
   switch (sub) {
     case "ls":
     case "list": {
-      if (!vm) die("usage: arker syncs ls <vm_id>");
-      const res = await client.vm(vm).listSyncs({
+      if (!vm) die("usage: arker mounts ls <vm_id>");
+      const res = await client.vm(vm).listMounts({
         cursor: args.flags.cursor as string | undefined,
         limit: numFlag(args, "limit"),
         filesystemId: args.flags["filesystem-id"] as string | undefined,
       });
       if (args.flags.json) return out(res);
-      for (const s of res.syncs) {
-        out(`${s.sync_id}\t${s.filesystem_id}\t${s.path}`);
+      for (const s of res.mounts) {
+        out(`${s.mount_id}\t${s.filesystem_id}\t${s.path}`);
       }
       if (res.next_cursor) out(`# next_cursor=${res.next_cursor}`);
       return;
     }
     case "create": {
-      if (!vm) die("usage: arker syncs create <vm_id> --filesystem-id <fs> [--path /mnt]");
+      if (!vm) die("usage: arker mounts create <vm_id> --filesystem-id <fs> [--path /mnt]");
       const filesystemId = args.flags["filesystem-id"] as string | undefined;
       if (!filesystemId) die("missing --filesystem-id");
-      out(await client.vm(vm).createSync({
+      out(await client.vm(vm).createMount({
         filesystemId,
         path: args.flags.path as string | undefined,
       }));
@@ -1238,15 +1238,15 @@ async function cmdSyncs(args: ParsedArgs, client: Arker): Promise<void> {
     }
     case "rm":
     case "delete": {
-      if (!vm) die("usage: arker syncs rm <vm_id> <sync_id>");
-      const sid = rest[1] ?? die("missing sync_id");
-      const r = await client.vm(vm).deleteSync(sid);
+      if (!vm) die("usage: arker mounts rm <vm_id> <mount_id>");
+      const sid = rest[1] ?? die("missing mount_id");
+      const r = await client.vm(vm).deleteMount(sid);
       if (r.deleted) out(`deleted ${sid}`);
       else { err("delete failed"); process.exitCode = 1; }
       return;
     }
     default:
-      die(`usage: arker syncs <ls|create|rm> ...  (read/write files with: arker sync)`);
+      die(`usage: arker mounts <ls|create|rm> ...  (read/write files with: arker sync)`);
   }
 }
 
@@ -1763,10 +1763,10 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     synopsis: ["arker sync-dir <vm_id> <local> <remote> [flags]"],
     summary: "Sync a local directory into the VM.",
   },
-  syncs: {
-    synopsis: ["arker syncs <ls|create|rm> <vm_id> [args] [flags]"],
-    summary: "Manage a VM's sync mounts.",
-    subs: { ls: "list syncs", create: "create a sync", rm: "delete a sync" },
+  mounts: {
+    synopsis: ["arker mounts <ls|create|rm> <vm_id> [args] [flags]"],
+    summary: "Manage a VM's filesystem mounts.",
+    subs: { ls: "list mounts", create: "create a mount", rm: "delete a mount" },
   },
   update: {
     synopsis: ["arker update <vm> [flags]"],
@@ -1879,7 +1879,7 @@ function usage(command?: string, sub?: string): void {
       "  arker runs ls [vm_id] [flags]              list organization or VM runs",
       "  arker runs <get|rm> <vm_id> <run_id> ...",
       "  arker sessions    <ls|get|create|rm|update> <vm_id> ...",
-      "  arker syncs       <ls|create|rm> <vm_id> ...",
+      "  arker mounts       <ls|create|rm> <vm_id> ...",
       "  arker filesystems <ls|create|get|rm> ...   (alias: fs)",
       "  arker sync <vm_id> <path> [data|-]          read a file, or write data/stdin",
       "  arker sync <vm_id> <path> --read            read a file, ignoring stdin",
@@ -1950,7 +1950,7 @@ function usage(command?: string, sub?: string): void {
       "  runs ls [vm]: --started-after <time> --started-before <time> --completed-after <time>",
       "  runs ls: --since <seconds> --until <seconds> --vm <id> --vms <id,...>",
       "           --search <text> --endpoint <kind> --actions <list> --status <list>",
-      "  syncs: --filesystem-id <id> --path <path>",
+      "  mounts: --filesystem-id <id> --path <path>",
       "  filesystems: --name <name> --name-prefix <prefix>",
       "",
       "Shell flags:",
@@ -1999,8 +1999,8 @@ async function main(): Promise<void> {
         return await cmdSync(args, client);
       case "sync-dir":
         return await cmdSyncDir(args, client);
-      case "syncs":
-        return await cmdSyncs(args, client);
+      case "mounts":
+        return await cmdMounts(args, client);
       case "policies":
         return await cmdPolicies(args, client);
       case "shell":

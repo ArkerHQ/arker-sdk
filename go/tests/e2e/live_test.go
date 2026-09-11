@@ -639,9 +639,9 @@ func TestSyncDir(t *testing.T) {
 	}
 }
 
-// ── Filesystems and syncs ───────────────────────────────────────────────
+// ── Filesystems and mounts ───────────────────────────────────────────────
 
-func TestFilesystemsAndSyncs(t *testing.T) {
+func TestFilesystemsAndMounts(t *testing.T) {
 	h := setup(t)
 	ctx := budget(t, forkBudget)
 
@@ -673,19 +673,19 @@ func TestFilesystemsAndSyncs(t *testing.T) {
 	}
 
 	vm := h.fork(t, ctx)
-	sync, err := vm.CreateSync(ctx, fs.FilesystemID, "/mnt/shared")
+	mount, err := vm.CreateMount(ctx, fs.FilesystemID, "/mnt/shared")
 	if err != nil {
-		t.Fatalf("create sync: %v", err)
+		t.Fatalf("create mount: %v", err)
 	}
-	syncs, err := vm.ListSyncs(ctx, arker.ListSyncsOptions{})
+	mounts, err := vm.ListMounts(ctx, arker.ListMountsOptions{})
 	if err != nil {
-		t.Fatalf("list syncs: %v", err)
+		t.Fatalf("list mounts: %v", err)
 	}
-	if !slices.ContainsFunc(syncs.Syncs, func(s arker.Sync) bool { return s.SyncID == sync.SyncID }) {
-		t.Fatalf("sync %s missing from the VM's listing", sync.SyncID)
+	if !slices.ContainsFunc(mounts.Mounts, func(s arker.Mount) bool { return s.MountID == mount.MountID }) {
+		t.Fatalf("mount %s missing from the VM's listing", mount.MountID)
 	}
-	if err := vm.DeleteSync(ctx, sync.SyncID); err != nil {
-		t.Fatalf("delete sync: %v", err)
+	if err := vm.DeleteMount(ctx, mount.MountID); err != nil {
+		t.Fatalf("delete mount: %v", err)
 	}
 }
 

@@ -53,7 +53,7 @@ func main() {
 			log.Fatalf("fork %s: %v", role, err)
 		}
 		vms = append(vms, vm)
-		if _, err := vm.CreateSync(ctx, fs.FilesystemID, "/mnt/shared"); err != nil {
+		if _, err := vm.CreateMount(ctx, fs.FilesystemID, "/mnt/shared"); err != nil {
 			log.Fatalf("bind filesystem into %s: %v", role, err)
 		}
 		fmt.Printf("%s = %s, filesystem mounted at /mnt/shared\n", role, vm.ID)
@@ -71,11 +71,11 @@ func main() {
 	}
 	fmt.Printf("the second VM sees: %s", out.Stdout)
 
-	syncs, err := reader.ListSyncs(ctx, arker.ListSyncsOptions{})
+	mounts, err := reader.ListMounts(ctx, arker.ListMountsOptions{})
 	if err != nil {
-		log.Fatalf("list syncs: %v", err)
+		log.Fatalf("list mounts: %v", err)
 	}
-	for _, s := range syncs.Syncs {
-		fmt.Printf("sync %s -> %s (status %s)\n", s.SyncID, s.Path, s.Status)
+	for _, s := range mounts.Mounts {
+		fmt.Printf("mount %s -> %s (status %s)\n", s.MountID, s.Path, s.Status)
 	}
 }

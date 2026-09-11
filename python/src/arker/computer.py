@@ -41,14 +41,16 @@ from .generated.api_models import (
     CompletedRunResponse,
     CreateSessionRequest,
     DeleteFilesystemResponse,
+    DeleteMountResponse,
     DeleteSessionResponse,
-    DeleteSyncResponse,
     DeleteVmResponse,
     ErrorResponse,
     Filesystem,
     FilesystemCreateRequest,
     ListFilesystemsParameters,
     ListFilesystemsResponse,
+    ListMountsParameters,
+    ListMountsResponse,
     ListOrgRunsParameters,
     ListOrgRunsResponse,
     ListRegionsResponse,
@@ -56,9 +58,9 @@ from .generated.api_models import (
     ListRunsResponse,
     ListSessionsParameters,
     ListSessionsResponse,
-    ListSyncsParameters,
-    ListSyncsResponse,
     ListVmsParameters,
+    Mount,
+    MountCreateRequest,
     PatchSessionRequest,
     PatchSessionResponse,
     PatchVmRequest,
@@ -69,9 +71,7 @@ from .generated.api_models import (
     RunRequest,
     RunResponse,
     Session,
-    Sync,
     SyncChunkWrite,
-    SyncCreateRequest,
     SyncManifestOperationRequest,
     SyncManifestResponse,
     SyncReadInlineResponse,
@@ -938,7 +938,7 @@ class VM:
         Omit ``data`` to read (returns ``bytes``); pass ``data`` to write
         (returns ``None``). Inline transfer for small files, presigned
         uploads for large ones. To mount a standalone filesystem into the
-        VM, use ``vm.syncs.create``.
+        VM, use ``vm.create_mount``.
         """
         if data is None:
             return self._sync_read(path)
@@ -1306,37 +1306,37 @@ class VM:
             with contextlib.suppress(OSError):
                 os.unlink(tar_local)
 
-    # ── Syncs: bindings of a filesystem into this VM at a path ────────
-    def list_syncs(
+    # ── Mounts: bindings of a filesystem into this VM at a path ────────
+    def list_mounts(
         self,
         *,
         cursor: str | None = None,
         limit: int | None = None,
         filesystem_id: str | None = None,
-    ) -> ListSyncsResponse:
-        parameters = ListSyncsParameters(
+    ) -> ListMountsResponse:
+        parameters = ListMountsParameters(
             id=self.id,
             cursor=cursor,
             limit=limit,
             filesystem_id=filesystem_id,
         )
-        path = _build_query(f"{_vm_path(self.id)}/syncs", parameters, path_fields={"id"})
+        path = _build_query(f"{_vm_path(self.id)}/mounts", parameters, path_fields={"id"})
         payload = self._client._request("GET", path, base_url=self.base_url)
-        return _decode_model(ListSyncsResponse, payload)
+        return _decode_model(ListMountsResponse, payload)
 
-    def create_sync(self, *, filesystem_id: str, path: str | None = None) -> Sync:
+    def create_mount(self, *, filesystem_id: str, path: str | None = None) -> Mount:
         """Bind a filesystem into this VM at ``path``."""
-        request = SyncCreateRequest(filesystem_id=filesystem_id, path=path)
-        payload = self._client._request("POST", f"{_vm_path(self.id)}/syncs", request, base_url=self.base_url)
-        return _sync(payload)
+        request = MountCreateRequest(filesystem_id=filesystem_id, path=path)
+        payload = self._client._request("POST", f"{_vm_path(self.id)}/mounts", request, base_url=self.base_url)
+        return _mount(payload)
 
-    def delete_sync(self, sync_id: str) -> DeleteSyncResponse:
+    def delete_mount(self, mount_id: str) -> DeleteMountResponse:
         payload = self._client._request(
             "DELETE",
-            f"{_vm_path(self.id)}/syncs/{_segment(sync_id)}",
+            f"{_vm_path(self.id)}/mounts/{_segment(mount_id)}",
             base_url=self.base_url,
         )
-        return _decode_model(DeleteSyncResponse, payload)
+        return _decode_model(DeleteMountResponse, payload)
 
     # ── Runs ──────────────────────────────────────────────────────────
     def list_runs(
@@ -2159,8 +2159,8 @@ def _filesystem(payload: dict[str, Any]) -> Filesystem:
     return _decode_model(Filesystem, payload)
 
 
-def _sync(payload: dict[str, Any]) -> Sync:
-    return _decode_model(Sync, payload)
+def _mount(payload: dict[str, Any]) -> Mount:
+    return _decode_model(Mount, payload)
 
 
 def _vm_info(payload: dict[str, Any]) -> Vm:

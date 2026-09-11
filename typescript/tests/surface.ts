@@ -1,7 +1,7 @@
 /**
  * Full-surface exercise of the SDK against a live backend.
  * Calls every public method on Arker / Computer / Runs / Sessions /
- * Tunnels / Syncs / Filesystems and reports PASS / FAIL / STUB.
+ * Tunnels / Mounts / Filesystems and reports PASS / FAIL / STUB.
  *
  *   ARKER_API_KEY=... ARKER_BASE_URL=http://host:8080/api bun tests/surface.ts
  */
@@ -45,7 +45,7 @@ function summarize(r: unknown): string {
   if (Array.isArray((r as any)?.runs)) return `${(r as any).runs.length} runs`;
   if (Array.isArray((r as any)?.sessions)) return `${(r as any).sessions.length} sessions`;
   if (Array.isArray((r as any)?.tunnels)) return `${(r as any).tunnels.length} tunnels`;
-  if (Array.isArray((r as any)?.syncs)) return `${(r as any).syncs.length} syncs`;
+  if (Array.isArray((r as any)?.mounts)) return `${(r as any).mounts.length} mounts`;
   if (Array.isArray((r as any)?.filesystems)) return `${(r as any).filesystems.length} filesystems`;
   if ((r as any)?.type) return `run:${(r as any).type}`;
   if ((r as any)?.id) return `id=${(r as any).id}`;
@@ -99,17 +99,17 @@ if (sid) {
   await call("Sessions.delete", () => computer.deleteSession(sid));
 } else { rec("STUB", "Sessions.get/delete", "no session id"); }
 
-// ── Syncs ───────────────────────────────────────────────────────────
+// ── Files and mounts ───────────────────────────────────────────────────────────
 const path = `/home/user/${stamp}.txt`;
-await call("Syncs.writeFile", () => computer.sync(path, `${stamp}\n`));
-await call("Syncs.readFile", async () => {
+await call("Sync.writeFile", () => computer.sync(path, `${stamp}\n`));
+await call("Sync.readFile", async () => {
   const b = await computer.sync(path);
   const got = new TextDecoder().decode(b);
   if (got !== `${stamp}\n`) throw new Error(`readback mismatch: ${JSON.stringify(got)}`);
   return b;
 });
-await call("Syncs.list", () => computer.listSyncs(), { stubOk: true });
-await call("Syncs.delete", () => computer.deleteSync("sync_does_not_exist"), { stubOk: true });
+await call("Mounts.list", () => computer.listMounts(), { stubOk: true });
+await call("Mounts.delete", () => computer.deleteMount("sync_does_not_exist"), { stubOk: true });
 
 // ── Filesystems get/delete ──────────────────────────────────────────
 await call("Filesystems.get", () => arker.getFilesystem("fs_does_not_exist"), { stubOk: true });
