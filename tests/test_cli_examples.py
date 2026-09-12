@@ -67,7 +67,7 @@ def test_browser_example_does_not_wait_for_window_manager_activation() -> None:
 def test_gpu_coding_agents_quickstart_installs_python_sdk() -> None:
     source = (EXAMPLES_DIR / "gpu-coding-agents" / "README.md").read_text()
 
-    assert "uv run --with arker python launch.py" in source
+    assert 'uv run --with "arker>=0.10.0,<0.11" python launch.py' in source
 
 
 def test_autoresearch_bounds_agent_output_tokens() -> None:

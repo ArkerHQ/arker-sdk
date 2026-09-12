@@ -37,7 +37,7 @@
   },
   "bugs": "https://github.com/ArkerHQ/arker-sdk/issues",
   "dependencies": {
-    "@arker-ai/sdk": "^2.0.0"
+    "@arker-ai/sdk": "^0.10.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

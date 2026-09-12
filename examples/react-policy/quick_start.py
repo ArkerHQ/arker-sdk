@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["arker"]
+# dependencies = ["arker>=0.10.0,<0.11"]
 # ///
 """Build a local React app in an Arker VM and expose it with a policy.
 

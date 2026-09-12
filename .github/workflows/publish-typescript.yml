@@ -109,7 +109,7 @@ jobs:
         run: bun run build
 
       - name: Publish to npm
-        run: npm publish --access public
+        run: npm publish --access public --tag latest
 
       # Last, so the tag means "this version is on npm". If this step fails
       # after a successful publish, tag by hand — do not re-run, npm rejects a
