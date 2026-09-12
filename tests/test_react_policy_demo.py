@@ -42,7 +42,7 @@ PUBLIC_POLICY = {
 
 
 def test_script_does_not_pin_python_sdk_release() -> None:
-    assert '# dependencies = ["arker"]' in PYTHON_DEMO.read_text()
+    assert '# dependencies = ["arker>=0.10.0,<0.11"]' in PYTHON_DEMO.read_text()
 
 
 def test_react_build_supports_public_node_template() -> None:

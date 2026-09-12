@@ -15,11 +15,11 @@ export OPENROUTER_API_KEY=sk-or-v1-...
 
 # Quick test: 2 agents, 2 turns each, ~5 minutes
 AGENTS=2 TURNS=2 VGPUS=0.25 \
-  uv run --with arker --with matplotlib python autoresearch.py
+  uv run --with "arker>=0.10.0,<0.11" --with matplotlib python autoresearch.py
 
 # Full test: compare the throughput of running with full vGPUs and with fraction vGPUs
 AGENTS=4 TURNS=8 VGPUS=0.25,1.0 \
-  uv run --with arker --with matplotlib python autoresearch.py
+  uv run --with "arker>=0.10.0,<0.11" --with matplotlib python autoresearch.py
 ```
 
 Result:
