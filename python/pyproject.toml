@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arker"
-version = "1.2.7"
+version = "2.0.0"
 description = "Python client for the Arker virtual computer platform."
 readme = "README.md"
 requires-python = ">=3.10"
