@@ -24,7 +24,7 @@
     },
     "typescript": {
       "name": "@arker-ai/sdk",
-      "version": "1.2.3",
+      "version": "0.10.0",
       "bin": {
         "arker": "./dist/cli.js",
       },

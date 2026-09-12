@@ -40,7 +40,7 @@ wheels = [
 
 [[package]]
 name = "arker"
-version = "1.2.7"
+version = "0.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "dockerfile-parse" },

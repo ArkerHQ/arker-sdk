@@ -15,8 +15,10 @@ Use the Arker Python SDK to fork VMs, run commands, and sync files.
 ## Install
 
 ```bash
-pip install arker
+pip install "arker>=0.10.0,<0.11"
 ```
+
+The SDK is prelaunch. Select the 0.10 series explicitly because the package index also contains older 1.x releases.
 
 The SDK requires Python 3.10 or later.
 

@@ -11,7 +11,7 @@ export ARKER_ANTHROPIC_API_KEY=sk-ant-...             # your own anthropic API k
 # Only identity-linked keys require this optional workspace header:
 # export ARKER_ANTHROPIC_WORKSPACE_ID=wrkspc_...
 
-uv run --with arker python launch.py --minutes 10 --threads 8 --tests-per-agent 3
+uv run --with "arker>=0.10.0,<0.11" python launch.py --minutes 10 --threads 8 --tests-per-agent 3
 ```
 
 ## Why
