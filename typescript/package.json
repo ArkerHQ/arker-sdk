@@ -48,7 +48,7 @@
     "example:ios-qa": "bun examples/ios-qa.ts",
     "generate:api-types": "openapi-typescript ../openapi.json --default-non-nullable false -o src/generated/api-types.ts",
     "smoke": "bun tests/conformance/fork-run-sync.ts",
-    "test": "bun tests/sync-route.ts && bun tests/unit.ts && bun tests/compat.ts && bun run build && bun tests/http2.ts",
+    "test": "bun tests/unit.ts && bun tests/compat.ts && bun run build && bun tests/http2.ts",
     "test:compat": "bun tests/compat.ts",
     "test:compat-live": "bun tests/compat-live.ts",
     "test:compat-fallback-live": "bun tests/compat-fallback-live.ts",

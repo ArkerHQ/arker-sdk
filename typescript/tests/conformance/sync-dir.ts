@@ -3,7 +3,7 @@
  *
  * Exercises the SDK's rsync-style directory sync end-to-end against a live VM:
  *   fork -> full sync -> repeat (delta=0) -> edit one file (delta=1) ->
- *   add a file (delta=1) -> byte-exact readback (incl. nested + >4 MB chunked)
+ *   add a file (delta=1) -> byte-exact readback (incl. nested + >4 MB presigned)
  *
  * Unlike fork-run-sync.ts (raw HTTP, contract drift), this drives the actual
  * SDK method, since syncDir orchestrates manifest-diff + tarball + guest extract
@@ -51,9 +51,9 @@ async function main(): Promise<void> {
   const source = requiredEnv("ARKER_SOURCE_VM");
 
   // A nested local tree: two small files, one nested, and one >CHUNK_SIZE (4 MB)
-  // file so the tarball spans multiple upload requests.
+  // file so the tarball takes the presigned path rather than inline.
   const local = mkdtempSync(join(tmpdir(), "arker-syncdir-"));
-  const bigBytes = randomBytes(5 * 1024 * 1024); // The archive spans multiple upload chunks.
+  const bigBytes = randomBytes(5 * 1024 * 1024); // >4 MB -> presigned tarball
   const aBytes = new TextEncoder().encode("alpha\n");
   const nestedBytes = new TextEncoder().encode("nested-original\n");
   mkdirSync(join(local, "nested"), { recursive: true });
@@ -69,11 +69,11 @@ async function main(): Promise<void> {
     // 1) Full sync: all 3 files are new.
     eq(await vm.syncDir(local, remote), 3, 0, "full sync");
 
-    // 2) Byte-exact readback: nested small file + the large file.
+    // 2) Byte-exact readback: nested small file + the large presigned file.
     const gotNested = await vm.sync(`${remote}/nested/b.txt`);
     assert(bytesEqual(gotNested, nestedBytes), "nested readback mismatch");
     const gotBig = await vm.sync(`${remote}/big.bin`);
-    assert(bytesEqual(gotBig, bigBytes), "big-file readback mismatch");
+    assert(bytesEqual(gotBig, bigBytes), "big-file readback mismatch (presigned tarball)");
 
     // 3) Repeat with no local change: the manifest diff must send NOTHING.
     eq(await vm.syncDir(local, remote), 0, 3, "repeat (delta) sync");
@@ -95,11 +95,10 @@ async function main(): Promise<void> {
 
     console.log("PASS sync-dir");
   } finally {
-    try {
-      if (vm) await vm.delete();
-    } finally {
-      rmSync(local, { recursive: true, force: true });
+    if (vm) {
+      try { await vm.delete(); } catch (error) { console.warn(`WARN: delete ${vm.id}: ${String(error)}`); }
     }
+    rmSync(local, { recursive: true, force: true });
   }
 }
 
