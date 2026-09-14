@@ -137,9 +137,6 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   for await (const chunk of req) chunks.push(chunk as Buffer);
   const text = Buffer.concat(chunks).toString("utf8");
   if (!text) return undefined;
-  // Not every request body is JSON any more: /sync-stream sends raw bytes with
-  // its parameters in the query string. Capture those as text instead of
-  // throwing, so a raw-body request is still assertable.
   try {
     return JSON.parse(text);
   } catch {
@@ -801,14 +798,15 @@ async function testEmptyPipedInputWritesZeroBytes(): Promise<void> {
     const result = await runCli(baseUrl, ["sync", "vm_1", "/tmp/example.txt"], { stdin: "" });
     assert.equal(result.code, 0);
     assert.equal(stdoutText(result), "wrote 0 bytes to /tmp/example.txt\n");
-    // `sync` now streams the bytes to /sync-stream rather than base64-ing them
-    // into a JSON `writes[]` envelope: path and size ride in the query string
-    // and the body is the raw bytes (here, none). The behaviour asserted above
-    // — zero bytes written, exit 0 — is unchanged; only the transport moved.
     assert.equal(requests.length, 1);
     assert.equal(requests[0]?.method, "POST");
-    assert.equal(requests[0]?.url, "/api/v1/vms/vm_1/sync-stream?path=%2Ftmp%2Fexample.txt&size=0");
-  }, { http1: true });
+    assert.equal(requests[0]?.url, "/api/v1/vms/vm_1/sync");
+    const body = requests[0]?.body as { op: string; writes: Array<{ path: string; size: number; content: string }> };
+    assert.equal(body.op, "write");
+    assert.equal(body.writes[0]?.path, "/tmp/example.txt");
+    assert.equal(body.writes[0]?.size, 0);
+    assert.equal(body.writes[0]?.content, "");
+  });
 }
 
 // `-` is the explicit "write stdin" form. It exists so a caller never has to
@@ -821,8 +819,12 @@ async function testSyncDashWritesStdin(): Promise<void> {
     const result = await runCli(baseUrl, ["sync", "vm_1", "/tmp/a.txt", "-"], { stdin: "hi\n" });
     assert.equal(result.code, 0, result.stderr);
     assert.equal(stdoutText(result), "wrote 3 bytes to /tmp/a.txt\n");
-    assert.equal(requests[0]?.url, "/api/v1/vms/vm_1/sync-stream?path=%2Ftmp%2Fa.txt&size=3");
-  }, { http1: true });
+    assert.equal(requests[0]?.url, "/api/v1/vms/vm_1/sync");
+    const body = requests[0]?.body as { writes: Array<{ path: string; size: number; content: string }> };
+    assert.equal(body.writes[0]?.path, "/tmp/a.txt");
+    assert.equal(body.writes[0]?.size, 3);
+    assert.equal(Buffer.from(body.writes[0]!.content, "base64").toString(), "hi\n");
+  });
 }
 
 // --read is the explicit "read" form: it must win even when data is piped in,
@@ -1103,15 +1105,11 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
       body: { filesystem_id: "fs_1", path: "/mnt" },
     },
     {
-      // `sync` streams the bytes now: path and size ride in the query string
-      // and the body is raw, rather than base64 inside a JSON `writes[]`.
-      name: "sync streamed write",
-      http1: true,
+      name: "sync write",
       args: ["sync", "vm_1", "/tmp/file", "hello"],
       response: { results: [{ complete: true, written: true }] },
       method: "POST",
-      url: "/api/v1/vms/vm_1/sync-stream?path=%2Ftmp%2Ffile&size=5",
-      body: "hello",
+      url: "/api/v1/vms/vm_1/sync",
     },
     {
       name: "filesystems ls",
@@ -1144,6 +1142,13 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
       assert.equal(requests.length, 1, testCase.name);
       assert.equal(requests[0]?.method, testCase.method, testCase.name);
       assert.equal(requests[0]?.url, testCase.url, testCase.name);
+      if (testCase.name === "sync write") {
+        const body = requests[0]?.body as { op: string; writes: Array<{ path: string; size: number; content: string }> };
+        assert.equal(body.op, "write");
+        assert.equal(body.writes[0]?.path, "/tmp/file");
+        assert.equal(body.writes[0]?.size, 5);
+        assert.equal(Buffer.from(body.writes[0]!.content, "base64").toString(), "hello");
+      }
       if (testCase.body !== undefined) assert.deepEqual(requests[0]?.body, testCase.body, testCase.name);
     }, { http1: testCase.http1 });
   }

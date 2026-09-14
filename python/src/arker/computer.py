@@ -103,19 +103,6 @@ _UNSET = _UnsetType()
 _EXPLICIT_NULL = _ExplicitNullType()
 
 CHUNK_SIZE = 4 * 1024 * 1024
-# Max raw bytes written inline in ONE /sync request, as multiple CHUNK_SIZE
-# chunks sharing an upload_id. Server budgets: 5MB per chunk, 20MB decoded per
-# request — 16MB = 4 chunks, inside both. Files above this take the presigned
-# blob path, where resumable multipart genuinely earns its double transfer.
-INLINE_WRITE_LIMIT = 16 * 1024 * 1024
-
-# Largest body `/sync-stream` accepts through the public edge. The router
-# buffers proxied bodies and caps them (DEFAULT_PROXY_BODY_LIMIT in
-# server side), which overrides the worker's own disabled limit. Measured
-# against a live env: 64 MiB returns 200, 72 MiB returns 413
-# `payload_too_large` — the limit is exact and fails loudly, never truncating.
-STREAM_MAX_BYTES = 64 * 1024 * 1024
-
 # Below this a compressibility sample is not worth taking; above it sync_dir
 # samples before choosing tar vs tar.gz.
 COMPRESSION_SAMPLE_MIN_BYTES = 256 * 1024
@@ -172,7 +159,6 @@ def run_poll_budget_s(timeout: int | None) -> float | None:
 # set is treated as non-terminal, so an unknown future state degrades to
 # "keep polling" rather than a false completion.
 TERMINAL_RUN_STATES = frozenset({"completed", "failed", "cancelled"})
-PRESIGNED_PUT_TIMEOUT_S = 600
 # Must exceed the server's 120s sync window, or the request is given up on just
 # as the background ack arrives and run() never gets to poll.
 REQUEST_TIMEOUT_S = 300
@@ -936,100 +922,14 @@ class VM:
         """Read or write a file in this VM over ``POST /v1/vms/{id}/sync``.
 
         Omit ``data`` to read (returns ``bytes``); pass ``data`` to write
-        (returns ``None``). Inline transfer for small files, presigned
-        uploads for large ones. To mount a standalone filesystem into the
+        (returns ``None``). Writes use bounded chunks. To mount a standalone filesystem into the
         VM, use ``vm.create_mount``.
         """
         if data is None:
             return self._sync_read(path)
         payload = data.encode("utf-8") if isinstance(data, str) else data
-        # Stream straight to the VM's disk, at every size. Syncing to a VM has
-        # no reason to detour through object storage — the destination is the
-        # guest filesystem, not S3. Presigned uploads existed only because the
-        # router buffered proxied bodies and capped them; it now forwards
-        # sync-stream as a stream above that cap, so the detour is gone.
-        # Presigned remains correct for SHARED FILESYSTEMS, where the bytes
-        # really do live in S3 — a different route, not this one.
-        self._sync_write_stream(path, payload)
+        self._sync_write_inline(path, payload)
         return None
-
-    def _sync_stream_post(
-        self,
-        params: dict[str, str],
-        body: Callable[[], bytes],
-        what: str,
-    ) -> None:
-        """The single ``/sync-stream`` call site.
-
-        ``body`` is a factory, not a value, so a retried attempt gets fresh
-        bytes — matching the TypeScript SDK, where the same helper also has to
-        rebuild a consumed file stream.
-        """
-        url = f"{self.base_url}{_vm_path(self.id)}/sync-stream"
-        headers = {
-            "authorization": f"Bearer {self._client._api_key}",
-            "content-type": "application/octet-stream",
-        }
-        for attempt in range(self._client._retry.attempts):
-            try:
-                with _http_client.stream(
-                    "POST",
-                    url,
-                    params=params,
-                    content=body(),
-                    headers=headers,
-                    timeout=PRESIGNED_PUT_TIMEOUT_S,
-                ) as response:
-                    status = response.status_code
-                    if status < 400:
-                        return
-                    try:
-                        raw = response.read()
-                    except httpx.RequestError:
-                        raw = b""
-            except httpx.RequestError as error:
-                raise _unknown_outcome_error("POST", "/sync-stream", error) from error
-            payload = _parse_json(raw.decode("utf-8", "replace"))
-            parsed_error = _extract_error(payload)
-            code, message = "internal", f"{what} failed ({status})"
-            if isinstance(payload, dict):
-                error_body = payload.get("error")
-                if isinstance(error_body, dict):
-                    code = error_body.get("code") or code
-                    message = error_body.get("message") or message
-            # 413 is the router's body cap, not a transient fault.
-            if not _is_retryable(status, parsed_error) or attempt == self._client._retry.attempts - 1:
-                raise ArkerError(code, message, status)
-            time.sleep(self._client._retry_delay(attempt, parsed_error))
-
-    def _sync_write_stream(self, path: str, data: bytes, sha256: str | None = None) -> None:
-        params = {"path": path, "size": str(len(data))}
-        if sha256:
-            params["sha256"] = sha256
-        self._sync_stream_post(params, lambda: data, "sync write")
-
-    def _sync_stream_extract_file(self, tar_path: str, remote_root: str, mode: str) -> None:
-        """Stream a tarball from disk to ``/sync-stream?extract=``.
-
-        ``size`` comes from stat, not from a buffered length: the router reads
-        that query parameter to decide whether to forward the body streamed
-        (a chunked request carries no content-length), so it must be exact.
-        """
-        size = os.path.getsize(tar_path)
-
-        def chunks():
-            with open(tar_path, "rb") as fh:
-                while True:
-                    block = fh.read(1024 * 1024)
-                    if not block:
-                        return
-                    yield block
-
-        self._sync_stream_post(
-            {"path": remote_root, "size": str(size), "extract": mode},
-            chunks,
-            "sync-stream extract",
-        )
 
     def _sync_read(self, path: str) -> bytes:
         request = SyncReadOperationRequest(op="read", path=path)
@@ -1050,25 +950,29 @@ class VM:
         return signed.content
 
     def _sync_write_inline(self, path: str, data: bytes) -> None:
+        self._sync_write_chunks(path, len(data), lambda start, length: data[start : start + length])
+
+    def _sync_write_chunks(self, path: str, size: int, read: Callable[[int, int], bytes]) -> None:
         upload_id = _ulid()
-        # `or [0]`: an empty file still needs its one (empty) chunk — zero
-        # chunks would send `writes: []` and never create the file.
-        starts = list(range(0, len(data), CHUNK_SIZE)) or [0]
-        entries = [
-            SyncChunkWrite(
-                path=path,
-                size=len(data),
-                upload_id=upload_id,
-                content=base64.b64encode(data[start : start + CHUNK_SIZE]).decode("ascii"),
-                start=start,
-                end=min(start + CHUNK_SIZE, len(data)),
+        result = None
+        # Initialize the upload before later chunks can write to its staging file.
+        # The empty range creates an empty file.
+        for start in range(0, max(size, 1), CHUNK_SIZE):
+            end = min(start + CHUNK_SIZE, size)
+            chunk = read(start, end - start)
+            if len(chunk) != end - start:
+                raise ArkerError("internal", "sync upload source ended before its declared size", 0)
+            result = self._send_one_write(
+                SyncChunkWrite(
+                    path=path,
+                    size=size,
+                    upload_id=upload_id,
+                    content=base64.b64encode(chunk).decode("ascii"),
+                    start=start,
+                    end=end,
+                )
             )
-            for start in starts
-        ]
-        results = self._send_writes(entries)
-        # Chunks before the last legitimately report written=False; the final
-        # chunk's result carries file completion.
-        _assert_write_complete(results[-1], "inline write")
+        _assert_write_complete(result, "inline write")
 
     def _send_one_write(self, entry: SyncWriteEntry) -> SyncWriteResult:
         return self._send_writes([entry])[0]
@@ -1261,27 +1165,9 @@ class VM:
             with tarfile.open(tar_local, "w:gz" if compress else "w") as tar:
                 for rel, abs_path in changed:
                     tar.add(abs_path, arcname=rel, recursive=False)
-            # One round trip. `/sync-stream?extract=` streams the
-            # tarball to the guest and untars it THERE before responding. The
-            # fallback path is upload plus a separate run("tar -xf") — two
-            # round-trips, with the extract going through the user run
-            # scheduler where it can queue behind an active foreground run.
-            try:
-                # Stream from disk to keep memory flat for large trees. The
-                # body is a factory so a retry reopens the file; a consumed
-                # stream cannot be replayed.
-                self._sync_stream_extract_file(tar_local, remote_root, mode)
-                return
-            except ArkerError as error:
-                if error.code != "not_found":
-                    raise  # real failure (auth, path escape, size) must not be masked
-
-            # Only reachable on a server predating /sync-stream, so this must
-            # NOT go through self.sync() — that streams now and would fail the
-            # same way. Use the inline/presigned write those servers understand.
             remote_tar = f"/tmp/.arker-sync-{_ulid()}.{mode}"
             with open(tar_local, "rb") as fh:
-                self._sync_write_inline(remote_tar, fh.read())
+                self._sync_write_chunks(remote_tar, os.path.getsize(tar_local), lambda _start, length: fh.read(length))
 
             q = shlex.quote
             # `set -e` + explicit rm: any extract failure exits non-zero; the
@@ -1293,7 +1179,7 @@ class VM:
             res = self.run(cmd)
             code = getattr(res, "exit_code", None)
             state = getattr(res, "state", None)
-            if (code not in (0, None)) or state == "failed":
+            if code != 0 or state == "failed":
                 stderr = getattr(res, "stderr", b"")
                 if isinstance(stderr, (bytes, bytearray)):
                     stderr = stderr.decode("utf-8", "replace")

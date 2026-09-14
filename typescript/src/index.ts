@@ -15,14 +15,6 @@ type ApiQuery<Name extends keyof operations> = NonNullable<
 
 export const CHUNK_SIZE = 4 * 1024 * 1024;
 
-/**
- * Size at which the router stops buffering a `/sync-stream` body and forwards
- * it as a stream (a server-side proxy body limit). Measured before
- * that change landed: 64 MiB returned 200, 72 MiB returned 413
- * `payload_too_large`.
- *
- * Every write streams, and the router selects buffered or streamed forwarding.
- */
 export const STREAM_MAX_BYTES = 64 * 1024 * 1024;
 
 /**
@@ -1182,8 +1174,7 @@ export class VM {
   /**
    * Read or write a file in this VM over `POST /v1/vms/{id}/sync`.
    * Omit `data` to read; pass `data` (string or bytes) to write. The
-   * client picks inline transfer for small files and presigned uploads
-   * for large ones automatically.
+   * client writes files in bounded chunks.
    *
    *     const bytes = await vm.sync("/home/user/out.txt");   // read
    *     await vm.sync("/home/user/in.txt", "hello\n");       // write
@@ -1195,14 +1186,7 @@ export class VM {
   async sync(path: string, data?: Uint8Array | string): Promise<Uint8Array | void> {
     if (data === undefined) return this.syncRead(path);
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
-    // Stream straight to the VM's disk, at every size. Syncing to a VM has no
-    // reason to detour through object storage — the bytes' destination is the
-    // guest filesystem, not S3. Presigned uploads existed only because the
-    // router buffered proxied bodies and capped them; it now forwards
-    // sync-stream as a stream above that cap, so the detour is gone. Presigned
-    // remains correct for SHARED FILESYSTEMS, where the bytes really do live in
-    // S3 — that is a different route (`/dirs/{id}/sync`), not this one.
-    await this.syncWriteStream(path, bytes);
+    await this.syncWriteInline(path, bytes);
   }
 
   /**
@@ -1412,94 +1396,6 @@ export class VM {
     return { entries: out, truncated: payload.truncated === true };
   }
 
-  /** One-round-trip directory upload: stream a gzip tar to `/sync-stream` and
-   * let the server untar it IN THE GUEST before responding.
-   *
-   * Params ride in the query string, not headers: the auth middleware strips
-   * `x-arker-*` from untrusted callers and would erase them.
-   *
-   * The body is sent raw (`application/octet-stream`) — no base64, so none of
-   * the +33% inflation the JSON write path pays. */
-  /**
-   * Every streaming upload goes through this call site so authentication,
-   * content type, retries, and error parsing stay consistent.
-   *
-   * `body` is a factory, not a value: a retried attempt needs a fresh body,
-   * and a stream can only be consumed once.
-   */
-  private async syncStreamPost(
-    query: Record<string, string>,
-    body: () => BodyInit,
-    what: string,
-  ): Promise<void> {
-    const url = `${this.baseUrl}${vmPath(this.id)}/sync-stream?${new URLSearchParams(query)}`;
-    const attempts = this._client._retryAttempts();
-    for (let attempt = 0; attempt < attempts; attempt++) {
-      let res: Response;
-      try {
-        const payload = body();
-        const init: RequestInit & { duplex?: "half" } = {
-          method: "POST",
-          headers: {
-            ...this._client._authHeaders(),
-            "content-type": "application/octet-stream",
-          },
-          body: payload,
-        };
-        // Only meaningful for a streamed body, and some runtimes REJECT the
-        // request outright when it is set alongside a plain byte body — which
-        // surfaces as an opaque "fetch failed", not an HTTP status.
-        if (typeof (payload as ReadableStream | undefined)?.getReader === "function") {
-          init.duplex = "half";
-        }
-        res = await this._client._fetch(url, init);
-      } catch (error) {
-        throw unknownOutcomeError("POST", "/sync-stream", error);
-      }
-      if (res.ok) return;
-      const parsed = await parseErrorResponse(res, `${what} failed (${res.status})`);
-      // 413 is the router's body cap, not a transient fault — never retry it.
-      if (!isRetryable(res.status, parsed) || attempt === attempts - 1) {
-        throw new ArkerError(parsed.code, parsed.message, res.status);
-      }
-      await sleep(this._client._retryDelay(attempt, parsed));
-    }
-  }
-
-  private async syncStreamExtract(
-    tar: Uint8Array,
-    remoteRoot: string,
-    mode: "tar" | "tar.gz",
-  ): Promise<void> {
-    await this.syncStreamPost(
-      { path: remoteRoot, size: String(tar.byteLength), extract: mode },
-      () => tar as BodyInit,
-      "sync-stream extract",
-    );
-  }
-
-  /**
-   * Upload a tarball straight from disk to keep memory flat for large trees.
-   *
-   * The body is a factory so a retry gets a FRESH read stream — a consumed
-   * stream cannot be replayed, which is why `syncStreamPost` takes a factory
-   * rather than a value.
-   */
-  private async syncStreamExtractFile(
-    localTar: string,
-    size: number,
-    remoteRoot: string,
-    mode: "tar" | "tar.gz",
-  ): Promise<void> {
-    const fs = await import("node:fs");
-    const { Readable } = await import("node:stream");
-    await this.syncStreamPost(
-      { path: remoteRoot, size: String(size), extract: mode },
-      () => Readable.toWeb(fs.createReadStream(localTar)) as unknown as BodyInit,
-      "sync-stream extract",
-    );
-  }
-
   /**
    * Decide whether gzip earns its keep for this file set.
    *
@@ -1543,25 +1439,7 @@ export class VM {
     return compressed / raw < COMPRESSION_WORTH_IT_RATIO;
   }
 
-  /**
-   * Write one file by streaming its bytes raw — no base64, no S3 hop.
-   *
-   * Measured in-region against the paths this replaces: 103-154 MB/s here vs
-   * 41-50 MB/s inline and 25-56 MB/s presigned. Parity with the inline path is
-   * verified: identical bytes, size and mode, nested parent directories are
-   * created, and the optional `sha256` is enforced by the guest (a wrong digest
-   * is rejected 409 rather than silently accepted).
-   */
-  private async syncWriteStream(path: string, data: Uint8Array, sha256?: string): Promise<void> {
-    const query: Record<string, string> = { path, size: String(data.length) };
-    if (sha256) query.sha256 = sha256;
-    await this.syncStreamPost(query, () => data as BodyInit, "sync write");
-  }
-
-  /** Pack the changed files (paths relative to `localRoot`) into one gzip tar
-   * and extract it in the guest — via `/sync-stream` where available, else by
-   * uploading and running `tar -x`. Uses node-tar, which reads the files from
-   * disk preserving mode (exec bits) + mtime. */
+  /** Upload the changed files as an archive and extract it in the VM. */
   private async uploadAndExtractTarball(
     changed: Array<{ rel: string; abs: string }>,
     localRoot: string,
@@ -1587,32 +1465,23 @@ export class VM {
         changed.map((entry) => entry.rel),
       );
 
-      // One round trip. `/sync-stream?extract=tar.gz` streams the
-      // tarball to the guest over vsock and untars it THERE before responding.
-      // The fallback path is upload plus a separate `run("tar -xf")` — two
-      // round-trips, with the extract going through the user run scheduler
-      // where it can queue behind an active foreground run.
-      //
-      // A 404 selects the upload-and-extract path.
-      try {
-        if (this._client._supportsStreamingBody()) {
-          const { size } = await fsp.stat(localTar);
-          await this.syncStreamExtractFile(localTar, size, remoteRoot, mode);
-        } else {
-          // Caller-supplied fetch: may not accept a stream body, so buffer.
-          await this.syncStreamExtract(await fsp.readFile(localTar), remoteRoot, mode);
-        }
-        return;
-      } catch (error) {
-        if (!(error instanceof ArkerError) || error.code !== "not_found") {
-          throw error; // real failure (auth, path escape, size) must not be masked
-        }
-      }
-
-      // A 404 selects the inline or presigned write path. Do not call `sync()`
-      // here because it uses the same streaming route.
       const remoteTar = `/tmp/.arker-sync-${ulid()}.${mode}`;
-      await this.syncWriteInline(remoteTar, await fsp.readFile(localTar));
+      const handle = await fsp.open(localTar, "r");
+      try {
+        const { size } = await handle.stat();
+        await this.syncWriteChunks(remoteTar, size, async (start, length) => {
+          const buffer = Buffer.alloc(length);
+          let offset = 0;
+          while (offset < length) {
+            const { bytesRead } = await handle.read(buffer, offset, length - offset, start + offset);
+            if (bytesRead === 0) throw new ArkerError("internal", "sync upload source ended before its declared size", 0);
+            offset += bytesRead;
+          }
+          return buffer;
+        });
+      } finally {
+        await handle.close();
+      }
 
       // `set -e` + explicit rm: any extract failure exits non-zero; the tarball
       // is removed on success. Missing parent dirs are created by mkdir/tar.
@@ -1652,16 +1521,23 @@ export class VM {
   }
 
   private async syncWriteInline(path: string, data: Uint8Array): Promise<void> {
-    const result = await this.sendOneWrite({
-      path,
-      size: data.length,
-      upload_id: ulid(),
-      content: bytesToBase64(data),
-      start: 0,
-      end: data.length,
-      is_secret: false,
-    });
-    assertWriteComplete(result, "inline write");
+    await this.syncWriteChunks(path, data.length, async (start, length) => data.subarray(start, start + length));
+  }
+
+  private async syncWriteChunks(
+    path: string, size: number, read: (start: number, length: number) => Promise<Uint8Array>,
+  ): Promise<void> {
+    const uploadId = ulid();
+    let result: SyncWriteResult | undefined;
+    for (let start = 0; start < Math.max(size, 1); start += CHUNK_SIZE) {
+      const end = Math.min(start + CHUNK_SIZE, size);
+      const data = await read(start, end - start);
+      result = await this.sendOneWrite({
+        path, size, upload_id: uploadId, content: bytesToBase64(data),
+        start, end, is_secret: false,
+      });
+    }
+    assertWriteComplete(result!, "inline write");
   }
 
   private async sendOneWrite(entry: SyncWriteEntry): Promise<SyncWriteResult> {

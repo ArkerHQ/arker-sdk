@@ -1004,9 +1004,9 @@ async function testMutationDoesNotRetryServerUnknownOutcome(): Promise<void> {
   assert.equal(fetch.calls.length, 1);
 }
 
-async function testSyncStreamDoesNotRetryAmbiguousNetworkFailure(): Promise<void> {
+async function testSyncWriteDoesNotRetryAmbiguousNetworkFailure(): Promise<void> {
   const fetch = new FakeFetch();
-  const match = (method: string, url: string) => method === "POST" && url.includes("/sync-stream");
+  const match = (method: string, url: string) => method === "POST" && url.endsWith("/sync");
   fetch.addNetworkError(match);
 
   await assert.rejects(
@@ -1512,7 +1512,7 @@ await testNonRetryableStatusFailsImmediately();
 await testGetRetriesNetworkFailure();
 await testKeyedRunDoesNotRetryAmbiguousNetworkFailure();
 await testMutationDoesNotRetryServerUnknownOutcome();
-await testSyncStreamDoesNotRetryAmbiguousNetworkFailure();
+await testSyncWriteDoesNotRetryAmbiguousNetworkFailure();
 await testGetAndSetPolicies();
 await testCreateFilesystem();
 await testCancelRun();
@@ -1677,10 +1677,6 @@ async function testSyncDirUploadsAGzippedTarball(): Promise<void> {
   const fetch = new FakeFetch();
   // 1. remote manifest -> empty, so every file counts as changed
   fetch.addJson((m, url) => m === "POST" && url.endsWith("/sync"), 200, { ok: true, op: "manifest", entries: [] });
-  // 2. no /sync-stream on this server -> 404 -> legacy upload+run path below
-  fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 404, {
-    error: { code: "not_found", message: "no route" },
-  });
   // 3. the tarball write (small enough to go inline)
   fetch.addJson((m, url) => m === "POST" && url.endsWith("/sync"), 200, {
     ok: true, op: "write",
@@ -1707,12 +1703,6 @@ async function testSyncDirUploadsAGzippedTarball(): Promise<void> {
 
 await testSyncDirUploadsAGzippedTarball();
 
-// ── syncDir /sync-stream fast path ───────────────────────────────────
-// The legacy path is upload + a SEPARATE run("tar -xf"): two round-trips, with
-// the extract going through the USER run scheduler where it queues behind an
-// active foreground run. /sync-stream?extract=tar.gz does both in one request,
-// untarring in the guest before responding.
-
 /** A syncDir fixture: a temp dir of `n` small files, plus a scripted manifest. */
 async function syncDirFixture(n = 8) {
   const fs = await import("node:fs");
@@ -1728,34 +1718,37 @@ async function syncDirFixture(n = 8) {
   return { dir, fetch, cleanup };
 }
 
-async function testSyncStreamFastPathSkipsTheExtractRun(): Promise<void> {
-  const { dir, fetch, cleanup } = await syncDirFixture();
-  fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 200, { ok: true });
-
-  await client(fetch).vm("vm_1").syncDir(dir, "/home/user/p");
-
-  const stream = fetch.calls.find((c) => c.url.includes("/sync-stream"));
-  assert.ok(stream, "syncDir must try /sync-stream first");
-  assert.equal(stream!.headers["content-type"], "application/octet-stream", "body must go raw, not base64 JSON");
-
-  // Params ride in the query string: the auth middleware strips x-arker-* from
-  // untrusted callers and would erase them as headers.
-  const qs = new URL(stream!.url).searchParams;
-  assert.equal(qs.get("path"), "/home/user/p");
-  assert.equal(qs.get("extract"), "tar.gz");
-  assert.ok(Number(qs.get("size")) > 0, "size must be the tarball byte length");
-
-  // The whole point: no second round-trip through the user run scheduler.
-  assert.equal(fetch.calls.filter((c) => c.url.endsWith("/runs")).length, 0, "fast path must not issue an extract run");
-  cleanup();
+function acceptSyncArchive(fetch: FakeFetch): void {
+  fetch.addJson((m, url) => m === "POST" && url.endsWith("/sync"), 200, {
+    ok: true, op: "write", results: [{ complete: true, written: true }],
+  });
+  fetch.addJson((m, url) => m === "POST" && url.endsWith("/runs"), 200, {
+    run_id: "r1", state: "completed", exit_code: 0, stdout: "", stderr: "",
+    stdout_encoding: "utf-8", stderr_encoding: "utf-8",
+  });
 }
 
-async function testSyncStreamErrorsOtherThan404DoNotFallBack(): Promise<void> {
+async function testSyncDirUploadsThenExtracts(): Promise<void> {
+  const { dir, fetch, cleanup } = await syncDirFixture();
+  try {
+    acceptSyncArchive(fetch);
+    await client(fetch).vm("vm_1").syncDir(dir, "/home/user/p");
+    assert.equal(fetch.calls.length, 3);
+    const write = JSON.parse(fetch.calls[1]!.body!);
+    assert.equal(write.op, "write");
+    const command = JSON.parse(fetch.calls[2]!.body!).command;
+    assert.ok(command.includes(write.writes[0].path));
+    assert.ok(command.includes("tar -xf"));
+    assert.ok(command.includes("/home/user/p"));
+  } finally { cleanup(); }
+}
+
+async function testSyncDirUploadErrorsStopExtraction(): Promise<void> {
   const { dir, fetch, cleanup } = await syncDirFixture();
   // A path escape is a REAL rejection. Silently retrying the slow path would
   // turn a hard error into a confusing one.
-  fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 403, {
-    error: { code: "permission_denied", message: "path escapes the VM root" },
+  fetch.addJson((m, url) => m === "POST" && url.endsWith("/sync"), 403, {
+    error: { code: "permission_denied", message: "path escapes the VM root", timestamp: "2026-01-01T00:00:00Z" },
   });
 
   await assert.rejects(
@@ -1770,8 +1763,8 @@ async function testSyncStreamErrorsOtherThan404DoNotFallBack(): Promise<void> {
   cleanup();
 }
 
-await testSyncStreamFastPathSkipsTheExtractRun();
-await testSyncStreamErrorsOtherThan404DoNotFallBack();
+await testSyncDirUploadsThenExtracts();
+await testSyncDirUploadErrorsStopExtraction();
 
 // ── syncDir assumeEmpty ──────────────────────────────────────────────
 // The manifest exists to avoid re-sending unchanged files. Into a fresh
@@ -1787,7 +1780,7 @@ async function testAssumeEmptySkipsTheManifestRoundTrip(): Promise<void> {
 
   const fetch = new FakeFetch();
   // Deliberately NO manifest script: if syncDir asks for one, FakeFetch throws.
-  fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 200, { ok: true });
+  acceptSyncArchive(fetch);
 
   const result = await client(fetch).vm("vm_1").syncDir(dir, "/home/user/p", { assumeEmpty: true });
 
@@ -1948,7 +1941,7 @@ function syncDirServer(remoteEntries: Array<{ path: string; hash: string }> = []
   fetch.addJson((m, url) => m === "POST" && url.endsWith("/sync"), 200, {
     ok: true, op: "manifest", entries: remoteEntries, truncated: false,
   });
-  fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 200, { ok: true });
+  acceptSyncArchive(fetch);
   return fetch;
 }
 
@@ -2109,7 +2102,7 @@ async function testStatCacheNotWrittenWhenUploadFails(): Promise<void> {
     fetch.addJson((m, url) => m === "POST" && url.endsWith("/sync"), 200, {
       ok: true, op: "manifest", entries: [], truncated: false,
     });
-    fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 500, {
+    fetch.addJson((m, url) => m === "POST" && url.endsWith("/sync"), 500, {
       error: { code: "internal", message: "nope" },
     });
     await assert.rejects(() => client(fetch).vm("vm_1").syncDir(dir, "/p"));
