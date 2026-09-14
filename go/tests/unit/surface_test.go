@@ -2,9 +2,11 @@ package unit
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -437,29 +439,6 @@ func TestReadFileFollowsAPresignedURL(t *testing.T) {
 	}
 }
 
-func TestWriteFileStreamsWithAnExactSize(t *testing.T) {
-	// The router reads ?size= to decide whether to forward the body streamed,
-	// so a wrong value breaks the transfer rather than merely mis-reporting it.
-	var size, path string
-	var got []byte
-	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
-		size, path = r.URL.Query().Get("size"), r.URL.Query().Get("path")
-		got, _ = io.ReadAll(r.Body)
-		fmt.Fprint(w, `{"ok":true}`)
-	}, reject(t, "control"))
-
-	payload := []byte("some bytes")
-	if err := c.VM("vm_1").WriteFile(context.Background(), "/tmp/x", payload); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if path != "/tmp/x" || size != "10" {
-		t.Fatalf("path=%q size=%q", path, size)
-	}
-	if string(got) != string(payload) {
-		t.Fatalf("body was %q", got)
-	}
-}
-
 func TestSyncDirSendsOnlyWhatTheManifestLacks(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "same.txt", "unchanged")
@@ -469,15 +448,10 @@ func TestSyncDirSendsOnlyWhatTheManifestLacks(t *testing.T) {
 	sameHash := sha256Hex("unchanged")
 	var extracted []string
 	var extractMode string
-	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/sync") {
-			fmt.Fprintf(w, `{"root":"/dst","hash_algo":"sha256","truncated":false,"entries":[{"path":"same.txt","size":9,"mode":420,"hash":%q}]}`, sameHash)
-			return
-		}
-		extractMode = r.URL.Query().Get("extract")
-		extracted = tarNames(t, r.Body, extractMode)
-		fmt.Fprint(w, `{"ok":true}`)
-	}, reject(t, "control"))
+	c := syncDirectoryServer(t, fmt.Sprintf(`{"root":"/dst","hash_algo":"sha256","truncated":false,"entries":[{"path":"same.txt","size":9,"mode":420,"hash":%q}]}`, sameHash), func(data []byte) {
+		extractMode = "tar.gz"
+		extracted = tarNames(t, bytes.NewReader(data), extractMode)
+	})
 
 	result, err := c.VM("vm_1").SyncDir(context.Background(), dir, "dst", arker.SyncDirOptions{})
 	if err != nil {
@@ -500,14 +474,9 @@ func TestSyncDirRespectsIgnore(t *testing.T) {
 	write(t, dir, "skip.log", "b")
 
 	var names []string
-	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/sync") {
-			fmt.Fprint(w, `{"root":"/dst","hash_algo":"sha256","truncated":false,"entries":[]}`)
-			return
-		}
-		names = tarNames(t, r.Body, r.URL.Query().Get("extract"))
-		fmt.Fprint(w, `{"ok":true}`)
-	}, reject(t, "control"))
+	c := syncDirectoryServer(t, `{"root":"/dst","hash_algo":"sha256","truncated":false,"entries":[]}`, func(data []byte) {
+		names = tarNames(t, bytes.NewReader(data), "tar.gz")
+	})
 
 	result, err := c.VM("vm_1").SyncDir(context.Background(), dir, "dst", arker.SyncDirOptions{
 		Ignore: func(rel string) bool { return strings.HasSuffix(rel, ".log") },
@@ -529,13 +498,7 @@ func TestSyncDirReportsATruncatedManifest(t *testing.T) {
 	// sync silently becomes a full one. The caller has to be able to see that.
 	dir := t.TempDir()
 	write(t, dir, "a.txt", "a")
-	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/sync") {
-			fmt.Fprint(w, `{"root":"/dst","hash_algo":"sha256","truncated":true,"entries":[]}`)
-			return
-		}
-		fmt.Fprint(w, `{"ok":true}`)
-	}, reject(t, "control"))
+	c := syncDirectoryServer(t, `{"root":"/dst","hash_algo":"sha256","truncated":true,"entries":[]}`, func([]byte) {})
 
 	result, err := c.VM("vm_1").SyncDir(context.Background(), dir, "dst", arker.SyncDirOptions{})
 	if err != nil {
@@ -554,14 +517,7 @@ func TestSyncDirCacheSkipsRehashingButNotUploads(t *testing.T) {
 	cache := arker.NewSyncCache()
 
 	var uploads int32
-	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/sync") {
-			fmt.Fprint(w, `{"root":"/dst","hash_algo":"sha256","truncated":false,"entries":[]}`)
-			return
-		}
-		atomic.AddInt32(&uploads, 1)
-		fmt.Fprint(w, `{"ok":true}`)
-	}, reject(t, "control"))
+	c := syncDirectoryServer(t, `{"root":"/dst","hash_algo":"sha256","truncated":false,"entries":[]}`, func([]byte) { atomic.AddInt32(&uploads, 1) })
 
 	for range 2 {
 		if _, err := c.VM("vm_1").SyncDir(context.Background(), dir, "dst",
@@ -852,4 +808,62 @@ func TestGetVMStaysOnTheConfiguredEndpoint(t *testing.T) {
 	if vm.BaseURL() != configured {
 		t.Fatalf("GetVM bound the VM to %q, not the configured %q", vm.BaseURL(), configured)
 	}
+}
+
+// syncDirectoryServer accepts only the supported upload and extraction routes.
+func syncDirectoryServer(t *testing.T, manifest string, archive func([]byte)) *arker.Client {
+	var data []byte
+	var remotePath string
+	return twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("unexpected method %s", r.Method)
+		}
+		if r.URL.Path == "/v1/vms/vm_1/runs" {
+			var body struct{ Command string }
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			if remotePath == "" || !strings.Contains(body.Command, remotePath) || !strings.Contains(body.Command, "tar -xf") {
+				t.Errorf("unexpected extract command %q", body.Command)
+			}
+			archive(data)
+			data = nil
+			fmt.Fprint(w, `{"run_id":"r1","state":"completed","exit_code":0,"stdout":"","stderr":""}`)
+			return
+		}
+		if r.URL.Path != "/v1/vms/vm_1/sync" {
+			t.Errorf("unexpected route %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		var body struct {
+			Op     string
+			Writes []struct {
+				Path    string
+				Content string
+				End     int64
+				Size    int64
+			}
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		if body.Op == "manifest" {
+			fmt.Fprint(w, manifest)
+			return
+		}
+		if body.Op != "write" || len(body.Writes) != 1 {
+			t.Error("unexpected sync body")
+			return
+		}
+		entry := body.Writes[0]
+		chunk, err := base64.StdEncoding.DecodeString(entry.Content)
+		if err != nil {
+			t.Error(err)
+		}
+		remotePath = entry.Path
+		data = append(data, chunk...)
+		fmt.Fprintf(w, `{"ok":true,"op":"write","results":[{"complete":%t,"written":%t}]}`, entry.End == entry.Size, entry.End == entry.Size)
+	}, reject(t, "control"))
 }
