@@ -29,12 +29,10 @@ const (
 	// Must exceed the server's sync window or the request is abandoned exactly
 	// as the background ack arrives, and Run never gets to poll.
 	defaultTimeout    = 300 * time.Second
-	streamTimeout     = 600 * time.Second
 	defaultAttempts   = 4 // TOTAL wire attempts, not four on top of the first
 	defaultBaseDelay  = 200 * time.Millisecond
 	defaultMaxDelay   = 2 * time.Second
 	defaultJitter     = 50 * time.Millisecond
-	streamMaxBytes    = 64 << 20 // the router's proxy body cap; 413 above it
 	compressSampleMin = 256 << 10
 	compressRatio     = 0.9
 	hashConcurrency   = 8

@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 )
@@ -61,59 +60,49 @@ func (v *VM) ReadFile(ctx context.Context, path string) ([]byte, error) {
 }
 
 // WriteFile writes data to path in this VM, creating parent directories.
-//
-// The bytes stream straight to the guest's disk at every size: the destination
-// is the guest filesystem, not object storage, so there is nothing to gain by
-// detouring through it.
 func (v *VM) WriteFile(ctx context.Context, path string, data []byte) error {
-	return v.streamPost(ctx, map[string]string{"path": path, "size": strconv.Itoa(len(data))},
-		func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(data)), nil }, "sync write")
+	return v.writeChunks(ctx, path, int64(len(data)), bytes.NewReader(data))
 }
 
-// streamPost is the single /sync-stream call site. body is a factory, not a
-// value, so a retried attempt gets fresh bytes -- a consumed stream cannot be
-// replayed.
-func (v *VM) streamPost(ctx context.Context, params map[string]string, body func() (io.ReadCloser, error), what string) error {
-	q := newQuery()
-	for k, val := range params {
-		q.str(k, val)
-	}
-	url := v.baseURL + q.on(v.path("/sync-stream"))
-	client := &http.Client{Timeout: streamTimeout, Transport: v.client.http.Transport}
-
-	for attempt := range v.client.retry.Attempts {
-		reader, err := body()
-		if err != nil {
+// writeChunks keeps each request within the server's chunk and body limits.
+func (v *VM) writeChunks(ctx context.Context, path string, size int64, source io.Reader) error {
+	const chunkSize = 4 << 20
+	uploadID := newIdempotencyKey("sync_")
+	for start := int64(0); start < max(size, 1); start += chunkSize {
+		end := min(start+chunkSize, size)
+		chunk := make([]byte, end-start)
+		if _, err := io.ReadFull(source, chunk); err != nil {
 			return err
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, reader)
-		if err != nil {
+		entry := map[string]any{
+			"path": path, "size": size, "upload_id": uploadID,
+			"content": base64.StdEncoding.EncodeToString(chunk), "start": start, "end": end,
+		}
+		var out struct {
+			Results []struct {
+				Complete bool   `json:"complete"`
+				Written  bool   `json:"written"`
+				Error    *Error `json:"error"`
+			} `json:"results"`
+		}
+		if _, err := v.client.do(ctx, call{
+			method: http.MethodPost, path: v.path("/sync"), base: v.baseURL,
+			body: map[string]any{"op": "write", "writes": []any{entry}}, out: &out,
+		}); err != nil {
 			return err
 		}
-		v.client.auth(req.Header)
-		req.Header.Set("Content-Type", "application/octet-stream")
-
-		resp, err := client.Do(req)
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			return &UnknownOutcomeError{http.MethodPost, "/sync-stream", err}
+		if len(out.Results) != 1 {
+			return &Error{Code: "internal", StatusCode: 200, Message: "sync write response missing result"}
 		}
-		status, raw, readErr := drain(resp)
-		if status < http.StatusBadRequest && readErr == nil {
-			return nil
+		result := out.Results[0]
+		if result.Error != nil {
+			return result.Error
 		}
-		apiErr := decodeError(status, raw)
-		if apiErr.Message == "" {
-			apiErr.Message = fmt.Sprintf("%s failed (%d)", what, status)
-		}
-		// 413 is the router's body cap, not a transient fault.
-		if !retryable(apiErr) || attempt == v.client.retry.Attempts-1 || !v.client.backoff(ctx, attempt, apiErr) {
-			return apiErr
+		if end == size && (!result.Complete || !result.Written) {
+			return &Error{Code: "internal", StatusCode: 200, Message: "sync write did not complete"}
 		}
 	}
-	return fmt.Errorf("arker: %s exhausted retries", what)
+	return nil
 }
 
 // SyncDirResult reports what a SyncDir call moved.
@@ -338,17 +327,25 @@ func (v *VM) uploadTarball(ctx context.Context, changed []*localFile, remoteRoot
 	if err != nil {
 		return err
 	}
-	if info.Size() > streamMaxBytes {
-		return &Error{Code: "payload_too_large", StatusCode: 413, Message: fmt.Sprintf(
-			"arker: sync_dir tarball is %d bytes, above the %d-byte edge limit; sync fewer files per call",
-			info.Size(), streamMaxBytes)}
+	remoteTar := "/tmp/.arker-" + newIdempotencyKey("sync_") + "." + mode
+	source, err := os.Open(tmp.Name())
+	if err != nil {
+		return err
 	}
-	// size comes from stat, not a buffered length: the router reads it to
-	// decide whether to forward the body streamed, so it must be exact.
-	return v.streamPost(ctx,
-		map[string]string{"path": remoteRoot, "size": strconv.FormatInt(info.Size(), 10), "extract": mode},
-		func() (io.ReadCloser, error) { return os.Open(tmp.Name()) },
-		"sync-stream extract")
+	defer func() { _ = source.Close() }()
+	if err := v.writeChunks(ctx, remoteTar, info.Size(), source); err != nil {
+		return err
+	}
+	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
+	command := "set -e; mkdir -p " + quote(remoteRoot) + "; tar -xf " + quote(remoteTar) + " -C " + quote(remoteRoot) + "; rm -f " + quote(remoteTar)
+	result, err := v.Run(ctx, RunRequest{Command: command})
+	if err != nil {
+		return err
+	}
+	if result.ExitCode == nil || *result.ExitCode != 0 || result.State == "failed" {
+		return &Error{Code: "internal", StatusCode: 200, Message: fmt.Sprintf("sync_dir tar extract failed: %s", result.Stderr)}
+	}
+	return nil
 }
 
 func writeTar(out io.Writer, changed []*localFile, compress bool) error {

@@ -1312,9 +1312,9 @@ def test_mutation_does_not_retry_a_server_unknown_outcome() -> None:
     assert len(t.calls) == 1
 
 
-def test_sync_stream_does_not_retry_an_ambiguous_network_failure() -> None:
+def test_sync_write_does_not_retry_an_ambiguous_network_failure() -> None:
     t = FakeTransport()
-    predicate = lambda method, url: method == "POST" and "/sync-stream" in url
+    predicate = lambda method, url: method == "POST" and url.endswith("/sync")
     t.add_network_error(predicate)
 
     with use_transport(t), pytest.raises(sdk.ArkerError, match="outcome is unknown"):
@@ -1372,30 +1372,6 @@ def test_read_presigned_follows_url() -> None:
         assert client().vm("vm_1").sync("/home/user/big") == b"hello"
 
 
-def test_small_write_streams_to_sync_stream() -> None:
-    """`sync` streams raw bytes to /sync-stream rather than base64-ing them
-    into a JSON writes[] envelope. Measured in-region, streaming beat the
-    inline path 103-112 MB/s vs 41-50, so it is the default at every size the
-    router will accept."""
-    t = FakeTransport()
-    t.add_json(
-        lambda method, url: method == "POST" and "/sync-stream" in url,
-        200,
-        {"ok": True},
-    )
-
-    with use_transport(t):
-        client().vm("vm_1").sync("/home/user/x", b"hello world")
-
-    call = t.calls[0]
-    assert "/sync-stream" in call["url"]
-    assert "path=%2Fhome%2Fuser%2Fx" in call["url"]
-    assert "size=11" in call["url"]
-    # Raw body: no base64, so none of the +33% inflation the JSON path pays.
-    body = call["body"]
-    assert (body.encode() if isinstance(body, str) else body) == b"hello world"
-
-
 def test_empty_write_sends_one_empty_chunk() -> None:
     t = FakeTransport()
     predicate = lambda method, url: method == "POST" and url.endswith("/sync")
@@ -1419,10 +1395,7 @@ def test_empty_write_sends_one_empty_chunk() -> None:
     )
 
     with use_transport(t):
-        # `sync()` streams now; the inline write machinery stays reachable via
-        # sync_dir's fallback for servers predating /sync-stream, so this
-        # exercises it directly rather than through the public entrypoint.
-        client().vm("vm_1")._sync_write_inline("/home/user/empty", b"")
+        client().vm("vm_1").sync("/home/user/empty", b"")
 
     writes = json.loads(t.calls[0]["body"])["writes"]
     assert len(writes) == 1
@@ -1430,55 +1403,38 @@ def test_empty_write_sends_one_empty_chunk() -> None:
     assert writes[0]["content"] == ""
 
 
-def test_mid_size_write_inlines_chunks_in_one_request() -> None:
+def test_mid_size_write_sends_ordered_chunks() -> None:
     payload = b"A" * (sdk.CHUNK_SIZE + 1)
     t = FakeTransport()
     predicate = lambda method, url: method == "POST" and url.endswith("/sync")
-    t.add_json(
-        predicate,
-        200,
-        {
-            "ok": True,
-            "op": "write",
-            "results": [
-                {
-                    "path": "/home/user/big",
-                    "size": len(payload),
-                    "received_bytes": sdk.CHUNK_SIZE,
-                    "ranges": [{"start": 0, "end": sdk.CHUNK_SIZE}],
-                    "complete": False,
-                    "written": False,
-                },
-                {
-                    "path": "/home/user/big",
-                    "size": len(payload),
-                    "received_bytes": len(payload),
-                    "ranges": [{"start": 0, "end": len(payload)}],
-                    "complete": True,
-                    "written": True,
-                },
-            ],
-        },
-    )
-
+    for end in (sdk.CHUNK_SIZE, len(payload)):
+        t.add_json(
+            predicate,
+            200,
+            {
+                "ok": True,
+                "op": "write",
+                "results": [
+                    {
+                        "path": "/home/user/big",
+                        "size": len(payload),
+                        "received_bytes": end,
+                        "ranges": [{"start": 0, "end": end}],
+                        "complete": end == len(payload),
+                        "written": end == len(payload),
+                    }
+                ],
+            },
+        )
     with use_transport(t):
-        # `sync()` streams now; the inline write machinery stays reachable via
-        # sync_dir's fallback for servers predating /sync-stream, so this
-        # exercises it directly rather than through the public entrypoint.
-        client().vm("vm_1")._sync_write_inline("/home/user/big", payload)
-
-    # One request, two chunks sharing an upload_id; only the final chunk
-    # reports completion.
-    assert [call["method"] for call in t.calls] == ["POST"]
-    writes = json.loads(t.calls[0]["body"])["writes"]
-    assert len(writes) == 2
+        client().vm("vm_1").sync("/home/user/big", payload)
+    assert [call["method"] for call in t.calls] == ["POST", "POST"]
+    writes = [json.loads(call["body"])["writes"][0] for call in t.calls]
     assert writes[0]["upload_id"] == writes[1]["upload_id"]
     assert (writes[0]["start"], writes[0]["end"]) == (0, sdk.CHUNK_SIZE)
     assert (writes[1]["start"], writes[1]["end"]) == (sdk.CHUNK_SIZE, len(payload))
-    assert writes[0]["size"] == len(payload)
-    assert writes[1]["size"] == len(payload)
-    decoded = base64.b64decode(writes[0]["content"]) + base64.b64decode(writes[1]["content"])
-    assert decoded == payload
+    assert all(write["size"] == len(payload) for write in writes)
+    assert b"".join(base64.b64decode(write["content"]) for write in writes) == payload
 
 
 def test_fork_sends_durable_flag() -> None:
@@ -1671,7 +1627,7 @@ def test_per_entry_internal_error_retries(monkeypatch) -> None:
     )
 
     with use_transport(t):
-        sdk.Arker(api_key="k", base_url="https://test.invalid/api", retry={"attempts": 2}).vm("vm")._sync_write_inline(
+        sdk.Arker(api_key="k", base_url="https://test.invalid/api", retry={"attempts": 2}).vm("vm").sync(
             "/home/user/x", b"hello"
         )
 
