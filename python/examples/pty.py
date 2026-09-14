@@ -1,6 +1,6 @@
 """Interactive PTY example — open a real terminal in a VM and run `claude`.
 
-    pip install 'arker[pty]>=0.10.0,<0.11'
+    pip install 'arker[pty]'
     ARKER_API_KEY=...  ARKER_BASE_URL=https://<host>/api \
         python examples/pty.py [vm_id]
 
