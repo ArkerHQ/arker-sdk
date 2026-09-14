@@ -1358,7 +1358,7 @@ class VM:
         ``persist=True`` (the default backend behavior) to reattach to a
         running shell (scrollback is replayed).
 
-        Requires the ``websocket-client`` package — ``pip install 'arker[pty]>=0.10.0,<0.11'``.
+        Requires the ``websocket-client`` package — ``pip install 'arker[pty]'``.
         """
         # Plain-text by default. A PTY inherits its session's environment, so
         # this is set when the session is created — no per-command prefixing and
@@ -1426,7 +1426,7 @@ class Pty:
     :meth:`kill` to destroy the shell, and :meth:`close` to detach.
 
     Obtain one via :meth:`VM.connect_pty`. Requires the ``websocket-client``
-    package (``pip install 'arker[pty]>=0.10.0,<0.11'``).
+    package (``pip install 'arker[pty]'``).
     """
 
     @dataclasses.dataclass
@@ -1450,8 +1450,7 @@ class Pty:
         except ImportError as error:  # pragma: no cover - import guard
             raise ArkerError(
                 "missing_dependency",
-                "interactive PTY needs the 'websocket-client' package; "
-                "install with: pip install 'arker[pty]>=0.10.0,<0.11'",
+                "interactive PTY needs the 'websocket-client' package; install with: pip install 'arker[pty]'",
                 0,
             ) from error
 
