@@ -7,7 +7,7 @@
     },
     "cli": {
       "name": "@arker-ai/cli",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "bin": {
         "arker": "./dist/cli.js",
       },
