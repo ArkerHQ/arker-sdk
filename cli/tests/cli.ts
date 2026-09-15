@@ -315,10 +315,28 @@ async function testForkForwardsVgpu(): Promise<void> {
     },
   );
 
+  // At or above one card `vgpu` counts WHOLE cards, so the rungs jump 1, 2, 4,
+  // 8. Nothing between them is legal, which is why the ladder cannot be a step.
+  for (const value of ["1", "2", "4", "8"]) {
+    await withCapturedServer(
+      (_request, res) => jsonResponse(res, { vm_id: "vm_gpu" }),
+      async (baseUrl, requests) => {
+        const result = await runCli(baseUrl, ["fork", "--vgpu", value, "source-vm"]);
+
+        assert.equal(result.code, 0, `--vgpu ${value} must be accepted: ${result.stderr}`);
+        assert.equal(
+          (requests[0]!.body as { resources: { vgpu: number } }).resources.vgpu,
+          Number(value),
+        );
+      },
+    );
+  }
+
   // Off the ladder, out of range, and non-numeric must all fail before any
-  // request is made — the server enforces eighths, so spending a round trip to
-  // be told so is pure latency.
-  for (const value of ["0", "1.5", "-0.5", "half", "0.3", "0.2", "0.0625"]) {
+  // request is made — the server enforces the ladder, so spending a round trip
+  // to be told so is pure latency. 3, 5 and 16 sit between or past the
+  // whole-card rungs.
+  for (const value of ["0", "1.5", "-0.5", "half", "0.3", "0.2", "0.0625", "3", "5", "16"]) {
     await withCapturedServer(
       (_request, res) => jsonResponse(res, { vm_id: "vm_gpu" }),
       async (baseUrl, requests) => {

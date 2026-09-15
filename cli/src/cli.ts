@@ -70,11 +70,10 @@ type OptionSpec =
   | { type: "boolean" }
   | { type: "string"; values?: readonly string[]; repeatable?: boolean; allowEmpty?: boolean }
   | { type: "integer"; min: number; max?: number }
-  // Fractional, for `--vgpu 0.25`. `min` is INCLUSIVE when a `step` is given
-  // (the smallest rung is a legal value); exclusive otherwise. `step` states a
-  // ladder the server enforces, so we can refuse the same values it would
-  // rather than spending a round trip on a 400.
-  | { type: "number"; min: number; max: number; step?: number };
+  // Fractional, for `--vgpu 0.25`. With `values` the flag is a membership test
+  // against a ladder the server enforces, so we refuse what it would without
+  // spending a round trip; otherwise `min` is exclusive and `max` inclusive.
+  | { type: "number"; min: number; max: number; values?: readonly number[] };
 
 type OptionSpecs = Record<string, OptionSpec>;
 
@@ -99,7 +98,14 @@ const RESOURCE_OPTIONS: OptionSpecs = {
 const FORK_RESOURCE_OPTIONS: OptionSpecs = {
   ...RESOURCE_OPTIONS,
   // Eighths of one card, matching `multipleOf: 0.125` in the API contract.
-  vgpu: { type: "number", min: 0.125, max: 1, step: 0.125 },
+  // arker-api-contract VGPU_LADDER, less its 0 rung: eighths of one card, then
+  // whole cards. 0 declines the GPU outright and stays refused here.
+  vgpu: {
+    type: "number",
+    min: 0.125,
+    max: 8,
+    values: [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1, 2, 4, 8],
+  },
 };
 
 const FORK_OPTIONS: OptionSpecs = {
@@ -451,19 +457,14 @@ function parseOption(
     if (!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(value) || !Number.isFinite(parsed)) {
       die(`parameter "${name}" must be a number`);
     }
-    if (spec.step === undefined) {
+    if (spec.values === undefined) {
       if (parsed <= spec.min || parsed > spec.max) {
         die(`parameter "${name}" must be > ${spec.min} and <= ${spec.max}`);
       }
-    } else {
-      // Every rung is a power-of-two fraction, so this is exact — no epsilon.
-      const rungs = [];
-      for (let v = spec.min; v <= spec.max + spec.step / 2; v += spec.step) {
-        rungs.push(v);
-      }
-      if (!rungs.includes(parsed)) {
-        die(`parameter "${name}" must be one of: ${rungs.join(", ")}`);
-      }
+    } else if (!spec.values.includes(parsed)) {
+      // Every rung is exact in binary floating point, so `includes` needs no
+      // epsilon.
+      die(`parameter "${name}" must be one of: ${spec.values.join(", ")}`);
     }
     flags[name] = parsed;
   } else {
@@ -1652,7 +1653,10 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   "time-to-background": { placeholder: "<seconds>", desc: "sync window; 0 returns a run id immediately (default 120)" },
   until: { placeholder: "<epoch-seconds>", desc: "include organization-wide activity before this time" },
   vcpu: { placeholder: "<n>", desc: "vCPU count" },
-  vgpu: { placeholder: "<fraction>", desc: "GPU size in eighths of a card (0.125 - 1)" },
+  vgpu: {
+    placeholder: "<size>",
+    desc: "GPU size: eighths of a card below 1 (0.125 - 1), or whole cards (2, 4, 8)",
+  },
   "vm-id": { placeholder: "<id>", desc: "target VM by global id" },
   vm: { placeholder: "<id>", desc: "filter organization-wide activity by one VM" },
   vms: { placeholder: "<id[,id...]>", desc: "filter organization-wide activity by VM IDs" },
