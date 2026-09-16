@@ -107,3 +107,25 @@ def test_invalid_sync_resource_is_not_exposed_as_a_typed_error():
     error = sdk._server_error(raw, 200, file=True)
     assert error.body is None
     assert error.raw == raw
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"retry_after_seconds": 4294967296},
+        {"stage": "image_configuration", "recovery": None},
+        {"stage": "dockerfile_build", "recovery": {"work": "continuing", "context": {"vm_id": "vm"}}},
+    ],
+)
+def test_invalid_contract_metadata_is_not_exposed_as_typed(changes):
+    raw = example("internal")["error"]
+    raw.update(changes)
+    if raw.get("recovery") is None:
+        raw.pop("recovery", None)
+    transport = FakeTransport()
+    transport.add_json(lambda *_: True, 500, {"error": raw})
+    with use_transport(transport), pytest.raises(sdk.ArkerError) as caught:
+        client().vm("vm").delete()
+    error = caught.value
+    assert error.body is None
+    assert error.raw == raw

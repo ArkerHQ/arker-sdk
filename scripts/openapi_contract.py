@@ -14,6 +14,7 @@ from pathlib import Path
 CONTRACT_PATH = Path("openapi.json")
 TYPESCRIPT_PATH = Path("typescript/src/generated/api-types.ts")
 PYTHON_PATH = Path("python/src/arker/generated/api_models.py")
+PYTHON_CONTRACT_PATH = Path("python/src/arker/_openapi.json")
 MANAGED_PATHS = (CONTRACT_PATH, TYPESCRIPT_PATH, PYTHON_PATH)
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -58,6 +59,7 @@ def generate(contract: Path, output_root: Path) -> None:
     python_output = output_root / PYTHON_PATH
     typescript_output.parent.mkdir(parents=True, exist_ok=True)
     python_output.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(contract, output_root / PYTHON_CONTRACT_PATH)
 
     typescript_generator = REPO_ROOT / "typescript/node_modules/.bin/openapi-typescript"
     if not typescript_generator.is_file():
@@ -101,7 +103,12 @@ def generate(contract: Path, output_root: Path) -> None:
             "--use-union-operator",
             "--use-subclass-enum",
             "--enum-field-as-literal",
-            "one",
+            "all",
+            "--enum-field-as-literal-map",
+            '{"Vgpu":"enum"}',
+            "--formatters",
+            "black",
+            "isort",
             "--frozen-dataclasses",
             "--disable-timestamp",
             "--include-path-parameters",
@@ -117,7 +124,7 @@ def stage_contract(output_root: Path, contract: bytes) -> None:
 
 
 def copy_managed_files(source_root: Path, output_root: Path) -> None:
-    for relative_path in MANAGED_PATHS:
+    for relative_path in (*MANAGED_PATHS, PYTHON_CONTRACT_PATH):
         source = source_root / relative_path
         destination = output_root / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)

@@ -2406,6 +2406,122 @@ export interface components {
              */
             code: "expired";
         });
+        IdempotencyConflictErrorResponse: {
+            error: components["schemas"]["IdempotencyConflict"];
+        };
+        PaymentRequiredErrorResponse: {
+            error: components["schemas"]["PaymentRequired"];
+        };
+        UnsupportedOperationErrorResponse: {
+            error: components["schemas"]["UnsupportedOperation"];
+        };
+        BadRequestErrorResponse: {
+            error: components["schemas"]["BadRequest"];
+        };
+        InsufficientResourcesErrorResponse: {
+            error: components["schemas"]["InsufficientResources"];
+        };
+        UnauthorizedErrorResponse: {
+            error: components["schemas"]["Unauthorized"];
+        };
+        ForbiddenErrorResponse: {
+            error: components["schemas"]["Forbidden"];
+        };
+        NotFoundErrorResponse: {
+            error: components["schemas"]["NotFound"];
+        };
+        ConflictErrorResponse: {
+            error: components["schemas"]["Conflict"];
+        };
+        ResourceBusyErrorResponse: {
+            error: components["schemas"]["ResourceBusy"];
+        };
+        InvalidStateErrorResponse: {
+            error: components["schemas"]["InvalidState"];
+        };
+        AlreadyExistsErrorResponse: {
+            error: components["schemas"]["AlreadyExists"];
+        };
+        ExpiredErrorResponse: {
+            error: components["schemas"]["Expired"];
+        };
+        PayloadTooLargeErrorResponse: {
+            error: components["schemas"]["PayloadTooLarge"];
+        };
+        MethodNotAllowedErrorResponse: {
+            error: components["schemas"]["MethodNotAllowed"];
+        };
+        UnrecoverableErrorResponse: {
+            error: components["schemas"]["Unrecoverable"];
+        };
+        CapacityUnavailableErrorResponse: {
+            error: components["schemas"]["CapacityUnavailable"];
+        };
+        UnavailableErrorResponse: {
+            error: components["schemas"]["Unavailable"];
+        };
+        InternalErrorResponse: {
+            error: components["schemas"]["Internal"];
+        };
+        RateLimitedErrorResponse: {
+            error: components["schemas"]["RateLimited"];
+        };
+        QuotaExceededErrorResponse: {
+            error: components["schemas"]["QuotaExceeded"];
+        };
+        ActionRequiredErrorResponse: {
+            error: components["schemas"]["ActionRequired"];
+        };
+        OperationFailedErrorResponse: {
+            error: components["schemas"]["OperationFailed"];
+        };
+        GatewayTimeoutErrorResponse: {
+            error: components["schemas"]["GatewayTimeout"];
+        };
+        BadRequestOrInsufficientResourcesErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["BadRequest"] | components["schemas"]["InsufficientResources"];
+        };
+        AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["AlreadyExists"] | components["schemas"]["Conflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
+        };
+        AlreadyExistsOrInvalidStateErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["AlreadyExists"] | components["schemas"]["InvalidState"];
+        };
+        ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["Conflict"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
+        };
+        ConflictOrInvalidStateErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["Conflict"] | components["schemas"]["InvalidState"];
+        };
+        ConflictOrInvalidStateOrResourceBusyErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["Conflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
+        };
+        InvalidStateOrResourceBusyErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
+        };
+        OperationFailedOrUnrecoverableOrUnsupportedOperationErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["OperationFailed"] | components["schemas"]["Unrecoverable"] | components["schemas"]["UnsupportedOperation"];
+        };
+        UnrecoverableOrUnsupportedOperationErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["Unrecoverable"] | components["schemas"]["UnsupportedOperation"];
+        };
+        QuotaExceededOrRateLimitedErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["QuotaExceeded"] | components["schemas"]["RateLimited"];
+        };
+        CapacityUnavailableOrUnavailableErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["CapacityUnavailable"] | components["schemas"]["Unavailable"];
+        };
     };
     responses: {
         Conflict: {
@@ -2443,9 +2559,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["BadRequest"];
-                };
+                "application/json": components["schemas"]["BadRequestErrorResponse"];
             };
         };
         /** @description HTTP 400: The requested allocation is too small for the operation. Increase the specified allocation. This does not mean the fleet lacks capacity. */
@@ -2455,9 +2569,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["InsufficientResources"];
-                };
+                "application/json": components["schemas"]["InsufficientResourcesErrorResponse"];
             };
         };
         /** @description HTTP 401: Valid authentication is missing or invalid. Supply or refresh credentials. */
@@ -2468,9 +2580,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["Unauthorized"];
-                };
+                "application/json": components["schemas"]["UnauthorizedErrorResponse"];
             };
         };
         /** @description HTTP 403: The caller or policy does not permit this operation. Obtain access or change the applicable policy; repeating the same request does not resolve it. */
@@ -2480,9 +2590,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["Forbidden"];
-                };
+                "application/json": components["schemas"]["ForbiddenErrorResponse"];
             };
         };
         /** @description HTTP 404: The requested resource or route is not available to this caller. Check the identifier and scope; do not assume this distinguishes missing from inaccessible. */
@@ -2492,9 +2600,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["NotFound"];
-                };
+                "application/json": components["schemas"]["NotFoundErrorResponse"];
             };
         };
         /** @description HTTP 409: The request conflicts with current state, with no more specific handling below. Read the current state and update the request. This is the fallback for known state conflicts. */
@@ -2504,9 +2610,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["Conflict"];
-                };
+                "application/json": components["schemas"]["ConflictErrorResponse"];
             };
         };
         /** @description HTTP 409: Active work temporarily prevents the requested operation. Wait for or finish the conflicting work, then retry when the operation is safe to repeat. */
@@ -2516,9 +2620,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["ResourceBusy"];
-                };
+                "application/json": components["schemas"]["ResourceBusyErrorResponse"];
             };
         };
         /** @description HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy requiring a separate wake uses running; established wake progress uses unavailable. */
@@ -2528,9 +2630,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["InvalidState"];
-                };
+                "application/json": components["schemas"]["InvalidStateErrorResponse"];
             };
         };
         /** @description HTTP 409: A resource or unique name already exists. Use the existing resource or choose another name. */
@@ -2540,9 +2640,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["AlreadyExists"];
-                };
+                "application/json": components["schemas"]["AlreadyExistsErrorResponse"];
             };
         };
         /** @description HTTP 409: An idempotency key is bound to a different request. Reuse the original request or intentionally use a new key. */
@@ -2552,9 +2650,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["IdempotencyConflict"];
-                };
+                "application/json": components["schemas"]["IdempotencyConflictErrorResponse"];
             };
         };
         /** @description HTTP 410: A time-limited resource is known to have expired. Create a replacement. Use not_found when missing and expired cannot be distinguished. */
@@ -2564,9 +2660,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["Expired"];
-                };
+                "application/json": components["schemas"]["ExpiredErrorResponse"];
             };
         };
         /** @description HTTP 413: A request or transfer exceeds the supported byte limit. Reduce or split the payload. This is different from insufficient VM disk allocation. */
@@ -2576,9 +2670,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["PayloadTooLarge"];
-                };
+                "application/json": components["schemas"]["PayloadTooLargeErrorResponse"];
             };
         };
         /** @description HTTP 405: The route does not support this HTTP method. Use an allowed method. */
@@ -2589,9 +2681,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["MethodNotAllowed"];
-                };
+                "application/json": components["schemas"]["MethodNotAllowedErrorResponse"];
             };
         };
         /** @description HTTP 422: The selected runtime, platform or feature cannot serve the requested operation. Select a supported operation or platform. For restore_requires_birth_host, restore through an eligible host; do not recreate solely because this host cannot restore it. */
@@ -2601,9 +2691,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["UnsupportedOperation"];
-                };
+                "application/json": components["schemas"]["UnsupportedOperationErrorResponse"];
             };
         };
         /** @description HTTP 422: Authoritative state establishes that recoverable resource state is lost. Recreate only after loss is established. Missing local files, an unknown owner or a host-specific restore restriction are insufficient evidence. */
@@ -2613,9 +2701,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["Unrecoverable"];
-                };
+                "application/json": components["schemas"]["UnrecoverableErrorResponse"];
             };
         };
         /** @description HTTP 503: The platform currently lacks capacity to admit otherwise valid work. Wait, release capacity, or select another placement. The requested allocation itself can be valid. */
@@ -2625,9 +2711,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["CapacityUnavailable"];
-                };
+                "application/json": components["schemas"]["CapacityUnavailableErrorResponse"];
             };
         };
         /** @description HTTP 503: A required service or operation is temporarily unavailable. Retry only when the operation is safe to repeat; the code does not guarantee absence of side effects. */
@@ -2637,9 +2721,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["Unavailable"];
-                };
+                "application/json": components["schemas"]["UnavailableErrorResponse"];
             };
         };
         /** @description HTTP 500: An unexpected implementation failure prevents completion. Use a safe message and correlation identifier for support; log the internal cause. */
@@ -2649,9 +2731,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["Internal"];
-                };
+                "application/json": components["schemas"]["InternalErrorResponse"];
             };
         };
         /** @description HTTP 429: A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service’s quota or credentials. */
@@ -2661,9 +2741,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["RateLimited"];
-                };
+                "application/json": components["schemas"]["RateLimitedErrorResponse"];
             };
         };
         /** @description HTTP 429: A scoped budget, resource or PTY-session limit rejects the operation. Use the exact metric, scope and measurements to release usage or adjust the applicable limit. Organization PTY counts are currently worker-local. */
@@ -2673,9 +2751,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["QuotaExceeded"];
-                };
+                "application/json": components["schemas"]["QuotaExceededErrorResponse"];
             };
         };
         /** @description HTTP 402: Billing setup or payment recovery is required for compute. Complete billing setup or resolve payment. */
@@ -2685,9 +2761,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["PaymentRequired"];
-                };
+                "application/json": components["schemas"]["PaymentRequiredErrorResponse"];
             };
         };
         /** @description HTTP 403: A specific account action must occur before this operation. Complete the named action, such as accepting legal terms or converting the billing plan. */
@@ -2697,9 +2771,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["ActionRequired"];
-                };
+                "application/json": components["schemas"]["ActionRequiredErrorResponse"];
             };
         };
         /** @description HTTP 422: A caller-selected image or build operation reports an expected domain failure, including an explicit execution-budget limit. Inspect the typed reason and any partial-work handles. Poll continuing work or clean up the retained VM before starting another attempt. */
@@ -2709,9 +2781,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["OperationFailed"];
-                };
+                "application/json": components["schemas"]["OperationFailedErrorResponse"];
             };
         };
         /** @description HTTP 504: A gateway or proxy did not receive a required upstream response before its deadline. Inspect known operation handles before retrying. An upstream timeout does not prove that upstream work stopped. An explicit application execution budget uses operation_failed/deadline_exceeded, not this code. */
@@ -2721,9 +2791,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["GatewayTimeout"];
-                };
+                "application/json": components["schemas"]["GatewayTimeoutErrorResponse"];
             };
         };
         /** @description HTTP 400: bad_request, insufficient_resources. The code selects the required details. */
@@ -2733,9 +2801,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["BadRequest"] | components["schemas"]["InsufficientResources"];
-                };
+                "application/json": components["schemas"]["BadRequestOrInsufficientResourcesErrorResponse"];
             };
         };
         /** @description HTTP 409: already_exists, conflict, invalid_state, resource_busy. The code selects the required details. */
@@ -2745,9 +2811,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["AlreadyExists"] | components["schemas"]["Conflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
-                };
+                "application/json": components["schemas"]["AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse"];
             };
         };
         /** @description HTTP 409: already_exists, invalid_state. The code selects the required details. */
@@ -2757,9 +2821,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["AlreadyExists"] | components["schemas"]["InvalidState"];
-                };
+                "application/json": components["schemas"]["AlreadyExistsOrInvalidStateErrorResponse"];
             };
         };
         /** @description HTTP 409: conflict, idempotency_conflict, invalid_state, resource_busy. The code selects the required details. */
@@ -2769,9 +2831,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["Conflict"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
-                };
+                "application/json": components["schemas"]["ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse"];
             };
         };
         /** @description HTTP 409: conflict, invalid_state. The code selects the required details. */
@@ -2781,9 +2841,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["Conflict"] | components["schemas"]["InvalidState"];
-                };
+                "application/json": components["schemas"]["ConflictOrInvalidStateErrorResponse"];
             };
         };
         /** @description HTTP 409: conflict, invalid_state, resource_busy. The code selects the required details. */
@@ -2793,9 +2851,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["Conflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
-                };
+                "application/json": components["schemas"]["ConflictOrInvalidStateOrResourceBusyErrorResponse"];
             };
         };
         /** @description HTTP 409: invalid_state, resource_busy. The code selects the required details. */
@@ -2805,9 +2861,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
-                };
+                "application/json": components["schemas"]["InvalidStateOrResourceBusyErrorResponse"];
             };
         };
         /** @description HTTP 422: operation_failed, unrecoverable, unsupported_operation. The code selects the required details. */
@@ -2817,9 +2871,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["OperationFailed"] | components["schemas"]["Unrecoverable"] | components["schemas"]["UnsupportedOperation"];
-                };
+                "application/json": components["schemas"]["OperationFailedOrUnrecoverableOrUnsupportedOperationErrorResponse"];
             };
         };
         /** @description HTTP 422: unrecoverable, unsupported_operation. The code selects the required details. */
@@ -2829,9 +2881,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["Unrecoverable"] | components["schemas"]["UnsupportedOperation"];
-                };
+                "application/json": components["schemas"]["UnrecoverableOrUnsupportedOperationErrorResponse"];
             };
         };
         /** @description HTTP 429: quota_exceeded, rate_limited. The code selects the required details. */
@@ -2841,9 +2891,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["QuotaExceeded"] | components["schemas"]["RateLimited"];
-                };
+                "application/json": components["schemas"]["QuotaExceededOrRateLimitedErrorResponse"];
             };
         };
         /** @description HTTP 503: capacity_unavailable, unavailable. The code selects the required details. */
@@ -2853,9 +2901,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    error: components["schemas"]["CapacityUnavailable"] | components["schemas"]["Unavailable"];
-                };
+                "application/json": components["schemas"]["CapacityUnavailableOrUnavailableErrorResponse"];
             };
         };
         /** @description HTTP 503: either a known not-ready HealthResponse or an Unavailable error envelope. Required top-level fields distinguish the two bodies. */

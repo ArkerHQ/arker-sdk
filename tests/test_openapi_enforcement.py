@@ -56,6 +56,8 @@ def test_generation_is_deterministic_for_both_languages() -> None:
         assert "class ForkOperation" not in python
         assert "class NotFound" in python
         assert "ErrorBody: TypeAlias" in python
+        assert "ResourceKind: TypeAlias = Literal[" in python
+        assert "class Vgpu(float, Enum)" in python
 
 
 def test_public_wire_types_are_generated() -> None:
@@ -64,6 +66,12 @@ def test_public_wire_types_are_generated() -> None:
             "schemas"
         ]
     )
+
+    generated = ast.parse((REPO_ROOT / PYTHON_PATH).read_text())
+    assert not any(
+        isinstance(node, ast.ClassDef) and re.search(r"Response\d+$", node.name)
+        for node in generated.body
+    ), "Response envelopes must have shared schema names, not numbered endpoint names"
 
     typescript = (REPO_ROOT / "typescript/src/index.ts").read_text()
     declarations = dict(

@@ -2281,16 +2281,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/BadRequest"
-                }
-              }
+              "$ref": "#/components/schemas/BadRequestErrorResponse"
             },
             "examples": {
               "bad_request": {
@@ -2338,16 +2329,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/InsufficientResources"
-                }
-              }
+              "$ref": "#/components/schemas/InsufficientResourcesErrorResponse"
             },
             "examples": {
               "insufficient_resources": {
@@ -2394,16 +2376,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/Unauthorized"
-                }
-              }
+              "$ref": "#/components/schemas/UnauthorizedErrorResponse"
             },
             "examples": {
               "unauthorized": {
@@ -2436,16 +2409,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/Forbidden"
-                }
-              }
+              "$ref": "#/components/schemas/ForbiddenErrorResponse"
             },
             "examples": {
               "forbidden": {
@@ -2478,16 +2442,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/NotFound"
-                }
-              }
+              "$ref": "#/components/schemas/NotFoundErrorResponse"
             },
             "examples": {
               "not_found": {
@@ -2523,16 +2478,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/Conflict"
-                }
-              }
+              "$ref": "#/components/schemas/ConflictErrorResponse"
             },
             "examples": {
               "conflict": {
@@ -2568,16 +2514,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/ResourceBusy"
-                }
-              }
+              "$ref": "#/components/schemas/ResourceBusyErrorResponse"
             },
             "examples": {
               "resource_busy": {
@@ -2613,16 +2550,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/InvalidState"
-                }
-              }
+              "$ref": "#/components/schemas/InvalidStateErrorResponse"
             },
             "examples": {
               "invalid_state": {
@@ -2661,16 +2589,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/AlreadyExists"
-                }
-              }
+              "$ref": "#/components/schemas/AlreadyExistsErrorResponse"
             },
             "examples": {
               "already_exists": {
@@ -2706,16 +2625,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/IdempotencyConflict"
-                }
-              }
+              "$ref": "#/components/schemas/IdempotencyConflictErrorResponse"
             },
             "examples": {
               "idempotency_conflict": {
@@ -2748,16 +2658,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/Expired"
-                }
-              }
+              "$ref": "#/components/schemas/ExpiredErrorResponse"
             },
             "examples": {
               "expired": {
@@ -2793,16 +2694,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/PayloadTooLarge"
-                }
-              }
+              "$ref": "#/components/schemas/PayloadTooLargeErrorResponse"
             },
             "examples": {
               "payload_too_large": {
@@ -2841,16 +2733,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/MethodNotAllowed"
-                }
-              }
+              "$ref": "#/components/schemas/MethodNotAllowedErrorResponse"
             },
             "examples": {
               "method_not_allowed": {
@@ -2889,16 +2772,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/UnsupportedOperation"
-                }
-              }
+              "$ref": "#/components/schemas/UnsupportedOperationErrorResponse"
             },
             "examples": {
               "unsupported_operation": {
@@ -2935,16 +2809,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/Unrecoverable"
-                }
-              }
+              "$ref": "#/components/schemas/UnrecoverableErrorResponse"
             },
             "examples": {
               "unrecoverable": {
@@ -2983,16 +2848,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/CapacityUnavailable"
-                }
-              }
+              "$ref": "#/components/schemas/CapacityUnavailableErrorResponse"
             },
             "examples": {
               "capacity_unavailable": {
@@ -3029,16 +2885,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/Unavailable"
-                }
-              }
+              "$ref": "#/components/schemas/UnavailableErrorResponse"
             },
             "examples": {
               "unavailable": {
@@ -3077,16 +2924,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/Internal"
-                }
-              }
+              "$ref": "#/components/schemas/InternalErrorResponse"
             },
             "examples": {
               "internal": {
@@ -3126,16 +2964,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/RateLimited"
-                }
-              }
+              "$ref": "#/components/schemas/RateLimitedErrorResponse"
             },
             "examples": {
               "rate_limited": {
@@ -3172,16 +3001,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/QuotaExceeded"
-                }
-              }
+              "$ref": "#/components/schemas/QuotaExceededErrorResponse"
             },
             "examples": {
               "quota_exceeded": {
@@ -3232,16 +3052,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/PaymentRequired"
-                }
-              }
+              "$ref": "#/components/schemas/PaymentRequiredErrorResponse"
             },
             "examples": {
               "payment_required": {
@@ -3274,16 +3085,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/ActionRequired"
-                }
-              }
+              "$ref": "#/components/schemas/ActionRequiredErrorResponse"
             },
             "examples": {
               "action_required": {
@@ -3319,16 +3121,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/OperationFailed"
-                }
-              }
+              "$ref": "#/components/schemas/OperationFailedErrorResponse"
             },
             "examples": {
               "operation_failed": {
@@ -3374,16 +3167,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/components/schemas/GatewayTimeout"
-                }
-              }
+              "$ref": "#/components/schemas/GatewayTimeoutErrorResponse"
             },
             "examples": {
               "gateway_timeout": {
@@ -3422,30 +3206,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/BadRequest"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InsufficientResources"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "bad_request": "#/components/schemas/BadRequest",
-                      "insufficient_resources": "#/components/schemas/InsufficientResources"
-                    }
-                  }
-                }
-              }
+              "$ref": "#/components/schemas/BadRequestOrInsufficientResourcesErrorResponse"
             },
             "examples": {
               "bad_request": {
@@ -3469,38 +3230,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AlreadyExists"
-                    },
-                    {
-                      "$ref": "#/components/schemas/Conflict"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidState"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ResourceBusy"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "already_exists": "#/components/schemas/AlreadyExists",
-                      "conflict": "#/components/schemas/Conflict",
-                      "invalid_state": "#/components/schemas/InvalidState",
-                      "resource_busy": "#/components/schemas/ResourceBusy"
-                    }
-                  }
-                }
-              }
+              "$ref": "#/components/schemas/AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse"
             },
             "examples": {
               "already_exists": {
@@ -3530,30 +3260,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AlreadyExists"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidState"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "already_exists": "#/components/schemas/AlreadyExists",
-                      "invalid_state": "#/components/schemas/InvalidState"
-                    }
-                  }
-                }
-              }
+              "$ref": "#/components/schemas/AlreadyExistsOrInvalidStateErrorResponse"
             },
             "examples": {
               "already_exists": {
@@ -3577,38 +3284,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/Conflict"
-                    },
-                    {
-                      "$ref": "#/components/schemas/IdempotencyConflict"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidState"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ResourceBusy"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "conflict": "#/components/schemas/Conflict",
-                      "idempotency_conflict": "#/components/schemas/IdempotencyConflict",
-                      "invalid_state": "#/components/schemas/InvalidState",
-                      "resource_busy": "#/components/schemas/ResourceBusy"
-                    }
-                  }
-                }
-              }
+              "$ref": "#/components/schemas/ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse"
             },
             "examples": {
               "conflict": {
@@ -3638,30 +3314,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/Conflict"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidState"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "conflict": "#/components/schemas/Conflict",
-                      "invalid_state": "#/components/schemas/InvalidState"
-                    }
-                  }
-                }
-              }
+              "$ref": "#/components/schemas/ConflictOrInvalidStateErrorResponse"
             },
             "examples": {
               "conflict": {
@@ -3685,34 +3338,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/Conflict"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidState"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ResourceBusy"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "conflict": "#/components/schemas/Conflict",
-                      "invalid_state": "#/components/schemas/InvalidState",
-                      "resource_busy": "#/components/schemas/ResourceBusy"
-                    }
-                  }
-                }
-              }
+              "$ref": "#/components/schemas/ConflictOrInvalidStateOrResourceBusyErrorResponse"
             },
             "examples": {
               "conflict": {
@@ -3739,30 +3365,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/InvalidState"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ResourceBusy"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "invalid_state": "#/components/schemas/InvalidState",
-                      "resource_busy": "#/components/schemas/ResourceBusy"
-                    }
-                  }
-                }
-              }
+              "$ref": "#/components/schemas/InvalidStateOrResourceBusyErrorResponse"
             },
             "examples": {
               "invalid_state": {
@@ -3786,34 +3389,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/OperationFailed"
-                    },
-                    {
-                      "$ref": "#/components/schemas/Unrecoverable"
-                    },
-                    {
-                      "$ref": "#/components/schemas/UnsupportedOperation"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "operation_failed": "#/components/schemas/OperationFailed",
-                      "unrecoverable": "#/components/schemas/Unrecoverable",
-                      "unsupported_operation": "#/components/schemas/UnsupportedOperation"
-                    }
-                  }
-                }
-              }
+              "$ref": "#/components/schemas/OperationFailedOrUnrecoverableOrUnsupportedOperationErrorResponse"
             },
             "examples": {
               "operation_failed": {
@@ -3840,30 +3416,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/Unrecoverable"
-                    },
-                    {
-                      "$ref": "#/components/schemas/UnsupportedOperation"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "unrecoverable": "#/components/schemas/Unrecoverable",
-                      "unsupported_operation": "#/components/schemas/UnsupportedOperation"
-                    }
-                  }
-                }
-              }
+              "$ref": "#/components/schemas/UnrecoverableOrUnsupportedOperationErrorResponse"
             },
             "examples": {
               "unrecoverable": {
@@ -3887,30 +3440,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/QuotaExceeded"
-                    },
-                    {
-                      "$ref": "#/components/schemas/RateLimited"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "quota_exceeded": "#/components/schemas/QuotaExceeded",
-                      "rate_limited": "#/components/schemas/RateLimited"
-                    }
-                  }
-                }
-              }
+              "$ref": "#/components/schemas/QuotaExceededOrRateLimitedErrorResponse"
             },
             "examples": {
               "quota_exceeded": {
@@ -3934,30 +3464,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "error"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/CapacityUnavailable"
-                    },
-                    {
-                      "$ref": "#/components/schemas/Unavailable"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "capacity_unavailable": "#/components/schemas/CapacityUnavailable",
-                      "unavailable": "#/components/schemas/Unavailable"
-                    }
-                  }
-                }
-              }
+              "$ref": "#/components/schemas/CapacityUnavailableOrUnavailableErrorResponse"
             },
             "examples": {
               "capacity_unavailable": {
@@ -9719,6 +9226,615 @@
           }
         ],
         "unevaluatedProperties": false
+      },
+      "IdempotencyConflictErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/IdempotencyConflict"
+          }
+        }
+      },
+      "PaymentRequiredErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/PaymentRequired"
+          }
+        }
+      },
+      "UnsupportedOperationErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/UnsupportedOperation"
+          }
+        }
+      },
+      "BadRequestErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/BadRequest"
+          }
+        }
+      },
+      "InsufficientResourcesErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/InsufficientResources"
+          }
+        }
+      },
+      "UnauthorizedErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Unauthorized"
+          }
+        }
+      },
+      "ForbiddenErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Forbidden"
+          }
+        }
+      },
+      "NotFoundErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/NotFound"
+          }
+        }
+      },
+      "ConflictErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Conflict"
+          }
+        }
+      },
+      "ResourceBusyErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ResourceBusy"
+          }
+        }
+      },
+      "InvalidStateErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/InvalidState"
+          }
+        }
+      },
+      "AlreadyExistsErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/AlreadyExists"
+          }
+        }
+      },
+      "ExpiredErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Expired"
+          }
+        }
+      },
+      "PayloadTooLargeErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/PayloadTooLarge"
+          }
+        }
+      },
+      "MethodNotAllowedErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/MethodNotAllowed"
+          }
+        }
+      },
+      "UnrecoverableErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Unrecoverable"
+          }
+        }
+      },
+      "CapacityUnavailableErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/CapacityUnavailable"
+          }
+        }
+      },
+      "UnavailableErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Unavailable"
+          }
+        }
+      },
+      "InternalErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Internal"
+          }
+        }
+      },
+      "RateLimitedErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/RateLimited"
+          }
+        }
+      },
+      "QuotaExceededErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/QuotaExceeded"
+          }
+        }
+      },
+      "ActionRequiredErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ActionRequired"
+          }
+        }
+      },
+      "OperationFailedErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/OperationFailed"
+          }
+        }
+      },
+      "GatewayTimeoutErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/GatewayTimeout"
+          }
+        }
+      },
+      "BadRequestOrInsufficientResourcesErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BadRequest"
+              },
+              {
+                "$ref": "#/components/schemas/InsufficientResources"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "bad_request": "#/components/schemas/BadRequest",
+                "insufficient_resources": "#/components/schemas/InsufficientResources"
+              }
+            },
+            "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
+      },
+      "AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AlreadyExists"
+              },
+              {
+                "$ref": "#/components/schemas/Conflict"
+              },
+              {
+                "$ref": "#/components/schemas/InvalidState"
+              },
+              {
+                "$ref": "#/components/schemas/ResourceBusy"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "already_exists": "#/components/schemas/AlreadyExists",
+                "conflict": "#/components/schemas/Conflict",
+                "invalid_state": "#/components/schemas/InvalidState",
+                "resource_busy": "#/components/schemas/ResourceBusy"
+              }
+            },
+            "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
+      },
+      "AlreadyExistsOrInvalidStateErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AlreadyExists"
+              },
+              {
+                "$ref": "#/components/schemas/InvalidState"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "already_exists": "#/components/schemas/AlreadyExists",
+                "invalid_state": "#/components/schemas/InvalidState"
+              }
+            },
+            "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
+      },
+      "ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Conflict"
+              },
+              {
+                "$ref": "#/components/schemas/IdempotencyConflict"
+              },
+              {
+                "$ref": "#/components/schemas/InvalidState"
+              },
+              {
+                "$ref": "#/components/schemas/ResourceBusy"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "conflict": "#/components/schemas/Conflict",
+                "idempotency_conflict": "#/components/schemas/IdempotencyConflict",
+                "invalid_state": "#/components/schemas/InvalidState",
+                "resource_busy": "#/components/schemas/ResourceBusy"
+              }
+            },
+            "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
+      },
+      "ConflictOrInvalidStateErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Conflict"
+              },
+              {
+                "$ref": "#/components/schemas/InvalidState"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "conflict": "#/components/schemas/Conflict",
+                "invalid_state": "#/components/schemas/InvalidState"
+              }
+            },
+            "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
+      },
+      "ConflictOrInvalidStateOrResourceBusyErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Conflict"
+              },
+              {
+                "$ref": "#/components/schemas/InvalidState"
+              },
+              {
+                "$ref": "#/components/schemas/ResourceBusy"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "conflict": "#/components/schemas/Conflict",
+                "invalid_state": "#/components/schemas/InvalidState",
+                "resource_busy": "#/components/schemas/ResourceBusy"
+              }
+            },
+            "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
+      },
+      "InvalidStateOrResourceBusyErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/InvalidState"
+              },
+              {
+                "$ref": "#/components/schemas/ResourceBusy"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "invalid_state": "#/components/schemas/InvalidState",
+                "resource_busy": "#/components/schemas/ResourceBusy"
+              }
+            },
+            "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
+      },
+      "OperationFailedOrUnrecoverableOrUnsupportedOperationErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OperationFailed"
+              },
+              {
+                "$ref": "#/components/schemas/Unrecoverable"
+              },
+              {
+                "$ref": "#/components/schemas/UnsupportedOperation"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "operation_failed": "#/components/schemas/OperationFailed",
+                "unrecoverable": "#/components/schemas/Unrecoverable",
+                "unsupported_operation": "#/components/schemas/UnsupportedOperation"
+              }
+            },
+            "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
+      },
+      "UnrecoverableOrUnsupportedOperationErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Unrecoverable"
+              },
+              {
+                "$ref": "#/components/schemas/UnsupportedOperation"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "unrecoverable": "#/components/schemas/Unrecoverable",
+                "unsupported_operation": "#/components/schemas/UnsupportedOperation"
+              }
+            },
+            "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
+      },
+      "QuotaExceededOrRateLimitedErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuotaExceeded"
+              },
+              {
+                "$ref": "#/components/schemas/RateLimited"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "quota_exceeded": "#/components/schemas/QuotaExceeded",
+                "rate_limited": "#/components/schemas/RateLimited"
+              }
+            },
+            "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
+      },
+      "CapacityUnavailableOrUnavailableErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CapacityUnavailable"
+              },
+              {
+                "$ref": "#/components/schemas/Unavailable"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "capacity_unavailable": "#/components/schemas/CapacityUnavailable",
+                "unavailable": "#/components/schemas/Unavailable"
+              }
+            },
+            "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
       }
     }
   }

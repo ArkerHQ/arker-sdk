@@ -32,62 +32,44 @@ class ListRegionsResponse:
     regions: list[RegionPlacement]
 
 
-class ErrorCode(str, Enum):
-    bad_request = 'bad_request'
-    insufficient_resources = 'insufficient_resources'
-    unauthorized = 'unauthorized'
-    forbidden = 'forbidden'
-    not_found = 'not_found'
-    conflict = 'conflict'
-    resource_busy = 'resource_busy'
-    invalid_state = 'invalid_state'
-    already_exists = 'already_exists'
-    idempotency_conflict = 'idempotency_conflict'
-    expired = 'expired'
-    payload_too_large = 'payload_too_large'
-    method_not_allowed = 'method_not_allowed'
-    unsupported_operation = 'unsupported_operation'
-    unrecoverable = 'unrecoverable'
-    capacity_unavailable = 'capacity_unavailable'
-    unavailable = 'unavailable'
-    internal = 'internal'
-    rate_limited = 'rate_limited'
-    quota_exceeded = 'quota_exceeded'
-    payment_required = 'payment_required'
-    action_required = 'action_required'
-    operation_failed = 'operation_failed'
-    gateway_timeout = 'gateway_timeout'
+ErrorCode: TypeAlias = Literal[
+    'bad_request',
+    'insufficient_resources',
+    'unauthorized',
+    'forbidden',
+    'not_found',
+    'conflict',
+    'resource_busy',
+    'invalid_state',
+    'already_exists',
+    'idempotency_conflict',
+    'expired',
+    'payload_too_large',
+    'method_not_allowed',
+    'unsupported_operation',
+    'unrecoverable',
+    'capacity_unavailable',
+    'unavailable',
+    'internal',
+    'rate_limited',
+    'quota_exceeded',
+    'payment_required',
+    'action_required',
+    'operation_failed',
+    'gateway_timeout',
+]
 
 
-class VmState(str, Enum):
-    idle = 'idle'
-    running = 'running'
+VmState: TypeAlias = Literal['idle', 'running']
 
 
-class SessionState(str, Enum):
-    idle = 'idle'
-    running = 'running'
+SessionState: TypeAlias = Literal['idle', 'running']
 
 
-class RunState(str, Enum):
-    pending = 'pending'
-    running = 'running'
-    completed = 'completed'
-    failed = 'failed'
-    cancelled = 'cancelled'
+RunState: TypeAlias = Literal['pending', 'running', 'completed', 'failed', 'cancelled']
 
 
 Provider: TypeAlias = str
-
-
-class Type(str, Enum):
-    outbound = 'outbound'
-    inbound = 'inbound'
-
-
-class Auth(str, Enum):
-    open = 'open'
-    arker = 'arker'
 
 
 Port: TypeAlias = int
@@ -102,11 +84,6 @@ class PolicyMatch:
     paths: list[str] | None = None
     headers: dict[str, list[str]] | None = None
     body_contains: list[str] | None = None
-
-
-class PolicyAction1(str, Enum):
-    allow = 'allow'
-    deny = 'deny'
 
 
 @dataclass(frozen=True)
@@ -134,11 +111,6 @@ class Gate:
     body: Any | None = None
     deny_on_timeout: bool | None = True
     timeout_ms: int | None = None
-
-
-class Layer(str, Enum):
-    disk = 'disk'
-    memory = 'memory'
 
 
 @dataclass(frozen=True)
@@ -185,36 +157,12 @@ class PatchSessionResponse:
     session_id: str
 
 
-class MemoryBackend(Enum):
-    file = 'file'
-    uffd = 'uffd'
-    NoneType_None = None
-
-
-class Signal(Enum):
-    SIGINT = 'SIGINT'
-    SIGTERM = 'SIGTERM'
-    SIGKILL = 'SIGKILL'
-    SIGHUP = 'SIGHUP'
-    NoneType_None = None
-
-
-class StdoutEncoding(str, Enum):
-    utf_8 = 'utf-8'
-    base64 = 'base64'
-
-
-class StderrEncoding(str, Enum):
-    utf_8 = 'utf-8'
-    base64 = 'base64'
-
-
 @dataclass(frozen=True)
 class CompletedRunResponse:
     stdout: str
-    stdout_encoding: StdoutEncoding
+    stdout_encoding: Literal['utf-8', 'base64']
     stderr: str
-    stderr_encoding: StderrEncoding
+    stderr_encoding: Literal['utf-8', 'base64']
     exit_code: int | None
     session_id: str | None = None
     run_id: str | None = None
@@ -223,7 +171,7 @@ class CompletedRunResponse:
     memory_requested_mib: int | None = None
     memory_achieved_mib: int | None = None
     memory_partial: bool | None = None
-    memory_backend: MemoryBackend | None = None
+    memory_backend: Literal['file', 'uffd'] | None = None
 
 
 @dataclass(frozen=True)
@@ -240,9 +188,9 @@ class Run:
     started_at: str
     exit_code: int | None
     stdout: str
-    stdout_encoding: StdoutEncoding
+    stdout_encoding: Literal['utf-8', 'base64']
     stderr: str
-    stderr_encoding: StderrEncoding
+    stderr_encoding: Literal['utf-8', 'base64']
     session_id: str | None = None
     command: str | None = None
     completed_at: str | None = None
@@ -341,13 +289,6 @@ class PtyTicketResponse:
     expires_in: int
 
 
-class Status(Enum):
-    attaching = 'attaching'
-    mounted = 'mounted'
-    failed = 'failed'
-    NoneType_None = None
-
-
 @dataclass(frozen=True)
 class Mount:
     mount_id: str
@@ -355,7 +296,7 @@ class Mount:
     filesystem_id: str
     path: str
     region: str | None = None
-    status: Status | None = None
+    status: Literal['attaching', 'mounted', 'failed'] | None = None
     status_detail: str | None = None
 
 
@@ -432,11 +373,6 @@ class SyncPresignedWriteCommit:
     sha256: str | None = None
 
 
-class Encoding(str, Enum):
-    utf8 = 'utf8'
-    base64 = 'base64'
-
-
 @dataclass(frozen=True)
 class SyncReadInlineResponse:
     ok: bool
@@ -444,7 +380,7 @@ class SyncReadInlineResponse:
     path: str
     size: int
     content: str
-    encoding: Encoding
+    encoding: Literal['utf8', 'base64']
 
 
 @dataclass(frozen=True)
@@ -563,150 +499,126 @@ class RegistryAuth:
     password: str
 
 
-class OpenApiOperationId(str, Enum):
-    health = 'health'
-    listRegions = 'listRegions'
-    whoami = 'whoami'
-    fork = 'fork'
-    listVms = 'listVms'
-    listOrgRuns = 'listOrgRuns'
-    getVm = 'getVm'
-    deleteVm = 'deleteVm'
-    patchVm = 'patchVm'
-    getVmPolicies = 'getVmPolicies'
-    putVmPolicies = 'putVmPolicies'
-    createRun = 'createRun'
-    listRuns = 'listRuns'
-    getRun = 'getRun'
-    cancelRun = 'cancelRun'
-    listSessions = 'listSessions'
-    createSession = 'createSession'
-    getSession = 'getSession'
-    patchSession = 'patchSession'
-    deleteSession = 'deleteSession'
-    attachSessionPty = 'attachSessionPty'
-    mintSessionPtyTicket = 'mintSessionPtyTicket'
-    createMount = 'createMount'
-    listMounts = 'listMounts'
-    deleteMount = 'deleteMount'
-    sync = 'sync'
-    listFilesystems = 'listFilesystems'
-    createFilesystem = 'createFilesystem'
-    getFilesystem = 'getFilesystem'
-    deleteFilesystem = 'deleteFilesystem'
+OpenApiOperationId: TypeAlias = Literal[
+    'health',
+    'listRegions',
+    'whoami',
+    'fork',
+    'listVms',
+    'listOrgRuns',
+    'getVm',
+    'deleteVm',
+    'patchVm',
+    'getVmPolicies',
+    'putVmPolicies',
+    'createRun',
+    'listRuns',
+    'getRun',
+    'cancelRun',
+    'listSessions',
+    'createSession',
+    'getSession',
+    'patchSession',
+    'deleteSession',
+    'attachSessionPty',
+    'mintSessionPtyTicket',
+    'createMount',
+    'listMounts',
+    'deleteMount',
+    'sync',
+    'listFilesystems',
+    'createFilesystem',
+    'getFilesystem',
+    'deleteFilesystem',
+]
 
 
-class HttpMethod(str, Enum):
-    GET = 'GET'
-    HEAD = 'HEAD'
-    POST = 'POST'
-    PUT = 'PUT'
-    PATCH = 'PATCH'
-    DELETE = 'DELETE'
-    OPTIONS = 'OPTIONS'
-    CONNECT = 'CONNECT'
-    TRACE = 'TRACE'
+HttpMethod: TypeAlias = Literal[
+    'GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'CONNECT', 'TRACE'
+]
 
 
-class ExecutionStage(str, Enum):
-    image_pull = 'image_pull'
-    image_conversion = 'image_conversion'
-    image_configuration = 'image_configuration'
-    image_command = 'image_command'
-    dockerfile_build = 'dockerfile_build'
-    restore = 'restore'
+ExecutionStage: TypeAlias = Literal[
+    'image_pull',
+    'image_conversion',
+    'image_configuration',
+    'image_command',
+    'dockerfile_build',
+    'restore',
+]
 
 
-class ComputeResource(str, Enum):
-    cpu = 'cpu'
-    memory = 'memory'
-    disk = 'disk'
-    gpu = 'gpu'
+ComputeResource: TypeAlias = Literal['cpu', 'memory', 'disk', 'gpu']
 
 
-class ResourceKind(str, Enum):
-    vm = 'vm'
-    source = 'source'
-    run = 'run'
-    session = 'session'
-    filesystem = 'filesystem'
-    mount = 'mount'
-    file = 'file'
-    sync = 'sync'
-    upload = 'upload'
-    api_key = 'api_key'
-    ssh_key = 'ssh_key'
-    ssh_setup = 'ssh_setup'
-    organization = 'organization'
-    route = 'route'
-    billing = 'billing'
-    correction_review = 'correction_review'
-    webhook = 'webhook'
-    resource = 'resource'
+ResourceKind: TypeAlias = Literal[
+    'vm',
+    'source',
+    'run',
+    'session',
+    'filesystem',
+    'mount',
+    'file',
+    'sync',
+    'upload',
+    'api_key',
+    'ssh_key',
+    'ssh_setup',
+    'organization',
+    'route',
+    'billing',
+    'correction_review',
+    'webhook',
+    'resource',
+]
 
 
-class CapacityScope(str, Enum):
-    worker = 'worker'
-    region = 'region'
-    platform = 'platform'
+CapacityScope: TypeAlias = Literal['worker', 'region', 'platform']
 
 
-class RateLimiter(str, Enum):
-    arker = 'arker'
-    upstream = 'upstream'
+RateLimiter: TypeAlias = Literal['arker', 'upstream']
 
 
-class StateRequirement(str, Enum):
-    running = 'running'
-    mutable = 'mutable'
-    unclaimed = 'unclaimed'
+StateRequirement: TypeAlias = Literal['running', 'mutable', 'unclaimed']
 
 
-class UnsupportedReason(str, Enum):
-    feature_not_supported = 'feature_not_supported'
-    platform_mismatch = 'platform_mismatch'
-    restore_requires_birth_host = 'restore_requires_birth_host'
+UnsupportedReason: TypeAlias = Literal[
+    'feature_not_supported', 'platform_mismatch', 'restore_requires_birth_host'
+]
 
 
-class RequiredAction(str, Enum):
-    accept_legal_terms = 'accept_legal_terms'
-    convert_billing_plan = 'convert_billing_plan'
+RequiredAction: TypeAlias = Literal['accept_legal_terms', 'convert_billing_plan']
 
 
-class OperationFailureReason(str, Enum):
-    image_pull_failed = 'image_pull_failed'
-    image_conversion_failed = 'image_conversion_failed'
-    command_failed = 'command_failed'
-    unexpected_interpreter = 'unexpected_interpreter'
-    deadline_exceeded = 'deadline_exceeded'
+OperationFailureReason: TypeAlias = Literal[
+    'image_pull_failed',
+    'image_conversion_failed',
+    'command_failed',
+    'unexpected_interpreter',
+    'deadline_exceeded',
+]
 
 
-class Feature(str, Enum):
-    durability = 'durability'
-    nested_virtualization = 'nested_virtualization'
-    diskless = 'diskless'
-    filesystem_only_fork = 'filesystem_only_fork'
-    shared_filesystem = 'shared_filesystem'
-    persistent_pty = 'persistent_pty'
-    network_policy = 'network_policy'
-    public_ingress = 'public_ingress'
-    guest_control = 'guest_control'
-    platform = 'platform'
-    systemd = 'systemd'
-    restore = 'restore'
+Feature: TypeAlias = Literal[
+    'durability',
+    'nested_virtualization',
+    'diskless',
+    'filesystem_only_fork',
+    'shared_filesystem',
+    'persistent_pty',
+    'network_policy',
+    'public_ingress',
+    'guest_control',
+    'platform',
+    'systemd',
+    'restore',
+]
 
 
-class WorkState(str, Enum):
-    not_started = 'not_started'
-    stopped = 'stopped'
-    continuing = 'continuing'
-    unknown = 'unknown'
+WorkState: TypeAlias = Literal['not_started', 'stopped', 'continuing', 'unknown']
 
 
-class EnforcementScope(str, Enum):
-    worker_local = 'worker_local'
-    regional = 'regional'
-    global_ = 'global'
+EnforcementScope: TypeAlias = Literal['worker_local', 'regional', 'global']
 
 
 @dataclass(frozen=True)
@@ -1193,15 +1105,9 @@ class SyncBadRequestError(ErrorExecutionContext):
     details: BadRequestDetails | None = None
 
 
-class Resource(str, Enum):
-    file = 'file'
-    upload = 'upload'
-    resource = 'resource'
-
-
 @dataclass(frozen=True)
 class Details:
-    resource: Resource
+    resource: Literal['file', 'upload', 'resource']
 
 
 @dataclass(frozen=True)
@@ -1212,15 +1118,10 @@ class SyncNotFoundError(ErrorExecutionContext):
 
 
 @dataclass(frozen=True)
-class Details1:
-    resource: Resource
-
-
-@dataclass(frozen=True)
 class SyncConflictError(ErrorExecutionContext):
     code: Literal['conflict'] = field(kw_only=True)
     message: str = field(kw_only=True)
-    details: Details1 = field(kw_only=True)
+    details: Details = field(kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -1230,16 +1131,9 @@ class SyncPayloadTooLargeError(ErrorExecutionContext):
     details: PayloadTooLargeDetails | None = None
 
 
-class Kind(str, Enum):
-    file = 'file'
-    upload = 'upload'
-    filesystem = 'filesystem'
-    resource = 'resource'
-
-
 @dataclass(frozen=True)
-class Resource2:
-    kind: Kind
+class Resource:
+    kind: Literal['file', 'upload', 'filesystem', 'resource']
     id: str | None = None
 
 
@@ -1247,7 +1141,7 @@ class Resource2:
 class Details2:
     reason: Literal['feature_not_supported']
     feature: Feature | None = None
-    resource: Resource2 | None = None
+    resource: Resource | None = None
 
 
 @dataclass(frozen=True)
@@ -1282,103 +1176,178 @@ class SyncExpiredError(ErrorExecutionContext):
 
 
 @dataclass(frozen=True)
-class HealthResponse1:
-    error: Internal
+class IdempotencyConflictErrorResponse:
+    error: IdempotencyConflict
 
 
 @dataclass(frozen=True)
-class ListRegionsResponse1:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class ListRegionsResponse2:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class WhoamiResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class WhoamiResponse2:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class WhoamiResponse3:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class WhoamiResponse4:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class WhoamiResponse5:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class ForkResponse:
-    error: BadRequest | InsufficientResources
-
-
-@dataclass(frozen=True)
-class ForkResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class ForkResponse2:
+class PaymentRequiredErrorResponse:
     error: PaymentRequired
 
 
 @dataclass(frozen=True)
-class ForkResponse3:
+class UnsupportedOperationErrorResponse:
+    error: UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class BadRequestErrorResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class InsufficientResourcesErrorResponse:
+    error: InsufficientResources
+
+
+@dataclass(frozen=True)
+class UnauthorizedErrorResponse:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class ForbiddenErrorResponse:
     error: Forbidden
 
 
 @dataclass(frozen=True)
-class ForkResponse4:
+class NotFoundErrorResponse:
     error: NotFound
 
 
 @dataclass(frozen=True)
-class ForkResponse5:
-    error: AlreadyExists | Conflict | InvalidState | ResourceBusy
+class ConflictErrorResponse:
+    error: Conflict
 
 
 @dataclass(frozen=True)
-class ForkResponse6:
+class ResourceBusyErrorResponse:
+    error: ResourceBusy
+
+
+@dataclass(frozen=True)
+class InvalidStateErrorResponse:
+    error: InvalidState
+
+
+@dataclass(frozen=True)
+class AlreadyExistsErrorResponse:
+    error: AlreadyExists
+
+
+@dataclass(frozen=True)
+class ExpiredErrorResponse:
+    error: Expired
+
+
+@dataclass(frozen=True)
+class PayloadTooLargeErrorResponse:
     error: PayloadTooLarge
 
 
 @dataclass(frozen=True)
-class ForkResponse7:
-    error: OperationFailed | Unrecoverable | UnsupportedOperation
+class MethodNotAllowedErrorResponse:
+    error: MethodNotAllowed
 
 
 @dataclass(frozen=True)
-class ForkResponse8:
-    error: QuotaExceeded | RateLimited
+class UnrecoverableErrorResponse:
+    error: Unrecoverable
 
 
 @dataclass(frozen=True)
-class ForkResponse9:
+class CapacityUnavailableErrorResponse:
+    error: CapacityUnavailable
+
+
+@dataclass(frozen=True)
+class UnavailableErrorResponse:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class InternalErrorResponse:
     error: Internal
 
 
 @dataclass(frozen=True)
-class ForkResponse10:
-    error: CapacityUnavailable | Unavailable
+class RateLimitedErrorResponse:
+    error: RateLimited
 
 
 @dataclass(frozen=True)
-class ForkResponse11:
+class QuotaExceededErrorResponse:
+    error: QuotaExceeded
+
+
+@dataclass(frozen=True)
+class ActionRequiredErrorResponse:
+    error: ActionRequired
+
+
+@dataclass(frozen=True)
+class OperationFailedErrorResponse:
+    error: OperationFailed
+
+
+@dataclass(frozen=True)
+class GatewayTimeoutErrorResponse:
     error: GatewayTimeout
+
+
+@dataclass(frozen=True)
+class BadRequestOrInsufficientResourcesErrorResponse:
+    error: BadRequest | InsufficientResources
+
+
+@dataclass(frozen=True)
+class AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse:
+    error: AlreadyExists | Conflict | InvalidState | ResourceBusy
+
+
+@dataclass(frozen=True)
+class AlreadyExistsOrInvalidStateErrorResponse:
+    error: AlreadyExists | InvalidState
+
+
+@dataclass(frozen=True)
+class ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse:
+    error: Conflict | IdempotencyConflict | InvalidState | ResourceBusy
+
+
+@dataclass(frozen=True)
+class ConflictOrInvalidStateErrorResponse:
+    error: Conflict | InvalidState
+
+
+@dataclass(frozen=True)
+class ConflictOrInvalidStateOrResourceBusyErrorResponse:
+    error: Conflict | InvalidState | ResourceBusy
+
+
+@dataclass(frozen=True)
+class InvalidStateOrResourceBusyErrorResponse:
+    error: InvalidState | ResourceBusy
+
+
+@dataclass(frozen=True)
+class OperationFailedOrUnrecoverableOrUnsupportedOperationErrorResponse:
+    error: OperationFailed | Unrecoverable | UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class UnrecoverableOrUnsupportedOperationErrorResponse:
+    error: Unrecoverable | UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class QuotaExceededOrRateLimitedErrorResponse:
+    error: QuotaExceeded | RateLimited
+
+
+@dataclass(frozen=True)
+class CapacityUnavailableOrUnavailableErrorResponse:
+    error: CapacityUnavailable | Unavailable
 
 
 @dataclass(frozen=True)
@@ -1396,57 +1365,6 @@ class ListVmsParameters:
 
 
 @dataclass(frozen=True)
-class ListVmsResponse1:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class ListVmsResponse2:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class ListVmsResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class ListVmsResponse4:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class ListVmsResponse5:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class ListVmsResponse6:
-    error: Unavailable
-
-
-class Endpoint(str, Enum):
-    run = 'run'
-    fork = 'fork'
-    sync = 'sync'
-
-
-class Sort(str, Enum):
-    when = 'when'
-    status = 'status'
-    path = 'path'
-    total = 'total'
-    queue = 'queue'
-    your_code = 'your_code'
-    runtime = 'runtime'
-
-
-class Dir(str, Enum):
-    asc = 'asc'
-    desc = 'desc'
-
-
-@dataclass(frozen=True)
 class ListOrgRunsParameters:
     since: int | None = None
     until: int | None = None
@@ -1459,43 +1377,16 @@ class ListOrgRunsParameters:
     offset: int | None = None
     lite: bool | None = None
     runtime: str | None = None
-    endpoint: Endpoint | None = None
+    endpoint: Literal['run', 'fork', 'sync'] | None = None
     actions: str | None = None
     status: str | None = None
     status_min: int | None = None
     status_max: int | None = None
-    sort: Sort | None = None
-    dir: Dir | None = None
-
-
-@dataclass(frozen=True)
-class ListOrgRunsResponse1:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class ListOrgRunsResponse2:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class ListOrgRunsResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class ListOrgRunsResponse4:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class ListOrgRunsResponse5:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class ListOrgRunsResponse6:
-    error: Unavailable
+    sort: (
+        Literal['when', 'status', 'path', 'total', 'queue', 'your_code', 'runtime']
+        | None
+    ) = None
+    dir: Literal['asc', 'desc'] | None = None
 
 
 @dataclass(frozen=True)
@@ -1504,93 +1395,8 @@ class GetVmParameters:
 
 
 @dataclass(frozen=True)
-class GetVmResponse:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class GetVmResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class GetVmResponse2:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class GetVmResponse3:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class GetVmResponse4:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class GetVmResponse5:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class GetVmResponse6:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class GetVmResponse7:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
 class DeleteVmParameters:
     id: str
-
-
-@dataclass(frozen=True)
-class DeleteVmResponse1:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class DeleteVmResponse2:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class DeleteVmResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class DeleteVmResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class DeleteVmResponse5:
-    error: InvalidState | ResourceBusy
-
-
-@dataclass(frozen=True)
-class DeleteVmResponse6:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class DeleteVmResponse7:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class DeleteVmResponse8:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class DeleteVmResponse9:
-    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -1599,118 +1405,8 @@ class PatchVmParameters:
 
 
 @dataclass(frozen=True)
-class PatchVmResponse:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class PatchVmResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class PatchVmResponse2:
-    error: PaymentRequired
-
-
-@dataclass(frozen=True)
-class PatchVmResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class PatchVmResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class PatchVmResponse5:
-    error: AlreadyExists | InvalidState
-
-
-@dataclass(frozen=True)
-class PatchVmResponse6:
-    error: PayloadTooLarge
-
-
-@dataclass(frozen=True)
-class PatchVmResponse7:
-    error: UnsupportedOperation
-
-
-@dataclass(frozen=True)
-class PatchVmResponse8:
-    error: QuotaExceeded | RateLimited
-
-
-@dataclass(frozen=True)
-class PatchVmResponse9:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class PatchVmResponse10:
-    error: CapacityUnavailable | Unavailable
-
-
-@dataclass(frozen=True)
-class PatchVmResponse11:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
 class GetVmPoliciesParameters:
     id: str
-
-
-@dataclass(frozen=True)
-class GetVmPoliciesResponse:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class GetVmPoliciesResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class GetVmPoliciesResponse2:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class GetVmPoliciesResponse3:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class GetVmPoliciesResponse4:
-    error: InvalidState
-
-
-@dataclass(frozen=True)
-class GetVmPoliciesResponse5:
-    error: UnsupportedOperation
-
-
-@dataclass(frozen=True)
-class GetVmPoliciesResponse6:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class GetVmPoliciesResponse7:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class GetVmPoliciesResponse8:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class GetVmPoliciesResponse9:
-    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -1719,123 +1415,8 @@ class PutVmPoliciesParameters:
 
 
 @dataclass(frozen=True)
-class PutVmPoliciesResponse:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class PutVmPoliciesResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class PutVmPoliciesResponse2:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class PutVmPoliciesResponse3:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class PutVmPoliciesResponse4:
-    error: InvalidState
-
-
-@dataclass(frozen=True)
-class PutVmPoliciesResponse5:
-    error: PayloadTooLarge
-
-
-@dataclass(frozen=True)
-class PutVmPoliciesResponse6:
-    error: UnsupportedOperation
-
-
-@dataclass(frozen=True)
-class PutVmPoliciesResponse7:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class PutVmPoliciesResponse8:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class PutVmPoliciesResponse9:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class PutVmPoliciesResponse10:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
 class CreateRunParameters:
     id: str
-
-
-@dataclass(frozen=True)
-class CreateRunResponse:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class CreateRunResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class CreateRunResponse2:
-    error: PaymentRequired
-
-
-@dataclass(frozen=True)
-class CreateRunResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class CreateRunResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class CreateRunResponse5:
-    error: Conflict | IdempotencyConflict | InvalidState | ResourceBusy
-
-
-@dataclass(frozen=True)
-class CreateRunResponse6:
-    error: PayloadTooLarge
-
-
-@dataclass(frozen=True)
-class CreateRunResponse7:
-    error: Unrecoverable | UnsupportedOperation
-
-
-@dataclass(frozen=True)
-class CreateRunResponse8:
-    error: QuotaExceeded | RateLimited
-
-
-@dataclass(frozen=True)
-class CreateRunResponse9:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class CreateRunResponse10:
-    error: CapacityUnavailable | Unavailable
-
-
-@dataclass(frozen=True)
-class CreateRunResponse11:
-    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -1850,150 +1431,15 @@ class ListRunsParameters:
 
 
 @dataclass(frozen=True)
-class ListRunsResponse1:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class ListRunsResponse2:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class ListRunsResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class ListRunsResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class ListRunsResponse5:
-    error: InvalidState
-
-
-@dataclass(frozen=True)
-class ListRunsResponse6:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class ListRunsResponse7:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class ListRunsResponse8:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class ListRunsResponse9:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
 class GetRunParameters:
     id: str
     run_id: str
 
 
 @dataclass(frozen=True)
-class GetRunResponse:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class GetRunResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class GetRunResponse2:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class GetRunResponse3:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class GetRunResponse4:
-    error: InvalidState
-
-
-@dataclass(frozen=True)
-class GetRunResponse5:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class GetRunResponse6:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class GetRunResponse7:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class GetRunResponse8:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
 class CancelRunParameters:
     id: str
     run_id: str
-
-
-@dataclass(frozen=True)
-class CancelRunResponse1:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class CancelRunResponse2:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class CancelRunResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class CancelRunResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class CancelRunResponse5:
-    error: InvalidState
-
-
-@dataclass(frozen=True)
-class CancelRunResponse6:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class CancelRunResponse7:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class CancelRunResponse8:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class CancelRunResponse9:
-    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -2005,108 +1451,8 @@ class ListSessionsParameters:
 
 
 @dataclass(frozen=True)
-class ListSessionsResponse1:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class ListSessionsResponse2:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class ListSessionsResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class ListSessionsResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class ListSessionsResponse5:
-    error: InvalidState
-
-
-@dataclass(frozen=True)
-class ListSessionsResponse6:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class ListSessionsResponse7:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class ListSessionsResponse8:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class ListSessionsResponse9:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
 class CreateSessionParameters:
     id: str
-
-
-@dataclass(frozen=True)
-class CreateSessionResponse:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class CreateSessionResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class CreateSessionResponse2:
-    error: PaymentRequired
-
-
-@dataclass(frozen=True)
-class CreateSessionResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class CreateSessionResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class CreateSessionResponse5:
-    error: Conflict | InvalidState
-
-
-@dataclass(frozen=True)
-class CreateSessionResponse6:
-    error: PayloadTooLarge
-
-
-@dataclass(frozen=True)
-class CreateSessionResponse7:
-    error: QuotaExceeded | RateLimited
-
-
-@dataclass(frozen=True)
-class CreateSessionResponse8:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class CreateSessionResponse9:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class CreateSessionResponse10:
-    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -2116,155 +1462,15 @@ class GetSessionParameters:
 
 
 @dataclass(frozen=True)
-class GetSessionResponse:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class GetSessionResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class GetSessionResponse2:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class GetSessionResponse3:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class GetSessionResponse4:
-    error: InvalidState
-
-
-@dataclass(frozen=True)
-class GetSessionResponse5:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class GetSessionResponse6:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class GetSessionResponse7:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class GetSessionResponse8:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
 class PatchSessionParameters:
     id: str
     sid: str
 
 
 @dataclass(frozen=True)
-class PatchSessionResponse1:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class PatchSessionResponse2:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class PatchSessionResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class PatchSessionResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class PatchSessionResponse5:
-    error: InvalidState
-
-
-@dataclass(frozen=True)
-class PatchSessionResponse6:
-    error: PayloadTooLarge
-
-
-@dataclass(frozen=True)
-class PatchSessionResponse7:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class PatchSessionResponse8:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class PatchSessionResponse9:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class PatchSessionResponse10:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
 class DeleteSessionParameters:
     id: str
     sid: str
-
-
-@dataclass(frozen=True)
-class DeleteSessionResponse1:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class DeleteSessionResponse2:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class DeleteSessionResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class DeleteSessionResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class DeleteSessionResponse5:
-    error: InvalidState
-
-
-@dataclass(frozen=True)
-class DeleteSessionResponse6:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class DeleteSessionResponse7:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class DeleteSessionResponse8:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class DeleteSessionResponse9:
-    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -2280,184 +1486,14 @@ class AttachSessionPtyParameters:
 
 
 @dataclass(frozen=True)
-class AttachSessionPtyResponse:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class AttachSessionPtyResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class AttachSessionPtyResponse2:
-    error: PaymentRequired
-
-
-@dataclass(frozen=True)
-class AttachSessionPtyResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class AttachSessionPtyResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class AttachSessionPtyResponse5:
-    error: InvalidState | ResourceBusy
-
-
-@dataclass(frozen=True)
-class AttachSessionPtyResponse6:
-    error: UnsupportedOperation
-
-
-@dataclass(frozen=True)
-class AttachSessionPtyResponse7:
-    error: QuotaExceeded | RateLimited
-
-
-@dataclass(frozen=True)
-class AttachSessionPtyResponse8:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class AttachSessionPtyResponse9:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class AttachSessionPtyResponse10:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
 class MintSessionPtyTicketParameters:
     id: str
     sid: str
 
 
 @dataclass(frozen=True)
-class MintSessionPtyTicketResponse:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class MintSessionPtyTicketResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class MintSessionPtyTicketResponse2:
-    error: PaymentRequired
-
-
-@dataclass(frozen=True)
-class MintSessionPtyTicketResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class MintSessionPtyTicketResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class MintSessionPtyTicketResponse5:
-    error: InvalidState
-
-
-@dataclass(frozen=True)
-class MintSessionPtyTicketResponse6:
-    error: PayloadTooLarge
-
-
-@dataclass(frozen=True)
-class MintSessionPtyTicketResponse7:
-    error: QuotaExceeded | RateLimited
-
-
-@dataclass(frozen=True)
-class MintSessionPtyTicketResponse8:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class MintSessionPtyTicketResponse9:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class MintSessionPtyTicketResponse10:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
 class CreateMountParameters:
     id: str
-
-
-@dataclass(frozen=True)
-class CreateMountResponse:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class CreateMountResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class CreateMountResponse2:
-    error: PaymentRequired
-
-
-@dataclass(frozen=True)
-class CreateMountResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class CreateMountResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class CreateMountResponse5:
-    error: Conflict | InvalidState
-
-
-@dataclass(frozen=True)
-class CreateMountResponse6:
-    error: PayloadTooLarge
-
-
-@dataclass(frozen=True)
-class CreateMountResponse7:
-    error: UnsupportedOperation
-
-
-@dataclass(frozen=True)
-class CreateMountResponse8:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class CreateMountResponse9:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class CreateMountResponse10:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class CreateMountResponse11:
-    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -2469,174 +1505,14 @@ class ListMountsParameters:
 
 
 @dataclass(frozen=True)
-class ListMountsResponse1:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class ListMountsResponse2:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class ListMountsResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class ListMountsResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class ListMountsResponse5:
-    error: InvalidState
-
-
-@dataclass(frozen=True)
-class ListMountsResponse6:
-    error: UnsupportedOperation
-
-
-@dataclass(frozen=True)
-class ListMountsResponse7:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class ListMountsResponse8:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class ListMountsResponse9:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class ListMountsResponse10:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
 class DeleteMountParameters:
     id: str
     mount_id: str
 
 
 @dataclass(frozen=True)
-class DeleteMountResponse1:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class DeleteMountResponse2:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class DeleteMountResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class DeleteMountResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class DeleteMountResponse5:
-    error: InvalidState
-
-
-@dataclass(frozen=True)
-class DeleteMountResponse6:
-    error: UnsupportedOperation
-
-
-@dataclass(frozen=True)
-class DeleteMountResponse7:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class DeleteMountResponse8:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class DeleteMountResponse9:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class DeleteMountResponse10:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
 class SyncParameters:
     id: str
-
-
-@dataclass(frozen=True)
-class SyncResponse1:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class SyncResponse2:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class SyncResponse3:
-    error: PaymentRequired
-
-
-@dataclass(frozen=True)
-class SyncResponse4:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class SyncResponse5:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class SyncResponse6:
-    error: Conflict | InvalidState | ResourceBusy
-
-
-@dataclass(frozen=True)
-class SyncResponse7:
-    error: PayloadTooLarge
-
-
-@dataclass(frozen=True)
-class SyncResponse8:
-    error: UnsupportedOperation
-
-
-@dataclass(frozen=True)
-class SyncResponse9:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class SyncResponse10:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class SyncResponse11:
-    error: CapacityUnavailable | Unavailable
-
-
-@dataclass(frozen=True)
-class SyncResponse12:
-    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -2647,193 +1523,13 @@ class ListFilesystemsParameters:
 
 
 @dataclass(frozen=True)
-class ListFilesystemsResponse1:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class ListFilesystemsResponse2:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class ListFilesystemsResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class ListFilesystemsResponse4:
-    error: UnsupportedOperation
-
-
-@dataclass(frozen=True)
-class ListFilesystemsResponse5:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class ListFilesystemsResponse6:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class ListFilesystemsResponse7:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class ListFilesystemsResponse8:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
-class CreateFilesystemResponse:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class CreateFilesystemResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class CreateFilesystemResponse2:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class CreateFilesystemResponse3:
-    error: AlreadyExists
-
-
-@dataclass(frozen=True)
-class CreateFilesystemResponse4:
-    error: PayloadTooLarge
-
-
-@dataclass(frozen=True)
-class CreateFilesystemResponse5:
-    error: UnsupportedOperation
-
-
-@dataclass(frozen=True)
-class CreateFilesystemResponse6:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class CreateFilesystemResponse7:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class CreateFilesystemResponse8:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class CreateFilesystemResponse9:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
 class GetFilesystemParameters:
     filesystem_id: str
 
 
 @dataclass(frozen=True)
-class GetFilesystemResponse:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class GetFilesystemResponse1:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class GetFilesystemResponse2:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class GetFilesystemResponse3:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class GetFilesystemResponse4:
-    error: UnsupportedOperation
-
-
-@dataclass(frozen=True)
-class GetFilesystemResponse5:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class GetFilesystemResponse6:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class GetFilesystemResponse7:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class GetFilesystemResponse8:
-    error: GatewayTimeout
-
-
-@dataclass(frozen=True)
 class DeleteFilesystemParameters:
     filesystem_id: str
-
-
-@dataclass(frozen=True)
-class DeleteFilesystemResponse1:
-    error: BadRequest
-
-
-@dataclass(frozen=True)
-class DeleteFilesystemResponse2:
-    error: Unauthorized
-
-
-@dataclass(frozen=True)
-class DeleteFilesystemResponse3:
-    error: Forbidden
-
-
-@dataclass(frozen=True)
-class DeleteFilesystemResponse4:
-    error: NotFound
-
-
-@dataclass(frozen=True)
-class DeleteFilesystemResponse5:
-    error: UnsupportedOperation
-
-
-@dataclass(frozen=True)
-class DeleteFilesystemResponse6:
-    error: RateLimited
-
-
-@dataclass(frozen=True)
-class DeleteFilesystemResponse7:
-    error: Internal
-
-
-@dataclass(frozen=True)
-class DeleteFilesystemResponse8:
-    error: Unavailable
-
-
-@dataclass(frozen=True)
-class DeleteFilesystemResponse9:
-    error: GatewayTimeout
 
 
 ErrorBody: TypeAlias = (
@@ -2870,13 +1566,13 @@ class ErrorResponse:
 
 
 @dataclass(frozen=True)
-class PolicyAction2:
+class PolicyAction1:
     rewrite: Rewrite | None = None
     gate: Gate | None = None
     scaling: ScalingAction | None = None
 
 
-PolicyAction: TypeAlias = PolicyAction1 | PolicyAction2
+PolicyAction: TypeAlias = Literal['allow', 'deny'] | PolicyAction1
 
 
 RunResponse: TypeAlias = CompletedRunResponse | BackgroundRunResponse
@@ -2926,10 +1622,10 @@ HealthUnavailableResponse: TypeAlias = (
 
 @dataclass(frozen=True)
 class PolicyEntry:
-    type: Type
+    type: Literal['outbound', 'inbound']
     action: PolicyAction
     match: PolicyMatch | None = None
-    auth: Auth | None = None
+    auth: Literal['open', 'arker'] | None = None
 
 
 @dataclass(frozen=True)
@@ -3045,7 +1741,7 @@ class ForkRequest1:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
-    layers: list[Layer] | None = None
+    layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
@@ -3068,7 +1764,7 @@ class ForkRequest2:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
-    layers: list[Layer] | None = None
+    layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
@@ -3091,7 +1787,7 @@ class ForkRequest3:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
-    layers: list[Layer] | None = None
+    layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
@@ -3114,7 +1810,7 @@ class ForkRequest4:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
-    layers: list[Layer] | None = None
+    layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
@@ -3137,7 +1833,7 @@ class ForkRequest5:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
-    layers: list[Layer] | None = None
+    layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
@@ -3160,7 +1856,7 @@ class ForkRequest6:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
-    layers: list[Layer] | None = None
+    layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
@@ -3190,8 +1886,8 @@ class RunRequest:
     vcpu_count: int | None = None
     memory_mib: int | None = None
     disk_mib: int | None = None
-    memory_backend: MemoryBackend | None = None
-    signal: Signal | None = None
+    memory_backend: Literal['file', 'uffd'] | None = None
+    signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
     policies: PolicyWriteRequest | None = None
 
 

@@ -33,3 +33,4 @@ checkpoint-*.png
 # Compiled OpenAPI validators
 typescript/src/generated/error-validators.js
 typescript/src/generated/error-validators.d.ts
+python/src/arker/_openapi.json

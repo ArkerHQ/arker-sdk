@@ -25,6 +25,7 @@ import types
 import urllib.parse
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from importlib.resources import files as package_files
 from typing import (
     Any,
     TypeVar,
@@ -34,6 +35,8 @@ from typing import (
 )
 
 import httpx2 as httpx
+from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema.exceptions import ValidationError as SchemaValidationError
 from pydantic import TypeAdapter, ValidationError
 
 from .generated.api_models import (
@@ -1912,14 +1915,22 @@ def _parse_json(text: str) -> Any:
 
 _HTTP_ERROR_ADAPTER = TypeAdapter(ErrorBody)
 _FILE_ERROR_ADAPTER = TypeAdapter(SyncEntryError)
+_ERROR_SCHEMA = json.loads(package_files("arker").joinpath("_openapi.json").read_text())
+_ERROR_VALIDATORS = {
+    file: Draft202012Validator(
+        {**_ERROR_SCHEMA, "$ref": f"#/components/schemas/{name}"}, format_checker=FormatChecker()
+    )
+    for file, name in ((False, "ErrorBody"), (True, "SyncEntryError"))
+}
 
 
 def _server_error(raw: Any, status: int, *, file: bool = False) -> ArkerError:
     if not isinstance(raw, dict) or not isinstance(raw.get("code"), str) or not isinstance(raw.get("message"), str):
         return ArkerError("internal", "Malformed API error response", status, raw=raw)
     try:
+        _ERROR_VALIDATORS[file].validate(raw)
         body = (_FILE_ERROR_ADAPTER if file else _HTTP_ERROR_ADAPTER).validate_python(raw)
-    except ValidationError:
+    except (ValidationError, SchemaValidationError):
         body = None
     return ArkerError(raw["code"], raw["message"], status, body, raw)
 

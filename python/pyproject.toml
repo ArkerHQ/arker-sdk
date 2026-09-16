@@ -27,6 +27,7 @@ dependencies = [
     "dockerfile-parse>=2.0.1",
     "httpx2[http2]>=2.12",
     "pydantic>=2.13,<3",
+    "jsonschema[format-nongpl]>=4.26,<5",
 ]
 
 [project.optional-dependencies]
@@ -43,6 +44,11 @@ Issues = "https://github.com/ArkerHQ/arker-sdk/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["src/arker"]
 
+[tool.hatch.build]
+exclude = ["src/arker/_openapi.json"]
+
+[tool.hatch.build.hooks.custom]
+
 [tool.pytest.ini_options]
 # tests/e2e hits a live deployment: run it explicitly, with ARKER_API_KEY set.
 testpaths = ["tests/unit"]
@@ -50,7 +56,7 @@ addopts = "-q"
 
 [dependency-groups]
 dev = [
-    "datamodel-code-generator==0.45.0",
+    "datamodel-code-generator==0.56.1",
     "pytest>=9.0.3",
     "ruff>=0.16.6",
 ]
