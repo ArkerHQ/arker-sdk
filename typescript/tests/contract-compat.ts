@@ -43,3 +43,7 @@ type ContractTypes = [
 
 declare const contractTypes: ContractTypes;
 void contractTypes;
+
+// @ts-expect-error quota measurements must be structured, never an arbitrary scalar.
+const invalidMeasurements: Schema<"QuotaMeasurements"> = "invalid";
+void invalidMeasurements;

@@ -45,6 +45,7 @@ source = { editable = "." }
 dependencies = [
     { name = "dockerfile-parse" },
     { name = "httpx2", extra = ["http2"] },
+    { name = "pydantic" },
     { name = "typing-extensions" },
 ]
 
@@ -67,6 +68,7 @@ dev = [
 requires-dist = [
     { name = "dockerfile-parse", specifier = ">=2.0.1" },
     { name = "httpx2", extras = ["http2"], specifier = ">=2.12" },
+    { name = "pydantic", specifier = ">=2.13,<3" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "typing-extensions", specifier = ">=4.12" },
     { name = "websocket-client", marker = "extra == 'pty'", specifier = ">=1.7" },

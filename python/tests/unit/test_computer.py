@@ -1595,7 +1595,7 @@ def test_run_status_defaults_retry_count_when_missing() -> None:
     assert status.retry_count == 0
 
 
-def test_per_entry_internal_error_retries(monkeypatch) -> None:
+def test_per_entry_unavailable_error_retries(monkeypatch) -> None:
     monkeypatch.setattr(sdk.time, "sleep", lambda *_: None)
     t = FakeTransport()
     transient = {
@@ -1603,7 +1603,7 @@ def test_per_entry_internal_error_retries(monkeypatch) -> None:
         "size": 5,
         "complete": False,
         "written": False,
-        "error": {"code": "internal", "message": "503 Service Unavailable SlowDown"},
+        "error": {"code": "unavailable", "message": "try later"},
     }
     predicate = lambda method, url: method == "POST" and url.endswith("/sync")
     t.add_json(predicate, 200, {"ok": True, "op": "write", "results": [transient]})
@@ -2184,26 +2184,26 @@ def test_retry_delay_honours_server_retry_after() -> None:
     # the default exists to shape backoff, and capping the hint with it would
     # neuter real capacity waits.
     retry = sdk.RetryOptions(attempts=4, base_delay_s=0.2, jitter_s=0.0)
-    assert sdk._retry_delay(retry, 0, {"code": "unavailable", "retry_after": 30}) == 30.0
+    assert sdk._retry_delay(retry, 0, sdk._extract_error(_unavailable_body(30))) == 30.0
 
     # Without a hint the existing backoff is untouched.
     assert sdk._retry_delay(retry, 0) == pytest.approx(0.2)
     assert sdk._retry_delay(retry, 2) == pytest.approx(0.8)
-    assert sdk._retry_delay(retry, 1, {"code": "unavailable", "retry_after": None}) == pytest.approx(0.4)
+    assert sdk._retry_delay(retry, 1, sdk.ArkerError("unavailable", "try later", 503)) == pytest.approx(0.4)
 
     # An explicitly configured max_delay_s is the caller's latency budget, and
     # it caps the hint too.
     capped = sdk.RetryOptions(attempts=4, base_delay_s=0.2, max_delay_s=2.0, jitter_s=0.0)
-    assert sdk._retry_delay(capped, 0, {"code": "unavailable", "retry_after": 30}) == 2.0
+    assert sdk._retry_delay(capped, 0, sdk._extract_error(_unavailable_body(30))) == 2.0
 
 
 def test_wire_retry_after_rejects_what_the_decoder_lets_through() -> None:
     # The response decoder passes scalars through unchecked, so anything the
     # server sent lands here; a non-number must not reach the delay math.
-    for bad in (0, -5, True, "30", None):
+    for bad in (-5, True, "30", None, 1.5, 4294967296):
         assert sdk._wire_retry_after(bad) is None
     assert sdk._wire_retry_after(30) == 30.0
-    assert sdk._wire_retry_after(1.5) == 1.5
+    assert sdk._wire_retry_after(0) == 0
 
 
 def test_retry_after_hint_drives_the_actual_sleep() -> None:
@@ -2218,7 +2218,10 @@ def test_retry_after_hint_drives_the_actual_sleep() -> None:
             "error": {
                 "code": "unavailable",
                 "message": "cold",
-                "retry_after": 0.05,
+                "retry_after_seconds": 1,
+                "request_id": "req-test",
+                "request": {"kind": "unmatched", "method": "POST"},
+                "recovery": {"work": "not_started"},
                 "timestamp": "2026-01-01T00:00:00.000Z",
             }
         },
@@ -2246,7 +2249,7 @@ def test_retry_after_hint_drives_the_actual_sleep() -> None:
             base_url="https://test.invalid/api",
             retry={"attempts": 2, "base_delay_s": 0.001, "jitter_s": 0.0},
         ).fork(source_vm_name="source-vm")
-    assert time.monotonic() - started >= 0.045
+    assert time.monotonic() - started >= 0.95
     assert len(t.calls) == 2
 
 
@@ -2255,7 +2258,10 @@ def _unavailable_body(retry_after_s: float) -> dict[str, Any]:
         "error": {
             "code": "unavailable",
             "message": "at capacity",
-            "retry_after": retry_after_s,
+            "retry_after_seconds": retry_after_s,
+            "request_id": "req-test",
+            "request": {"kind": "unmatched", "method": "POST"},
+            "recovery": {"work": "not_started"},
             "timestamp": "2026-01-01T00:00:00.000Z",
         }
     }
@@ -2286,7 +2292,7 @@ def test_queueing_timeout_retries_past_the_attempt_cap() -> None:
     t = FakeTransport()
     predicate = lambda method, url: method == "POST" and url.endswith("/v1/vms/vm_1/runs")
     for _ in range(3):
-        t.add_json(predicate, 503, _unavailable_body(0.05))
+        t.add_json(predicate, 503, _unavailable_body(0))
     t.add_json(predicate, 200, _completed_run_body())
 
     with use_transport(t):
@@ -2296,12 +2302,12 @@ def test_queueing_timeout_retries_past_the_attempt_cap() -> None:
 
 
 def test_queueing_window_drains_then_surfaces_unavailable() -> None:
-    # 3s window, 1.1s hints: bodies re-send the remaining window (3, 2, 1),
+    # 3s window, 1s hints: bodies re-send the remaining window (3, 2, 1),
     # then the error surfaces without sleeping past the deadline.
     t = FakeTransport()
     predicate = lambda method, url: method == "POST" and url.endswith("/v1/vms/vm_1/runs")
     for _ in range(3):
-        t.add_json(predicate, 503, _unavailable_body(1.1))
+        t.add_json(predicate, 503, _unavailable_body(1))
 
     started = time.monotonic()
     with use_transport(t), pytest.raises(sdk.ArkerError) as error:
@@ -2317,7 +2323,7 @@ def test_queueing_timeout_respects_retry_false() -> None:
     # retry=False = exactly one request, window or not.
     t = FakeTransport()
     predicate = lambda method, url: method == "POST" and url.endswith("/v1/vms/vm_1/runs")
-    t.add_json(predicate, 503, _unavailable_body(0.05))
+    t.add_json(predicate, 503, _unavailable_body(0))
 
     with use_transport(t), pytest.raises(sdk.ArkerError) as error:
         client().vm("vm_1").run("true", queueing_timeout=30)

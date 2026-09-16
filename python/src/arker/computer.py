@@ -34,6 +34,7 @@ from typing import (
 )
 
 import httpx2 as httpx
+from pydantic import TypeAdapter, ValidationError
 
 from .generated.api_models import (
     BackgroundRunResponse,
@@ -44,7 +45,7 @@ from .generated.api_models import (
     DeleteMountResponse,
     DeleteSessionResponse,
     DeleteVmResponse,
-    ErrorResponse,
+    ErrorBody,
     Filesystem,
     FilesystemCreateRequest,
     ListFilesystemsParameters,
@@ -72,6 +73,7 @@ from .generated.api_models import (
     RunResponse,
     Session,
     SyncChunkWrite,
+    SyncEntryError,
     SyncManifestOperationRequest,
     SyncManifestResponse,
     SyncReadInlineResponse,
@@ -163,19 +165,7 @@ TERMINAL_RUN_STATES = frozenset({"completed", "failed", "cancelled"})
 # as the background ack arrives and run() never gets to poll.
 REQUEST_TIMEOUT_S = 300
 RETRYABLE_HTTP = {429, 502, 503, 504}
-RETRYABLE_CODES = {
-    "unavailable",
-    "bad_gateway",
-    "stale_route",
-    "capacity_unavailable",
-}
-TRANSIENT_HINTS = (
-    "503",
-    "Service Unavailable",
-    "throttle",
-    "SlowDown",
-    "ThrottlingException",
-)
+RETRYABLE_CODES = {"unavailable", "capacity_unavailable", "rate_limited", "gateway_timeout"}
 ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 ComputeProvider = str
 DEFAULT_CONTROL_BASE_URL = "https://arker.ai/api"
@@ -287,6 +277,8 @@ class ArkerError(Exception):
     code: str
     message: str
     status: int
+    body: ErrorBody | SyncEntryError | None = None
+    raw: Any = None
 
     def __post_init__(self) -> None:
         Exception.__init__(self, f"{self.code}: {self.message}")
@@ -619,7 +611,7 @@ class Arker:
             retry_network_failures=retry_network_failures,
         )
 
-    def _retry_delay(self, attempt: int, error: dict[str, Any] | None = None) -> float:
+    def _retry_delay(self, attempt: int, error: ArkerError | None = None) -> float:
         return _retry_delay(self._retry, attempt, error)
 
 
@@ -980,7 +972,7 @@ class VM:
     def _send_writes(self, entries: list[SyncWriteEntry]) -> list[SyncWriteResult]:
         # Chunk entries share one upload_id, so a retry resends the same byte
         # ranges idempotently — the server's chunk ledger merges them.
-        last_error: tuple[str, str] | None = None
+        last_error: ArkerError | None = None
         for attempt in range(self._client._retry.attempts):
             request = SyncWriteOperationRequest(op="write", writes=entries)
             payload = self._client._request(
@@ -989,25 +981,17 @@ class VM:
                 request,
                 base_url=self.base_url,
             )
-            response = _decode_model(SyncWriteResponse, payload)
-            if len(response.results) != len(entries):
+            results = payload.get("results", [])
+            if len(results) != len(entries):
                 raise ArkerError("internal", "write response missing results", 200)
-            error = next(
-                (result.error for result in response.results if result.error is not None),
-                None,
-            )
-            if error is None:
-                return response.results
-            last_error = (error.code, error.message)
-            parsed_error = {"code": error.code, "message": error.message}
-            if not _is_retryable(200, parsed_error) or attempt == self._client._retry.attempts - 1:
+            raw = next((result["error"] for result in results if result.get("error")), None)
+            if raw is None:
+                return _decode_model(SyncWriteResponse, payload).results
+            last_error = _server_error(raw, 200, file=True)
+            if not _is_retryable(200, last_error, replay_safe=True) or attempt == self._client._retry.attempts - 1:
                 break
             time.sleep(self._client._retry_delay(attempt))
-        raise ArkerError(
-            last_error[0] if last_error else "internal",
-            last_error[1] if last_error else "write failed",
-            200,
-        )
+        raise last_error or ArkerError("internal", "write failed", 200)
 
     # ── Directory sync (rsync-style, manifest diff) ──────────────────
     def sync_dir(
@@ -1655,8 +1639,10 @@ def _request_json(
 
         text = raw.decode("utf-8", "replace")
         payload = _parse_json(text)
-        parsed_error = _extract_error(payload)
-        if _is_retryable(status, parsed_error):
+        parsed_error = _extract_error(payload, status)
+        if _is_retryable(
+            status, parsed_error, replay_safe=should_retry_network_failures or bool(headers.get("Idempotency-Key"))
+        ):
             delay = _retry_delay(retry, attempt, parsed_error)
             if _can_retry_again(retry, attempt, deadline, delay):
                 time.sleep(delay)
@@ -1664,7 +1650,7 @@ def _request_json(
                 continue
 
         if parsed_error:
-            raise ArkerError(parsed_error["code"], parsed_error["message"], status)
+            raise parsed_error
         if status >= 400:
             raise ArkerError("internal", text[:300] or f"HTTP {status}", status)
         if not isinstance(payload, dict):
@@ -1680,7 +1666,7 @@ def _can_retry_again(retry: RetryOptions, attempt: int, deadline: float | None, 
     return attempt < retry.attempts - 1
 
 
-def _retry_delay(retry: RetryOptions, attempt: int, error: dict[str, Any] | None = None) -> float:
+def _retry_delay(retry: RetryOptions, attempt: int, error: ArkerError | None = None) -> float:
     """Wait before the next attempt.
 
     The server's hint beats backoff, bounded by an explicitly configured
@@ -1689,7 +1675,7 @@ def _retry_delay(retry: RetryOptions, attempt: int, error: dict[str, Any] | None
     """
     jitter_range = max(1, int(retry.jitter_s * 1000) + 1)
     jitter = secrets.randbelow(jitter_range) / 1000.0
-    hint = (error or {}).get("retry_after")
+    hint = _wire_retry_after((error.raw or {}).get("retry_after_seconds")) if error else None
     if hint is not None:
         if retry.max_delay_s is not None:
             hint = min(float(hint), retry.max_delay_s)
@@ -1924,31 +1910,33 @@ def _parse_json(text: str) -> Any:
         return None
 
 
-def _extract_error(payload: Any) -> dict[str, Any] | None:
-    if not isinstance(payload, dict):
-        return None
+_HTTP_ERROR_ADAPTER = TypeAdapter(ErrorBody)
+_FILE_ERROR_ADAPTER = TypeAdapter(SyncEntryError)
+
+
+def _server_error(raw: Any, status: int, *, file: bool = False) -> ArkerError:
+    if not isinstance(raw, dict) or not isinstance(raw.get("code"), str) or not isinstance(raw.get("message"), str):
+        return ArkerError("internal", "Malformed API error response", status, raw=raw)
     try:
-        response = _decode_model(ErrorResponse, payload)
-    except (KeyError, TypeError):
+        body = (_FILE_ERROR_ADAPTER if file else _HTTP_ERROR_ADAPTER).validate_python(raw)
+    except ValidationError:
+        body = None
+    return ArkerError(raw["code"], raw["message"], status, body, raw)
+
+
+def _extract_error(payload: Any, status: int = 0) -> ArkerError | None:
+    if not isinstance(payload, dict) or set(payload) != {"error"}:
         return None
-    return {
-        "code": response.error.code,
-        "message": response.error.message,
-        "retry_after": _wire_retry_after(response.error.retry_after),
-        "retryable": (response.error.retryable if isinstance(response.error.retryable, bool) else None),
-    }
+    raw = payload["error"]
+    if not isinstance(raw, dict) or not isinstance(raw.get("code"), str) or not isinstance(raw.get("message"), str):
+        return None
+    return _server_error(raw, status)
 
 
 def _wire_retry_after(value: Any) -> float | None:
-    """Seconds the server asked us to wait, or None if it did not say usefully.
-
-    The response decoder passes scalars through without checking them against
-    the model, so this is where a non-numeric or non-positive value has to be
-    rejected — past here it is a number or absent.
-    """
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 4294967295:
         return None
-    return float(value) if value > 0 else None
+    return float(value)
 
 
 def _delete_after_failed_build(vm: VM, attempts: int = 3, base_delay_s: float = 1.0) -> None:
@@ -1962,18 +1950,13 @@ def _delete_after_failed_build(vm: VM, attempts: int = 3, base_delay_s: float = 
             time.sleep(base_delay_s * (attempt + 1))
 
 
-def _is_retryable(status: int, error: dict[str, Any] | None) -> bool:
-    if error and error.get("retryable") is not None:
-        return bool(error["retryable"])
-    if status in RETRYABLE_HTTP:
-        return True
-    if not error:
-        return False
-    if error["code"] in RETRYABLE_CODES:
-        return True
-    if error["code"] != "internal":
-        return False
-    return any(hint in error["message"] for hint in TRANSIENT_HINTS)
+def _is_retryable(status: int, error: ArkerError | None, *, replay_safe: bool = False) -> bool:
+    if error and error.body and error.body.recovery:
+        work = error.body.recovery.work
+        if work != "not_started":
+            return False
+        replay_safe = True
+    return replay_safe and (status in RETRYABLE_HTTP or bool(error and error.code in RETRYABLE_CODES))
 
 
 def _ulid() -> str:

@@ -5,7 +5,6 @@ import argparse
 import difflib
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -16,7 +15,6 @@ CONTRACT_PATH = Path("openapi.json")
 TYPESCRIPT_PATH = Path("typescript/src/generated/api-types.ts")
 PYTHON_PATH = Path("python/src/arker/generated/api_models.py")
 MANAGED_PATHS = (CONTRACT_PATH, TYPESCRIPT_PATH, PYTHON_PATH)
-HTTP_METHODS = ("get", "post", "put", "patch", "delete", "options", "head", "trace")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -50,198 +48,6 @@ def validate_contract(content: bytes) -> None:
         raise ContractError("source contract is not valid JSON") from error
     if not isinstance(document, dict) or not isinstance(document.get("openapi"), str):
         raise ContractError("source contract is not an OpenAPI document")
-
-
-def resolve_reference(document: dict[str, object], reference: str) -> object:
-    if not reference.startswith("#/"):
-        raise ContractError(f"unsupported external OpenAPI reference: {reference}")
-    value: object = document
-    for raw_part in reference[2:].split("/"):
-        part = raw_part.replace("~1", "/").replace("~0", "~")
-        if not isinstance(value, dict) or part not in value:
-            raise ContractError(f"unresolved OpenAPI reference: {reference}")
-        value = value[part]
-    return value
-
-
-def model_name(value: str) -> str:
-    words = re.split(r"[^A-Za-z0-9]+", value)
-    name = "".join(word[:1].upper() + word[1:] for word in words if word)
-    if not name or name[0].isdigit():
-        raise ContractError(f"operationId cannot form a Python model name: {value!r}")
-    return name
-
-
-def schema_type(
-    document: dict[str, object], schema: object, *, inline_name: str
-) -> str:
-    if not isinstance(schema, dict):
-        return "None"
-    reference = schema.get("$ref")
-    if isinstance(reference, str):
-        return reference.rsplit("/", 1)[-1]
-
-    alternatives = schema.get("oneOf") or schema.get("anyOf")
-    if isinstance(alternatives, list):
-        types = [
-            schema_type(document, alternative, inline_name=inline_name)
-            for alternative in alternatives
-        ]
-        return " | ".join(dict.fromkeys(types))
-
-    schema_kind = schema.get("type")
-    if isinstance(schema_kind, list):
-        types = [
-            schema_type(document, {**schema, "type": kind}, inline_name=inline_name)
-            for kind in schema_kind
-        ]
-        return " | ".join(dict.fromkeys(types))
-    if schema_kind == "array":
-        return f"list[{schema_type(document, schema.get('items'), inline_name=inline_name)}]"
-    if schema_kind == "string":
-        return "str"
-    if schema_kind == "integer":
-        return "int"
-    if schema_kind == "number":
-        return "float"
-    if schema_kind == "boolean":
-        return "bool"
-    if schema_kind == "null":
-        return "None"
-    if schema_kind == "object" and "properties" not in schema:
-        additional = schema.get("additionalProperties")
-        value_type = (
-            schema_type(document, additional, inline_name=inline_name)
-            if isinstance(additional, dict)
-            else "Any"
-        )
-        return f"dict[str, {value_type}]"
-    return inline_name
-
-
-def response_type(
-    document: dict[str, object], response: object, *, inline_name: str
-) -> str:
-    if isinstance(response, dict) and isinstance(response.get("$ref"), str):
-        response = resolve_reference(document, response["$ref"])
-    if not isinstance(response, dict):
-        return "None"
-    content = response.get("content")
-    if not isinstance(content, dict):
-        return "None"
-    media = content.get("application/json")
-    if not isinstance(media, dict):
-        return "None"
-    return schema_type(document, media.get("schema"), inline_name=inline_name)
-
-
-def union(types: list[str]) -> str:
-    unique = list(dict.fromkeys(types))
-    return " | ".join(unique) if unique else "None"
-
-
-def append_operation_types(contract: Path, output: Path) -> None:
-    document = json.loads(contract.read_text())
-    paths = document.get("paths")
-    if not isinstance(paths, dict):
-        raise ContractError("OpenAPI document has no paths object")
-
-    definitions: list[str] = []
-    operation_names: list[str] = []
-    operation_ids: set[str] = set()
-    for path in sorted(paths):
-        path_item = paths[path]
-        if not isinstance(path_item, dict):
-            continue
-        for method in HTTP_METHODS:
-            operation = path_item.get(method)
-            if not isinstance(operation, dict):
-                continue
-            operation_id = operation.get("operationId")
-            if not isinstance(operation_id, str) or not operation_id:
-                raise ContractError(f"{method.upper()} {path} has no operationId")
-            if operation_id in operation_ids:
-                raise ContractError(f"duplicate operationId: {operation_id}")
-            operation_ids.add(operation_id)
-
-            prefix = model_name(operation_id)
-            operation_name = f"{prefix}Operation"
-            operation_names.append(operation_name)
-            parameters = [
-                *(path_item.get("parameters") or []),
-                *(operation.get("parameters") or []),
-            ]
-            parameter_type = f"{prefix}Parameters" if parameters else "None"
-
-            request_body = operation.get("requestBody")
-            if isinstance(request_body, dict) and isinstance(
-                request_body.get("$ref"), str
-            ):
-                request_body = resolve_reference(document, request_body["$ref"])
-            request_content = (
-                request_body.get("content") if isinstance(request_body, dict) else None
-            )
-            request_media = (
-                request_content.get("application/json")
-                if isinstance(request_content, dict)
-                else None
-            )
-            request_type = (
-                schema_type(
-                    document,
-                    request_media.get("schema"),
-                    inline_name=f"{prefix}Request",
-                )
-                if isinstance(request_media, dict)
-                else "None"
-            )
-            if (
-                request_type != "None"
-                and isinstance(request_body, dict)
-                and request_body.get("required") is not True
-            ):
-                request_type = union([request_type, "None"])
-
-            responses = operation.get("responses")
-            if not isinstance(responses, dict):
-                raise ContractError(f"{method.upper()} {path} has no responses")
-            success_types: list[str] = []
-            error_types: list[str] = []
-            for status, response in responses.items():
-                response_model = response_type(
-                    document, response, inline_name=f"{prefix}Response"
-                )
-                if status.isdigit() and 100 <= int(status) < 400:
-                    success_types.append(response_model)
-                else:
-                    error_types.append(response_model)
-
-            definitions.extend(
-                [
-                    f"class {operation_name}(TypedDict):",
-                    f"    operation_id: Literal[{operation_id!r}]",
-                    f"    method: Literal[{method.upper()!r}]",
-                    f"    path: Literal[{path!r}]",
-                    f"    parameters: {parameter_type}",
-                    f"    request: {request_type}",
-                    f"    success: {union(success_types)}",
-                    f"    errors: {union(error_types)}",
-                    "",
-                    "",
-                ]
-            )
-
-    definitions.append("ApiOperation: TypeAlias = (")
-    definitions.extend(f"    {name} |" for name in operation_names[:-1])
-    definitions.append(f"    {operation_names[-1]}")
-    definitions.append(")")
-    output.write_text(
-        output.read_text()
-        + "\nfrom typing import TypedDict\n\n"
-        + "# OpenAPI operation types\n\n"
-        + "\n".join(definitions)
-        + "\n"
-    )
 
 
 def generate(contract: Path, output_root: Path) -> None:
@@ -293,14 +99,14 @@ def generate(contract: Path, output_root: Path) -> None:
             "--use-operation-id-as-name",
             "--use-standard-collections",
             "--use-union-operator",
+            "--use-subclass-enum",
             "--enum-field-as-literal",
-            "all",
+            "one",
             "--frozen-dataclasses",
             "--disable-timestamp",
             "--include-path-parameters",
         ],
     )
-    append_operation_types(contract, python_output)
 
 
 def stage_contract(output_root: Path, contract: bytes) -> None:

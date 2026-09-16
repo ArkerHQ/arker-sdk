@@ -26,6 +26,7 @@ dependencies = [
     "typing-extensions>=4.12",
     "dockerfile-parse>=2.0.1",
     "httpx2[http2]>=2.12",
+    "pydantic>=2.13,<3",
 ]
 
 [project.optional-dependencies]

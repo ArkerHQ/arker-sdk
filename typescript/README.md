@@ -53,3 +53,9 @@ Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [e
 ## License
 
 Apache-2.0
+
+### API errors
+
+`ArkerError.code`, `.message`, and `.status` remain available. For a recognized response, `.body` contains the generated HTTP or sync-file error union. Narrow `body.code` to access its typed details, request metadata, and recovery handles. `.raw` preserves the original error payload, including unknown future codes or fields; `.body` is `undefined` when validation fails.
+
+A retry delay is a scheduling hint, not permission to repeat a mutation. Automatic retries require a read, an idempotent request (including a keyed operation or upload chunk), or a typed `not_started` outcome. Failures with continuing, stopped, or unknown work are surfaced with their recovery context. Network failures keep their existing unknown-outcome behavior.

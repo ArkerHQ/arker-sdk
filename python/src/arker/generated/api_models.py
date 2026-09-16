@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Literal, TypeAlias
 
 
@@ -31,71 +32,62 @@ class ListRegionsResponse:
     regions: list[RegionPlacement]
 
 
-ErrorCode: TypeAlias = Literal[
-    'unsupported_operation',
-    'bad_request',
-    'validation_error',
-    'unauthorized',
-    'invalid_api_key',
-    'api_key_required',
-    'csrf_rejected',
-    'forbidden',
-    'legal_acceptance_required',
-    'payment_required',
-    'not_found',
-    'conflict',
-    'method_not_allowed',
-    'payload_too_large',
-    'rate_limited',
-    'upstream_rate_limited',
-    'budget_exceeded',
-    'concurrency_limit_exceeded',
-    'regional_concurrency_limit_exceeded',
-    'resource_pressure',
-    'capacity_unavailable',
-    'internal',
-    'unavailable',
-    'bad_gateway',
-    'stale_route',
-    'unrecoverable',
-]
+class ErrorCode(str, Enum):
+    bad_request = 'bad_request'
+    insufficient_resources = 'insufficient_resources'
+    unauthorized = 'unauthorized'
+    forbidden = 'forbidden'
+    not_found = 'not_found'
+    conflict = 'conflict'
+    resource_busy = 'resource_busy'
+    invalid_state = 'invalid_state'
+    already_exists = 'already_exists'
+    idempotency_conflict = 'idempotency_conflict'
+    expired = 'expired'
+    payload_too_large = 'payload_too_large'
+    method_not_allowed = 'method_not_allowed'
+    unsupported_operation = 'unsupported_operation'
+    unrecoverable = 'unrecoverable'
+    capacity_unavailable = 'capacity_unavailable'
+    unavailable = 'unavailable'
+    internal = 'internal'
+    rate_limited = 'rate_limited'
+    quota_exceeded = 'quota_exceeded'
+    payment_required = 'payment_required'
+    action_required = 'action_required'
+    operation_failed = 'operation_failed'
+    gateway_timeout = 'gateway_timeout'
 
 
-@dataclass(frozen=True)
-class ErrorBody:
-    code: ErrorCode
-    message: str
-    timestamp: str
-    retry_after: int | None = None
-    operation: str | None = None
-    runtime: str | None = None
-    provider: str | None = None
-    retryable: bool | None = None
-    scope: Literal['global', 'regional'] | None = None
-    region: str | None = None
-    resource: str | None = None
-    current_usage: int | None = None
-    requested_increment: int | None = None
-    projected_usage: int | None = None
-    quota: int | None = None
-    action: Literal['settings_limits'] | None = None
+class VmState(str, Enum):
+    idle = 'idle'
+    running = 'running'
 
 
-@dataclass(frozen=True)
-class ErrorResponse:
-    error: ErrorBody
+class SessionState(str, Enum):
+    idle = 'idle'
+    running = 'running'
 
 
-VmState: TypeAlias = Literal['idle', 'running']
-
-
-SessionState: TypeAlias = VmState
-
-
-RunState: TypeAlias = Literal['pending', 'running', 'completed', 'failed', 'cancelled']
+class RunState(str, Enum):
+    pending = 'pending'
+    running = 'running'
+    completed = 'completed'
+    failed = 'failed'
+    cancelled = 'cancelled'
 
 
 Provider: TypeAlias = str
+
+
+class Type(str, Enum):
+    outbound = 'outbound'
+    inbound = 'inbound'
+
+
+class Auth(str, Enum):
+    open = 'open'
+    arker = 'arker'
 
 
 Port: TypeAlias = int
@@ -110,6 +102,11 @@ class PolicyMatch:
     paths: list[str] | None = None
     headers: dict[str, list[str]] | None = None
     body_contains: list[str] | None = None
+
+
+class PolicyAction1(str, Enum):
+    allow = 'allow'
+    deny = 'deny'
 
 
 @dataclass(frozen=True)
@@ -137,6 +134,11 @@ class Gate:
     body: Any | None = None
     deny_on_timeout: bool | None = True
     timeout_ms: int | None = None
+
+
+class Layer(str, Enum):
+    disk = 'disk'
+    memory = 'memory'
 
 
 @dataclass(frozen=True)
@@ -183,12 +185,36 @@ class PatchSessionResponse:
     session_id: str
 
 
+class MemoryBackend(Enum):
+    file = 'file'
+    uffd = 'uffd'
+    NoneType_None = None
+
+
+class Signal(Enum):
+    SIGINT = 'SIGINT'
+    SIGTERM = 'SIGTERM'
+    SIGKILL = 'SIGKILL'
+    SIGHUP = 'SIGHUP'
+    NoneType_None = None
+
+
+class StdoutEncoding(str, Enum):
+    utf_8 = 'utf-8'
+    base64 = 'base64'
+
+
+class StderrEncoding(str, Enum):
+    utf_8 = 'utf-8'
+    base64 = 'base64'
+
+
 @dataclass(frozen=True)
 class CompletedRunResponse:
     stdout: str
-    stdout_encoding: Literal['utf-8', 'base64']
+    stdout_encoding: StdoutEncoding
     stderr: str
-    stderr_encoding: Literal['utf-8', 'base64']
+    stderr_encoding: StderrEncoding
     exit_code: int | None
     session_id: str | None = None
     run_id: str | None = None
@@ -197,7 +223,7 @@ class CompletedRunResponse:
     memory_requested_mib: int | None = None
     memory_achieved_mib: int | None = None
     memory_partial: bool | None = None
-    memory_backend: Literal['file', 'uffd'] | None = None
+    memory_backend: MemoryBackend | None = None
 
 
 @dataclass(frozen=True)
@@ -214,9 +240,9 @@ class Run:
     started_at: str
     exit_code: int | None
     stdout: str
-    stdout_encoding: Literal['utf-8', 'base64']
+    stdout_encoding: StdoutEncoding
     stderr: str
-    stderr_encoding: Literal['utf-8', 'base64']
+    stderr_encoding: StderrEncoding
     session_id: str | None = None
     command: str | None = None
     completed_at: str | None = None
@@ -315,6 +341,13 @@ class PtyTicketResponse:
     expires_in: int
 
 
+class Status(Enum):
+    attaching = 'attaching'
+    mounted = 'mounted'
+    failed = 'failed'
+    NoneType_None = None
+
+
 @dataclass(frozen=True)
 class Mount:
     mount_id: str
@@ -322,7 +355,7 @@ class Mount:
     filesystem_id: str
     path: str
     region: str | None = None
-    status: Literal['attaching', 'mounted', 'failed'] | None = None
+    status: Status | None = None
     status_detail: str | None = None
 
 
@@ -399,6 +432,11 @@ class SyncPresignedWriteCommit:
     sha256: str | None = None
 
 
+class Encoding(str, Enum):
+    utf8 = 'utf8'
+    base64 = 'base64'
+
+
 @dataclass(frozen=True)
 class SyncReadInlineResponse:
     ok: bool
@@ -406,7 +444,7 @@ class SyncReadInlineResponse:
     path: str
     size: int
     content: str
-    encoding: Literal['utf8', 'base64']
+    encoding: Encoding
 
 
 @dataclass(frozen=True)
@@ -424,12 +462,6 @@ class SyncReadPresignedResponse:
 class SyncByteRange:
     start: int
     end: int
-
-
-@dataclass(frozen=True)
-class SyncEntryError:
-    code: str
-    message: str
 
 
 @dataclass(frozen=True)
@@ -469,7 +501,19 @@ class VmResources:
     gpu_count: int | None = None
 
 
-Vgpu: TypeAlias = float
+class Vgpu(float, Enum):
+    number_0 = 0
+    number_0_125 = 0.125
+    number_0_25 = 0.25
+    number_0_375 = 0.375
+    number_0_5 = 0.5
+    number_0_625 = 0.625
+    number_0_75 = 0.75
+    number_0_875 = 0.875
+    number_1 = 1
+    number_2 = 2
+    number_4 = 4
+    number_8 = 8
 
 
 @dataclass(frozen=True)
@@ -519,6 +563,824 @@ class RegistryAuth:
     password: str
 
 
+class OpenApiOperationId(str, Enum):
+    health = 'health'
+    listRegions = 'listRegions'
+    whoami = 'whoami'
+    fork = 'fork'
+    listVms = 'listVms'
+    listOrgRuns = 'listOrgRuns'
+    getVm = 'getVm'
+    deleteVm = 'deleteVm'
+    patchVm = 'patchVm'
+    getVmPolicies = 'getVmPolicies'
+    putVmPolicies = 'putVmPolicies'
+    createRun = 'createRun'
+    listRuns = 'listRuns'
+    getRun = 'getRun'
+    cancelRun = 'cancelRun'
+    listSessions = 'listSessions'
+    createSession = 'createSession'
+    getSession = 'getSession'
+    patchSession = 'patchSession'
+    deleteSession = 'deleteSession'
+    attachSessionPty = 'attachSessionPty'
+    mintSessionPtyTicket = 'mintSessionPtyTicket'
+    createMount = 'createMount'
+    listMounts = 'listMounts'
+    deleteMount = 'deleteMount'
+    sync = 'sync'
+    listFilesystems = 'listFilesystems'
+    createFilesystem = 'createFilesystem'
+    getFilesystem = 'getFilesystem'
+    deleteFilesystem = 'deleteFilesystem'
+
+
+class HttpMethod(str, Enum):
+    GET = 'GET'
+    HEAD = 'HEAD'
+    POST = 'POST'
+    PUT = 'PUT'
+    PATCH = 'PATCH'
+    DELETE = 'DELETE'
+    OPTIONS = 'OPTIONS'
+    CONNECT = 'CONNECT'
+    TRACE = 'TRACE'
+
+
+class ExecutionStage(str, Enum):
+    image_pull = 'image_pull'
+    image_conversion = 'image_conversion'
+    image_configuration = 'image_configuration'
+    image_command = 'image_command'
+    dockerfile_build = 'dockerfile_build'
+    restore = 'restore'
+
+
+class ComputeResource(str, Enum):
+    cpu = 'cpu'
+    memory = 'memory'
+    disk = 'disk'
+    gpu = 'gpu'
+
+
+class ResourceKind(str, Enum):
+    vm = 'vm'
+    source = 'source'
+    run = 'run'
+    session = 'session'
+    filesystem = 'filesystem'
+    mount = 'mount'
+    file = 'file'
+    sync = 'sync'
+    upload = 'upload'
+    api_key = 'api_key'
+    ssh_key = 'ssh_key'
+    ssh_setup = 'ssh_setup'
+    organization = 'organization'
+    route = 'route'
+    billing = 'billing'
+    correction_review = 'correction_review'
+    webhook = 'webhook'
+    resource = 'resource'
+
+
+class CapacityScope(str, Enum):
+    worker = 'worker'
+    region = 'region'
+    platform = 'platform'
+
+
+class RateLimiter(str, Enum):
+    arker = 'arker'
+    upstream = 'upstream'
+
+
+class StateRequirement(str, Enum):
+    running = 'running'
+    mutable = 'mutable'
+    unclaimed = 'unclaimed'
+
+
+class UnsupportedReason(str, Enum):
+    feature_not_supported = 'feature_not_supported'
+    platform_mismatch = 'platform_mismatch'
+    restore_requires_birth_host = 'restore_requires_birth_host'
+
+
+class RequiredAction(str, Enum):
+    accept_legal_terms = 'accept_legal_terms'
+    convert_billing_plan = 'convert_billing_plan'
+
+
+class OperationFailureReason(str, Enum):
+    image_pull_failed = 'image_pull_failed'
+    image_conversion_failed = 'image_conversion_failed'
+    command_failed = 'command_failed'
+    unexpected_interpreter = 'unexpected_interpreter'
+    deadline_exceeded = 'deadline_exceeded'
+
+
+class Feature(str, Enum):
+    durability = 'durability'
+    nested_virtualization = 'nested_virtualization'
+    diskless = 'diskless'
+    filesystem_only_fork = 'filesystem_only_fork'
+    shared_filesystem = 'shared_filesystem'
+    persistent_pty = 'persistent_pty'
+    network_policy = 'network_policy'
+    public_ingress = 'public_ingress'
+    guest_control = 'guest_control'
+    platform = 'platform'
+    systemd = 'systemd'
+    restore = 'restore'
+
+
+class WorkState(str, Enum):
+    not_started = 'not_started'
+    stopped = 'stopped'
+    continuing = 'continuing'
+    unknown = 'unknown'
+
+
+class EnforcementScope(str, Enum):
+    worker_local = 'worker_local'
+    regional = 'regional'
+    global_ = 'global'
+
+
+@dataclass(frozen=True)
+class ResourceRef:
+    kind: ResourceKind
+    id: str | None = None
+
+
+@dataclass(frozen=True)
+class FieldViolation:
+    field: str
+    message: str
+
+
+@dataclass(frozen=True)
+class MatchedRequestContext:
+    kind: Literal['matched']
+    operation_id: OpenApiOperationId
+
+
+@dataclass(frozen=True)
+class UnmatchedRequestContext:
+    kind: Literal['unmatched']
+    method: str
+
+
+RequestContext: TypeAlias = MatchedRequestContext | UnmatchedRequestContext
+
+
+@dataclass(frozen=True)
+class RecoveryDetails:
+    vm_id: str | None = None
+    run_id: str | None = None
+    step_index: int | None = None
+    step_count: int | None = None
+    completed_steps: int | None = None
+    exit_code: int | None = None
+
+
+@dataclass(frozen=True)
+class RecoveryContext:
+    work: WorkState
+    context: RecoveryDetails | None = None
+
+
+@dataclass(frozen=True)
+class ErrorExecutionContext:
+    stage: ExecutionStage | None = None
+    recovery: RecoveryContext | None = None
+
+
+@dataclass(frozen=True)
+class ErrorMetadata(ErrorExecutionContext):
+    message: str = field(kw_only=True)
+    timestamp: str = field(kw_only=True)
+    request_id: str = field(kw_only=True)
+    request: RequestContext = field(kw_only=True)
+    retry_after_seconds: int | None = None
+
+
+@dataclass(frozen=True)
+class ByteAmount:
+    unit: Literal['bytes']
+    value: int
+
+
+@dataclass(frozen=True)
+class CpuAmount:
+    unit: Literal['vcpus']
+    value: int
+
+
+@dataclass(frozen=True)
+class GpuDeviceAmount:
+    unit: Literal['gpu_devices']
+    value: int
+
+
+@dataclass(frozen=True)
+class GpuSmAmount:
+    unit: Literal['gpu_sms']
+    value: int
+
+
+@dataclass(frozen=True)
+class GpuVramAmount:
+    unit: Literal['gpu_vram_bytes']
+    value: int
+
+
+@dataclass(frozen=True)
+class CpuInsufficientResourcesDetails:
+    resource: Literal['cpu']
+    requested: CpuAmount | None = None
+    minimum: CpuAmount | None = None
+
+
+@dataclass(frozen=True)
+class MemoryInsufficientResourcesDetails:
+    resource: Literal['memory']
+    requested: ByteAmount | None = None
+    minimum: ByteAmount | None = None
+
+
+@dataclass(frozen=True)
+class DiskInsufficientResourcesDetails:
+    resource: Literal['disk']
+    requested: ByteAmount | None = None
+    minimum: ByteAmount | None = None
+
+
+@dataclass(frozen=True)
+class GpuDevicesInsufficientResourcesDetails:
+    resource: Literal['gpu']
+    requested: GpuDeviceAmount | None = None
+    minimum: GpuDeviceAmount | None = None
+
+
+@dataclass(frozen=True)
+class GpuSmsInsufficientResourcesDetails1:
+    resource: Literal['gpu']
+    requested: GpuSmAmount
+    minimum: GpuSmAmount | None = None
+
+
+@dataclass(frozen=True)
+class GpuSmsInsufficientResourcesDetails2:
+    resource: Literal['gpu']
+    minimum: GpuSmAmount
+    requested: GpuSmAmount | None = None
+
+
+GpuSmsInsufficientResourcesDetails: TypeAlias = (
+    GpuSmsInsufficientResourcesDetails1 | GpuSmsInsufficientResourcesDetails2
+)
+
+
+@dataclass(frozen=True)
+class GpuVramInsufficientResourcesDetails1:
+    resource: Literal['gpu']
+    requested: GpuVramAmount
+    minimum: GpuVramAmount | None = None
+
+
+@dataclass(frozen=True)
+class GpuVramInsufficientResourcesDetails2:
+    resource: Literal['gpu']
+    minimum: GpuVramAmount
+    requested: GpuVramAmount | None = None
+
+
+GpuVramInsufficientResourcesDetails: TypeAlias = (
+    GpuVramInsufficientResourcesDetails1 | GpuVramInsufficientResourcesDetails2
+)
+
+
+InsufficientResourcesDetails: TypeAlias = (
+    CpuInsufficientResourcesDetails
+    | MemoryInsufficientResourcesDetails
+    | DiskInsufficientResourcesDetails
+    | GpuDevicesInsufficientResourcesDetails
+    | GpuSmsInsufficientResourcesDetails
+    | GpuVramInsufficientResourcesDetails
+)
+
+
+@dataclass(frozen=True)
+class BudgetPeriod:
+    start: str
+    end: str
+
+
+@dataclass(frozen=True)
+class VcpuLimit:
+    metric: Literal['vcpus']
+    unit: Literal['vcpus']
+
+
+@dataclass(frozen=True)
+class RamLimit:
+    metric: Literal['ram_mib']
+    unit: Literal['mib']
+
+
+@dataclass(frozen=True)
+class DiskLimit:
+    metric: Literal['disk_mib']
+    unit: Literal['mib']
+
+
+@dataclass(frozen=True)
+class GpuVramLimit:
+    metric: Literal['gpu_vram_mib']
+    unit: Literal['mib']
+
+
+@dataclass(frozen=True)
+class GpuSmLimit:
+    metric: Literal['gpu_sms']
+    unit: Literal['sms']
+
+
+@dataclass(frozen=True)
+class PtySessionLimit:
+    metric: Literal['pty_sessions']
+    unit: Literal['sessions']
+
+
+@dataclass(frozen=True)
+class BudgetLimit:
+    metric: Literal['budget']
+    unit: Literal['minor_currency_units']
+    currency: str
+    period: BudgetPeriod
+
+
+LimitDescriptor: TypeAlias = (
+    VcpuLimit
+    | RamLimit
+    | DiskLimit
+    | GpuVramLimit
+    | GpuSmLimit
+    | PtySessionLimit
+    | BudgetLimit
+)
+
+
+@dataclass(frozen=True)
+class VmLimitScope:
+    kind: Literal['vm']
+    vm_id: str
+
+
+@dataclass(frozen=True)
+class RegionLimitScope:
+    kind: Literal['region']
+    region: str
+
+
+@dataclass(frozen=True)
+class OrganizationLimitScope:
+    kind: Literal['organization']
+
+
+LimitScope: TypeAlias = VmLimitScope | RegionLimitScope | OrganizationLimitScope
+
+
+@dataclass(frozen=True)
+class MeasuredQuota:
+    kind: Literal['measured']
+    current_usage: int | None = None
+    requested_increment: int | None = None
+    projected_usage: int | None = None
+    cap: int | None = None
+
+
+@dataclass(frozen=True)
+class UnmeasuredQuota:
+    kind: Literal['unmeasured']
+
+
+QuotaMeasurements: TypeAlias = MeasuredQuota | UnmeasuredQuota
+
+
+@dataclass(frozen=True)
+class QuotaExceededDetails:
+    limit: LimitDescriptor
+    scope: LimitScope
+    enforcement: EnforcementScope
+    measurements: QuotaMeasurements
+
+
+@dataclass(frozen=True)
+class BadRequestDetails:
+    violations: list[FieldViolation] | None = None
+
+
+@dataclass(frozen=True)
+class ResourceErrorDetails:
+    resource: ResourceKind
+
+
+@dataclass(frozen=True)
+class InvalidStateDetails:
+    resource: ResourceRef
+    requirement: StateRequirement
+
+
+@dataclass(frozen=True)
+class PayloadTooLargeDetails:
+    maximum_bytes: int | None = None
+
+
+@dataclass(frozen=True)
+class MethodNotAllowedDetails:
+    allowed_methods: list[HttpMethod]
+
+
+@dataclass(frozen=True)
+class UnsupportedOperationDetails:
+    reason: UnsupportedReason
+    feature: Feature | None = None
+    resource: ResourceRef | None = None
+
+
+@dataclass(frozen=True)
+class UnrecoverableDetails:
+    resource: ResourceRef
+
+
+@dataclass(frozen=True)
+class CapacityUnavailableDetails:
+    scope: CapacityScope
+    resource: ComputeResource | None = None
+
+
+@dataclass(frozen=True)
+class RateLimitedDetails:
+    limiter: RateLimiter
+
+
+@dataclass(frozen=True)
+class ActionRequiredDetails:
+    action: RequiredAction
+
+
+@dataclass(frozen=True)
+class OperationFailedDetails:
+    reason: OperationFailureReason
+
+
+@dataclass(frozen=True)
+class BadRequest(ErrorMetadata):
+    code: Literal['bad_request'] = field(kw_only=True)
+    details: BadRequestDetails | None = None
+
+
+@dataclass(frozen=True)
+class InsufficientResources(ErrorMetadata):
+    code: Literal['insufficient_resources'] = field(kw_only=True)
+    details: InsufficientResourcesDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Unauthorized(ErrorMetadata):
+    code: Literal['unauthorized'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Forbidden(ErrorMetadata):
+    code: Literal['forbidden'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class NotFound(ErrorMetadata):
+    code: Literal['not_found'] = field(kw_only=True)
+    details: ResourceErrorDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Conflict(ErrorMetadata):
+    code: Literal['conflict'] = field(kw_only=True)
+    details: ResourceErrorDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class ResourceBusy(ErrorMetadata):
+    code: Literal['resource_busy'] = field(kw_only=True)
+    details: ResourceErrorDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class InvalidState(ErrorMetadata):
+    code: Literal['invalid_state'] = field(kw_only=True)
+    details: InvalidStateDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class AlreadyExists(ErrorMetadata):
+    code: Literal['already_exists'] = field(kw_only=True)
+    details: ResourceErrorDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class IdempotencyConflict(ErrorMetadata):
+    code: Literal['idempotency_conflict'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Expired(ErrorMetadata):
+    code: Literal['expired'] = field(kw_only=True)
+    details: ResourceErrorDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class PayloadTooLarge(ErrorMetadata):
+    code: Literal['payload_too_large'] = field(kw_only=True)
+    details: PayloadTooLargeDetails | None = None
+
+
+@dataclass(frozen=True)
+class MethodNotAllowed(ErrorMetadata):
+    code: Literal['method_not_allowed'] = field(kw_only=True)
+    details: MethodNotAllowedDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class UnsupportedOperation(ErrorMetadata):
+    code: Literal['unsupported_operation'] = field(kw_only=True)
+    details: UnsupportedOperationDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Unrecoverable(ErrorMetadata):
+    code: Literal['unrecoverable'] = field(kw_only=True)
+    details: UnrecoverableDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class CapacityUnavailable(ErrorMetadata):
+    code: Literal['capacity_unavailable'] = field(kw_only=True)
+    details: CapacityUnavailableDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Unavailable(ErrorMetadata):
+    code: Literal['unavailable'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Internal(ErrorMetadata):
+    code: Literal['internal'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class RateLimited(ErrorMetadata):
+    code: Literal['rate_limited'] = field(kw_only=True)
+    details: RateLimitedDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class QuotaExceeded(ErrorMetadata):
+    code: Literal['quota_exceeded'] = field(kw_only=True)
+    details: QuotaExceededDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class PaymentRequired(ErrorMetadata):
+    code: Literal['payment_required'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class ActionRequired(ErrorMetadata):
+    code: Literal['action_required'] = field(kw_only=True)
+    details: ActionRequiredDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class OperationFailed(ErrorMetadata):
+    code: Literal['operation_failed'] = field(kw_only=True)
+    details: OperationFailedDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class GatewayTimeout(ErrorMetadata):
+    code: Literal['gateway_timeout'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class NotReadyHealthResponse:
+    status: Literal['unavailable']
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class HealthUnavailableErrorResponse:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class SyncBadRequestError(ErrorExecutionContext):
+    code: Literal['bad_request'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: BadRequestDetails | None = None
+
+
+class Resource(str, Enum):
+    file = 'file'
+    upload = 'upload'
+    resource = 'resource'
+
+
+@dataclass(frozen=True)
+class Details:
+    resource: Resource
+
+
+@dataclass(frozen=True)
+class SyncNotFoundError(ErrorExecutionContext):
+    code: Literal['not_found'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: Details = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Details1:
+    resource: Resource
+
+
+@dataclass(frozen=True)
+class SyncConflictError(ErrorExecutionContext):
+    code: Literal['conflict'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: Details1 = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class SyncPayloadTooLargeError(ErrorExecutionContext):
+    code: Literal['payload_too_large'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: PayloadTooLargeDetails | None = None
+
+
+class Kind(str, Enum):
+    file = 'file'
+    upload = 'upload'
+    filesystem = 'filesystem'
+    resource = 'resource'
+
+
+@dataclass(frozen=True)
+class Resource2:
+    kind: Kind
+    id: str | None = None
+
+
+@dataclass(frozen=True)
+class Details2:
+    reason: Literal['feature_not_supported']
+    feature: Feature | None = None
+    resource: Resource2 | None = None
+
+
+@dataclass(frozen=True)
+class SyncUnsupportedOperationError(ErrorExecutionContext):
+    code: Literal['unsupported_operation'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: Details2 = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class SyncUnavailableError(ErrorExecutionContext):
+    code: Literal['unavailable'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class SyncInternalError(ErrorExecutionContext):
+    code: Literal['internal'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Details3:
+    resource: Literal['upload']
+
+
+@dataclass(frozen=True)
+class SyncExpiredError(ErrorExecutionContext):
+    code: Literal['expired'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: Details3 = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class HealthResponse1:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class ListRegionsResponse1:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class ListRegionsResponse2:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class WhoamiResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class WhoamiResponse2:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class WhoamiResponse3:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class WhoamiResponse4:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class WhoamiResponse5:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class ForkResponse:
+    error: BadRequest | InsufficientResources
+
+
+@dataclass(frozen=True)
+class ForkResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class ForkResponse2:
+    error: PaymentRequired
+
+
+@dataclass(frozen=True)
+class ForkResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class ForkResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class ForkResponse5:
+    error: AlreadyExists | Conflict | InvalidState | ResourceBusy
+
+
+@dataclass(frozen=True)
+class ForkResponse6:
+    error: PayloadTooLarge
+
+
+@dataclass(frozen=True)
+class ForkResponse7:
+    error: OperationFailed | Unrecoverable | UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class ForkResponse8:
+    error: QuotaExceeded | RateLimited
+
+
+@dataclass(frozen=True)
+class ForkResponse9:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class ForkResponse10:
+    error: CapacityUnavailable | Unavailable
+
+
+@dataclass(frozen=True)
+class ForkResponse11:
+    error: GatewayTimeout
+
+
 @dataclass(frozen=True)
 class ListVmsParameters:
     cursor: str | None = None
@@ -534,6 +1396,57 @@ class ListVmsParameters:
 
 
 @dataclass(frozen=True)
+class ListVmsResponse1:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class ListVmsResponse2:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class ListVmsResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class ListVmsResponse4:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class ListVmsResponse5:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class ListVmsResponse6:
+    error: Unavailable
+
+
+class Endpoint(str, Enum):
+    run = 'run'
+    fork = 'fork'
+    sync = 'sync'
+
+
+class Sort(str, Enum):
+    when = 'when'
+    status = 'status'
+    path = 'path'
+    total = 'total'
+    queue = 'queue'
+    your_code = 'your_code'
+    runtime = 'runtime'
+
+
+class Dir(str, Enum):
+    asc = 'asc'
+    desc = 'desc'
+
+
+@dataclass(frozen=True)
 class ListOrgRunsParameters:
     since: int | None = None
     until: int | None = None
@@ -546,16 +1459,43 @@ class ListOrgRunsParameters:
     offset: int | None = None
     lite: bool | None = None
     runtime: str | None = None
-    endpoint: Literal['run', 'fork', 'sync'] | None = None
+    endpoint: Endpoint | None = None
     actions: str | None = None
     status: str | None = None
     status_min: int | None = None
     status_max: int | None = None
-    sort: (
-        Literal['when', 'status', 'path', 'total', 'queue', 'your_code', 'runtime']
-        | None
-    ) = None
-    dir: Literal['asc', 'desc'] | None = None
+    sort: Sort | None = None
+    dir: Dir | None = None
+
+
+@dataclass(frozen=True)
+class ListOrgRunsResponse1:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class ListOrgRunsResponse2:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class ListOrgRunsResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class ListOrgRunsResponse4:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class ListOrgRunsResponse5:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class ListOrgRunsResponse6:
+    error: Unavailable
 
 
 @dataclass(frozen=True)
@@ -564,8 +1504,93 @@ class GetVmParameters:
 
 
 @dataclass(frozen=True)
+class GetVmResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class GetVmResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class GetVmResponse2:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class GetVmResponse3:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class GetVmResponse4:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class GetVmResponse5:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class GetVmResponse6:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class GetVmResponse7:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
 class DeleteVmParameters:
     id: str
+
+
+@dataclass(frozen=True)
+class DeleteVmResponse1:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class DeleteVmResponse2:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class DeleteVmResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class DeleteVmResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class DeleteVmResponse5:
+    error: InvalidState | ResourceBusy
+
+
+@dataclass(frozen=True)
+class DeleteVmResponse6:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class DeleteVmResponse7:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class DeleteVmResponse8:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class DeleteVmResponse9:
+    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -574,8 +1599,118 @@ class PatchVmParameters:
 
 
 @dataclass(frozen=True)
+class PatchVmResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class PatchVmResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class PatchVmResponse2:
+    error: PaymentRequired
+
+
+@dataclass(frozen=True)
+class PatchVmResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class PatchVmResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class PatchVmResponse5:
+    error: AlreadyExists | InvalidState
+
+
+@dataclass(frozen=True)
+class PatchVmResponse6:
+    error: PayloadTooLarge
+
+
+@dataclass(frozen=True)
+class PatchVmResponse7:
+    error: UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class PatchVmResponse8:
+    error: QuotaExceeded | RateLimited
+
+
+@dataclass(frozen=True)
+class PatchVmResponse9:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class PatchVmResponse10:
+    error: CapacityUnavailable | Unavailable
+
+
+@dataclass(frozen=True)
+class PatchVmResponse11:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
 class GetVmPoliciesParameters:
     id: str
+
+
+@dataclass(frozen=True)
+class GetVmPoliciesResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class GetVmPoliciesResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class GetVmPoliciesResponse2:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class GetVmPoliciesResponse3:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class GetVmPoliciesResponse4:
+    error: InvalidState
+
+
+@dataclass(frozen=True)
+class GetVmPoliciesResponse5:
+    error: UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class GetVmPoliciesResponse6:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class GetVmPoliciesResponse7:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class GetVmPoliciesResponse8:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class GetVmPoliciesResponse9:
+    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -584,8 +1719,123 @@ class PutVmPoliciesParameters:
 
 
 @dataclass(frozen=True)
+class PutVmPoliciesResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class PutVmPoliciesResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class PutVmPoliciesResponse2:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class PutVmPoliciesResponse3:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class PutVmPoliciesResponse4:
+    error: InvalidState
+
+
+@dataclass(frozen=True)
+class PutVmPoliciesResponse5:
+    error: PayloadTooLarge
+
+
+@dataclass(frozen=True)
+class PutVmPoliciesResponse6:
+    error: UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class PutVmPoliciesResponse7:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class PutVmPoliciesResponse8:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class PutVmPoliciesResponse9:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class PutVmPoliciesResponse10:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
 class CreateRunParameters:
     id: str
+
+
+@dataclass(frozen=True)
+class CreateRunResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class CreateRunResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class CreateRunResponse2:
+    error: PaymentRequired
+
+
+@dataclass(frozen=True)
+class CreateRunResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class CreateRunResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class CreateRunResponse5:
+    error: Conflict | IdempotencyConflict | InvalidState | ResourceBusy
+
+
+@dataclass(frozen=True)
+class CreateRunResponse6:
+    error: PayloadTooLarge
+
+
+@dataclass(frozen=True)
+class CreateRunResponse7:
+    error: Unrecoverable | UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class CreateRunResponse8:
+    error: QuotaExceeded | RateLimited
+
+
+@dataclass(frozen=True)
+class CreateRunResponse9:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class CreateRunResponse10:
+    error: CapacityUnavailable | Unavailable
+
+
+@dataclass(frozen=True)
+class CreateRunResponse11:
+    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -600,15 +1850,150 @@ class ListRunsParameters:
 
 
 @dataclass(frozen=True)
+class ListRunsResponse1:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class ListRunsResponse2:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class ListRunsResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class ListRunsResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class ListRunsResponse5:
+    error: InvalidState
+
+
+@dataclass(frozen=True)
+class ListRunsResponse6:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class ListRunsResponse7:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class ListRunsResponse8:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class ListRunsResponse9:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
 class GetRunParameters:
     id: str
     run_id: str
 
 
 @dataclass(frozen=True)
+class GetRunResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class GetRunResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class GetRunResponse2:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class GetRunResponse3:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class GetRunResponse4:
+    error: InvalidState
+
+
+@dataclass(frozen=True)
+class GetRunResponse5:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class GetRunResponse6:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class GetRunResponse7:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class GetRunResponse8:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
 class CancelRunParameters:
     id: str
     run_id: str
+
+
+@dataclass(frozen=True)
+class CancelRunResponse1:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class CancelRunResponse2:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class CancelRunResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class CancelRunResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class CancelRunResponse5:
+    error: InvalidState
+
+
+@dataclass(frozen=True)
+class CancelRunResponse6:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class CancelRunResponse7:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class CancelRunResponse8:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class CancelRunResponse9:
+    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -620,8 +2005,108 @@ class ListSessionsParameters:
 
 
 @dataclass(frozen=True)
+class ListSessionsResponse1:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class ListSessionsResponse2:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class ListSessionsResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class ListSessionsResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class ListSessionsResponse5:
+    error: InvalidState
+
+
+@dataclass(frozen=True)
+class ListSessionsResponse6:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class ListSessionsResponse7:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class ListSessionsResponse8:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class ListSessionsResponse9:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
 class CreateSessionParameters:
     id: str
+
+
+@dataclass(frozen=True)
+class CreateSessionResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class CreateSessionResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class CreateSessionResponse2:
+    error: PaymentRequired
+
+
+@dataclass(frozen=True)
+class CreateSessionResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class CreateSessionResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class CreateSessionResponse5:
+    error: Conflict | InvalidState
+
+
+@dataclass(frozen=True)
+class CreateSessionResponse6:
+    error: PayloadTooLarge
+
+
+@dataclass(frozen=True)
+class CreateSessionResponse7:
+    error: QuotaExceeded | RateLimited
+
+
+@dataclass(frozen=True)
+class CreateSessionResponse8:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class CreateSessionResponse9:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class CreateSessionResponse10:
+    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -631,15 +2116,155 @@ class GetSessionParameters:
 
 
 @dataclass(frozen=True)
+class GetSessionResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class GetSessionResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class GetSessionResponse2:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class GetSessionResponse3:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class GetSessionResponse4:
+    error: InvalidState
+
+
+@dataclass(frozen=True)
+class GetSessionResponse5:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class GetSessionResponse6:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class GetSessionResponse7:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class GetSessionResponse8:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
 class PatchSessionParameters:
     id: str
     sid: str
 
 
 @dataclass(frozen=True)
+class PatchSessionResponse1:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class PatchSessionResponse2:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class PatchSessionResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class PatchSessionResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class PatchSessionResponse5:
+    error: InvalidState
+
+
+@dataclass(frozen=True)
+class PatchSessionResponse6:
+    error: PayloadTooLarge
+
+
+@dataclass(frozen=True)
+class PatchSessionResponse7:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class PatchSessionResponse8:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class PatchSessionResponse9:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class PatchSessionResponse10:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
 class DeleteSessionParameters:
     id: str
     sid: str
+
+
+@dataclass(frozen=True)
+class DeleteSessionResponse1:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class DeleteSessionResponse2:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class DeleteSessionResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class DeleteSessionResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class DeleteSessionResponse5:
+    error: InvalidState
+
+
+@dataclass(frozen=True)
+class DeleteSessionResponse6:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class DeleteSessionResponse7:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class DeleteSessionResponse8:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class DeleteSessionResponse9:
+    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -655,14 +2280,184 @@ class AttachSessionPtyParameters:
 
 
 @dataclass(frozen=True)
+class AttachSessionPtyResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class AttachSessionPtyResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class AttachSessionPtyResponse2:
+    error: PaymentRequired
+
+
+@dataclass(frozen=True)
+class AttachSessionPtyResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class AttachSessionPtyResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class AttachSessionPtyResponse5:
+    error: InvalidState | ResourceBusy
+
+
+@dataclass(frozen=True)
+class AttachSessionPtyResponse6:
+    error: UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class AttachSessionPtyResponse7:
+    error: QuotaExceeded | RateLimited
+
+
+@dataclass(frozen=True)
+class AttachSessionPtyResponse8:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class AttachSessionPtyResponse9:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class AttachSessionPtyResponse10:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
 class MintSessionPtyTicketParameters:
     id: str
     sid: str
 
 
 @dataclass(frozen=True)
+class MintSessionPtyTicketResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class MintSessionPtyTicketResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class MintSessionPtyTicketResponse2:
+    error: PaymentRequired
+
+
+@dataclass(frozen=True)
+class MintSessionPtyTicketResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class MintSessionPtyTicketResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class MintSessionPtyTicketResponse5:
+    error: InvalidState
+
+
+@dataclass(frozen=True)
+class MintSessionPtyTicketResponse6:
+    error: PayloadTooLarge
+
+
+@dataclass(frozen=True)
+class MintSessionPtyTicketResponse7:
+    error: QuotaExceeded | RateLimited
+
+
+@dataclass(frozen=True)
+class MintSessionPtyTicketResponse8:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class MintSessionPtyTicketResponse9:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class MintSessionPtyTicketResponse10:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
 class CreateMountParameters:
     id: str
+
+
+@dataclass(frozen=True)
+class CreateMountResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class CreateMountResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class CreateMountResponse2:
+    error: PaymentRequired
+
+
+@dataclass(frozen=True)
+class CreateMountResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class CreateMountResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class CreateMountResponse5:
+    error: Conflict | InvalidState
+
+
+@dataclass(frozen=True)
+class CreateMountResponse6:
+    error: PayloadTooLarge
+
+
+@dataclass(frozen=True)
+class CreateMountResponse7:
+    error: UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class CreateMountResponse8:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class CreateMountResponse9:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class CreateMountResponse10:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class CreateMountResponse11:
+    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -674,14 +2469,174 @@ class ListMountsParameters:
 
 
 @dataclass(frozen=True)
+class ListMountsResponse1:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class ListMountsResponse2:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class ListMountsResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class ListMountsResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class ListMountsResponse5:
+    error: InvalidState
+
+
+@dataclass(frozen=True)
+class ListMountsResponse6:
+    error: UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class ListMountsResponse7:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class ListMountsResponse8:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class ListMountsResponse9:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class ListMountsResponse10:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
 class DeleteMountParameters:
     id: str
     mount_id: str
 
 
 @dataclass(frozen=True)
+class DeleteMountResponse1:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class DeleteMountResponse2:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class DeleteMountResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class DeleteMountResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class DeleteMountResponse5:
+    error: InvalidState
+
+
+@dataclass(frozen=True)
+class DeleteMountResponse6:
+    error: UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class DeleteMountResponse7:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class DeleteMountResponse8:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class DeleteMountResponse9:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class DeleteMountResponse10:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
 class SyncParameters:
     id: str
+
+
+@dataclass(frozen=True)
+class SyncResponse1:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class SyncResponse2:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class SyncResponse3:
+    error: PaymentRequired
+
+
+@dataclass(frozen=True)
+class SyncResponse4:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class SyncResponse5:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class SyncResponse6:
+    error: Conflict | InvalidState | ResourceBusy
+
+
+@dataclass(frozen=True)
+class SyncResponse7:
+    error: PayloadTooLarge
+
+
+@dataclass(frozen=True)
+class SyncResponse8:
+    error: UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class SyncResponse9:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class SyncResponse10:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class SyncResponse11:
+    error: CapacityUnavailable | Unavailable
+
+
+@dataclass(frozen=True)
+class SyncResponse12:
+    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -692,8 +2647,143 @@ class ListFilesystemsParameters:
 
 
 @dataclass(frozen=True)
+class ListFilesystemsResponse1:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class ListFilesystemsResponse2:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class ListFilesystemsResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class ListFilesystemsResponse4:
+    error: UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class ListFilesystemsResponse5:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class ListFilesystemsResponse6:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class ListFilesystemsResponse7:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class ListFilesystemsResponse8:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
+class CreateFilesystemResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class CreateFilesystemResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class CreateFilesystemResponse2:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class CreateFilesystemResponse3:
+    error: AlreadyExists
+
+
+@dataclass(frozen=True)
+class CreateFilesystemResponse4:
+    error: PayloadTooLarge
+
+
+@dataclass(frozen=True)
+class CreateFilesystemResponse5:
+    error: UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class CreateFilesystemResponse6:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class CreateFilesystemResponse7:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class CreateFilesystemResponse8:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class CreateFilesystemResponse9:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
 class GetFilesystemParameters:
     filesystem_id: str
+
+
+@dataclass(frozen=True)
+class GetFilesystemResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class GetFilesystemResponse1:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class GetFilesystemResponse2:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class GetFilesystemResponse3:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class GetFilesystemResponse4:
+    error: UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class GetFilesystemResponse5:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class GetFilesystemResponse6:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class GetFilesystemResponse7:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class GetFilesystemResponse8:
+    error: GatewayTimeout
 
 
 @dataclass(frozen=True)
@@ -702,13 +2792,91 @@ class DeleteFilesystemParameters:
 
 
 @dataclass(frozen=True)
-class PolicyAction1:
+class DeleteFilesystemResponse1:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class DeleteFilesystemResponse2:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class DeleteFilesystemResponse3:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class DeleteFilesystemResponse4:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class DeleteFilesystemResponse5:
+    error: UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class DeleteFilesystemResponse6:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class DeleteFilesystemResponse7:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class DeleteFilesystemResponse8:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class DeleteFilesystemResponse9:
+    error: GatewayTimeout
+
+
+ErrorBody: TypeAlias = (
+    BadRequest
+    | InsufficientResources
+    | Unauthorized
+    | Forbidden
+    | NotFound
+    | Conflict
+    | ResourceBusy
+    | InvalidState
+    | AlreadyExists
+    | IdempotencyConflict
+    | Expired
+    | PayloadTooLarge
+    | MethodNotAllowed
+    | UnsupportedOperation
+    | Unrecoverable
+    | CapacityUnavailable
+    | Unavailable
+    | Internal
+    | RateLimited
+    | QuotaExceeded
+    | PaymentRequired
+    | ActionRequired
+    | OperationFailed
+    | GatewayTimeout
+)
+
+
+@dataclass(frozen=True)
+class ErrorResponse:
+    error: ErrorBody
+
+
+@dataclass(frozen=True)
+class PolicyAction2:
     rewrite: Rewrite | None = None
     gate: Gate | None = None
     scaling: ScalingAction | None = None
 
 
-PolicyAction: TypeAlias = Literal['allow', 'deny'] | PolicyAction1
+PolicyAction: TypeAlias = PolicyAction1 | PolicyAction2
 
 
 RunResponse: TypeAlias = CompletedRunResponse | BackgroundRunResponse
@@ -722,37 +2890,16 @@ SyncWriteEntry: TypeAlias = (
 SyncReadResponse: TypeAlias = SyncReadInlineResponse | SyncReadPresignedResponse
 
 
-@dataclass(frozen=True)
-class SyncChunkWriteResult:
-    path: str
-    size: int
-    received_bytes: int
-    ranges: list[SyncByteRange]
-    complete: bool
-    written: bool
-    error: SyncEntryError | None = None
-
-
-@dataclass(frozen=True)
-class SyncPresignedWriteRequestResult:
-    path: str
-    size: int
-    presigned_url: str
-    upload_id: str
-    expires_in: int
-    method: str
-    complete: bool
-    written: bool
-    error: SyncEntryError | None = None
-
-
-@dataclass(frozen=True)
-class SyncCommitWriteResult:
-    path: str
-    size: int
-    complete: bool
-    written: bool
-    error: SyncEntryError | None = None
+SyncEntryError: TypeAlias = (
+    SyncBadRequestError
+    | SyncNotFoundError
+    | SyncConflictError
+    | SyncPayloadTooLargeError
+    | SyncUnsupportedOperationError
+    | SyncUnavailableError
+    | SyncInternalError
+    | SyncExpiredError
+)
 
 
 @dataclass(frozen=True)
@@ -772,12 +2919,17 @@ class CompatiblePlatform:
     gpu: PlatformGpuLimits | None = None
 
 
+HealthUnavailableResponse: TypeAlias = (
+    NotReadyHealthResponse | HealthUnavailableErrorResponse
+)
+
+
 @dataclass(frozen=True)
 class PolicyEntry:
-    type: Literal['outbound', 'inbound']
+    type: Type
     action: PolicyAction
     match: PolicyMatch | None = None
-    auth: Literal['open', 'arker'] | None = None
+    auth: Auth | None = None
 
 
 @dataclass(frozen=True)
@@ -826,9 +2978,37 @@ SyncRequest: TypeAlias = (
 )
 
 
-SyncWriteResult: TypeAlias = (
-    SyncChunkWriteResult | SyncPresignedWriteRequestResult | SyncCommitWriteResult
-)
+@dataclass(frozen=True)
+class SyncChunkWriteResult:
+    path: str
+    size: int
+    received_bytes: int
+    ranges: list[SyncByteRange]
+    complete: bool
+    written: bool
+    error: SyncEntryError | None = None
+
+
+@dataclass(frozen=True)
+class SyncPresignedWriteRequestResult:
+    path: str
+    size: int
+    presigned_url: str
+    upload_id: str
+    expires_in: int
+    method: str
+    complete: bool
+    written: bool
+    error: SyncEntryError | None = None
+
+
+@dataclass(frozen=True)
+class SyncCommitWriteResult:
+    path: str
+    size: int
+    complete: bool
+    written: bool
+    error: SyncEntryError | None = None
 
 
 @dataclass(frozen=True)
@@ -865,7 +3045,7 @@ class ForkRequest1:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
-    layers: list[Literal['disk', 'memory']] | None = None
+    layers: list[Layer] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
@@ -888,7 +3068,7 @@ class ForkRequest2:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
-    layers: list[Literal['disk', 'memory']] | None = None
+    layers: list[Layer] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
@@ -911,7 +3091,7 @@ class ForkRequest3:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
-    layers: list[Literal['disk', 'memory']] | None = None
+    layers: list[Layer] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
@@ -934,7 +3114,7 @@ class ForkRequest4:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
-    layers: list[Literal['disk', 'memory']] | None = None
+    layers: list[Layer] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
@@ -957,7 +3137,7 @@ class ForkRequest5:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
-    layers: list[Literal['disk', 'memory']] | None = None
+    layers: list[Layer] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
@@ -980,7 +3160,7 @@ class ForkRequest6:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
-    layers: list[Literal['disk', 'memory']] | None = None
+    layers: list[Layer] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
@@ -1010,16 +3190,14 @@ class RunRequest:
     vcpu_count: int | None = None
     memory_mib: int | None = None
     disk_mib: int | None = None
-    memory_backend: Literal['file', 'uffd'] | None = None
-    signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
+    memory_backend: MemoryBackend | None = None
+    signal: Signal | None = None
     policies: PolicyWriteRequest | None = None
 
 
-@dataclass(frozen=True)
-class SyncWriteResponse:
-    ok: bool
-    op: Literal['write']
-    results: list[SyncWriteResult]
+SyncWriteResult: TypeAlias = (
+    SyncChunkWriteResult | SyncPresignedWriteRequestResult | SyncCommitWriteResult
+)
 
 
 @dataclass(frozen=True)
@@ -1030,341 +3208,11 @@ class PatchVmRequest:
     policies: PolicyWriteRequest | None = None
 
 
+@dataclass(frozen=True)
+class SyncWriteResponse:
+    ok: bool
+    op: Literal['write']
+    results: list[SyncWriteResult]
+
+
 SyncResponse: TypeAlias = SyncReadResponse | SyncWriteResponse | SyncManifestResponse
-
-from typing import TypedDict
-
-# OpenAPI operation types
-
-class ListFilesystemsOperation(TypedDict):
-    operation_id: Literal['listFilesystems']
-    method: Literal['GET']
-    path: Literal['/v1/filesystems']
-    parameters: ListFilesystemsParameters
-    request: None
-    success: ListFilesystemsResponse
-    errors: ErrorResponse
-
-
-class CreateFilesystemOperation(TypedDict):
-    operation_id: Literal['createFilesystem']
-    method: Literal['POST']
-    path: Literal['/v1/filesystems']
-    parameters: None
-    request: FilesystemCreateRequest
-    success: Filesystem
-    errors: ErrorResponse
-
-
-class GetFilesystemOperation(TypedDict):
-    operation_id: Literal['getFilesystem']
-    method: Literal['GET']
-    path: Literal['/v1/filesystems/{filesystem_id}']
-    parameters: GetFilesystemParameters
-    request: None
-    success: Filesystem
-    errors: ErrorResponse
-
-
-class DeleteFilesystemOperation(TypedDict):
-    operation_id: Literal['deleteFilesystem']
-    method: Literal['DELETE']
-    path: Literal['/v1/filesystems/{filesystem_id}']
-    parameters: DeleteFilesystemParameters
-    request: None
-    success: DeleteFilesystemResponse
-    errors: ErrorResponse
-
-
-class ForkOperation(TypedDict):
-    operation_id: Literal['fork']
-    method: Literal['POST']
-    path: Literal['/v1/fork']
-    parameters: ForkParameters
-    request: ForkRequest
-    success: Vm
-    errors: ErrorResponse
-
-
-class HealthOperation(TypedDict):
-    operation_id: Literal['health']
-    method: Literal['GET']
-    path: Literal['/v1/health']
-    parameters: None
-    request: None
-    success: HealthResponse
-    errors: HealthResponse | ErrorResponse
-
-
-class ListRegionsOperation(TypedDict):
-    operation_id: Literal['listRegions']
-    method: Literal['GET']
-    path: Literal['/v1/regions']
-    parameters: None
-    request: None
-    success: ListRegionsResponse
-    errors: ErrorResponse
-
-
-class ListOrgRunsOperation(TypedDict):
-    operation_id: Literal['listOrgRuns']
-    method: Literal['GET']
-    path: Literal['/v1/runs']
-    parameters: ListOrgRunsParameters
-    request: None
-    success: ListOrgRunsResponse
-    errors: ErrorResponse
-
-
-class ListVmsOperation(TypedDict):
-    operation_id: Literal['listVms']
-    method: Literal['GET']
-    path: Literal['/v1/vms']
-    parameters: ListVmsParameters
-    request: None
-    success: ListVmsResponse
-    errors: ErrorResponse
-
-
-class GetVmOperation(TypedDict):
-    operation_id: Literal['getVm']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}']
-    parameters: GetVmParameters
-    request: None
-    success: Vm
-    errors: ErrorResponse
-
-
-class PatchVmOperation(TypedDict):
-    operation_id: Literal['patchVm']
-    method: Literal['PATCH']
-    path: Literal['/v1/vms/{id}']
-    parameters: PatchVmParameters
-    request: PatchVmRequest
-    success: Vm
-    errors: ErrorResponse
-
-
-class DeleteVmOperation(TypedDict):
-    operation_id: Literal['deleteVm']
-    method: Literal['DELETE']
-    path: Literal['/v1/vms/{id}']
-    parameters: DeleteVmParameters
-    request: None
-    success: DeleteVmResponse
-    errors: ErrorResponse
-
-
-class ListMountsOperation(TypedDict):
-    operation_id: Literal['listMounts']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/mounts']
-    parameters: ListMountsParameters
-    request: None
-    success: ListMountsResponse
-    errors: ErrorResponse
-
-
-class CreateMountOperation(TypedDict):
-    operation_id: Literal['createMount']
-    method: Literal['POST']
-    path: Literal['/v1/vms/{id}/mounts']
-    parameters: CreateMountParameters
-    request: MountCreateRequest
-    success: Mount
-    errors: ErrorResponse
-
-
-class DeleteMountOperation(TypedDict):
-    operation_id: Literal['deleteMount']
-    method: Literal['DELETE']
-    path: Literal['/v1/vms/{id}/mounts/{mount_id}']
-    parameters: DeleteMountParameters
-    request: None
-    success: DeleteMountResponse
-    errors: ErrorResponse
-
-
-class GetVmPoliciesOperation(TypedDict):
-    operation_id: Literal['getVmPolicies']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/policies']
-    parameters: GetVmPoliciesParameters
-    request: None
-    success: PolicyDoc
-    errors: ErrorResponse
-
-
-class PutVmPoliciesOperation(TypedDict):
-    operation_id: Literal['putVmPolicies']
-    method: Literal['PUT']
-    path: Literal['/v1/vms/{id}/policies']
-    parameters: PutVmPoliciesParameters
-    request: PolicyWriteRequest
-    success: PolicyDoc
-    errors: ErrorResponse
-
-
-class ListRunsOperation(TypedDict):
-    operation_id: Literal['listRuns']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/runs']
-    parameters: ListRunsParameters
-    request: None
-    success: ListRunsResponse
-    errors: ErrorResponse
-
-
-class CreateRunOperation(TypedDict):
-    operation_id: Literal['createRun']
-    method: Literal['POST']
-    path: Literal['/v1/vms/{id}/runs']
-    parameters: CreateRunParameters
-    request: RunRequest
-    success: RunResponse
-    errors: ErrorResponse
-
-
-class GetRunOperation(TypedDict):
-    operation_id: Literal['getRun']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/runs/{run_id}']
-    parameters: GetRunParameters
-    request: None
-    success: Run
-    errors: ErrorResponse
-
-
-class CancelRunOperation(TypedDict):
-    operation_id: Literal['cancelRun']
-    method: Literal['DELETE']
-    path: Literal['/v1/vms/{id}/runs/{run_id}']
-    parameters: CancelRunParameters
-    request: None
-    success: CancelRunResponse
-    errors: ErrorResponse
-
-
-class ListSessionsOperation(TypedDict):
-    operation_id: Literal['listSessions']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/sessions']
-    parameters: ListSessionsParameters
-    request: None
-    success: ListSessionsResponse
-    errors: ErrorResponse
-
-
-class CreateSessionOperation(TypedDict):
-    operation_id: Literal['createSession']
-    method: Literal['POST']
-    path: Literal['/v1/vms/{id}/sessions']
-    parameters: CreateSessionParameters
-    request: CreateSessionRequest
-    success: Session
-    errors: ErrorResponse
-
-
-class GetSessionOperation(TypedDict):
-    operation_id: Literal['getSession']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/sessions/{sid}']
-    parameters: GetSessionParameters
-    request: None
-    success: Session
-    errors: ErrorResponse
-
-
-class PatchSessionOperation(TypedDict):
-    operation_id: Literal['patchSession']
-    method: Literal['PATCH']
-    path: Literal['/v1/vms/{id}/sessions/{sid}']
-    parameters: PatchSessionParameters
-    request: PatchSessionRequest | None
-    success: PatchSessionResponse
-    errors: ErrorResponse
-
-
-class DeleteSessionOperation(TypedDict):
-    operation_id: Literal['deleteSession']
-    method: Literal['DELETE']
-    path: Literal['/v1/vms/{id}/sessions/{sid}']
-    parameters: DeleteSessionParameters
-    request: None
-    success: DeleteSessionResponse
-    errors: ErrorResponse
-
-
-class AttachSessionPtyOperation(TypedDict):
-    operation_id: Literal['attachSessionPty']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/sessions/{sid}/pty']
-    parameters: AttachSessionPtyParameters
-    request: None
-    success: None
-    errors: ErrorResponse
-
-
-class MintSessionPtyTicketOperation(TypedDict):
-    operation_id: Literal['mintSessionPtyTicket']
-    method: Literal['POST']
-    path: Literal['/v1/vms/{id}/sessions/{sid}/pty-ticket']
-    parameters: MintSessionPtyTicketParameters
-    request: None
-    success: PtyTicketResponse
-    errors: ErrorResponse
-
-
-class SyncOperation(TypedDict):
-    operation_id: Literal['sync']
-    method: Literal['POST']
-    path: Literal['/v1/vms/{id}/sync']
-    parameters: SyncParameters
-    request: SyncRequest
-    success: SyncResponse
-    errors: ErrorResponse
-
-
-class WhoamiOperation(TypedDict):
-    operation_id: Literal['whoami']
-    method: Literal['GET']
-    path: Literal['/v1/whoami']
-    parameters: None
-    request: None
-    success: WhoamiResponse
-    errors: ErrorResponse
-
-
-ApiOperation: TypeAlias = (
-    ListFilesystemsOperation |
-    CreateFilesystemOperation |
-    GetFilesystemOperation |
-    DeleteFilesystemOperation |
-    ForkOperation |
-    HealthOperation |
-    ListRegionsOperation |
-    ListOrgRunsOperation |
-    ListVmsOperation |
-    GetVmOperation |
-    PatchVmOperation |
-    DeleteVmOperation |
-    ListMountsOperation |
-    CreateMountOperation |
-    DeleteMountOperation |
-    GetVmPoliciesOperation |
-    PutVmPoliciesOperation |
-    ListRunsOperation |
-    CreateRunOperation |
-    GetRunOperation |
-    CancelRunOperation |
-    ListSessionsOperation |
-    CreateSessionOperation |
-    GetSessionOperation |
-    PatchSessionOperation |
-    DeleteSessionOperation |
-    AttachSessionPtyOperation |
-    MintSessionPtyTicketOperation |
-    SyncOperation |
-    WhoamiOperation
-)

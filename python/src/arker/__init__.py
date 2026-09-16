@@ -35,10 +35,12 @@ from .computer import (
     discover_regions,
 )
 from .generated.api_models import (
+    ErrorBody,
     ListVmsResponse,
     OrgRunListRow,
     RegionPlacement,
     RunSummary,
+    SyncEntryError,
     SyncPresignedWriteCommit,
     SyncPresignedWriteRequest,
     SyncPresignedWriteRequestResult,
@@ -57,6 +59,7 @@ __all__ = [
     "DeleteMountResponse",
     "DeleteSessionResponse",
     "DeleteVmResponse",
+    "ErrorBody",
     "Filesystem",
     "ListFilesystemsResponse",
     "ListMountsResponse",
@@ -76,6 +79,7 @@ __all__ = [
     "RunSummary",
     "Session",
     "SyncDirResult",
+    "SyncEntryError",
     "SyncPresignedWriteCommit",
     "SyncPresignedWriteRequest",
     "SyncPresignedWriteRequestResult",
