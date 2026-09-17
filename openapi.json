@@ -1127,6 +1127,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
