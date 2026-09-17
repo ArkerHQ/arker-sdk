@@ -1,7 +1,7 @@
 {
   "name": "@arker-ai/sdk",
   "version": "1.2.8",
-  "description": "TypeScript SDK for the Arker virtual computer platform — spawn sandboxed VMs, run code, sync files.",
+  "description": "TypeScript SDK for the Arker virtual computer platform \u2014 spawn sandboxed VMs, run code, sync files.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -42,18 +42,19 @@
   "packageManager": "bun@1.3.8",
   "scripts": {
     "build": "bun run build:sdk && ../scripts/build-legacy-cli",
-    "build:sdk": "tsup src/index.ts src/daytona.ts src/e2b.ts src/modal.ts --format esm,cjs --dts --clean --target=node18",
+    "build:sdk": "bun run generate:validators && tsup src/index.ts src/daytona.ts src/e2b.ts src/modal.ts --format esm,cjs --dts --clean --target=node18",
     "check:api-types": "openapi-typescript ../openapi.json --default-non-nullable false -o src/generated/api-types.ts --check",
     "demo": "bun tests/demo.ts",
     "example:ios-qa": "bun examples/ios-qa.ts",
     "generate:api-types": "openapi-typescript ../openapi.json --default-non-nullable false -o src/generated/api-types.ts",
     "smoke": "bun tests/conformance/fork-run-sync.ts",
-    "test": "bun tests/unit.ts && bun tests/compat.ts && bun run build && bun tests/http2.ts",
+    "test": "bun run generate:validators && bun test tests/typed-errors.test.ts && bun tests/unit.ts && bun tests/compat.ts && bun run build && bun tests/http2.ts",
     "test:compat": "bun tests/compat.ts",
     "test:compat-live": "bun tests/compat-live.ts",
     "test:compat-fallback-live": "bun tests/compat-fallback-live.ts",
-    "typecheck": "tsc -p tsconfig.test.json",
-    "prepublishOnly": "bun run build"
+    "typecheck": "bun run generate:validators && tsc -p tsconfig.test.json",
+    "prepublishOnly": "bun run build",
+    "generate:validators": "bun scripts/generate-error-validators.ts"
   },
   "keywords": [
     "arker",
@@ -79,7 +80,9 @@
     "computesdk": "^4.1.3",
     "openapi-typescript": "^7.13.0",
     "tsup": "^8.3.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1"
   },
   "peerDependencies": {
     "@computesdk/daytona": "^1.7.30",

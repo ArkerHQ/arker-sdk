@@ -1528,17 +1528,17 @@ async function testRetryHonoursServerRetryAfter(): Promise<void> {
   // default exists to shape backoff, and capping the hint with it would
   // neuter real capacity waits.
   const client = new Arker({ apiKey: "k", baseUrl: "http://x", retry: { attempts: 4, baseDelayMs: 200, jitterMs: 0 } });
-  assert.equal(client._retryDelay(0, { code: "unavailable", message: "", retryAfterS: 30 }), 30_000);
+  assert.equal(client._retryDelay(0, new ArkerError("unavailable", "wait", 503, { ...unavailableBody(30).error, code: "unavailable" })), 30_000);
 
   // Without a hint the existing backoff is untouched.
   assert.equal(client._retryDelay(0), 200);
   assert.equal(client._retryDelay(2), 800);
-  assert.equal(client._retryDelay(1, { code: "unavailable", message: "" }), 400);
+  assert.equal(client._retryDelay(1, new ArkerError("unavailable", "wait", 503)), 400);
 
   // An explicitly configured maxDelayMs is the caller's latency budget, and
   // it caps the hint too.
   const capped = new Arker({ apiKey: "k", baseUrl: "http://x", retry: { attempts: 4, baseDelayMs: 200, maxDelayMs: 2_000, jitterMs: 0 } });
-  assert.equal(capped._retryDelay(0, { code: "unavailable", message: "", retryAfterS: 30 }), 2_000);
+  assert.equal(capped._retryDelay(0, new ArkerError("unavailable", "wait", 503, { ...unavailableBody(30).error, code: "unavailable" })), 2_000);
 }
 
 async function testRetryAfterHintDrivesTheActualSleep(): Promise<void> {
@@ -1546,7 +1546,7 @@ async function testRetryAfterHintDrivesTheActualSleep(): Promise<void> {
   // to retryDelay, or the hint silently never applies. Lower bound only.
   const fetchImpl = new FakeFetch();
   fetchImpl.addJson((m, u) => m === "POST" && u.includes("/fork"), 503, {
-    error: { code: "unavailable", message: "cold", retry_after: 0.05, timestamp: new Date().toISOString() },
+    ...unavailableBody(1),
   });
   fetchImpl.addJson((m, u) => m === "POST" && u.includes("/fork"), 200, { vm_id: "vm-1", state: "running" });
   const client = new Arker({
@@ -1558,19 +1558,22 @@ async function testRetryAfterHintDrivesTheActualSleep(): Promise<void> {
   const started = Date.now();
   const vm = await client.fork({ source_vm_name: "source-vm" });
   assert.equal(vm.id, "vm-1");
-  assert.ok(Date.now() - started >= 45, "the 50ms hint must drive the sleep");
+  assert.ok(Date.now() - started >= 950, "the one-second hint must drive the sleep");
   assert.equal(fetchImpl.calls.length, 2);
 }
 
 await testRetryHonoursServerRetryAfter();
 await testRetryAfterHintDrivesTheActualSleep();
 
-function unavailableBody(retryAfterS: number): unknown {
+function unavailableBody(retryAfterS: number) {
   return {
     error: {
       code: "unavailable",
       message: "at capacity",
-      retry_after: retryAfterS,
+      retry_after_seconds: retryAfterS,
+      request_id: "req-test",
+      request: { kind: "unmatched" as const, method: "POST" },
+      recovery: { work: "not_started" as const },
       timestamp: new Date().toISOString(),
     },
   };
@@ -1580,9 +1583,9 @@ async function testQueueingTimeoutRetriesPastTheAttemptCap(): Promise<void> {
   // The window is the budget: three failures exceed attempts=2, still succeeds.
   const runs = (m: string, u: string) => m === "POST" && u.includes("/runs");
   const fetchImpl = new FakeFetch();
-  fetchImpl.addJson(runs, 503, unavailableBody(0.05));
-  fetchImpl.addJson(runs, 503, unavailableBody(0.05));
-  fetchImpl.addJson(runs, 503, unavailableBody(0.05));
+  fetchImpl.addJson(runs, 503, unavailableBody(0));
+  fetchImpl.addJson(runs, 503, unavailableBody(0));
+  fetchImpl.addJson(runs, 503, unavailableBody(0));
   fetchImpl.addJson(runs, 200, { run_id: "run_q", state: "completed", exit_code: 0, stdout: "ok", stdout_encoding: "utf-8", stderr: "", stderr_encoding: "utf-8" });
   const client = new Arker({
     apiKey: "k",
@@ -1597,13 +1600,13 @@ async function testQueueingTimeoutRetriesPastTheAttemptCap(): Promise<void> {
 }
 
 async function testQueueingWindowDrainsThenSurfacesUnavailable(): Promise<void> {
-  // 3s window, 1.1s hints: bodies re-send the remaining window (3, 2, 1),
+  // 3s window, 1s hints: bodies re-send the remaining window (3, 2, 1),
   // then the error surfaces without sleeping past the deadline.
   const runs = (m: string, u: string) => m === "POST" && u.includes("/runs");
   const fetchImpl = new FakeFetch();
-  fetchImpl.addJson(runs, 503, unavailableBody(1.1));
-  fetchImpl.addJson(runs, 503, unavailableBody(1.1));
-  fetchImpl.addJson(runs, 503, unavailableBody(1.1));
+  fetchImpl.addJson(runs, 503, unavailableBody(1));
+  fetchImpl.addJson(runs, 503, unavailableBody(1));
+  fetchImpl.addJson(runs, 503, unavailableBody(1));
   const client = new Arker({
     apiKey: "k",
     baseUrl: "http://x",
@@ -1627,7 +1630,7 @@ async function testQueueingTimeoutRespectsRetryFalse(): Promise<void> {
   // retry: false = exactly one request, window or not.
   const runs = (m: string, u: string) => m === "POST" && u.includes("/runs");
   const fetchImpl = new FakeFetch();
-  fetchImpl.addJson(runs, 503, unavailableBody(0.05));
+  fetchImpl.addJson(runs, 503, unavailableBody(0));
   const client = new Arker({
     apiKey: "k",
     baseUrl: "http://x",

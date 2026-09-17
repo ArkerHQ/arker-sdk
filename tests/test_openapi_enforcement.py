@@ -30,20 +30,6 @@ def run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     )
 
 
-def annotations(source: str, class_name: str) -> dict[str, str]:
-    module = ast.parse(source)
-    class_node = next(
-        node
-        for node in module.body
-        if isinstance(node, ast.ClassDef) and node.name == class_name
-    )
-    return {
-        node.target.id: ast.unparse(node.annotation)
-        for node in class_node.body
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
-    }
-
-
 def test_generation_is_deterministic_for_both_languages() -> None:
     with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
         for output in (first, second):
@@ -63,51 +49,15 @@ def test_generation_is_deterministic_for_both_languages() -> None:
         typescript = (Path(first) / TYPESCRIPT_PATH).read_text()
         python = (Path(first) / PYTHON_PATH).read_text()
         assert "export interface operations" in typescript
-        assert "@dataclass(frozen=True)\nclass ForkRequest" in python
+        assert "@dataclass(frozen=True)" in python
         assert "class ForkRequest" in python
         assert "class ListVmsParameters" in python
 
-        operation_ids = {
-            operation["operationId"]
-            for path_item in json.loads(
-                (REPO_ROOT / "openapi.json").read_text()
-            )["paths"].values()
-            for method, operation in path_item.items()
-            if method != "parameters"
-        }
-        operation_classes = {
-            node.name.removesuffix("Operation")
-            for node in ast.parse(python).body
-            if isinstance(node, ast.ClassDef) and node.name.endswith("Operation")
-        }
-        assert operation_classes == {
-            operation_id[0].upper() + operation_id[1:] for operation_id in operation_ids
-        }
-
-        assert annotations(python, "ForkOperation") == {
-            "operation_id": "Literal['fork']",
-            "method": "Literal['POST']",
-            "path": "Literal['/v1/fork']",
-            "parameters": "ForkParameters",
-            "request": "ForkRequest",
-            "success": "Vm",
-            "errors": "ErrorResponse",
-        }
-        assert annotations(python, "PatchSessionOperation") == {
-            "operation_id": "Literal['patchSession']",
-            "method": "Literal['PATCH']",
-            "path": "Literal['/v1/vms/{id}/sessions/{sid}']",
-            "parameters": "PatchSessionParameters",
-            "request": "PatchSessionRequest | None",
-            "success": "PatchSessionResponse",
-            "errors": "ErrorResponse",
-        }
-        assert (
-            annotations(python, "CreateSessionOperation")["request"]
-            == "CreateSessionRequest"
-        )
-        assert annotations(python, "SyncOperation")["request"] == "SyncRequest"
-        assert annotations(python, "SyncOperation")["success"] == "SyncResponse"
+        assert "class ForkOperation" not in python
+        assert "class NotFound" in python
+        assert "ErrorBody: TypeAlias" in python
+        assert "ResourceKind: TypeAlias = Literal[" in python
+        assert "class Vgpu(float, Enum)" in python
 
 
 def test_public_wire_types_are_generated() -> None:
@@ -116,6 +66,12 @@ def test_public_wire_types_are_generated() -> None:
             "schemas"
         ]
     )
+
+    generated = ast.parse((REPO_ROOT / PYTHON_PATH).read_text())
+    assert not any(
+        isinstance(node, ast.ClassDef) and re.search(r"Response\d+$", node.name)
+        for node in generated.body
+    ), "Response envelopes must have shared schema names, not numbered endpoint names"
 
     typescript = (REPO_ROOT / "typescript/src/index.ts").read_text()
     declarations = dict(

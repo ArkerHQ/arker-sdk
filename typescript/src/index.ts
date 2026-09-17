@@ -1,3 +1,4 @@
+import { validateHttpError, validateFileError } from "./generated/error-validators.js";
 /**
  * Arker TypeScript SDK.
  *
@@ -152,24 +153,6 @@ async function saveStatCache(
   }
 }
 
-async function parseErrorResponse(
-  res: Response,
-  fallbackMessage: string,
-): Promise<ParsedError> {
-  try {
-    const body: unknown = await res.json();
-    const parsed = extractError(body);
-    if (parsed) return parsed;
-    const error = isObject(body) && isObject(body.error) ? body.error : undefined;
-    return {
-      code: typeof error?.code === "string" ? error.code : "internal",
-      message: typeof error?.message === "string" ? error.message : fallbackMessage,
-    };
-  } catch {
-    return { code: "internal", message: fallbackMessage };
-  }
-}
-
 /** Org id for callers that explicitly select an Arker-owned public source. */
 export const ARKER_ORG_ID = "ArkerHQ";
 
@@ -200,13 +183,9 @@ const RUN_POLL_MAX_CONSECUTIVE_FAILURES = 10;
 // "keep polling" rather than a false completion.
 const TERMINAL_RUN_STATES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
 const RETRYABLE_HTTP = new Set([429, 502, 503, 504]);
-const RETRYABLE_CODES: ReadonlySet<ErrorCode> = new Set([
-  "unavailable",
-  "bad_gateway",
-  "stale_route",
-  "capacity_unavailable",
+const RETRYABLE_CODES: ReadonlySet<string> = new Set([
+  "unavailable", "capacity_unavailable", "rate_limited", "gateway_timeout",
 ]);
-const TRANSIENT_HINTS = ["503", "Service Unavailable", "throttle", "SlowDown", "ThrottlingException"];
 const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 export type ComputeProvider = string;
 const DEFAULT_CONTROL_BASE_URL = "https://arker.ai/api";
@@ -576,19 +555,14 @@ interface RetryConfig {
   hintCapMs?: number;
 }
 
-interface ParsedError {
-  code: string;
-  message: string;
-  /** Seconds the server asked us to wait, if it said. */
-  retryAfterS?: number;
-  retryable?: boolean;
-}
+export type ErrorBody = ApiSchema<"ErrorBody">;
 
 export class ArkerError extends Error {
   readonly code: string;
   readonly status: number;
 
-  constructor(code: string, message: string, status: number) {
+  constructor(code: string, message: string, status: number,
+    readonly body?: ErrorBody | SyncEntryError, readonly raw?: unknown) {
     super(`${code}: ${message}`);
     this.name = "ArkerError";
     this.code = code;
@@ -906,7 +880,7 @@ export class Arker {
   }
 
   /** @internal */
-  _retryDelay(attempt: number, error?: ParsedError): number {
+  _retryDelay(attempt: number, error?: ArkerError): number {
     return retryDelay(this.retry, attempt, error);
   }
 
@@ -1541,7 +1515,7 @@ export class VM {
   }
 
   private async sendOneWrite(entry: SyncWriteEntry): Promise<SyncWriteResult> {
-    let lastError: SyncEntryError | undefined;
+    let lastError: ArkerError | undefined;
     const attempts = this._client._retryAttempts();
     for (let attempt = 0; attempt < attempts; attempt++) {
       const request: SyncWriteOperationRequest = {
@@ -1553,11 +1527,11 @@ export class VM {
       if (!result) throw new ArkerError("internal", "write response missing results[0]", 200);
       const error = result.error ?? undefined;
       if (!error) return result;
-      lastError = error;
-      if (!isRetryable(200, error) || attempt === attempts - 1) break;
+      lastError = serverError(error, 200, true);
+      if (!isRetryable(200, lastError, true) || attempt === attempts - 1) break;
       await sleep(this._client._retryDelay(attempt));
     }
-    throw new ArkerError(lastError?.code ?? "internal", lastError?.message ?? "write failed", 200);
+    throw lastError ?? new ArkerError("internal", "write failed", 200);
   }
 
   /**
@@ -2177,9 +2151,9 @@ async function requestJson<T>(
         shouldRetryNetworkFailures,
       );
       const payload = parseJson(text);
-      const parsedError = extractError(payload);
+      const parsedError = extractError(payload, status);
 
-      if (isRetryable(status, parsedError)) {
+      if (isRetryable(status, parsedError, shouldRetryNetworkFailures || Boolean(headers["Idempotency-Key"]))) {
         const delay = retryDelay(retry, attempt, parsedError);
         if (canRetryAgain(retry, attempt, queueingDeadline, delay)) {
           await sleep(delay);
@@ -2188,7 +2162,7 @@ async function requestJson<T>(
       }
 
       if (parsedError) {
-        throw new ArkerError(parsedError.code, parsedError.message, status);
+        throw parsedError;
       }
       if (!ok) {
         throw new ArkerError(
@@ -2232,46 +2206,42 @@ function parseJson(text: string): unknown {
   try { return JSON.parse(text) as unknown; } catch { return undefined; }
 }
 
-function extractError(payload: unknown): ParsedError | undefined {
-  if (!isObject(payload)) return undefined;
-  if (Object.keys(payload).length === 1 && isObject(payload.error)) {
-    const error: Partial<ErrorResponse["error"]> = payload.error;
-    if (
-      typeof error.code === "string" &&
-      typeof error.message === "string" &&
-      typeof error.timestamp === "string"
-    ) {
-      return {
-        code: error.code,
-        message: error.message,
-        retryAfterS: wireRetryAfter(error.retry_after),
-        retryable: typeof error.retryable === "boolean" ? error.retryable : undefined,
-      };
-    }
+function serverError(raw: unknown, status: number, file = false): ArkerError {
+  if (!isObject(raw) || typeof raw.code !== "string" || typeof raw.message !== "string") {
+    return new ArkerError("internal", "Malformed API error response", status, undefined, raw);
   }
-  return undefined;
+  const body = file ? (validateFileError(raw) ? raw : undefined) : (validateHttpError(raw) ? raw : undefined);
+  return new ArkerError(String(raw.code), String(raw.message), status, body, raw);
+}
+
+function extractError(payload: unknown, status: number): ArkerError | undefined {
+  if (!isObject(payload) || Object.keys(payload).length !== 1 || !isObject(payload.error)) return undefined;
+  const raw = payload.error;
+  if (typeof raw.code !== "string" || typeof raw.message !== "string") return undefined;
+  return serverError(raw, status);
 }
 
 /** Seconds the server asked us to wait, or undefined if it did not say usefully. */
 function wireRetryAfter(value: unknown): number | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 4294967295) return undefined;
   return value;
 }
 
-function isRetryable(status: number, error?: ParsedError): boolean {
-  if (error?.retryable !== undefined) return error.retryable;
-  if (RETRYABLE_HTTP.has(status)) return true;
-  if (!error) return false;
-  if (RETRYABLE_CODES.has(error.code as ErrorCode)) return true;
-  if (error.code !== "internal") return false;
-  return TRANSIENT_HINTS.some((hint) => error.message.includes(hint));
+function isRetryable(status: number, error?: ArkerError, replaySafe = false): boolean {
+  const work = error?.body?.recovery?.work;
+  if (work !== undefined) {
+    if (work !== "not_started") return false;
+    replaySafe = true;
+  }
+  return replaySafe && (RETRYABLE_HTTP.has(status) || Boolean(error && RETRYABLE_CODES.has(error.code)));
 }
 
-function retryDelay(retry: RetryConfig, attempt: number, error?: ParsedError): number {
+function retryDelay(retry: RetryConfig, attempt: number, error?: ArkerError): number {
   // The server's hint beats backoff, bounded by an explicitly configured
   // maxDelayMs — the caller's latency budget outranks the server. The DEFAULT
   // max only shapes backoff; applying it here would neuter real capacity waits.
-  const hint = error?.retryAfterS;
+  const hint = error?.body && "retry_after_seconds" in error.body
+    ? wireRetryAfter(error.body.retry_after_seconds) : undefined;
   if (hint !== undefined) {
     return Math.min(hint * 1000, retry.hintCapMs ?? Number.POSITIVE_INFINITY) + jitter(retry.jitterMs);
   }

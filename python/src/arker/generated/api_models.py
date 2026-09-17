@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Literal, TypeAlias
 
 
@@ -32,64 +33,37 @@ class ListRegionsResponse:
 
 
 ErrorCode: TypeAlias = Literal[
-    'unsupported_operation',
     'bad_request',
-    'validation_error',
+    'insufficient_resources',
     'unauthorized',
-    'invalid_api_key',
-    'api_key_required',
-    'csrf_rejected',
     'forbidden',
-    'legal_acceptance_required',
-    'payment_required',
     'not_found',
     'conflict',
-    'method_not_allowed',
+    'resource_busy',
+    'invalid_state',
+    'already_exists',
+    'idempotency_conflict',
+    'expired',
     'payload_too_large',
-    'rate_limited',
-    'upstream_rate_limited',
-    'budget_exceeded',
-    'concurrency_limit_exceeded',
-    'regional_concurrency_limit_exceeded',
-    'resource_pressure',
-    'capacity_unavailable',
-    'internal',
-    'unavailable',
-    'bad_gateway',
-    'stale_route',
+    'method_not_allowed',
+    'unsupported_operation',
     'unrecoverable',
+    'capacity_unavailable',
+    'unavailable',
+    'internal',
+    'rate_limited',
+    'quota_exceeded',
+    'payment_required',
+    'action_required',
+    'operation_failed',
+    'gateway_timeout',
 ]
-
-
-@dataclass(frozen=True)
-class ErrorBody:
-    code: ErrorCode
-    message: str
-    timestamp: str
-    retry_after: int | None = None
-    operation: str | None = None
-    runtime: str | None = None
-    provider: str | None = None
-    retryable: bool | None = None
-    scope: Literal['global', 'regional'] | None = None
-    region: str | None = None
-    resource: str | None = None
-    current_usage: int | None = None
-    requested_increment: int | None = None
-    projected_usage: int | None = None
-    quota: int | None = None
-    action: Literal['settings_limits'] | None = None
-
-
-@dataclass(frozen=True)
-class ErrorResponse:
-    error: ErrorBody
 
 
 VmState: TypeAlias = Literal['idle', 'running']
 
 
-SessionState: TypeAlias = VmState
+SessionState: TypeAlias = Literal['idle', 'running']
 
 
 RunState: TypeAlias = Literal['pending', 'running', 'completed', 'failed', 'cancelled']
@@ -427,12 +401,6 @@ class SyncByteRange:
 
 
 @dataclass(frozen=True)
-class SyncEntryError:
-    code: str
-    message: str
-
-
-@dataclass(frozen=True)
 class Filesystem:
     filesystem_id: str
     name: str
@@ -469,7 +437,19 @@ class VmResources:
     gpu_count: int | None = None
 
 
-Vgpu: TypeAlias = float
+class Vgpu(float, Enum):
+    number_0 = 0
+    number_0_125 = 0.125
+    number_0_25 = 0.25
+    number_0_375 = 0.375
+    number_0_5 = 0.5
+    number_0_625 = 0.625
+    number_0_75 = 0.75
+    number_0_875 = 0.875
+    number_1 = 1
+    number_2 = 2
+    number_4 = 4
+    number_8 = 8
 
 
 @dataclass(frozen=True)
@@ -517,6 +497,857 @@ class PlatformGpuLimits:
 class RegistryAuth:
     username: str
     password: str
+
+
+OpenApiOperationId: TypeAlias = Literal[
+    'health',
+    'listRegions',
+    'whoami',
+    'fork',
+    'listVms',
+    'listOrgRuns',
+    'getVm',
+    'deleteVm',
+    'patchVm',
+    'getVmPolicies',
+    'putVmPolicies',
+    'createRun',
+    'listRuns',
+    'getRun',
+    'cancelRun',
+    'listSessions',
+    'createSession',
+    'getSession',
+    'patchSession',
+    'deleteSession',
+    'attachSessionPty',
+    'mintSessionPtyTicket',
+    'createMount',
+    'listMounts',
+    'deleteMount',
+    'sync',
+    'listFilesystems',
+    'createFilesystem',
+    'getFilesystem',
+    'deleteFilesystem',
+]
+
+
+HttpMethod: TypeAlias = Literal[
+    'GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'CONNECT', 'TRACE'
+]
+
+
+ExecutionStage: TypeAlias = Literal[
+    'image_pull',
+    'image_conversion',
+    'image_configuration',
+    'image_command',
+    'dockerfile_build',
+    'restore',
+]
+
+
+ComputeResource: TypeAlias = Literal['cpu', 'memory', 'disk', 'gpu']
+
+
+ResourceKind: TypeAlias = Literal[
+    'vm',
+    'source',
+    'run',
+    'session',
+    'filesystem',
+    'mount',
+    'file',
+    'sync',
+    'upload',
+    'api_key',
+    'ssh_key',
+    'ssh_setup',
+    'organization',
+    'route',
+    'billing',
+    'correction_review',
+    'webhook',
+    'resource',
+]
+
+
+CapacityScope: TypeAlias = Literal['worker', 'region', 'platform']
+
+
+RateLimiter: TypeAlias = Literal['arker', 'upstream']
+
+
+StateRequirement: TypeAlias = Literal['running', 'mutable', 'unclaimed']
+
+
+UnsupportedReason: TypeAlias = Literal[
+    'feature_not_supported', 'platform_mismatch', 'restore_requires_birth_host'
+]
+
+
+RequiredAction: TypeAlias = Literal['accept_legal_terms', 'convert_billing_plan']
+
+
+OperationFailureReason: TypeAlias = Literal[
+    'image_pull_failed',
+    'image_conversion_failed',
+    'command_failed',
+    'unexpected_interpreter',
+    'deadline_exceeded',
+]
+
+
+Feature: TypeAlias = Literal[
+    'durability',
+    'nested_virtualization',
+    'diskless',
+    'filesystem_only_fork',
+    'shared_filesystem',
+    'persistent_pty',
+    'network_policy',
+    'public_ingress',
+    'guest_control',
+    'platform',
+    'systemd',
+    'restore',
+]
+
+
+WorkState: TypeAlias = Literal['not_started', 'stopped', 'continuing', 'unknown']
+
+
+EnforcementScope: TypeAlias = Literal['worker_local', 'regional', 'global']
+
+
+@dataclass(frozen=True)
+class ResourceRef:
+    kind: ResourceKind
+    id: str | None = None
+
+
+@dataclass(frozen=True)
+class FieldViolation:
+    field: str
+    message: str
+
+
+@dataclass(frozen=True)
+class MatchedRequestContext:
+    kind: Literal['matched']
+    operation_id: OpenApiOperationId
+
+
+@dataclass(frozen=True)
+class UnmatchedRequestContext:
+    kind: Literal['unmatched']
+    method: str
+
+
+RequestContext: TypeAlias = MatchedRequestContext | UnmatchedRequestContext
+
+
+@dataclass(frozen=True)
+class RecoveryDetails:
+    vm_id: str | None = None
+    run_id: str | None = None
+    step_index: int | None = None
+    step_count: int | None = None
+    completed_steps: int | None = None
+    exit_code: int | None = None
+
+
+@dataclass(frozen=True)
+class RecoveryContext:
+    work: WorkState
+    context: RecoveryDetails | None = None
+
+
+@dataclass(frozen=True)
+class ErrorExecutionContext:
+    stage: ExecutionStage | None = None
+    recovery: RecoveryContext | None = None
+
+
+@dataclass(frozen=True)
+class ErrorMetadata(ErrorExecutionContext):
+    message: str = field(kw_only=True)
+    timestamp: str = field(kw_only=True)
+    request_id: str = field(kw_only=True)
+    request: RequestContext = field(kw_only=True)
+    retry_after_seconds: int | None = None
+
+
+@dataclass(frozen=True)
+class ByteAmount:
+    unit: Literal['bytes']
+    value: int
+
+
+@dataclass(frozen=True)
+class CpuAmount:
+    unit: Literal['vcpus']
+    value: int
+
+
+@dataclass(frozen=True)
+class GpuDeviceAmount:
+    unit: Literal['gpu_devices']
+    value: int
+
+
+@dataclass(frozen=True)
+class GpuSmAmount:
+    unit: Literal['gpu_sms']
+    value: int
+
+
+@dataclass(frozen=True)
+class GpuVramAmount:
+    unit: Literal['gpu_vram_bytes']
+    value: int
+
+
+@dataclass(frozen=True)
+class CpuInsufficientResourcesDetails:
+    resource: Literal['cpu']
+    requested: CpuAmount | None = None
+    minimum: CpuAmount | None = None
+
+
+@dataclass(frozen=True)
+class MemoryInsufficientResourcesDetails:
+    resource: Literal['memory']
+    requested: ByteAmount | None = None
+    minimum: ByteAmount | None = None
+
+
+@dataclass(frozen=True)
+class DiskInsufficientResourcesDetails:
+    resource: Literal['disk']
+    requested: ByteAmount | None = None
+    minimum: ByteAmount | None = None
+
+
+@dataclass(frozen=True)
+class GpuDevicesInsufficientResourcesDetails:
+    resource: Literal['gpu']
+    requested: GpuDeviceAmount | None = None
+    minimum: GpuDeviceAmount | None = None
+
+
+@dataclass(frozen=True)
+class GpuSmsInsufficientResourcesDetails1:
+    resource: Literal['gpu']
+    requested: GpuSmAmount
+    minimum: GpuSmAmount | None = None
+
+
+@dataclass(frozen=True)
+class GpuSmsInsufficientResourcesDetails2:
+    resource: Literal['gpu']
+    minimum: GpuSmAmount
+    requested: GpuSmAmount | None = None
+
+
+GpuSmsInsufficientResourcesDetails: TypeAlias = (
+    GpuSmsInsufficientResourcesDetails1 | GpuSmsInsufficientResourcesDetails2
+)
+
+
+@dataclass(frozen=True)
+class GpuVramInsufficientResourcesDetails1:
+    resource: Literal['gpu']
+    requested: GpuVramAmount
+    minimum: GpuVramAmount | None = None
+
+
+@dataclass(frozen=True)
+class GpuVramInsufficientResourcesDetails2:
+    resource: Literal['gpu']
+    minimum: GpuVramAmount
+    requested: GpuVramAmount | None = None
+
+
+GpuVramInsufficientResourcesDetails: TypeAlias = (
+    GpuVramInsufficientResourcesDetails1 | GpuVramInsufficientResourcesDetails2
+)
+
+
+InsufficientResourcesDetails: TypeAlias = (
+    CpuInsufficientResourcesDetails
+    | MemoryInsufficientResourcesDetails
+    | DiskInsufficientResourcesDetails
+    | GpuDevicesInsufficientResourcesDetails
+    | GpuSmsInsufficientResourcesDetails
+    | GpuVramInsufficientResourcesDetails
+)
+
+
+@dataclass(frozen=True)
+class BudgetPeriod:
+    start: str
+    end: str
+
+
+@dataclass(frozen=True)
+class VcpuLimit:
+    metric: Literal['vcpus']
+    unit: Literal['vcpus']
+
+
+@dataclass(frozen=True)
+class RamLimit:
+    metric: Literal['ram_mib']
+    unit: Literal['mib']
+
+
+@dataclass(frozen=True)
+class DiskLimit:
+    metric: Literal['disk_mib']
+    unit: Literal['mib']
+
+
+@dataclass(frozen=True)
+class GpuVramLimit:
+    metric: Literal['gpu_vram_mib']
+    unit: Literal['mib']
+
+
+@dataclass(frozen=True)
+class GpuSmLimit:
+    metric: Literal['gpu_sms']
+    unit: Literal['sms']
+
+
+@dataclass(frozen=True)
+class PtySessionLimit:
+    metric: Literal['pty_sessions']
+    unit: Literal['sessions']
+
+
+@dataclass(frozen=True)
+class BudgetLimit:
+    metric: Literal['budget']
+    unit: Literal['minor_currency_units']
+    currency: str
+    period: BudgetPeriod
+
+
+LimitDescriptor: TypeAlias = (
+    VcpuLimit
+    | RamLimit
+    | DiskLimit
+    | GpuVramLimit
+    | GpuSmLimit
+    | PtySessionLimit
+    | BudgetLimit
+)
+
+
+@dataclass(frozen=True)
+class VmLimitScope:
+    kind: Literal['vm']
+    vm_id: str
+
+
+@dataclass(frozen=True)
+class RegionLimitScope:
+    kind: Literal['region']
+    region: str
+
+
+@dataclass(frozen=True)
+class OrganizationLimitScope:
+    kind: Literal['organization']
+
+
+LimitScope: TypeAlias = VmLimitScope | RegionLimitScope | OrganizationLimitScope
+
+
+@dataclass(frozen=True)
+class MeasuredQuota:
+    kind: Literal['measured']
+    current_usage: int | None = None
+    requested_increment: int | None = None
+    projected_usage: int | None = None
+    cap: int | None = None
+
+
+@dataclass(frozen=True)
+class UnmeasuredQuota:
+    kind: Literal['unmeasured']
+
+
+QuotaMeasurements: TypeAlias = MeasuredQuota | UnmeasuredQuota
+
+
+@dataclass(frozen=True)
+class QuotaExceededDetails:
+    limit: LimitDescriptor
+    scope: LimitScope
+    enforcement: EnforcementScope
+    measurements: QuotaMeasurements
+
+
+@dataclass(frozen=True)
+class BadRequestDetails:
+    violations: list[FieldViolation] | None = None
+
+
+@dataclass(frozen=True)
+class ResourceErrorDetails:
+    resource: ResourceKind
+
+
+@dataclass(frozen=True)
+class InvalidStateDetails:
+    resource: ResourceRef
+    requirement: StateRequirement
+
+
+@dataclass(frozen=True)
+class PayloadTooLargeDetails:
+    maximum_bytes: int | None = None
+
+
+@dataclass(frozen=True)
+class MethodNotAllowedDetails:
+    allowed_methods: list[HttpMethod]
+
+
+@dataclass(frozen=True)
+class UnsupportedOperationDetails:
+    reason: UnsupportedReason
+    feature: Feature | None = None
+    resource: ResourceRef | None = None
+
+
+@dataclass(frozen=True)
+class UnrecoverableDetails:
+    resource: ResourceRef
+
+
+@dataclass(frozen=True)
+class CapacityUnavailableDetails:
+    scope: CapacityScope
+    resource: ComputeResource | None = None
+
+
+@dataclass(frozen=True)
+class RateLimitedDetails:
+    limiter: RateLimiter
+
+
+@dataclass(frozen=True)
+class ActionRequiredDetails:
+    action: RequiredAction
+
+
+@dataclass(frozen=True)
+class OperationFailedDetails:
+    reason: OperationFailureReason
+
+
+@dataclass(frozen=True)
+class BadRequest(ErrorMetadata):
+    code: Literal['bad_request'] = field(kw_only=True)
+    details: BadRequestDetails | None = None
+
+
+@dataclass(frozen=True)
+class InsufficientResources(ErrorMetadata):
+    code: Literal['insufficient_resources'] = field(kw_only=True)
+    details: InsufficientResourcesDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Unauthorized(ErrorMetadata):
+    code: Literal['unauthorized'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Forbidden(ErrorMetadata):
+    code: Literal['forbidden'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class NotFound(ErrorMetadata):
+    code: Literal['not_found'] = field(kw_only=True)
+    details: ResourceErrorDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Conflict(ErrorMetadata):
+    code: Literal['conflict'] = field(kw_only=True)
+    details: ResourceErrorDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class ResourceBusy(ErrorMetadata):
+    code: Literal['resource_busy'] = field(kw_only=True)
+    details: ResourceErrorDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class InvalidState(ErrorMetadata):
+    code: Literal['invalid_state'] = field(kw_only=True)
+    details: InvalidStateDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class AlreadyExists(ErrorMetadata):
+    code: Literal['already_exists'] = field(kw_only=True)
+    details: ResourceErrorDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class IdempotencyConflict(ErrorMetadata):
+    code: Literal['idempotency_conflict'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Expired(ErrorMetadata):
+    code: Literal['expired'] = field(kw_only=True)
+    details: ResourceErrorDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class PayloadTooLarge(ErrorMetadata):
+    code: Literal['payload_too_large'] = field(kw_only=True)
+    details: PayloadTooLargeDetails | None = None
+
+
+@dataclass(frozen=True)
+class MethodNotAllowed(ErrorMetadata):
+    code: Literal['method_not_allowed'] = field(kw_only=True)
+    details: MethodNotAllowedDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class UnsupportedOperation(ErrorMetadata):
+    code: Literal['unsupported_operation'] = field(kw_only=True)
+    details: UnsupportedOperationDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Unrecoverable(ErrorMetadata):
+    code: Literal['unrecoverable'] = field(kw_only=True)
+    details: UnrecoverableDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class CapacityUnavailable(ErrorMetadata):
+    code: Literal['capacity_unavailable'] = field(kw_only=True)
+    details: CapacityUnavailableDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Unavailable(ErrorMetadata):
+    code: Literal['unavailable'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Internal(ErrorMetadata):
+    code: Literal['internal'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class RateLimited(ErrorMetadata):
+    code: Literal['rate_limited'] = field(kw_only=True)
+    details: RateLimitedDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class QuotaExceeded(ErrorMetadata):
+    code: Literal['quota_exceeded'] = field(kw_only=True)
+    details: QuotaExceededDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class PaymentRequired(ErrorMetadata):
+    code: Literal['payment_required'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class ActionRequired(ErrorMetadata):
+    code: Literal['action_required'] = field(kw_only=True)
+    details: ActionRequiredDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class OperationFailed(ErrorMetadata):
+    code: Literal['operation_failed'] = field(kw_only=True)
+    details: OperationFailedDetails = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class GatewayTimeout(ErrorMetadata):
+    code: Literal['gateway_timeout'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class NotReadyHealthResponse:
+    status: Literal['unavailable']
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class HealthUnavailableErrorResponse:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class SyncBadRequestError(ErrorExecutionContext):
+    code: Literal['bad_request'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: BadRequestDetails | None = None
+
+
+@dataclass(frozen=True)
+class Details:
+    resource: Literal['file', 'upload', 'resource']
+
+
+@dataclass(frozen=True)
+class SyncNotFoundError(ErrorExecutionContext):
+    code: Literal['not_found'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: Details = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class SyncConflictError(ErrorExecutionContext):
+    code: Literal['conflict'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: Details = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class SyncPayloadTooLargeError(ErrorExecutionContext):
+    code: Literal['payload_too_large'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: PayloadTooLargeDetails | None = None
+
+
+@dataclass(frozen=True)
+class Resource:
+    kind: Literal['file', 'upload', 'filesystem', 'resource']
+    id: str | None = None
+
+
+@dataclass(frozen=True)
+class Details2:
+    reason: Literal['feature_not_supported']
+    feature: Feature | None = None
+    resource: Resource | None = None
+
+
+@dataclass(frozen=True)
+class SyncUnsupportedOperationError(ErrorExecutionContext):
+    code: Literal['unsupported_operation'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: Details2 = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class SyncUnavailableError(ErrorExecutionContext):
+    code: Literal['unavailable'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class SyncInternalError(ErrorExecutionContext):
+    code: Literal['internal'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class Details3:
+    resource: Literal['upload']
+
+
+@dataclass(frozen=True)
+class SyncExpiredError(ErrorExecutionContext):
+    code: Literal['expired'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: Details3 = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class IdempotencyConflictErrorResponse:
+    error: IdempotencyConflict
+
+
+@dataclass(frozen=True)
+class PaymentRequiredErrorResponse:
+    error: PaymentRequired
+
+
+@dataclass(frozen=True)
+class UnsupportedOperationErrorResponse:
+    error: UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class BadRequestErrorResponse:
+    error: BadRequest
+
+
+@dataclass(frozen=True)
+class InsufficientResourcesErrorResponse:
+    error: InsufficientResources
+
+
+@dataclass(frozen=True)
+class UnauthorizedErrorResponse:
+    error: Unauthorized
+
+
+@dataclass(frozen=True)
+class ForbiddenErrorResponse:
+    error: Forbidden
+
+
+@dataclass(frozen=True)
+class NotFoundErrorResponse:
+    error: NotFound
+
+
+@dataclass(frozen=True)
+class ConflictErrorResponse:
+    error: Conflict
+
+
+@dataclass(frozen=True)
+class ResourceBusyErrorResponse:
+    error: ResourceBusy
+
+
+@dataclass(frozen=True)
+class InvalidStateErrorResponse:
+    error: InvalidState
+
+
+@dataclass(frozen=True)
+class AlreadyExistsErrorResponse:
+    error: AlreadyExists
+
+
+@dataclass(frozen=True)
+class ExpiredErrorResponse:
+    error: Expired
+
+
+@dataclass(frozen=True)
+class PayloadTooLargeErrorResponse:
+    error: PayloadTooLarge
+
+
+@dataclass(frozen=True)
+class MethodNotAllowedErrorResponse:
+    error: MethodNotAllowed
+
+
+@dataclass(frozen=True)
+class UnrecoverableErrorResponse:
+    error: Unrecoverable
+
+
+@dataclass(frozen=True)
+class CapacityUnavailableErrorResponse:
+    error: CapacityUnavailable
+
+
+@dataclass(frozen=True)
+class UnavailableErrorResponse:
+    error: Unavailable
+
+
+@dataclass(frozen=True)
+class InternalErrorResponse:
+    error: Internal
+
+
+@dataclass(frozen=True)
+class RateLimitedErrorResponse:
+    error: RateLimited
+
+
+@dataclass(frozen=True)
+class QuotaExceededErrorResponse:
+    error: QuotaExceeded
+
+
+@dataclass(frozen=True)
+class ActionRequiredErrorResponse:
+    error: ActionRequired
+
+
+@dataclass(frozen=True)
+class OperationFailedErrorResponse:
+    error: OperationFailed
+
+
+@dataclass(frozen=True)
+class GatewayTimeoutErrorResponse:
+    error: GatewayTimeout
+
+
+@dataclass(frozen=True)
+class BadRequestOrInsufficientResourcesErrorResponse:
+    error: BadRequest | InsufficientResources
+
+
+@dataclass(frozen=True)
+class AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse:
+    error: AlreadyExists | Conflict | InvalidState | ResourceBusy
+
+
+@dataclass(frozen=True)
+class AlreadyExistsOrInvalidStateErrorResponse:
+    error: AlreadyExists | InvalidState
+
+
+@dataclass(frozen=True)
+class ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse:
+    error: Conflict | IdempotencyConflict | InvalidState | ResourceBusy
+
+
+@dataclass(frozen=True)
+class ConflictOrInvalidStateErrorResponse:
+    error: Conflict | InvalidState
+
+
+@dataclass(frozen=True)
+class ConflictOrInvalidStateOrResourceBusyErrorResponse:
+    error: Conflict | InvalidState | ResourceBusy
+
+
+@dataclass(frozen=True)
+class InvalidStateOrResourceBusyErrorResponse:
+    error: InvalidState | ResourceBusy
+
+
+@dataclass(frozen=True)
+class OperationFailedOrUnrecoverableOrUnsupportedOperationErrorResponse:
+    error: OperationFailed | Unrecoverable | UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class UnrecoverableOrUnsupportedOperationErrorResponse:
+    error: Unrecoverable | UnsupportedOperation
+
+
+@dataclass(frozen=True)
+class QuotaExceededOrRateLimitedErrorResponse:
+    error: QuotaExceeded | RateLimited
+
+
+@dataclass(frozen=True)
+class CapacityUnavailableOrUnavailableErrorResponse:
+    error: CapacityUnavailable | Unavailable
 
 
 @dataclass(frozen=True)
@@ -701,6 +1532,39 @@ class DeleteFilesystemParameters:
     filesystem_id: str
 
 
+ErrorBody: TypeAlias = (
+    BadRequest
+    | InsufficientResources
+    | Unauthorized
+    | Forbidden
+    | NotFound
+    | Conflict
+    | ResourceBusy
+    | InvalidState
+    | AlreadyExists
+    | IdempotencyConflict
+    | Expired
+    | PayloadTooLarge
+    | MethodNotAllowed
+    | UnsupportedOperation
+    | Unrecoverable
+    | CapacityUnavailable
+    | Unavailable
+    | Internal
+    | RateLimited
+    | QuotaExceeded
+    | PaymentRequired
+    | ActionRequired
+    | OperationFailed
+    | GatewayTimeout
+)
+
+
+@dataclass(frozen=True)
+class ErrorResponse:
+    error: ErrorBody
+
+
 @dataclass(frozen=True)
 class PolicyAction1:
     rewrite: Rewrite | None = None
@@ -722,37 +1586,16 @@ SyncWriteEntry: TypeAlias = (
 SyncReadResponse: TypeAlias = SyncReadInlineResponse | SyncReadPresignedResponse
 
 
-@dataclass(frozen=True)
-class SyncChunkWriteResult:
-    path: str
-    size: int
-    received_bytes: int
-    ranges: list[SyncByteRange]
-    complete: bool
-    written: bool
-    error: SyncEntryError | None = None
-
-
-@dataclass(frozen=True)
-class SyncPresignedWriteRequestResult:
-    path: str
-    size: int
-    presigned_url: str
-    upload_id: str
-    expires_in: int
-    method: str
-    complete: bool
-    written: bool
-    error: SyncEntryError | None = None
-
-
-@dataclass(frozen=True)
-class SyncCommitWriteResult:
-    path: str
-    size: int
-    complete: bool
-    written: bool
-    error: SyncEntryError | None = None
+SyncEntryError: TypeAlias = (
+    SyncBadRequestError
+    | SyncNotFoundError
+    | SyncConflictError
+    | SyncPayloadTooLargeError
+    | SyncUnsupportedOperationError
+    | SyncUnavailableError
+    | SyncInternalError
+    | SyncExpiredError
+)
 
 
 @dataclass(frozen=True)
@@ -770,6 +1613,11 @@ class CompatiblePlatform:
     default_memory_mib: int | None = None
     default_disk_mib: int | None = None
     gpu: PlatformGpuLimits | None = None
+
+
+HealthUnavailableResponse: TypeAlias = (
+    NotReadyHealthResponse | HealthUnavailableErrorResponse
+)
 
 
 @dataclass(frozen=True)
@@ -826,9 +1674,37 @@ SyncRequest: TypeAlias = (
 )
 
 
-SyncWriteResult: TypeAlias = (
-    SyncChunkWriteResult | SyncPresignedWriteRequestResult | SyncCommitWriteResult
-)
+@dataclass(frozen=True)
+class SyncChunkWriteResult:
+    path: str
+    size: int
+    received_bytes: int
+    ranges: list[SyncByteRange]
+    complete: bool
+    written: bool
+    error: SyncEntryError | None = None
+
+
+@dataclass(frozen=True)
+class SyncPresignedWriteRequestResult:
+    path: str
+    size: int
+    presigned_url: str
+    upload_id: str
+    expires_in: int
+    method: str
+    complete: bool
+    written: bool
+    error: SyncEntryError | None = None
+
+
+@dataclass(frozen=True)
+class SyncCommitWriteResult:
+    path: str
+    size: int
+    complete: bool
+    written: bool
+    error: SyncEntryError | None = None
 
 
 @dataclass(frozen=True)
@@ -1015,11 +1891,9 @@ class RunRequest:
     policies: PolicyWriteRequest | None = None
 
 
-@dataclass(frozen=True)
-class SyncWriteResponse:
-    ok: bool
-    op: Literal['write']
-    results: list[SyncWriteResult]
+SyncWriteResult: TypeAlias = (
+    SyncChunkWriteResult | SyncPresignedWriteRequestResult | SyncCommitWriteResult
+)
 
 
 @dataclass(frozen=True)
@@ -1030,341 +1904,11 @@ class PatchVmRequest:
     policies: PolicyWriteRequest | None = None
 
 
+@dataclass(frozen=True)
+class SyncWriteResponse:
+    ok: bool
+    op: Literal['write']
+    results: list[SyncWriteResult]
+
+
 SyncResponse: TypeAlias = SyncReadResponse | SyncWriteResponse | SyncManifestResponse
-
-from typing import TypedDict
-
-# OpenAPI operation types
-
-class ListFilesystemsOperation(TypedDict):
-    operation_id: Literal['listFilesystems']
-    method: Literal['GET']
-    path: Literal['/v1/filesystems']
-    parameters: ListFilesystemsParameters
-    request: None
-    success: ListFilesystemsResponse
-    errors: ErrorResponse
-
-
-class CreateFilesystemOperation(TypedDict):
-    operation_id: Literal['createFilesystem']
-    method: Literal['POST']
-    path: Literal['/v1/filesystems']
-    parameters: None
-    request: FilesystemCreateRequest
-    success: Filesystem
-    errors: ErrorResponse
-
-
-class GetFilesystemOperation(TypedDict):
-    operation_id: Literal['getFilesystem']
-    method: Literal['GET']
-    path: Literal['/v1/filesystems/{filesystem_id}']
-    parameters: GetFilesystemParameters
-    request: None
-    success: Filesystem
-    errors: ErrorResponse
-
-
-class DeleteFilesystemOperation(TypedDict):
-    operation_id: Literal['deleteFilesystem']
-    method: Literal['DELETE']
-    path: Literal['/v1/filesystems/{filesystem_id}']
-    parameters: DeleteFilesystemParameters
-    request: None
-    success: DeleteFilesystemResponse
-    errors: ErrorResponse
-
-
-class ForkOperation(TypedDict):
-    operation_id: Literal['fork']
-    method: Literal['POST']
-    path: Literal['/v1/fork']
-    parameters: ForkParameters
-    request: ForkRequest
-    success: Vm
-    errors: ErrorResponse
-
-
-class HealthOperation(TypedDict):
-    operation_id: Literal['health']
-    method: Literal['GET']
-    path: Literal['/v1/health']
-    parameters: None
-    request: None
-    success: HealthResponse
-    errors: HealthResponse | ErrorResponse
-
-
-class ListRegionsOperation(TypedDict):
-    operation_id: Literal['listRegions']
-    method: Literal['GET']
-    path: Literal['/v1/regions']
-    parameters: None
-    request: None
-    success: ListRegionsResponse
-    errors: ErrorResponse
-
-
-class ListOrgRunsOperation(TypedDict):
-    operation_id: Literal['listOrgRuns']
-    method: Literal['GET']
-    path: Literal['/v1/runs']
-    parameters: ListOrgRunsParameters
-    request: None
-    success: ListOrgRunsResponse
-    errors: ErrorResponse
-
-
-class ListVmsOperation(TypedDict):
-    operation_id: Literal['listVms']
-    method: Literal['GET']
-    path: Literal['/v1/vms']
-    parameters: ListVmsParameters
-    request: None
-    success: ListVmsResponse
-    errors: ErrorResponse
-
-
-class GetVmOperation(TypedDict):
-    operation_id: Literal['getVm']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}']
-    parameters: GetVmParameters
-    request: None
-    success: Vm
-    errors: ErrorResponse
-
-
-class PatchVmOperation(TypedDict):
-    operation_id: Literal['patchVm']
-    method: Literal['PATCH']
-    path: Literal['/v1/vms/{id}']
-    parameters: PatchVmParameters
-    request: PatchVmRequest
-    success: Vm
-    errors: ErrorResponse
-
-
-class DeleteVmOperation(TypedDict):
-    operation_id: Literal['deleteVm']
-    method: Literal['DELETE']
-    path: Literal['/v1/vms/{id}']
-    parameters: DeleteVmParameters
-    request: None
-    success: DeleteVmResponse
-    errors: ErrorResponse
-
-
-class ListMountsOperation(TypedDict):
-    operation_id: Literal['listMounts']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/mounts']
-    parameters: ListMountsParameters
-    request: None
-    success: ListMountsResponse
-    errors: ErrorResponse
-
-
-class CreateMountOperation(TypedDict):
-    operation_id: Literal['createMount']
-    method: Literal['POST']
-    path: Literal['/v1/vms/{id}/mounts']
-    parameters: CreateMountParameters
-    request: MountCreateRequest
-    success: Mount
-    errors: ErrorResponse
-
-
-class DeleteMountOperation(TypedDict):
-    operation_id: Literal['deleteMount']
-    method: Literal['DELETE']
-    path: Literal['/v1/vms/{id}/mounts/{mount_id}']
-    parameters: DeleteMountParameters
-    request: None
-    success: DeleteMountResponse
-    errors: ErrorResponse
-
-
-class GetVmPoliciesOperation(TypedDict):
-    operation_id: Literal['getVmPolicies']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/policies']
-    parameters: GetVmPoliciesParameters
-    request: None
-    success: PolicyDoc
-    errors: ErrorResponse
-
-
-class PutVmPoliciesOperation(TypedDict):
-    operation_id: Literal['putVmPolicies']
-    method: Literal['PUT']
-    path: Literal['/v1/vms/{id}/policies']
-    parameters: PutVmPoliciesParameters
-    request: PolicyWriteRequest
-    success: PolicyDoc
-    errors: ErrorResponse
-
-
-class ListRunsOperation(TypedDict):
-    operation_id: Literal['listRuns']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/runs']
-    parameters: ListRunsParameters
-    request: None
-    success: ListRunsResponse
-    errors: ErrorResponse
-
-
-class CreateRunOperation(TypedDict):
-    operation_id: Literal['createRun']
-    method: Literal['POST']
-    path: Literal['/v1/vms/{id}/runs']
-    parameters: CreateRunParameters
-    request: RunRequest
-    success: RunResponse
-    errors: ErrorResponse
-
-
-class GetRunOperation(TypedDict):
-    operation_id: Literal['getRun']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/runs/{run_id}']
-    parameters: GetRunParameters
-    request: None
-    success: Run
-    errors: ErrorResponse
-
-
-class CancelRunOperation(TypedDict):
-    operation_id: Literal['cancelRun']
-    method: Literal['DELETE']
-    path: Literal['/v1/vms/{id}/runs/{run_id}']
-    parameters: CancelRunParameters
-    request: None
-    success: CancelRunResponse
-    errors: ErrorResponse
-
-
-class ListSessionsOperation(TypedDict):
-    operation_id: Literal['listSessions']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/sessions']
-    parameters: ListSessionsParameters
-    request: None
-    success: ListSessionsResponse
-    errors: ErrorResponse
-
-
-class CreateSessionOperation(TypedDict):
-    operation_id: Literal['createSession']
-    method: Literal['POST']
-    path: Literal['/v1/vms/{id}/sessions']
-    parameters: CreateSessionParameters
-    request: CreateSessionRequest
-    success: Session
-    errors: ErrorResponse
-
-
-class GetSessionOperation(TypedDict):
-    operation_id: Literal['getSession']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/sessions/{sid}']
-    parameters: GetSessionParameters
-    request: None
-    success: Session
-    errors: ErrorResponse
-
-
-class PatchSessionOperation(TypedDict):
-    operation_id: Literal['patchSession']
-    method: Literal['PATCH']
-    path: Literal['/v1/vms/{id}/sessions/{sid}']
-    parameters: PatchSessionParameters
-    request: PatchSessionRequest | None
-    success: PatchSessionResponse
-    errors: ErrorResponse
-
-
-class DeleteSessionOperation(TypedDict):
-    operation_id: Literal['deleteSession']
-    method: Literal['DELETE']
-    path: Literal['/v1/vms/{id}/sessions/{sid}']
-    parameters: DeleteSessionParameters
-    request: None
-    success: DeleteSessionResponse
-    errors: ErrorResponse
-
-
-class AttachSessionPtyOperation(TypedDict):
-    operation_id: Literal['attachSessionPty']
-    method: Literal['GET']
-    path: Literal['/v1/vms/{id}/sessions/{sid}/pty']
-    parameters: AttachSessionPtyParameters
-    request: None
-    success: None
-    errors: ErrorResponse
-
-
-class MintSessionPtyTicketOperation(TypedDict):
-    operation_id: Literal['mintSessionPtyTicket']
-    method: Literal['POST']
-    path: Literal['/v1/vms/{id}/sessions/{sid}/pty-ticket']
-    parameters: MintSessionPtyTicketParameters
-    request: None
-    success: PtyTicketResponse
-    errors: ErrorResponse
-
-
-class SyncOperation(TypedDict):
-    operation_id: Literal['sync']
-    method: Literal['POST']
-    path: Literal['/v1/vms/{id}/sync']
-    parameters: SyncParameters
-    request: SyncRequest
-    success: SyncResponse
-    errors: ErrorResponse
-
-
-class WhoamiOperation(TypedDict):
-    operation_id: Literal['whoami']
-    method: Literal['GET']
-    path: Literal['/v1/whoami']
-    parameters: None
-    request: None
-    success: WhoamiResponse
-    errors: ErrorResponse
-
-
-ApiOperation: TypeAlias = (
-    ListFilesystemsOperation |
-    CreateFilesystemOperation |
-    GetFilesystemOperation |
-    DeleteFilesystemOperation |
-    ForkOperation |
-    HealthOperation |
-    ListRegionsOperation |
-    ListOrgRunsOperation |
-    ListVmsOperation |
-    GetVmOperation |
-    PatchVmOperation |
-    DeleteVmOperation |
-    ListMountsOperation |
-    CreateMountOperation |
-    DeleteMountOperation |
-    GetVmPoliciesOperation |
-    PutVmPoliciesOperation |
-    ListRunsOperation |
-    CreateRunOperation |
-    GetRunOperation |
-    CancelRunOperation |
-    ListSessionsOperation |
-    CreateSessionOperation |
-    GetSessionOperation |
-    PatchSessionOperation |
-    DeleteSessionOperation |
-    AttachSessionPtyOperation |
-    MintSessionPtyTicketOperation |
-    SyncOperation |
-    WhoamiOperation
-)

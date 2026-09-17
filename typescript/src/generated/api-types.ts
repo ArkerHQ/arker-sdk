@@ -526,61 +526,26 @@ export interface components {
             regions: components["schemas"]["RegionPlacement"][];
         };
         /**
-         * @description Stable machine-readable error code. `unsupported_operation` means the requested optional feature is unavailable in the selected region or provider. `payment_required` means billing setup or payment is required before new compute can start. `rate_limited` means the organization exceeded its request rate. `upstream_rate_limited` means a third-party service the request directed Arker to contact — a registry named by `image`, today — rate limited Arker while acting on the caller's behalf; unlike `rate_limited`, the limit is not Arker's and not the organization's request rate, so the remedy is with that service (authenticate, or pull less from it); `message` carries the upstream's own words, including which host refused. `budget_exceeded` means the organization reached its monthly spending limit. `concurrency_limit_exceeded` means the organization reached a global concurrent compute-resource limit. `regional_concurrency_limit_exceeded` means the organization reached a concurrent compute-resource limit in the selected region. `resource_pressure` means the serving infrastructure is temporarily at capacity. `capacity_unavailable` means no worker can currently serve the requested platform and one is being brought up; unlike `unavailable`, which signals a fault, this is an expected transient state and the accompanying `retry_after` says when to try again.
+         * @description Stable public error codes. ErrorBody selects the required details for each code; clients must not parse message text.
          * @enum {string}
          */
-        ErrorCode: "unsupported_operation" | "bad_request" | "validation_error" | "unauthorized" | "invalid_api_key" | "api_key_required" | "csrf_rejected" | "forbidden" | "legal_acceptance_required" | "payment_required" | "not_found" | "conflict" | "method_not_allowed" | "payload_too_large" | "rate_limited" | "upstream_rate_limited" | "budget_exceeded" | "concurrency_limit_exceeded" | "regional_concurrency_limit_exceeded" | "resource_pressure" | "capacity_unavailable" | "internal" | "unavailable" | "bad_gateway" | "stale_route" | "unrecoverable";
-        ErrorBody: {
-            code: components["schemas"]["ErrorCode"];
-            /** @description Human-readable, client-safe error message. For `code: "internal"`, this is intentionally generic. */
-            message: string;
-            /**
-             * Format: date-time
-             * @description Server time when the error response was generated.
-             */
-            timestamp: string;
-            /** @description Suggested retry delay in seconds. Present on retryable responses and mirrored by the Retry-After header. */
-            retry_after?: number;
-            /** @description Operation that failed, when the service can identify it safely. */
-            operation?: string;
-            /** @description Runtime involved in the failure, when safe to expose. */
-            runtime?: string;
-            /** @description Public provider involved in the failure, when safe to expose. */
-            provider?: string;
-            /** @description Whether clients should retry the operation. */
-            retryable?: boolean;
-            /**
-             * @description Quota scope that denied the operation.
-             * @enum {string}
-             */
-            scope?: "global" | "regional";
-            /** @description Region whose quota denied the operation. */
-            region?: string;
-            /** @description Stable quota resource key. */
-            resource?: string;
-            /** @description Usage observed by admission. */
-            current_usage?: number;
-            /** @description Positive allocation added by the operation. */
-            requested_increment?: number;
-            /** @description Usage after the requested increment. */
-            projected_usage?: number;
-            /** @description Enforced quota cap. */
-            quota?: number;
-            /**
-             * @description Stable Console action for resolving the denial.
-             * @enum {string}
-             */
-            action?: "settings_limits";
-        };
+        ErrorCode: "bad_request" | "insufficient_resources" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "resource_busy" | "invalid_state" | "already_exists" | "idempotency_conflict" | "expired" | "payload_too_large" | "method_not_allowed" | "unsupported_operation" | "unrecoverable" | "capacity_unavailable" | "unavailable" | "internal" | "rate_limited" | "quota_exceeded" | "payment_required" | "action_required" | "operation_failed" | "gateway_timeout";
+        /** @description Typed HTTP error body. The code selects its required details. Endpoint responses must narrow this union to their permitted codes. */
+        ErrorBody: components["schemas"]["BadRequest"] | components["schemas"]["InsufficientResources"] | components["schemas"]["Unauthorized"] | components["schemas"]["Forbidden"] | components["schemas"]["NotFound"] | components["schemas"]["Conflict"] | components["schemas"]["ResourceBusy"] | components["schemas"]["InvalidState"] | components["schemas"]["AlreadyExists"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["Expired"] | components["schemas"]["PayloadTooLarge"] | components["schemas"]["MethodNotAllowed"] | components["schemas"]["UnsupportedOperation"] | components["schemas"]["Unrecoverable"] | components["schemas"]["CapacityUnavailable"] | components["schemas"]["Unavailable"] | components["schemas"]["Internal"] | components["schemas"]["RateLimited"] | components["schemas"]["QuotaExceeded"] | components["schemas"]["PaymentRequired"] | components["schemas"]["ActionRequired"] | components["schemas"]["OperationFailed"] | components["schemas"]["GatewayTimeout"];
+        /** @description Public HTTP error envelope. Every code has one HTTP status, documented on its body schema. Code/status matching is enforced at the response boundary. */
         ErrorResponse: {
             error: components["schemas"]["ErrorBody"];
         };
         /**
-         * @description Unified lifecycle state for a VM or a Session. `idle` means no command is currently executing; `running` means a command is in flight.
+         * @description Activity state for a VM. `idle` means no command is currently executing; `running` means a command is in flight.
          * @enum {string}
          */
         VmState: "idle" | "running";
-        SessionState: components["schemas"]["VmState"];
+        /**
+         * @description Session activity derived from its runs. `running` means the session has at least one pending or running run, including an attached PTY; `idle` means it has none. Completing or cancelling one run does not make the session idle while another is active.
+         * @enum {string}
+         */
+        SessionState: "idle" | "running";
         /**
          * @description Lifecycle state for a run. `pending` means the run was accepted but has not started yet because an earlier run on the same session is still in flight; it is not terminal, and a client should keep polling. `running` means the command is in progress. `completed` means the command finished; `exit_code` reports its result. `failed` means the service could not start or finish the command, with a client-safe explanation in `fail_reason`. `cancelled` means the client cancelled the run.
          * @enum {string}
@@ -1417,12 +1382,8 @@ export interface components {
             /** @description Exclusive ending byte offset. The range is half-open `[start, end)`, so a whole file of `N` bytes uses `start=0` and `end=N`. */
             end: number;
         };
-        SyncEntryError: {
-            /** @description Stable machine-readable error code. */
-            code: string;
-            /** @description Human-readable error message. */
-            message: string;
-        };
+        /** @description Per-file error union for successful batch responses. It does not change the enclosing HTTP status. Checksum mismatches use bad_request. */
+        SyncEntryError: components["schemas"]["SyncBadRequestError"] | components["schemas"]["SyncNotFoundError"] | components["schemas"]["SyncConflictError"] | components["schemas"]["SyncPayloadTooLargeError"] | components["schemas"]["SyncUnsupportedOperationError"] | components["schemas"]["SyncUnavailableError"] | components["schemas"]["SyncInternalError"] | components["schemas"]["SyncExpiredError"];
         Filesystem: {
             /** @description Unique filesystem identifier. */
             filesystem_id: string;
@@ -1465,11 +1426,14 @@ export interface components {
             gpu_sms?: number | null;
             /** @description GPU memory available to the VM, in MiB, on EACH of its GPUs (a per-GPU value; see `gpu_count`). Reported on GPU platforms. Response-only: a fork sizes GPU with `vgpu`. `0` means the VM was forked with `vgpu: 0` and holds no GPU; an absent field means the VM has no GPU at all. */
             gpu_vram_mib?: number | null;
-            /** @description Number of physical GPUs attached to the VM. `gpu_sms`/`gpu_vram_mib` are per-GPU values applied uniformly to every attached device, so the VM's total GPU allocation (and quota charge) is `gpu_count x per-GPU`. Reported on GPU platforms. Response-only: a fork sizes GPU with `vgpu`, which allocates at most one card. `0` means the VM was forked with `vgpu: 0` and holds no GPU; an absent field means the VM has no GPU at all. */
+            /** @description Number of physical GPUs attached to the VM. `gpu_sms`/`gpu_vram_mib` are per-GPU values applied uniformly to every attached device, so the VM's total GPU allocation (and quota charge) is `gpu_count x per-GPU`. Reported on GPU platforms. Response-only: a fork sizes GPU with `vgpu`, and this is the card count that implies. `0` means the VM was forked with `vgpu: 0` and holds no GPU; an absent field means the VM has no GPU at all. */
             gpu_count?: number | null;
         };
-        /** @description A slice of ONE physical GPU, in eighths of a card: 0.125 through 1 — plus 0, which declines a GPU entirely and yields a CPU-only VM. The constraints are the contract — an off-ladder fraction is rejected on the wire, not by the worker that later resolves it. */
-        Vgpu: number;
+        /**
+         * @description How much GPU, measured in cards. Below one card: eighths of ONE card. At or above one: whole cards, and the VM holds that many devices — `gpu_sms` and `gpu_vram_mib` are per-GPU, so its total is `gpu_count` times those. 0 declines a GPU and yields a CPU-only VM. The enum is the ladder: there is no 1.5 of a card, and no 3-card worker to be given.
+         * @enum {number}
+         */
+        Vgpu: 0 | 0.125 | 0.25 | 0.375 | 0.5 | 0.625 | 0.75 | 0.875 | 1 | 2 | 4 | 8;
         /** @description Resource shape a caller asks for. GPU size is set with `vgpu`, in eighths of one card; the resolved per-GPU `gpu_sms`/`gpu_vram_mib` are reported back on the machine. */
         ResourcesInput: {
             /** @description Virtual CPU allocation. */
@@ -1569,27 +1533,1010 @@ export interface components {
              */
             password: string;
         };
+        /**
+         * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
+         * @enum {string}
+         */
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem";
+        /** @enum {string} */
+        HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
+        /**
+         * @description Execution stage, separate from the matched request operationId.
+         * @enum {string}
+         */
+        ExecutionStage: "image_pull" | "image_conversion" | "image_configuration" | "image_command" | "dockerfile_build" | "restore";
+        /** @enum {string} */
+        ComputeResource: "cpu" | "memory" | "disk" | "gpu";
+        /**
+         * @description Use resource only when the actual kind cannot be identified safely.
+         * @enum {string}
+         */
+        ResourceKind: "vm" | "source" | "run" | "session" | "filesystem" | "mount" | "file" | "sync" | "upload" | "api_key" | "ssh_key" | "ssh_setup" | "organization" | "route" | "billing" | "correction_review" | "webhook" | "resource";
+        /** @enum {string} */
+        CapacityScope: "worker" | "region" | "platform";
+        /** @enum {string} */
+        RateLimiter: "arker" | "upstream";
+        /** @enum {string} */
+        StateRequirement: "running" | "mutable" | "unclaimed";
+        /** @enum {string} */
+        UnsupportedReason: "feature_not_supported" | "platform_mismatch" | "restore_requires_birth_host";
+        /** @enum {string} */
+        RequiredAction: "accept_legal_terms" | "convert_billing_plan";
+        /** @enum {string} */
+        OperationFailureReason: "image_pull_failed" | "image_conversion_failed" | "command_failed" | "unexpected_interpreter" | "deadline_exceeded";
+        /** @enum {string} */
+        Feature: "durability" | "nested_virtualization" | "diskless" | "filesystem_only_fork" | "shared_filesystem" | "persistent_pty" | "network_policy" | "public_ingress" | "guest_control" | "platform" | "systemd" | "restore";
+        /** @enum {string} */
+        WorkState: "not_started" | "stopped" | "continuing" | "unknown";
+        /** @enum {string} */
+        EnforcementScope: "worker_local" | "regional" | "global";
+        ResourceRef: {
+            kind: components["schemas"]["ResourceKind"];
+            /** @description Include only when known and safe for this caller. Do not disclose hidden resource identifiers. */
+            id?: string;
+        };
+        FieldViolation: {
+            /** @description Field path within the request; never include secret values. */
+            field: string;
+            /** @description Safe explanation of the validation failure. */
+            message: string;
+        };
+        MatchedRequestContext: {
+            /**
+             * @description Identifies this kind as `matched`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            kind: "matched";
+            operation_id: components["schemas"]["OpenApiOperationId"];
+        };
+        /** @description Used for unknown routes, unsupported methods, and auxiliary routes without a declared operationId. Never include raw URLs or queries. */
+        UnmatchedRequestContext: {
+            /**
+             * @description Identifies this kind as `unmatched`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            kind: "unmatched";
+            /** @description HTTP method token. Allows extension methods as well as the standard HttpMethod vocabulary. */
+            method: string;
+        };
+        RequestContext: components["schemas"]["MatchedRequestContext"] | components["schemas"]["UnmatchedRequestContext"];
+        /** @description Keep every known safe VM/run handle and applicable build-step value. Step counts must agree with the actual build; these relational constraints are enforced by the producer. */
+        RecoveryDetails: {
+            /** @description Known safe VM handle, including a VM created before a failed build. */
+            vm_id?: string;
+            /** @description Known safe background run handle. */
+            run_id?: string;
+            /** @description Zero-based failing or continuing build step. */
+            step_index?: number;
+            /** @description Total number of build steps. */
+            step_count?: number;
+            /** @description Number of completed build steps. */
+            completed_steps?: number;
+            /** @description Known command exit code; omit while the command is still running or its result is unknown. */
+            exit_code?: number;
+        };
+        /** @description Required when work has effects, may continue, or its outcome is unknown for an effectful execution. A known read-only execution with no work to recover can omit recovery. Producers determine applicability from actual execution, not operationId. Stage is recorded only on the containing error. */
+        RecoveryContext: {
+            work: components["schemas"]["WorkState"];
+            context?: components["schemas"]["RecoveryDetails"];
+        } & unknown;
+        /** @description Canonical execution stage is error.stage. Build, image-configuration and image-command stages identify work against a created VM and require its recovery handle for every error code. No nested stage is permitted. Other recovery applicability and preservation of every known handle are producer responsibilities. */
+        ErrorExecutionContext: {
+            stage?: components["schemas"]["ExecutionStage"];
+            recovery?: components["schemas"]["RecoveryContext"];
+        } & (unknown & unknown & unknown);
+        /** @description Shared fields for every typed HTTP error, including Internal and Unavailable. Recovery is mandatory when effects exist, continue, or are unknown; producers must preserve known safe handles even through error conversion. */
+        ErrorMetadata: {
+            /** @description Client-safe explanation, not fixed contract text. Internal causes and stacks remain in logs. */
+            message: string;
+            /**
+             * Format: date-time
+             * @description Server time when the error was generated.
+             */
+            timestamp: string;
+            /** @description Correlation identifier safe to give to support. */
+            request_id: string;
+            request: components["schemas"]["RequestContext"];
+            /** @description Scheduling hint in seconds, mirrored by Retry-After. Does not establish that replay is safe. */
+            retry_after_seconds?: number;
+        } & components["schemas"]["ErrorExecutionContext"];
+        ByteAmount: {
+            /**
+             * @description Identifies this unit as `bytes`.
+             * @constant
+             */
+            unit: "bytes";
+            /** @description Amount measured in the specified unit. */
+            value: number;
+        };
+        CpuAmount: {
+            /**
+             * @description Identifies this unit as `vcpus`.
+             * @constant
+             */
+            unit: "vcpus";
+            /** @description Amount measured in the specified unit. */
+            value: number;
+        };
+        GpuDeviceAmount: {
+            /**
+             * @description Identifies this unit as `gpu_devices`.
+             * @constant
+             */
+            unit: "gpu_devices";
+            /** @description Amount measured in the specified unit. */
+            value: number;
+        };
+        GpuSmAmount: {
+            /**
+             * @description Identifies this unit as `gpu_sms`.
+             * @constant
+             */
+            unit: "gpu_sms";
+            /** @description Amount measured in the specified unit. */
+            value: number;
+        };
+        GpuVramAmount: {
+            /**
+             * @description Identifies this unit as `gpu_vram_bytes`.
+             * @constant
+             */
+            unit: "gpu_vram_bytes";
+            /** @description Amount measured in the specified unit. */
+            value: number;
+        };
+        CpuInsufficientResourcesDetails: {
+            /**
+             * @description Identifies this resource as `cpu`.
+             * @constant
+             */
+            resource: "cpu";
+            requested?: components["schemas"]["CpuAmount"];
+            minimum?: components["schemas"]["CpuAmount"];
+        };
+        MemoryInsufficientResourcesDetails: {
+            /**
+             * @description Identifies this resource as `memory`.
+             * @constant
+             */
+            resource: "memory";
+            requested?: components["schemas"]["ByteAmount"];
+            minimum?: components["schemas"]["ByteAmount"];
+        };
+        DiskInsufficientResourcesDetails: {
+            /**
+             * @description Identifies this resource as `disk`.
+             * @constant
+             */
+            resource: "disk";
+            requested?: components["schemas"]["ByteAmount"];
+            minimum?: components["schemas"]["ByteAmount"];
+        };
+        GpuDevicesInsufficientResourcesDetails: {
+            /**
+             * @description Identifies this resource as `gpu`.
+             * @constant
+             */
+            resource: "gpu";
+            requested?: components["schemas"]["GpuDeviceAmount"];
+            minimum?: components["schemas"]["GpuDeviceAmount"];
+        };
+        GpuSmsInsufficientResourcesDetails: {
+            /**
+             * @description Identifies this resource as `gpu`.
+             * @constant
+             */
+            resource: "gpu";
+            requested?: components["schemas"]["GpuSmAmount"];
+            minimum?: components["schemas"]["GpuSmAmount"];
+        } | unknown | unknown;
+        GpuVramInsufficientResourcesDetails: {
+            /**
+             * @description Identifies this resource as `gpu`.
+             * @constant
+             */
+            resource: "gpu";
+            requested?: components["schemas"]["GpuVramAmount"];
+            minimum?: components["schemas"]["GpuVramAmount"];
+        } | unknown | unknown;
+        /** @description Allocation too small, not physical fleet capacity. Requested and minimum, when supplied, must use the same resource-appropriate units. Omit unknown quantities. */
+        InsufficientResourcesDetails: components["schemas"]["CpuInsufficientResourcesDetails"] | components["schemas"]["MemoryInsufficientResourcesDetails"] | components["schemas"]["DiskInsufficientResourcesDetails"] | components["schemas"]["GpuDevicesInsufficientResourcesDetails"] | components["schemas"]["GpuSmsInsufficientResourcesDetails"] | components["schemas"]["GpuVramInsufficientResourcesDetails"];
+        /** @description Budget accounting interval [start,end). Producers must ensure end is later than start. */
+        BudgetPeriod: {
+            /**
+             * Format: date-time
+             * @description Inclusive start of the budget period.
+             */
+            start: string;
+            /**
+             * Format: date-time
+             * @description Exclusive end of the budget period.
+             */
+            end: string;
+        };
+        VcpuLimit: {
+            /**
+             * @description Identifies this metric as `vcpus`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            metric: "vcpus";
+            /**
+             * @description Identifies this unit as `vcpus`.
+             * @constant
+             */
+            unit: "vcpus";
+        };
+        RamLimit: {
+            /**
+             * @description Identifies this metric as `ram_mib`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            metric: "ram_mib";
+            /**
+             * @description Identifies this unit as `mib`.
+             * @constant
+             */
+            unit: "mib";
+        };
+        DiskLimit: {
+            /**
+             * @description Identifies this metric as `disk_mib`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            metric: "disk_mib";
+            /**
+             * @description Identifies this unit as `mib`.
+             * @constant
+             */
+            unit: "mib";
+        };
+        GpuVramLimit: {
+            /**
+             * @description Identifies this metric as `gpu_vram_mib`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            metric: "gpu_vram_mib";
+            /**
+             * @description Identifies this unit as `mib`.
+             * @constant
+             */
+            unit: "mib";
+        };
+        GpuSmLimit: {
+            /**
+             * @description Identifies this metric as `gpu_sms`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            metric: "gpu_sms";
+            /**
+             * @description Identifies this unit as `sms`.
+             * @constant
+             */
+            unit: "sms";
+        };
+        PtySessionLimit: {
+            /**
+             * @description Identifies this metric as `pty_sessions`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            metric: "pty_sessions";
+            /**
+             * @description Identifies this unit as `sessions`.
+             * @constant
+             */
+            unit: "sessions";
+        };
+        BudgetLimit: {
+            /**
+             * @description Identifies this metric as `budget`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            metric: "budget";
+            /**
+             * @description Identifies this unit as `minor_currency_units`.
+             * @constant
+             */
+            unit: "minor_currency_units";
+            /** @description ISO 4217 currency code. */
+            currency: string;
+            period: components["schemas"]["BudgetPeriod"];
+        };
+        LimitDescriptor: components["schemas"]["VcpuLimit"] | components["schemas"]["RamLimit"] | components["schemas"]["DiskLimit"] | components["schemas"]["GpuVramLimit"] | components["schemas"]["GpuSmLimit"] | components["schemas"]["PtySessionLimit"] | components["schemas"]["BudgetLimit"];
+        VmLimitScope: {
+            /**
+             * @description Identifies this kind as `vm`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            kind: "vm";
+            /** @description VM whose usage reached the limit. */
+            vm_id: string;
+        };
+        RegionLimitScope: {
+            /**
+             * @description Identifies this kind as `region`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            kind: "region";
+            /** @description Region where the limit applies. */
+            region: string;
+        };
+        OrganizationLimitScope: {
+            /**
+             * @description Identifies this kind as `organization`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            kind: "organization";
+        };
+        LimitScope: components["schemas"]["VmLimitScope"] | components["schemas"]["RegionLimitScope"] | components["schemas"]["OrganizationLimitScope"];
+        MeasuredQuota: {
+            /**
+             * @description Identifies this kind as `measured`.
+             * @constant
+             */
+            kind: "measured";
+            /** @description Quantity in the unit declared by limit. Preserve each available measurement; omit unknown values. */
+            current_usage?: number;
+            /** @description Quantity in the unit declared by limit. Preserve each available measurement; omit unknown values. */
+            requested_increment?: number;
+            /** @description Quantity in the unit declared by limit. Preserve each available measurement; omit unknown values. */
+            projected_usage?: number;
+            /** @description Quantity in the unit declared by limit. Preserve each available measurement; omit unknown values. */
+            cap?: number;
+        } & ((unknown | unknown | unknown | unknown) & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "measured";
+        });
+        /** @description The limiter supplied no measurement. Never fabricate zero values. */
+        UnmeasuredQuota: {
+            /**
+             * @description Identifies this kind as `unmeasured`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            kind: "unmeasured";
+        };
+        QuotaMeasurements: components["schemas"]["MeasuredQuota"] | components["schemas"]["UnmeasuredQuota"];
+        /** @description Exact limit metric, units, scope and enforcement. Current per-organization PTY counters are worker-local, not organization-global. */
+        QuotaExceededDetails: {
+            limit: components["schemas"]["LimitDescriptor"];
+            scope: components["schemas"]["LimitScope"];
+            enforcement: components["schemas"]["EnforcementScope"];
+            measurements: components["schemas"]["QuotaMeasurements"];
+        } & unknown;
+        /** @description Optional structured validation information. Checksum mismatch is bad_request before generic conflict conversion; preserve genuine conflicts. */
+        BadRequestDetails: {
+            /** @description Fields that failed validation and instructions for correcting them. */
+            violations?: components["schemas"]["FieldViolation"][];
+        };
+        ResourceErrorDetails: {
+            resource: components["schemas"]["ResourceKind"];
+        };
+        InvalidStateDetails: {
+            resource: components["schemas"]["ResourceRef"];
+            requirement: components["schemas"]["StateRequirement"];
+        };
+        PayloadTooLargeDetails: {
+            /** @description Known enforced payload limit in bytes. */
+            maximum_bytes?: number;
+        };
+        MethodNotAllowedDetails: {
+            /** @description Must match the HTTP Allow header. */
+            allowed_methods: components["schemas"]["HttpMethod"][];
+        };
+        /** @description Capability restriction rather than a transient outage. Put execution stage and request identity in shared metadata. */
+        UnsupportedOperationDetails: {
+            reason: components["schemas"]["UnsupportedReason"];
+            feature?: components["schemas"]["Feature"];
+            resource?: components["schemas"]["ResourceRef"];
+        } & unknown;
+        /** @description Only authoritative permanent loss. Missing local files, unknown ownership and birth-host restore restrictions are insufficient. */
+        UnrecoverableDetails: {
+            resource: components["schemas"]["ResourceRef"];
+        };
+        CapacityUnavailableDetails: {
+            scope: components["schemas"]["CapacityScope"];
+            resource?: components["schemas"]["ComputeResource"];
+        };
+        RateLimitedDetails: {
+            limiter: components["schemas"]["RateLimiter"];
+        };
+        ActionRequiredDetails: {
+            action: components["schemas"]["RequiredAction"];
+        };
+        /** @description Expected image/build failure. Build handles, step indices and known exit code belong in shared recovery context. Ordinary command exits/timeouts remain Run results. */
+        OperationFailedDetails: {
+            reason: components["schemas"]["OperationFailureReason"];
+        };
+        /** @description The request is malformed or its fields fail validation. Correct the request using the message and optional field violations. */
+        BadRequest: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "bad_request";
+            details?: components["schemas"]["BadRequestDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "bad_request";
+        };
+        /** @description The requested allocation is too small for the operation. Increase the specified allocation. This does not mean the fleet lacks capacity. */
+        InsufficientResources: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "insufficient_resources";
+            details: components["schemas"]["InsufficientResourcesDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "insufficient_resources";
+        };
+        /** @description Valid authentication is missing or invalid. Supply or refresh credentials. */
+        Unauthorized: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "unauthorized";
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "unauthorized";
+        };
+        /** @description The caller or policy does not permit this operation. Obtain access or change the applicable policy; repeating the same request does not resolve it. */
+        Forbidden: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "forbidden";
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "forbidden";
+        };
+        /** @description The requested resource or route is not available to this caller. Check the identifier and scope; do not assume this distinguishes missing from inaccessible. */
+        NotFound: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "not_found";
+            details: components["schemas"]["ResourceErrorDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "not_found";
+        };
+        /** @description The request conflicts with current state, with no more specific handling below. Read the current state and update the request. This is the fallback for known state conflicts. */
+        Conflict: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "conflict";
+            details: components["schemas"]["ResourceErrorDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "conflict";
+        };
+        /** @description Active work temporarily prevents the requested operation. Wait for or finish the conflicting work, then retry when the operation is safe to repeat. */
+        ResourceBusy: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "resource_busy";
+            details: components["schemas"]["ResourceErrorDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "resource_busy";
+        };
+        /** @description The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy requiring a separate wake uses running; established wake progress uses unavailable. */
+        InvalidState: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "invalid_state";
+            details: components["schemas"]["InvalidStateDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "invalid_state";
+        };
+        /** @description A resource or unique name already exists. Use the existing resource or choose another name. */
+        AlreadyExists: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "already_exists";
+            details: components["schemas"]["ResourceErrorDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "already_exists";
+        };
+        /** @description An idempotency key is bound to a different request. Reuse the original request or intentionally use a new key. */
+        IdempotencyConflict: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "idempotency_conflict";
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "idempotency_conflict";
+        };
+        /** @description A time-limited resource is known to have expired. Create a replacement. Use not_found when missing and expired cannot be distinguished. */
+        Expired: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "expired";
+            details: components["schemas"]["ResourceErrorDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "expired";
+        };
+        /** @description A request or transfer exceeds the supported byte limit. Reduce or split the payload. This is different from insufficient VM disk allocation. */
+        PayloadTooLarge: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "payload_too_large";
+            details?: components["schemas"]["PayloadTooLargeDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "payload_too_large";
+        };
+        /** @description The route does not support this HTTP method. Use an allowed method. */
+        MethodNotAllowed: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "method_not_allowed";
+            details: components["schemas"]["MethodNotAllowedDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "method_not_allowed";
+        };
+        /** @description The selected runtime, platform or feature cannot serve the requested operation. Select a supported operation or platform. For restore_requires_birth_host, restore through an eligible host; do not recreate solely because this host cannot restore it. */
+        UnsupportedOperation: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "unsupported_operation";
+            details: components["schemas"]["UnsupportedOperationDetails"];
+        } & unknown & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "unsupported_operation";
+        };
+        /** @description Authoritative state establishes that recoverable resource state is lost. Recreate only after loss is established. Missing local files, an unknown owner or a host-specific restore restriction are insufficient evidence. */
+        Unrecoverable: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "unrecoverable";
+            details: components["schemas"]["UnrecoverableDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "unrecoverable";
+        };
+        /** @description The platform currently lacks capacity to admit otherwise valid work. Wait, release capacity, or select another placement. The requested allocation itself can be valid. */
+        CapacityUnavailable: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "capacity_unavailable";
+            details: components["schemas"]["CapacityUnavailableDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "capacity_unavailable";
+        };
+        /** @description A required service or operation is temporarily unavailable. Retry only when the operation is safe to repeat; the code does not guarantee absence of side effects. */
+        Unavailable: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "unavailable";
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "unavailable";
+        };
+        /** @description An unexpected implementation failure prevents completion. Use a safe message and correlation identifier for support; log the internal cause. */
+        Internal: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "internal";
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "internal";
+        };
+        /** @description A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service’s quota or credentials. */
+        RateLimited: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "rate_limited";
+            details: components["schemas"]["RateLimitedDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "rate_limited";
+        };
+        /** @description A scoped budget, resource or PTY-session limit rejects the operation. Use the exact metric, scope and measurements to release usage or adjust the applicable limit. Organization PTY counts are currently worker-local. */
+        QuotaExceeded: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "quota_exceeded";
+            details: components["schemas"]["QuotaExceededDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "quota_exceeded";
+        };
+        /** @description Billing setup or payment recovery is required for compute. Complete billing setup or resolve payment. */
+        PaymentRequired: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "payment_required";
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "payment_required";
+        };
+        /** @description A specific account action must occur before this operation. Complete the named action, such as accepting legal terms or converting the billing plan. */
+        ActionRequired: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "action_required";
+            details: components["schemas"]["ActionRequiredDetails"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "action_required";
+        };
+        /** @description A caller-selected image or build operation reports an expected domain failure, including an explicit execution-budget limit. Inspect the typed reason and any partial-work handles. Poll continuing work or clean up the retained VM before starting another attempt. */
+        OperationFailed: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "operation_failed";
+            details: components["schemas"]["OperationFailedDetails"];
+        } & unknown & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "operation_failed";
+        };
+        /** @description A gateway or proxy did not receive a required upstream response before its deadline. Inspect known operation handles before retrying. An upstream timeout does not prove that upstream work stopped. An explicit application execution budget uses operation_failed/deadline_exceeded, not this code. */
+        GatewayTimeout: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "gateway_timeout";
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "gateway_timeout";
+        };
+        /** @description Known not-ready health result. This is an operation result, not an error envelope. */
+        NotReadyHealthResponse: {
+            /**
+             * @description Readiness status. `ok` means the service is ready; other values may be returned with HTTP 503.
+             * @enum {string}
+             */
+            status: "unavailable";
+            /**
+             * Format: date-time
+             * @description Server time when the health response was generated.
+             */
+            timestamp: string;
+        };
+        /** @description HTTP 503 health response body. The readiness result and error envelope have disjoint top-level fields. */
+        HealthUnavailableResponse: components["schemas"]["NotReadyHealthResponse"] | components["schemas"]["HealthUnavailableErrorResponse"];
+        /** @description Failure to serve the health request, distinct from a known not-ready result. */
+        HealthUnavailableErrorResponse: {
+            error: components["schemas"]["Unavailable"];
+        };
+        /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
+        SyncBadRequestError: {
+            /**
+             * @description Identifies this code as `bad_request`.
+             * @constant
+             */
+            code: "bad_request";
+            /** @description Safe explanation of this file-operation failure. */
+            message: string;
+            details?: components["schemas"]["BadRequestDetails"];
+        } & (components["schemas"]["ErrorExecutionContext"] & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "bad_request";
+        });
+        /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
+        SyncNotFoundError: {
+            /**
+             * @description Identifies this code as `not_found`.
+             * @constant
+             */
+            code: "not_found";
+            /** @description Safe explanation of this file-operation failure. */
+            message: string;
+            /** @description Structured information about the file operation failure. */
+            details: {
+                /** @enum {string} */
+                resource: "file" | "upload" | "resource";
+            };
+        } & (components["schemas"]["ErrorExecutionContext"] & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "not_found";
+        });
+        /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
+        SyncConflictError: {
+            /**
+             * @description Identifies this code as `conflict`.
+             * @constant
+             */
+            code: "conflict";
+            /** @description Safe explanation of this file-operation failure. */
+            message: string;
+            /** @description Structured information about the file operation failure. */
+            details: {
+                /** @enum {string} */
+                resource: "file" | "upload" | "resource";
+            };
+        } & (components["schemas"]["ErrorExecutionContext"] & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "conflict";
+        });
+        /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
+        SyncPayloadTooLargeError: {
+            /**
+             * @description Identifies this code as `payload_too_large`.
+             * @constant
+             */
+            code: "payload_too_large";
+            /** @description Safe explanation of this file-operation failure. */
+            message: string;
+            details?: components["schemas"]["PayloadTooLargeDetails"];
+        } & (components["schemas"]["ErrorExecutionContext"] & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "payload_too_large";
+        });
+        /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
+        SyncUnsupportedOperationError: {
+            /**
+             * @description Identifies this code as `unsupported_operation`.
+             * @constant
+             */
+            code: "unsupported_operation";
+            /** @description Safe explanation of this file-operation failure. */
+            message: string;
+            /** @description Structured information about the file operation failure. */
+            details: {
+                /** @enum {string} */
+                reason: "feature_not_supported";
+                feature?: components["schemas"]["Feature"];
+                resource?: {
+                    /** @enum {string} */
+                    kind: "file" | "upload" | "filesystem" | "resource";
+                    /** @description Include only when known and safe for this caller. Do not disclose hidden resource identifiers. */
+                    id?: string;
+                };
+            };
+        } & (components["schemas"]["ErrorExecutionContext"] & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "unsupported_operation";
+        });
+        /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
+        SyncUnavailableError: {
+            /**
+             * @description Identifies this code as `unavailable`.
+             * @constant
+             */
+            code: "unavailable";
+            /** @description Safe explanation of this file-operation failure. */
+            message: string;
+        } & (components["schemas"]["ErrorExecutionContext"] & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "unavailable";
+        });
+        /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
+        SyncInternalError: {
+            /**
+             * @description Identifies this code as `internal`.
+             * @constant
+             */
+            code: "internal";
+            /** @description Safe explanation of this file-operation failure. */
+            message: string;
+        } & (components["schemas"]["ErrorExecutionContext"] & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "internal";
+        });
+        /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
+        SyncExpiredError: {
+            /**
+             * @description Identifies a known expired upload.
+             * @constant
+             */
+            code: "expired";
+            /** @description Safe explanation of this file-operation failure. */
+            message: string;
+            /** @description Structured information about the file operation failure. */
+            details: {
+                /** @enum {string} */
+                resource: "upload";
+            };
+        } & (components["schemas"]["ErrorExecutionContext"] & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "expired";
+        });
+        IdempotencyConflictErrorResponse: {
+            error: components["schemas"]["IdempotencyConflict"];
+        };
+        PaymentRequiredErrorResponse: {
+            error: components["schemas"]["PaymentRequired"];
+        };
+        UnsupportedOperationErrorResponse: {
+            error: components["schemas"]["UnsupportedOperation"];
+        };
+        BadRequestErrorResponse: {
+            error: components["schemas"]["BadRequest"];
+        };
+        InsufficientResourcesErrorResponse: {
+            error: components["schemas"]["InsufficientResources"];
+        };
+        UnauthorizedErrorResponse: {
+            error: components["schemas"]["Unauthorized"];
+        };
+        ForbiddenErrorResponse: {
+            error: components["schemas"]["Forbidden"];
+        };
+        NotFoundErrorResponse: {
+            error: components["schemas"]["NotFound"];
+        };
+        ConflictErrorResponse: {
+            error: components["schemas"]["Conflict"];
+        };
+        ResourceBusyErrorResponse: {
+            error: components["schemas"]["ResourceBusy"];
+        };
+        InvalidStateErrorResponse: {
+            error: components["schemas"]["InvalidState"];
+        };
+        AlreadyExistsErrorResponse: {
+            error: components["schemas"]["AlreadyExists"];
+        };
+        ExpiredErrorResponse: {
+            error: components["schemas"]["Expired"];
+        };
+        PayloadTooLargeErrorResponse: {
+            error: components["schemas"]["PayloadTooLarge"];
+        };
+        MethodNotAllowedErrorResponse: {
+            error: components["schemas"]["MethodNotAllowed"];
+        };
+        UnrecoverableErrorResponse: {
+            error: components["schemas"]["Unrecoverable"];
+        };
+        CapacityUnavailableErrorResponse: {
+            error: components["schemas"]["CapacityUnavailable"];
+        };
+        UnavailableErrorResponse: {
+            error: components["schemas"]["Unavailable"];
+        };
+        InternalErrorResponse: {
+            error: components["schemas"]["Internal"];
+        };
+        RateLimitedErrorResponse: {
+            error: components["schemas"]["RateLimited"];
+        };
+        QuotaExceededErrorResponse: {
+            error: components["schemas"]["QuotaExceeded"];
+        };
+        ActionRequiredErrorResponse: {
+            error: components["schemas"]["ActionRequired"];
+        };
+        OperationFailedErrorResponse: {
+            error: components["schemas"]["OperationFailed"];
+        };
+        GatewayTimeoutErrorResponse: {
+            error: components["schemas"]["GatewayTimeout"];
+        };
+        BadRequestOrInsufficientResourcesErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["BadRequest"] | components["schemas"]["InsufficientResources"];
+        };
+        AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["AlreadyExists"] | components["schemas"]["Conflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
+        };
+        AlreadyExistsOrInvalidStateErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["AlreadyExists"] | components["schemas"]["InvalidState"];
+        };
+        ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["Conflict"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
+        };
+        ConflictOrInvalidStateErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["Conflict"] | components["schemas"]["InvalidState"];
+        };
+        ConflictOrInvalidStateOrResourceBusyErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["Conflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
+        };
+        InvalidStateOrResourceBusyErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
+        };
+        OperationFailedOrUnrecoverableOrUnsupportedOperationErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["OperationFailed"] | components["schemas"]["Unrecoverable"] | components["schemas"]["UnsupportedOperation"];
+        };
+        UnrecoverableOrUnsupportedOperationErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["Unrecoverable"] | components["schemas"]["UnsupportedOperation"];
+        };
+        QuotaExceededOrRateLimitedErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["QuotaExceeded"] | components["schemas"]["RateLimited"];
+        };
+        CapacityUnavailableOrUnavailableErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["CapacityUnavailable"] | components["schemas"]["Unavailable"];
+        };
     };
     responses: {
-        /** @description The `Idempotency-Key` was already used for a different request. Reusing a key is only meaningful for retrying the SAME request; a key that arrives with different semantic content is refused rather than answered with the earlier result, which would silently hand back something the caller did not ask for. */
         Conflict: {
             headers: {
                 [name: string]: unknown;
             };
-            content: {
-                "application/json": components["schemas"]["ErrorResponse"];
-            };
+            content?: never;
         };
-        /** @description The organization must complete billing setup or payment before starting new compute. */
         PaymentRequired: {
             headers: {
                 [name: string]: unknown;
             };
-            content: {
-                "application/json": components["schemas"]["ErrorResponse"];
-            };
+            content?: never;
         };
-        /** @description API error. */
+        /** @description Public error envelope. This full-catalog fallback does not define the permitted errors for an individual endpoint; explicit response sets narrow the union. */
         Error: {
             headers: {
                 "Retry-After": components["headers"]["RetryAfter"];
@@ -1599,13 +2546,372 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description The request is valid, but the requested operation or option is unavailable in the selected region or provider. */
         UnsupportedOperation: {
             headers: {
                 [name: string]: unknown;
             };
+            content?: never;
+        };
+        /** @description HTTP 400: The request is malformed or its fields fail validation. Correct the request using the message and optional field violations. */
+        BadRequestError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
             content: {
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/json": components["schemas"]["BadRequestErrorResponse"];
+            };
+        };
+        /** @description HTTP 400: The requested allocation is too small for the operation. Increase the specified allocation. This does not mean the fleet lacks capacity. */
+        InsufficientResourcesError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["InsufficientResourcesErrorResponse"];
+            };
+        };
+        /** @description HTTP 401: Valid authentication is missing or invalid. Supply or refresh credentials. */
+        UnauthorizedError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                "WWW-Authenticate": components["headers"]["WwwAuthenticate"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["UnauthorizedErrorResponse"];
+            };
+        };
+        /** @description HTTP 403: The caller or policy does not permit this operation. Obtain access or change the applicable policy; repeating the same request does not resolve it. */
+        ForbiddenError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ForbiddenErrorResponse"];
+            };
+        };
+        /** @description HTTP 404: The requested resource or route is not available to this caller. Check the identifier and scope; do not assume this distinguishes missing from inaccessible. */
+        NotFoundError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["NotFoundErrorResponse"];
+            };
+        };
+        /** @description HTTP 409: The request conflicts with current state, with no more specific handling below. Read the current state and update the request. This is the fallback for known state conflicts. */
+        ConflictError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ConflictErrorResponse"];
+            };
+        };
+        /** @description HTTP 409: Active work temporarily prevents the requested operation. Wait for or finish the conflicting work, then retry when the operation is safe to repeat. */
+        ResourceBusyError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ResourceBusyErrorResponse"];
+            };
+        };
+        /** @description HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy requiring a separate wake uses running; established wake progress uses unavailable. */
+        InvalidStateError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["InvalidStateErrorResponse"];
+            };
+        };
+        /** @description HTTP 409: A resource or unique name already exists. Use the existing resource or choose another name. */
+        AlreadyExistsError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["AlreadyExistsErrorResponse"];
+            };
+        };
+        /** @description HTTP 409: An idempotency key is bound to a different request. Reuse the original request or intentionally use a new key. */
+        IdempotencyConflictError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["IdempotencyConflictErrorResponse"];
+            };
+        };
+        /** @description HTTP 410: A time-limited resource is known to have expired. Create a replacement. Use not_found when missing and expired cannot be distinguished. */
+        ExpiredError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ExpiredErrorResponse"];
+            };
+        };
+        /** @description HTTP 413: A request or transfer exceeds the supported byte limit. Reduce or split the payload. This is different from insufficient VM disk allocation. */
+        PayloadTooLargeError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["PayloadTooLargeErrorResponse"];
+            };
+        };
+        /** @description HTTP 405: The route does not support this HTTP method. Use an allowed method. */
+        MethodNotAllowedError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                Allow: components["headers"]["Allow"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["MethodNotAllowedErrorResponse"];
+            };
+        };
+        /** @description HTTP 422: The selected runtime, platform or feature cannot serve the requested operation. Select a supported operation or platform. For restore_requires_birth_host, restore through an eligible host; do not recreate solely because this host cannot restore it. */
+        UnsupportedOperationError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["UnsupportedOperationErrorResponse"];
+            };
+        };
+        /** @description HTTP 422: Authoritative state establishes that recoverable resource state is lost. Recreate only after loss is established. Missing local files, an unknown owner or a host-specific restore restriction are insufficient evidence. */
+        UnrecoverableError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["UnrecoverableErrorResponse"];
+            };
+        };
+        /** @description HTTP 503: The platform currently lacks capacity to admit otherwise valid work. Wait, release capacity, or select another placement. The requested allocation itself can be valid. */
+        CapacityUnavailableError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["CapacityUnavailableErrorResponse"];
+            };
+        };
+        /** @description HTTP 503: A required service or operation is temporarily unavailable. Retry only when the operation is safe to repeat; the code does not guarantee absence of side effects. */
+        UnavailableError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["UnavailableErrorResponse"];
+            };
+        };
+        /** @description HTTP 500: An unexpected implementation failure prevents completion. Use a safe message and correlation identifier for support; log the internal cause. */
+        InternalError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["InternalErrorResponse"];
+            };
+        };
+        /** @description HTTP 429: A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service’s quota or credentials. */
+        RateLimitedError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["RateLimitedErrorResponse"];
+            };
+        };
+        /** @description HTTP 429: A scoped budget, resource or PTY-session limit rejects the operation. Use the exact metric, scope and measurements to release usage or adjust the applicable limit. Organization PTY counts are currently worker-local. */
+        QuotaExceededError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["QuotaExceededErrorResponse"];
+            };
+        };
+        /** @description HTTP 402: Billing setup or payment recovery is required for compute. Complete billing setup or resolve payment. */
+        PaymentRequiredError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["PaymentRequiredErrorResponse"];
+            };
+        };
+        /** @description HTTP 403: A specific account action must occur before this operation. Complete the named action, such as accepting legal terms or converting the billing plan. */
+        ActionRequiredError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ActionRequiredErrorResponse"];
+            };
+        };
+        /** @description HTTP 422: A caller-selected image or build operation reports an expected domain failure, including an explicit execution-budget limit. Inspect the typed reason and any partial-work handles. Poll continuing work or clean up the retained VM before starting another attempt. */
+        OperationFailedError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["OperationFailedErrorResponse"];
+            };
+        };
+        /** @description HTTP 504: A gateway or proxy did not receive a required upstream response before its deadline. Inspect known operation handles before retrying. An upstream timeout does not prove that upstream work stopped. An explicit application execution budget uses operation_failed/deadline_exceeded, not this code. */
+        GatewayTimeoutError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["GatewayTimeoutErrorResponse"];
+            };
+        };
+        /** @description HTTP 400: bad_request, insufficient_resources. The code selects the required details. */
+        BadRequestOrInsufficientResourcesError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["BadRequestOrInsufficientResourcesErrorResponse"];
+            };
+        };
+        /** @description HTTP 409: already_exists, conflict, invalid_state, resource_busy. The code selects the required details. */
+        AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse"];
+            };
+        };
+        /** @description HTTP 409: already_exists, invalid_state. The code selects the required details. */
+        AlreadyExistsOrInvalidStateError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["AlreadyExistsOrInvalidStateErrorResponse"];
+            };
+        };
+        /** @description HTTP 409: conflict, idempotency_conflict, invalid_state, resource_busy. The code selects the required details. */
+        ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse"];
+            };
+        };
+        /** @description HTTP 409: conflict, invalid_state. The code selects the required details. */
+        ConflictOrInvalidStateError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ConflictOrInvalidStateErrorResponse"];
+            };
+        };
+        /** @description HTTP 409: conflict, invalid_state, resource_busy. The code selects the required details. */
+        ConflictOrInvalidStateOrResourceBusyError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ConflictOrInvalidStateOrResourceBusyErrorResponse"];
+            };
+        };
+        /** @description HTTP 409: invalid_state, resource_busy. The code selects the required details. */
+        InvalidStateOrResourceBusyError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["InvalidStateOrResourceBusyErrorResponse"];
+            };
+        };
+        /** @description HTTP 422: operation_failed, unrecoverable, unsupported_operation. The code selects the required details. */
+        OperationFailedOrUnrecoverableOrUnsupportedOperationError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["OperationFailedOrUnrecoverableOrUnsupportedOperationErrorResponse"];
+            };
+        };
+        /** @description HTTP 422: unrecoverable, unsupported_operation. The code selects the required details. */
+        UnrecoverableOrUnsupportedOperationError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["UnrecoverableOrUnsupportedOperationErrorResponse"];
+            };
+        };
+        /** @description HTTP 429: quota_exceeded, rate_limited. The code selects the required details. */
+        QuotaExceededOrRateLimitedError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["QuotaExceededOrRateLimitedErrorResponse"];
+            };
+        };
+        /** @description HTTP 503: capacity_unavailable, unavailable. The code selects the required details. */
+        CapacityUnavailableOrUnavailableError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["CapacityUnavailableOrUnavailableErrorResponse"];
+            };
+        };
+        /** @description HTTP 503: either a known not-ready HealthResponse or an Unavailable error envelope. Required top-level fields distinguish the two bodies. */
+        HealthUnavailable: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["HealthUnavailableResponse"];
             };
         };
     };
@@ -1631,6 +2937,16 @@ export interface components {
     headers: {
         /** @description Delay in seconds before retrying a transiently unavailable request. */
         RetryAfter: number;
+        /**
+         * @description Required on 405. Comma-separated allowed HTTP methods, matching error.details.allowed_methods.
+         * @example GET, HEAD
+         */
+        Allow: string;
+        /**
+         * @description Required authentication challenge for a 401 response. Do not include credentials or internal authentication failure details.
+         * @example Bearer realm="arker"
+         */
+        WwwAuthenticate: string;
     };
     pathItems: never;
 }
@@ -1654,16 +2970,8 @@ export interface operations {
                     "application/json": components["schemas"]["HealthResponse"];
                 };
             };
-            /** @description Service is live but not currently ready to accept public API traffic. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthResponse"];
-                };
-            };
-            default: components["responses"]["Error"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["HealthUnavailable"];
         };
     };
     listRegions: {
@@ -1684,7 +2992,8 @@ export interface operations {
                     "application/json": components["schemas"]["ListRegionsResponse"];
                 };
             };
-            default: components["responses"]["Error"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
         };
     };
     whoami: {
@@ -1705,7 +3014,11 @@ export interface operations {
                     "application/json": components["schemas"]["WhoamiResponse"];
                 };
             };
-            default: components["responses"]["Error"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
         };
     };
     fork: {
@@ -1733,10 +3046,18 @@ export interface operations {
                     "application/json": components["schemas"]["Vm"];
                 };
             };
-            402: components["responses"]["PaymentRequired"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["UnsupportedOperation"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestOrInsufficientResourcesError"];
+            401: components["responses"]["UnauthorizedError"];
+            402: components["responses"]["PaymentRequiredError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError"];
+            413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["OperationFailedOrUnrecoverableOrUnsupportedOperationError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["CapacityUnavailableOrUnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     listVms: {
@@ -1778,7 +3099,12 @@ export interface operations {
                     "application/json": components["schemas"]["ListVmsResponse"];
                 };
             };
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
         };
     };
     listOrgRuns: {
@@ -1836,7 +3162,12 @@ export interface operations {
                     "application/json": components["schemas"]["ListOrgRunsResponse"];
                 };
             };
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
         };
     };
     getVm: {
@@ -1860,7 +3191,14 @@ export interface operations {
                     "application/json": components["schemas"]["Vm"];
                 };
             };
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     deleteVm: {
@@ -1884,7 +3222,15 @@ export interface operations {
                     "application/json": components["schemas"]["DeleteVmResponse"];
                 };
             };
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateOrResourceBusyError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     patchVm: {
@@ -1912,8 +3258,18 @@ export interface operations {
                     "application/json": components["schemas"]["Vm"];
                 };
             };
-            402: components["responses"]["PaymentRequired"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            402: components["responses"]["PaymentRequiredError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["AlreadyExistsOrInvalidStateError"];
+            413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["CapacityUnavailableOrUnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     getVmPolicies: {
@@ -1937,7 +3293,16 @@ export interface operations {
                     "application/json": components["schemas"]["PolicyDoc"];
                 };
             };
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     putVmPolicies: {
@@ -1965,7 +3330,17 @@ export interface operations {
                     "application/json": components["schemas"]["PolicyDoc"];
                 };
             };
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     listRuns: {
@@ -2002,7 +3377,15 @@ export interface operations {
                     "application/json": components["schemas"]["ListRunsResponse"];
                 };
             };
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     createRun: {
@@ -2042,10 +3425,18 @@ export interface operations {
                     "application/json": components["schemas"]["RunResponse"];
                 };
             };
-            402: components["responses"]["PaymentRequired"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["UnsupportedOperation"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            402: components["responses"]["PaymentRequiredError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError"];
+            413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["CapacityUnavailableOrUnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     getRun: {
@@ -2071,8 +3462,15 @@ export interface operations {
                     "application/json": components["schemas"]["Run"];
                 };
             };
-            422: components["responses"]["UnsupportedOperation"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     cancelRun: {
@@ -2098,8 +3496,16 @@ export interface operations {
                     "application/json": components["schemas"]["CancelRunResponse"];
                 };
             };
-            422: components["responses"]["UnsupportedOperation"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     listSessions: {
@@ -2130,8 +3536,15 @@ export interface operations {
                     "application/json": components["schemas"]["ListSessionsResponse"];
                 };
             };
-            422: components["responses"]["UnsupportedOperation"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     createSession: {
@@ -2159,9 +3572,17 @@ export interface operations {
                     "application/json": components["schemas"]["Session"];
                 };
             };
-            402: components["responses"]["PaymentRequired"];
-            422: components["responses"]["UnsupportedOperation"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            402: components["responses"]["PaymentRequiredError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["ConflictOrInvalidStateError"];
+            413: components["responses"]["PayloadTooLargeError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     getSession: {
@@ -2187,8 +3608,15 @@ export interface operations {
                     "application/json": components["schemas"]["Session"];
                 };
             };
-            422: components["responses"]["UnsupportedOperation"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     deleteSession: {
@@ -2214,8 +3642,15 @@ export interface operations {
                     "application/json": components["schemas"]["DeleteSessionResponse"];
                 };
             };
-            422: components["responses"]["UnsupportedOperation"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     patchSession: {
@@ -2245,8 +3680,16 @@ export interface operations {
                     "application/json": components["schemas"]["PatchSessionResponse"];
                 };
             };
-            422: components["responses"]["UnsupportedOperation"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            413: components["responses"]["PayloadTooLargeError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     attachSessionPty: {
@@ -2283,11 +3726,17 @@ export interface operations {
                 };
                 content?: never;
             };
-            401: components["responses"]["Error"];
-            402: components["responses"]["PaymentRequired"];
-            404: components["responses"]["Error"];
-            429: components["responses"]["Error"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            402: components["responses"]["PaymentRequiredError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateOrResourceBusyError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     mintSessionPtyTicket: {
@@ -2313,10 +3762,17 @@ export interface operations {
                     "application/json": components["schemas"]["PtyTicketResponse"];
                 };
             };
-            401: components["responses"]["Error"];
-            402: components["responses"]["PaymentRequired"];
-            404: components["responses"]["Error"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            402: components["responses"]["PaymentRequiredError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            413: components["responses"]["PayloadTooLargeError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     listMounts: {
@@ -2347,7 +3803,16 @@ export interface operations {
                     "application/json": components["schemas"]["ListMountsResponse"];
                 };
             };
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     createMount: {
@@ -2375,9 +3840,18 @@ export interface operations {
                     "application/json": components["schemas"]["Mount"];
                 };
             };
-            402: components["responses"]["PaymentRequired"];
-            422: components["responses"]["UnsupportedOperation"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            402: components["responses"]["PaymentRequiredError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["ConflictOrInvalidStateError"];
+            413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     deleteMount: {
@@ -2403,7 +3877,16 @@ export interface operations {
                     "application/json": components["schemas"]["DeleteMountResponse"];
                 };
             };
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     sync: {
@@ -2431,9 +3914,18 @@ export interface operations {
                     "application/json": components["schemas"]["SyncResponse"];
                 };
             };
-            402: components["responses"]["PaymentRequired"];
-            422: components["responses"]["UnsupportedOperation"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            402: components["responses"]["PaymentRequiredError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["ConflictOrInvalidStateOrResourceBusyError"];
+            413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["CapacityUnavailableOrUnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     listFilesystems: {
@@ -2461,7 +3953,14 @@ export interface operations {
                     "application/json": components["schemas"]["ListFilesystemsResponse"];
                 };
             };
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     createFilesystem: {
@@ -2486,8 +3985,16 @@ export interface operations {
                     "application/json": components["schemas"]["Filesystem"];
                 };
             };
-            422: components["responses"]["UnsupportedOperation"];
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            409: components["responses"]["AlreadyExistsError"];
+            413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     getFilesystem: {
@@ -2511,7 +4018,15 @@ export interface operations {
                     "application/json": components["schemas"]["Filesystem"];
                 };
             };
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     deleteFilesystem: {
@@ -2535,7 +4050,15 @@ export interface operations {
                     "application/json": components["schemas"]["DeleteFilesystemResponse"];
                 };
             };
-            default: components["responses"]["Error"];
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
 }
