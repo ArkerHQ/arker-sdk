@@ -72,9 +72,12 @@ async function main(): Promise<void> {
     // Concurrent workload: network + compute + writes, continuously ~22 s.
     const workloadSecs = Number(process.env.ADV_WORKLOAD_SECS ?? "22");
     const netUrl = process.env.ADV_NET_URL ?? "https://example.com";
+    // /tmp/wl (not /root) so this workload's scratch dir is writable
+    // regardless of which account the VM executes commands as, and stays
+    // clearly outside the smallRemote/bigRemote sync targets above.
     const workload =
-      `mkdir -p /root/wl; n=0; i=0; end=$((SECONDS+${workloadSecs})); ` +
-      `while [ $SECONDS -lt $end ]; do i=$((i+1)); echo line$i >> /root/wl/log.txt; ` +
+      `mkdir -p /tmp/wl; n=0; i=0; end=$((SECONDS+${workloadSecs})); ` +
+      `while [ $SECONDS -lt $end ]; do i=$((i+1)); echo line$i >> /tmp/wl/log.txt; ` +
       `seq 1 50000 | sha256sum >/dev/null; ` +
       `c=$(curl -s -m5 -o /dev/null -w "%{http_code}" ${netUrl} 2>/dev/null); ` +
       `[ "$c" = 200 ] && n=$((n+1)); done; echo WL_DONE lines=$i net200=$n`;
