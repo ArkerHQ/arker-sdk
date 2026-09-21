@@ -130,7 +130,7 @@ ARCHIVE_MIN_BYTES = 1024 * 1024
 # Ceiling on one archive's total INPUT bytes before a directory sync splits the
 # changed-file set into multiple sequential tarballs instead of one.
 #
-# arkerd's `/sync-stream` route (the archive-extract transport) enforces
+# arkerd's raw `/sync` transport enforces
 # `MAX_SYNC_FILE_BYTES = 2 GiB` per request (aws/arkerd-worker-linux/src/api/routes/sync.rs)
 # and rejects anything larger with 413 `payload_too_large` -- exact, no
 # truncation. A directory sync used to tar EVERY changed file into ONE archive
@@ -1239,7 +1239,7 @@ class VM:
         result.bytes_sent = sum(sizes)
         return result
 
-    def _sync_stream_post(
+    def _sync_upload(
         self,
         params: dict[str, str],
         body: Callable[[], bytes],
@@ -1252,16 +1252,10 @@ class VM:
         between them. ``body`` is a factory, not a value, so a retried attempt
         gets fresh bytes.
 
-        Deliberately a private (``_``-prefixed) method, not a second public
-        one: the server has two write routes (``/sync``, JSON/base64;
-        ``/sync-stream``, raw octet-stream — see the route-registration
-        comment in arker-app's ``routes/mod.rs`` for why both exist), but a
-        caller of ``sync()``/``sync_dir()`` should never need to know or
-        choose between them. Re-verified (2026-08-25) that this stays true:
-        no ``sync_stream``/``sync-stream`` name appears anywhere in this
-        package's ``__init__.py`` exports, README, or examples.
+        The server selects JSON/base64 or raw bytes by ``Content-Type``;
+        callers of ``sync()`` never choose a route.
         """
-        url = f"{self.base_url}{_vm_path(self.id)}/sync-stream"
+        url = f"{self.base_url}{_vm_path(self.id)}/sync"
         headers = {
             "authorization": f"Bearer {self._client._api_key}",
             "content-type": "application/octet-stream",
@@ -1297,9 +1291,9 @@ class VM:
         params = {"path": path, "size": str(len(data))}
         if sha256:
             params["sha256"] = sha256
-        self._sync_stream_post(params, lambda: data, "sync write")
+        self._sync_upload(params, lambda: data, "sync write")
 
-    def _sync_stream_extract_file(self, tar_path: str, remote_root: str, mode: str) -> None:
+    def _sync_extract_file(self, tar_path: str, remote_root: str, mode: str) -> None:
         """Upload an archive straight off disk, so a 2 GB tree does not mean a
         2 GB allocation.
 
@@ -1316,7 +1310,7 @@ class VM:
                         return
                     yield block
 
-        self._sync_stream_post(
+        self._sync_upload(
             {"path": remote_root, "size": str(size), "extract": mode},
             chunks,
             "sync upload",
@@ -1340,7 +1334,7 @@ class VM:
     def _sync_write_inline(self, path: str, data: bytes) -> None:
         """Write ``data`` through the JSON/base64 ``/sync`` fallback.
 
-        Used only when the streaming fast path (``/sync-stream``) is
+        Used only when the raw-upload fast path is
         unavailable — an older server, or the route missing entirely. Chunked
         the same way regardless of size: every chunk shares one ``upload_id``,
         and chunks are grouped into as many sequential requests as it takes to
@@ -1607,7 +1601,7 @@ class VM:
             # 2 GB tree is not buffered) and is a factory, so a retry reopens
             # the file — a consumed stream cannot be replayed.
             try:
-                self._sync_stream_extract_file(tar_local, remote_root, mode)
+                self._sync_extract_file(tar_local, remote_root, mode)
                 return
             except ArkerError as error:
                 if error.code != "not_found":

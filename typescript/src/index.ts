@@ -47,7 +47,7 @@ const ARCHIVE_MIN_BYTES = 1024 * 1024;
  * the changed-file set into multiple sequential/bounded-concurrent tarballs
  * instead of one.
  *
- * arkerd's `/sync-stream` route (the archive-extract transport) enforces
+ * arkerd's raw `/sync` transport enforces
  * `MAX_SYNC_FILE_BYTES = 2 GiB` per request
  * (aws/arkerd-worker-linux/src/api/routes/sync.rs) and rejects anything
  * larger with 413 `payload_too_large` — exact, no truncation. `uploadTree`
@@ -1653,20 +1653,15 @@ export class VM {
    * `body` is a factory, not a value: a retried attempt needs a fresh body,
    * and a stream can only be consumed once.
    *
-   * Deliberately `private`, not a second public method: the server has two
-   * write routes (`/sync`, JSON/base64; `/sync-stream`, raw octet-stream —
-   * see the route-registration comment in arker-app's `routes/mod.rs` for
-   * why both exist) but a caller of `sync()`/`syncDir()` should never need to
-   * know or choose between them. Re-verified (2026-08-25) that this stays
-   * true: no `sync-stream`/`syncStream` name appears anywhere in this
-   * package's public exports, README, or examples.
+   * The server selects JSON/base64 or raw bytes by `Content-Type`; callers of
+   * `sync()`/`syncDir()` never choose a route.
    */
-  private async syncStreamPost(
+  private async syncUpload(
     query: Record<string, string>,
     body: () => BodyInit,
     what: string,
   ): Promise<void> {
-    const url = `${this.baseUrl}${vmPath(this.id)}/sync-stream?${new URLSearchParams(query)}`;
+    const url = `${this.baseUrl}${vmPath(this.id)}/sync?${new URLSearchParams(query)}`;
     const attempts = this._client._retryAttempts();
     for (let attempt = 0; attempt < attempts; attempt++) {
       let res: Response;
@@ -1706,12 +1701,12 @@ export class VM {
     }
   }
 
-  private async syncStreamExtract(
+  private async syncExtract(
     tar: Uint8Array,
     remoteRoot: string,
     mode: "tar" | "tar.gz",
   ): Promise<void> {
-    await this.syncStreamPost(
+    await this.syncUpload(
       { path: remoteRoot, size: String(tar.byteLength), extract: mode },
       () => tar as BodyInit,
       "sync upload",
@@ -1723,10 +1718,10 @@ export class VM {
    * first, so a 2 GB tree does not mean a 2 GB allocation.
    *
    * The body is a factory so a retry gets a FRESH read stream — a consumed
-   * stream cannot be replayed, which is why `syncStreamPost` takes a factory
+   * stream cannot be replayed, which is why `syncUpload` takes a factory
    * rather than a value.
    */
-  private async syncStreamExtractFile(
+  private async syncExtractFile(
     localTar: string,
     size: number,
     remoteRoot: string,
@@ -1734,7 +1729,7 @@ export class VM {
   ): Promise<void> {
     const fs = await import("node:fs");
     const { Readable } = await import("node:stream");
-    await this.syncStreamPost(
+    await this.syncUpload(
       { path: remoteRoot, size: String(size), extract: mode },
       () => Readable.toWeb(fs.createReadStream(localTar)) as unknown as BodyInit,
       "sync upload",
@@ -1791,7 +1786,7 @@ export class VM {
   private async syncWriteStream(path: string, data: Uint8Array, sha256?: string): Promise<void> {
     const query: Record<string, string> = { path, size: String(data.length) };
     if (sha256) query.sha256 = sha256;
-    await this.syncStreamPost(query, () => data as BodyInit, "sync write");
+    await this.syncUpload(query, () => data as BodyInit, "sync write");
   }
 
   /** Pack the changed files (paths relative to `localRoot`) into one archive and
@@ -1822,10 +1817,10 @@ export class VM {
       try {
         if (this._client._supportsStreamingBody()) {
           const { size } = await fsp.stat(localTar);
-          await this.syncStreamExtractFile(localTar, size, remoteRoot, mode);
+          await this.syncExtractFile(localTar, size, remoteRoot, mode);
         } else {
           // Caller-supplied fetch: may not accept a stream body, so buffer.
-          await this.syncStreamExtract(await fsp.readFile(localTar), remoteRoot, mode);
+          await this.syncExtract(await fsp.readFile(localTar), remoteRoot, mode);
         }
         return;
       } catch (error) {
@@ -1929,7 +1924,7 @@ export class VM {
   /**
    * Write `data` through the JSON/base64 `/sync` fallback.
    *
-   * Used only when the streaming fast path (`/sync-stream`) is unavailable —
+   * Used only when raw uploads are unsupported —
    * an older server, or the route missing entirely. Chunked the same way
    * regardless of size: every chunk shares one `upload_id`, and chunks are
    * grouped into as many sequential requests as it takes to keep each

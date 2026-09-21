@@ -989,11 +989,11 @@ def test_read_presigned_follows_url() -> None:
         assert client().vm("vm_1").sync("/home/user/big") == b"hello"
 
 
-def test_small_write_streams_to_sync_stream() -> None:
+def test_small_write_streams_to_canonical_sync() -> None:
     """A content write puts the bytes on the wire as-is, in one request."""
     t = FakeTransport()
     t.add_json(
-        lambda method, url: method == "POST" and "/sync-stream" in url,
+        lambda method, url: method == "POST" and "/sync?" in url,
         200,
         {"ok": True},
     )
@@ -1002,7 +1002,7 @@ def test_small_write_streams_to_sync_stream() -> None:
         client().vm("vm_1").sync("/home/user/x", b"hello world")
 
     call = t.calls[0]
-    assert "/sync-stream" in call["url"]
+    assert "/sync?" in call["url"]
     assert "path=%2Fhome%2Fuser%2Fx" in call["url"]
     assert "size=11" in call["url"]
     # The bytes travel as-is.
@@ -2193,7 +2193,7 @@ def test_the_default_sync_path_still_polls_to_completion(monkeypatch) -> None:
 # ── Unified sync(): one call, transport chosen internally ────────────────────
 
 def _stream_calls(t: FakeTransport) -> list[dict[str, Any]]:
-    return [call for call in t.calls if "/sync-stream" in call["url"]]
+    return [call for call in t.calls if "/sync?" in call["url"]]
 
 
 def _extract_mode(url: str) -> str | None:
@@ -2208,7 +2208,7 @@ def test_sync_from_local_small_file_sends_bytes(tmp_path) -> None:
     local.write_bytes(b"hello world")
 
     t = FakeTransport()
-    t.add_json(lambda m, u: m == "POST" and "/sync-stream" in u, 200, {"ok": True})
+    t.add_json(lambda m, u: m == "POST" and "/sync?" in u, 200, {"ok": True})
 
     with use_transport(t):
         result = client().vm("vm_1").sync("/home/user/note.txt", from_local=str(local))
@@ -2227,7 +2227,7 @@ def test_sync_from_local_large_file_uses_archive(tmp_path) -> None:
     local.write_bytes(b"\0" * (sdk.ARCHIVE_MIN_BYTES + 1))
 
     t = FakeTransport()
-    t.add_json(lambda m, u: m == "POST" and "/sync-stream" in u, 200, {"ok": True})
+    t.add_json(lambda m, u: m == "POST" and "/sync?" in u, 200, {"ok": True})
 
     with use_transport(t):
         client().vm("vm_1").sync("/home/user/blob.bin", from_local=str(local))
@@ -2244,7 +2244,7 @@ def test_sync_from_local_executable_uses_archive(tmp_path) -> None:
     local.chmod(0o755)
 
     t = FakeTransport()
-    t.add_json(lambda m, u: m == "POST" and "/sync-stream" in u, 200, {"ok": True})
+    t.add_json(lambda m, u: m == "POST" and "/sync?" in u, 200, {"ok": True})
 
     with use_transport(t):
         client().vm("vm_1").sync("/usr/local/bin/tool", from_local=str(local))
@@ -2265,7 +2265,7 @@ def test_sync_from_local_dir_sends_one_archive(tmp_path) -> None:
         {"ok": True, "op": "manifest", "root": "/home/user/pkg", "hash_algo": "sha256",
          "entries": [], "truncated": False},
     )
-    t.add_json(lambda m, u: m == "POST" and "/sync-stream" in u, 200, {"ok": True})
+    t.add_json(lambda m, u: m == "POST" and "/sync?" in u, 200, {"ok": True})
 
     with use_transport(t):
         result = client().vm("vm_1").sync("/home/user/pkg", from_local=str(tmp_path / "pkg"))
@@ -2326,7 +2326,7 @@ def test_sync_from_local_dir_splits_oversized_changed_set(tmp_path, monkeypatch)
          "entries": [], "truncated": False},
     )
     for _ in range(3):
-        t.add_json(lambda m, u: m == "POST" and "/sync-stream" in u, 200, {"ok": True})
+        t.add_json(lambda m, u: m == "POST" and "/sync?" in u, 200, {"ok": True})
 
     with use_transport(t):
         result = client().vm("vm_1").sync("/home/user/pkg", from_local=str(tmp_path / "pkg"))
@@ -2375,7 +2375,7 @@ def test_incompressible_payload_is_not_compressed(tmp_path) -> None:
         {"ok": True, "op": "manifest", "root": "/home/user/pkg", "hash_algo": "sha256",
          "entries": [], "truncated": False},
     )
-    t.add_json(lambda m, u: m == "POST" and "/sync-stream" in u, 200, {"ok": True})
+    t.add_json(lambda m, u: m == "POST" and "/sync?" in u, 200, {"ok": True})
 
     with use_transport(t):
         client().vm("vm_1").sync("/home/user/pkg", from_local=str(tmp_path / "pkg"))
@@ -2395,7 +2395,7 @@ def test_compressible_payload_is_compressed(tmp_path) -> None:
         {"ok": True, "op": "manifest", "root": "/home/user/pkg", "hash_algo": "sha256",
          "entries": [], "truncated": False},
     )
-    t.add_json(lambda m, u: m == "POST" and "/sync-stream" in u, 200, {"ok": True})
+    t.add_json(lambda m, u: m == "POST" and "/sync?" in u, 200, {"ok": True})
 
     with use_transport(t):
         client().vm("vm_1").sync("/home/user/pkg", from_local=str(tmp_path / "pkg"))
@@ -2475,7 +2475,7 @@ def test_sync_dir_alias_still_works(tmp_path) -> None:
         {"ok": True, "op": "manifest", "root": "/home/user/pkg", "hash_algo": "sha256",
          "entries": [], "truncated": False},
     )
-    t.add_json(lambda m, u: m == "POST" and "/sync-stream" in u, 200, {"ok": True})
+    t.add_json(lambda m, u: m == "POST" and "/sync?" in u, 200, {"ok": True})
 
     with use_transport(t):
         result = client().vm("vm_1").sync_dir(str(tmp_path / "pkg"), "/home/user/pkg")
@@ -2494,7 +2494,7 @@ def test_sync_from_local_renames_on_upload(tmp_path) -> None:
     local.write_bytes(b"\0" * (sdk.ARCHIVE_MIN_BYTES + 1))
 
     t = FakeTransport()
-    t.add_json(lambda m, u: m == "POST" and "/sync-stream" in u, 200, {"ok": True})
+    t.add_json(lambda m, u: m == "POST" and "/sync?" in u, 200, {"ok": True})
 
     with use_transport(t):
         client().vm("vm_1").sync("/home/user/renamed.bin", from_local=str(local))

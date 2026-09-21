@@ -106,7 +106,7 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   for await (const chunk of req) chunks.push(chunk as Buffer);
   const text = Buffer.concat(chunks).toString("utf8");
   if (!text) return undefined;
-  // Not every request body is JSON any more: /sync-stream sends raw bytes with
+  // Not every request body is JSON: raw /sync sends bytes with
   // its parameters in the query string. Capture those as text instead of
   // throwing, so a raw-body request is still assertable.
   try {
@@ -588,13 +588,13 @@ async function testEmptyPipedInputWritesZeroBytes(): Promise<void> {
     const result = await runCli(baseUrl, ["sync", "vm_1", "/tmp/example.txt"], { stdin: "" });
     assert.equal(result.code, 0);
     assert.equal(stdoutText(result), "wrote 0 bytes to /tmp/example.txt\n");
-    // `sync` now streams the bytes to /sync-stream rather than base64-ing them
+    // `sync` now streams raw bytes to /sync rather than base64-ing them
     // into a JSON `writes[]` envelope: path and size ride in the query string
     // and the body is the raw bytes (here, none). The behaviour asserted above
     // — zero bytes written, exit 0 — is unchanged; only the transport moved.
     assert.equal(requests.length, 1);
     assert.equal(requests[0]?.method, "POST");
-    assert.equal(requests[0]?.url, "/api/v1/vms/vm_1/sync-stream?path=%2Ftmp%2Fexample.txt&size=0");
+    assert.equal(requests[0]?.url, "/api/v1/vms/vm_1/sync?path=%2Ftmp%2Fexample.txt&size=0");
   });
 }
 
@@ -608,7 +608,7 @@ async function testSyncDashWritesStdin(): Promise<void> {
     const result = await runCli(baseUrl, ["sync", "vm_1", "/tmp/a.txt", "-"], { stdin: "hi\n" });
     assert.equal(result.code, 0, result.stderr);
     assert.equal(stdoutText(result), "wrote 3 bytes to /tmp/a.txt\n");
-    assert.equal(requests[0]?.url, "/api/v1/vms/vm_1/sync-stream?path=%2Ftmp%2Fa.txt&size=3");
+    assert.equal(requests[0]?.url, "/api/v1/vms/vm_1/sync?path=%2Ftmp%2Fa.txt&size=3");
   });
 }
 
@@ -863,7 +863,7 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
       args: ["sync", "vm_1", "/tmp/file", "hello"],
       response: { results: [{ complete: true, written: true }] },
       method: "POST",
-      url: "/api/v1/vms/vm_1/sync-stream?path=%2Ftmp%2Ffile&size=5",
+      url: "/api/v1/vms/vm_1/sync?path=%2Ftmp%2Ffile&size=5",
       body: "hello",
     },
     {

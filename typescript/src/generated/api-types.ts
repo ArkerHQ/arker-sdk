@@ -424,29 +424,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/vms/{id}/sync-stream": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
-                id: components["parameters"]["VmId"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Stream a file or archive into the VM
-         * @description Write a file into the VM in a single request, streaming the body as it arrives. With `extract` set, the body is a tar archive and `path` is the destination directory: the archive is unpacked into `path`, so a whole directory is written in one request.
-         */
-        post: operations["syncStream"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/filesystems": {
         parameters: {
             query?: never;
@@ -2400,44 +2377,6 @@ export interface operations {
             };
             402: components["responses"]["PaymentRequired"];
             422: components["responses"]["UnsupportedOperation"];
-            default: components["responses"]["Error"];
-        };
-    };
-    syncStream: {
-        parameters: {
-            query: {
-                /** @description Absolute destination path. With `extract` set this is the destination DIRECTORY. */
-                path: string;
-                /** @description Exact byte length of the streamed body. The request fails if the stream does not match. */
-                size: number;
-                /** @description Optional checksum, verified on the write that completes the file. */
-                sha256?: string;
-                /** @description Treat the body as a tar archive and unpack it into `path`, so a whole directory is written in one request. Use `tar` for data that is already compressed and `tar.gz` when compression reduces the upload size. */
-                extract?: "tar.gz" | "tgz" | "tar";
-            };
-            header?: never;
-            path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
-                id: components["parameters"]["VmId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/octet-stream": string;
-            };
-        };
-        responses: {
-            /** @description Write or extract result. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SyncStreamResponse"];
-                };
-            };
-            402: components["responses"]["PaymentRequired"];
             default: components["responses"]["Error"];
         };
     };

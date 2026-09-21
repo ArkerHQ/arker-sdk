@@ -1556,8 +1556,8 @@ async function testSyncDirUploadsAGzippedTarball(): Promise<void> {
   const fetch = new FakeFetch();
   // 1. remote manifest -> empty, so every file counts as changed
   fetch.addJson((m, url) => m === "POST" && url.endsWith("/sync"), 200, { ok: true, op: "manifest", entries: [] });
-  // 2. no /sync-stream on this server -> 404 -> legacy upload+run path below
-  fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 404, {
+  // 2. raw /sync unsupported -> 404 -> legacy upload+run path below
+  fetch.addJson((m, url) => m === "POST" && url.includes("/sync?"), 404, {
     error: { code: "not_found", message: "no route" },
   });
   // 3. the tarball write (small enough to go inline)
@@ -1608,8 +1608,8 @@ async function testLargeInlineWriteSplitsAcrossMultipleRequests(): Promise<void>
   const fetch = new FakeFetch();
   // 1. remote manifest -> empty, so the file counts as changed
   fetch.addJson((m, url) => m === "POST" && url.endsWith("/sync"), 200, { ok: true, op: "manifest", entries: [] });
-  // 2. no /sync-stream on this server -> 404 -> legacy inline-write fallback
-  fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 404, {
+  // 2. raw /sync unsupported -> 404 -> legacy inline-write fallback
+  fetch.addJson((m, url) => m === "POST" && url.includes("/sync?"), 404, {
     error: { code: "not_found", message: "no route" },
   });
   // 3. every inline write request (however many it takes): echo back
@@ -1703,12 +1703,12 @@ async function syncDirFixture(n = 8) {
 
 async function testSyncStreamFastPathSkipsTheExtractRun(): Promise<void> {
   const { dir, fetch, cleanup } = await syncDirFixture();
-  fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 200, { ok: true });
+  fetch.addJson((m, url) => m === "POST" && url.includes("/sync?"), 200, { ok: true });
 
   await client(fetch).vm("vm_1").syncDir(dir, "/home/user/p");
 
-  const stream = fetch.calls.find((c) => c.url.includes("/sync-stream"));
-  assert.ok(stream, "syncDir must try /sync-stream first");
+  const stream = fetch.calls.find((c) => c.url.includes("/sync?"));
+  assert.ok(stream, "syncDir must use raw /sync");
   assert.equal(stream!.headers["content-type"], "application/octet-stream", "body must go raw, not base64 JSON");
 
   // Params ride in the query string, not as headers, so they reach the VM
@@ -1727,7 +1727,7 @@ async function testSyncStreamErrorsOtherThan404DoNotFallBack(): Promise<void> {
   const { dir, fetch, cleanup } = await syncDirFixture();
   // A path escape is a REAL rejection. Silently retrying the slow path would
   // turn a hard error into a confusing one.
-  fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 403, {
+  fetch.addJson((m, url) => m === "POST" && url.includes("/sync?"), 403, {
     error: { code: "permission_denied", message: "path escapes the VM root" },
   });
 
@@ -1762,15 +1762,15 @@ async function testSyncDirSplitsOversizedChangedSet(): Promise<void> {
 
   const fetch = new FakeFetch();
   fetch.addJson((m, url) => m === "POST" && url.endsWith("/sync"), 200, { ok: true, op: "manifest", entries: [] });
-  // Sticky: answers every batch's /sync-stream call, however many there are.
-  fetch.addDynamicJson((m, url) => m === "POST" && url.includes("/sync-stream"), () => ({
+  // Sticky: answers every raw /sync call, however many there are.
+  fetch.addDynamicJson((m, url) => m === "POST" && url.includes("/sync?"), () => ({
     status: 200,
     body: { ok: true },
   }));
 
   const result = await client(fetch).vm("vm_1").syncDir(dir, "/home/user/p", { archiveBatchMaxBytes: 5 });
 
-  const streamCalls = fetch.calls.filter((c) => c.url.includes("/sync-stream"));
+  const streamCalls = fetch.calls.filter((c) => c.url.includes("/sync?"));
   // One 5-byte file per batch under a 5-byte cap: three files, three
   // archives -- never one archive carrying all three.
   assert.equal(result.sent, 3);
@@ -1800,7 +1800,7 @@ async function testAssumeEmptySkipsTheManifestRoundTrip(): Promise<void> {
 
   const fetch = new FakeFetch();
   // Deliberately NO manifest script: if syncDir asks for one, FakeFetch throws.
-  fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 200, { ok: true });
+  fetch.addJson((m, url) => m === "POST" && url.includes("/sync?"), 200, { ok: true });
 
   const result = await client(fetch).vm("vm_1").syncDir(dir, "/home/user/p", { assumeEmpty: true });
 
@@ -1829,7 +1829,7 @@ function syncDirServer(remoteEntries: Array<{ path: string; hash: string }> = []
   fetch.addJson((m, url) => m === "POST" && url.endsWith("/sync"), 200, {
     ok: true, op: "manifest", entries: remoteEntries, truncated: false,
   });
-  fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 200, { ok: true });
+  fetch.addJson((m, url) => m === "POST" && url.includes("/sync?"), 200, { ok: true });
   return fetch;
 }
 
@@ -1999,7 +1999,7 @@ async function testStatCacheNotWrittenWhenUploadFails(): Promise<void> {
     fetch.addJson((m, url) => m === "POST" && url.endsWith("/sync"), 200, {
       ok: true, op: "manifest", entries: [], truncated: false,
     });
-    fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 500, {
+  fetch.addJson((m, url) => m === "POST" && url.includes("/sync?"), 500, {
       error: { code: "internal", message: "nope" },
     });
     await assert.rejects(() => client(fetch).vm("vm_1").syncDir(dir, "/p"));
@@ -2169,7 +2169,7 @@ await testTimeToBackgroundZeroReturnsTheAckWithoutPolling();
 // ── Unified sync(): one call, transport chosen internally ────────────────────
 
 function streamCalls(fetch: FakeFetch): FetchCall[] {
-  return fetch.calls.filter((call) => call.url.includes("/sync-stream"));
+  return fetch.calls.filter((call) => call.url.includes("/sync?"));
 }
 
 function extractMode(url: string): string | null {
@@ -2205,7 +2205,7 @@ async function testSyncFromLocalSmallFileSendsBytes(): Promise<void> {
   await withCacheDir(async () => {
     const dir = tmpTree({ "note.txt": "hello world" });
     const fetch = new FakeFetch();
-    fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 200, { ok: true });
+    fetch.addJson((m, url) => m === "POST" && url.includes("/sync?"), 200, { ok: true });
     const res = await client(fetch).vm("vm_1").sync("/home/user/note.txt", {
       fromLocal: nodePath.join(dir, "note.txt"),
     });
@@ -2222,7 +2222,7 @@ async function testSyncFromLocalLargeFileUsesArchive(): Promise<void> {
   await withCacheDir(async () => {
     const dir = tmpTreeBytes({ "blob.bin": new Uint8Array(1024 * 1024 + 1) });
     const fetch = new FakeFetch();
-    fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 200, { ok: true });
+    fetch.addJson((m, url) => m === "POST" && url.includes("/sync?"), 200, { ok: true });
     await client(fetch).vm("vm_1").sync("/home/user/blob.bin", {
       fromLocal: nodePath.join(dir, "blob.bin"),
     });
@@ -2238,7 +2238,7 @@ async function testSyncFromLocalExecutableUsesArchive(): Promise<void> {
     const dir = tmpTree({ tool: "#!/bin/sh\necho hi\n" });
     fs.chmodSync(nodePath.join(dir, "tool"), 0o755);
     const fetch = new FakeFetch();
-    fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 200, { ok: true });
+    fetch.addJson((m, url) => m === "POST" && url.includes("/sync?"), 200, { ok: true });
     await client(fetch).vm("vm_1").sync("/usr/local/bin/tool", {
       fromLocal: nodePath.join(dir, "tool"),
     });
@@ -2346,7 +2346,7 @@ async function testSyncFromLocalRenamesOnUpload(): Promise<void> {
   await withCacheDir(async () => {
     const dir = tmpTreeBytes({ "orig.bin": new Uint8Array(1024 * 1024 + 1) });
     const fetch = new FakeFetch();
-    fetch.addJson((m, url) => m === "POST" && url.includes("/sync-stream"), 200, { ok: true });
+    fetch.addJson((m, url) => m === "POST" && url.includes("/sync?"), 200, { ok: true });
     const res = await client(fetch).vm("vm_1").sync("/home/user/renamed.bin", {
       fromLocal: nodePath.join(dir, "orig.bin"),
     });
