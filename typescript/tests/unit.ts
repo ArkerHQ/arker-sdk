@@ -2029,15 +2029,15 @@ async function testSyncDirPreservesLinksAndEmptyDirectories(): Promise<void> {
     assert.equal(result.bytesSent, 6, "symlink targets must not be read");
     const archive = nodePath.join(outside, "upload.tar.gz");
     fs.writeFileSync(archive, Buffer.from(JSON.parse(fetch.calls[1]!.body!).writes[0].content, "base64"));
-    const entries: Array<{ path: string; type: string; linkpath: string }> = [];
+    const entries: Array<{ path: string; type: string; linkpath?: string }> = [];
     await (await import("tar")).list({ file: archive, onReadEntry: (entry) => {
-      entries.push({ path: entry.path, type: entry.type, linkpath: entry.linkpath });
+      entries.push({ path: entry.path, type: entry.type, ...(entry.type === "SymbolicLink" ? { linkpath: entry.linkpath } : {}) });
     } });
     assert.deepEqual(entries, [
       { path: "dangling", type: "SymbolicLink", linkpath: "missing" },
-      { path: "empty/", type: "Directory", linkpath: "" },
+      { path: "empty/", type: "Directory" },
       { path: "external", type: "SymbolicLink", linkpath: outside },
-      { path: "file.txt", type: "File", linkpath: "" },
+      { path: "file.txt", type: "File" },
       { path: "link", type: "SymbolicLink", linkpath: "file.txt" },
     ]);
     const repeated = await client(syncDirServer([{ path: "file.txt", hash: createHash("sha256").update("inside").digest("hex") }]))

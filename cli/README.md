@@ -108,5 +108,11 @@ There are no automatic exclusions, and `.gitignore` is not loaded.
 
 `--dry-run` reads the remote manifest and lists files that would be uploaded. It
 does not write guest files or run extraction. With `--json`, the preview has
-`dryRun: true`, a `planned` array of relative paths, byte counts and modes, and
+`dryRun: true`, a `planned` array of relative paths, byte counts, modes and entry kinds, and
 zero `sent` and `bytesSent` counts. Unchanged files are counted in `skipped`.
+
+Directory sync preserves symbolic links, including dangling links, without reading
+their targets. Empty directories are uploaded too. The remote manifest currently
+lists regular files only, so links and empty directories are sent on every sync.
+Unchanged regular files are still skipped. Upload counts include all entry kinds;
+byte counts include regular-file contents only.

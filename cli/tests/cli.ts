@@ -983,7 +983,7 @@ async function testDirectoryPreviewAndExclusions(): Promise<void> {
       ]);
       const text = await runCli(baseUrl, args);
       assert.equal(text.code, 0, text.stderr);
-      assert.match(stdoutText(text), /would upload 1 file/);
+      assert.match(stdoutText(text), /would upload 1 entry/);
       assert.match(stdoutText(text), /upload\tmain.ts/);
       const help = await runCli(baseUrl, ["sync-dir", "--help"]);
       for (const flag of ["--dry-run", "--exclude", "--session-id"]) assert.ok(stdoutText(help).includes(flag));

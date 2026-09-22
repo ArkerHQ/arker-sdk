@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,7 +51,19 @@ try {
   await cli(["sync-dir", vm.id, local, destination, "--session-id", session.session_id]);
   assert.equal(new TextDecoder().decode(await vm.sync(`/tmp/${destination}/.env`)), "dummy-value");
   assert.equal(new TextDecoder().decode(await vm.sync(`/tmp/${destination}/node_modules/dummy`)), "dependency");
-  console.log("PASS cli sync-dir options");
+  mkdirSync(join(local, "empty"));
+  symlinkSync("main.txt", join(local, "link"));
+  symlinkSync("missing", join(local, "dangling"));
+  symlinkSync("/not/a/local/upload/source", join(local, "absolute-link"));
+  await cli(["sync-dir", vm.id, local, `${root}/tree`]);
+  const kinds = await vm.run(`test -d ${root}/tree/empty && test -L ${root}/tree/link && test -L ${root}/tree/dangling && test -L ${root}/tree/absolute-link && readlink ${root}/tree/link && readlink ${root}/tree/dangling && readlink ${root}/tree/absolute-link`);
+  assert.equal(kinds.exitCode, 0, kinds.stderr);
+  assert.equal(kinds.stdout, "main.txt\nmissing\n/not/a/local/upload/source\n");
+  const emptyLocal = join(local, "only-empty");
+  mkdirSync(emptyLocal);
+  await cli(["sync-dir", vm.id, emptyLocal, `${root}/empty-root`]);
+  assert.equal((await vm.run(`test -d ${root}/empty-root`)).exitCode, 0);
+  console.log("PASS cli sync-dir options and entry kinds");
 } finally {
   try {
     if (vm) { await vm.delete(); console.log(`Deleted disposable VM: ${vm.id}`); }
