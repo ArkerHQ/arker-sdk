@@ -2148,7 +2148,6 @@ async function requestJson<T>(
         { method, headers, body: requestBody },
         fetchImpl,
         http2,
-        shouldRetryNetworkFailures,
       );
       const payload = parseJson(text);
       const parsedError = extractError(payload, status);
@@ -2424,16 +2423,33 @@ const BUN_RUNTIME = Boolean((globalThis as unknown as {
 }).process?.versions?.bun);
 
 // One HTTP/2 session per origin; concurrent requests multiplex over it as streams.
-// `confirmed` flips on the first response so the caller can fall back to fetch if the
-// origin turns out not to speak HTTP/2.
+// Protocol negotiation completes before any application request is sent.
 class Http2Connection {
-  confirmed = false;
+  readonly ready: Promise<void>;
   private streams = 0;
   private readonly session: Http2Session;
 
   constructor(http2: Http2Module, origin: string) {
     this.session = http2.connect(origin);
     this.session.on("error", () => {});
+    this.ready = new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.session.off("remoteSettings", onReady);
+        this.session.off("error", onError);
+        this.session.off("close", onClose);
+      };
+      const onReady = () => { cleanup(); resolve(); };
+      const onError = (error: Error) => { cleanup(); this.session.destroy(); reject(error); };
+      const onClose = () => onError(new Error("HTTP/2 connection closed before protocol negotiation"));
+      const timeout = setTimeout(() => {
+        onError(new Error("HTTP/2 protocol negotiation timed out"));
+      }, HTTP2_REQUEST_TIMEOUT_MS);
+      timeout.unref();
+      this.session.once("remoteSettings", onReady);
+      this.session.once("error", onError);
+      this.session.once("close", onClose);
+    }).finally(() => this.session.unref());
   }
 
   get closed(): boolean {
@@ -2463,7 +2479,6 @@ class Http2Connection {
       }
       stream.on("response", (responseHeaders) => {
         timeout?.refresh();
-        this.confirmed = true;
         status = Number(responseHeaders[":status"]) || 0;
       });
       stream.on("data", (chunk: string) => {
@@ -2500,12 +2515,15 @@ async function sendRequest(
   init: { method: string; headers: Record<string, string>; body?: string },
   fetchImpl: FetchLike,
   http2Enabled: boolean,
-  allowUnconfirmedHttp2Fallback: boolean,
 ): Promise<TransportResponse> {
+  let failedNegotiation: Http2Connection | undefined;
+  let origin: string | undefined;
   if (http2Enabled) {
     const http2 = await loadHttp2();
     if (http2) {
-      const { origin, pathname, search } = new URL(url);
+      const parsed = new URL(url);
+      origin = parsed.origin;
+      const { pathname, search } = parsed;
       const cached = http2Connections.get(origin); // null => origin known not to speak HTTP/2
       if (cached !== null) {
         let connection = cached;
@@ -2514,20 +2532,22 @@ async function sendRequest(
           http2Connections.set(origin, connection);
         }
         try {
-          return await connection.request(init.method, `${pathname}${search}`, init.headers, init.body);
-        } catch (error) {
-          // A safe request can probe the fetch transport on its next attempt.
-          // An unsafe request has an unknown outcome, so preserve the origin's
-          // HTTP/2 transport choice for later reconciliation.
-          if (!connection.confirmed && allowUnconfirmedHttp2Fallback) {
-            http2Connections.set(origin, null);
-          }
-          throw error;
+          await connection.ready;
+        } catch {
+          // No request stream exists yet, so switching transport cannot replay
+          // an operation. Do not cache HTTP/1 until it returns a response.
+          failedNegotiation = connection;
+        }
+        if (!failedNegotiation) {
+          return connection.request(init.method, `${pathname}${search}`, init.headers, init.body);
         }
       }
     }
   }
   const response = await fetchImpl(url, init as RequestInit);
+  if (origin && failedNegotiation && http2Connections.get(origin) === failedNegotiation) {
+    http2Connections.set(origin, null);
+  }
   let text: string;
   try {
     text = await response.text();
