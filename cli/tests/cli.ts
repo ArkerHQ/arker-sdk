@@ -735,6 +735,7 @@ async function testSubcommandHelpUsesAcceptedOptions(): Promise<void> {
     const help = stdoutText(result);
     assert.ok(help.includes(accepts), `${args.join(" ")} must document ${accepts}`);
     assert.ok(!help.includes(rejects), `${args.join(" ")} must not document ${rejects}`);
+    if (args.join(" ") === "sessions ls") assert.match(help, /--state <idle\|running>/);
   }
 }
 

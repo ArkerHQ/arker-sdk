@@ -350,7 +350,7 @@ function invocationOptions(command: string, positional: string[]): { options: Op
   } else if (command === "sessions") {
     context = `sessions ${subcommand ?? ""}`.trim();
     allowed = subcommand === "ls" || subcommand === "list"
-      ? { ...GLOBAL_OPTIONS, ...PAGINATION_OPTIONS, state: { type: "string" } }
+      ? { ...GLOBAL_OPTIONS, ...PAGINATION_OPTIONS, state: COMMAND_OPTIONS.sessions!.state! }
       : subcommand === "create"
         ? {
             ...GLOBAL_OPTIONS,
