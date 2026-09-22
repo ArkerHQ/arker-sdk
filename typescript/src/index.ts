@@ -1184,7 +1184,7 @@ export class VM {
   async syncDir(
     localDir: string,
     remoteDir: string,
-    options: SyncDirOptions & { ignore?: (rel: string) => boolean } = {},
+    options: SyncDirOptions = {},
   ): Promise<SyncDirResult> {
     const fs = await import("node:fs");
     const nodePath = await import("node:path");
@@ -1192,7 +1192,38 @@ export class VM {
     const fsp = fs.promises;
 
     const localRoot = nodePath.resolve(localDir);
-    const remoteRoot = "/" + remoteDir.replace(/^\/+/, "").replace(/\/+$/, "");
+    if (!remoteDir) throw new ArkerError("bad_request", "remoteDir must not be empty", 0);
+    let sessionId = options.sessionId;
+    let remoteRoot: string;
+    if (nodePath.posix.isAbsolute(remoteDir)) {
+      remoteRoot = nodePath.posix.normalize(remoteDir);
+    } else {
+      let session: Session | undefined;
+      if (sessionId) session = await this.getSession(sessionId);
+      else {
+        let cursor: string | undefined;
+        do {
+          const page = await this.listSessions({ cursor });
+          session = page.sessions.find((entry) => (entry.session_idx ?? 0) === 0);
+          cursor = page.next_cursor ?? undefined;
+        } while (!session && cursor);
+      }
+      if (!session) throw new ArkerError("not_found", "default guest session was not found", 0);
+      if (!nodePath.posix.isAbsolute(session.cwd)) {
+        throw new ArkerError("unexpected_response", "guest session returned a non-absolute working directory", 502);
+      }
+      sessionId = session.session_id;
+      remoteRoot = nodePath.posix.resolve(session.cwd, remoteDir);
+    }
+    const matchers: Array<(path: string) => boolean> = [];
+    if (options.exclude?.length) {
+      const { default: picomatch } = await import("picomatch");
+      for (const pattern of options.exclude) {
+        const normalized = pattern.replace(/^\.\//, "").replace(/\/$/, "");
+        matchers.push(picomatch(normalized, { dot: true, matchBase: !normalized.includes("/"), nonegate: true }));
+      }
+    }
+    const ignored = (rel: string, directory: boolean) => matchers.some((match) => match(rel) || (directory && match(`${rel}/`)));
 
     // 1. Authoritative remote manifest: relative path -> content hash and mode. A directory that
     //    doesn't exist yet (or an empty VM) yields {} -> everything is sent.
@@ -1215,15 +1246,14 @@ export class VM {
     const walk = async (dir: string): Promise<void> => {
       for (const dirent of await fsp.readdir(dir, { withFileTypes: true })) {
         const abs = nodePath.join(dir, dirent.name);
+        const rel = nodePath.relative(localRoot, abs).split(nodePath.sep).join("/");
+        if (ignored(rel, dirent.isDirectory())) continue;
         if (dirent.isSymbolicLink()) continue;
         if (dirent.isDirectory()) { await walk(abs); continue; }
         if (!dirent.isFile()) continue;
+        if (options.ignore?.(rel)) continue;
         // bigint stats: nanosecond timestamps, and ino/dev without precision loss.
         const st = await fsp.stat(abs, { bigint: true });
-        const rel = nodePath.relative(localRoot, abs).split(nodePath.sep).join("/");
-        // Filtered BEFORE hashing, so an ignored file cannot perturb the
-        // incremental diff — not merely skipped at upload time.
-        if (options.ignore?.(rel)) continue;
         localFiles.push({
           rel, abs,
           sig: {
@@ -1246,7 +1276,7 @@ export class VM {
     const cache = options.cache;
     const result: SyncDirResult = { sent: 0, skipped: 0, bytesSent: 0 };
     if (manifest.truncated) result.manifestTruncated = true;
-    const changed: Array<{ rel: string; abs: string }> = [];
+    const changed: Array<{ rel: string; abs: string; bytes: number; mode: number }> = [];
 
     // Hash with bounded concurrency, streaming each file rather than reading it
     // whole. Two distinct wins, and it is worth being precise about which:
@@ -1315,7 +1345,7 @@ export class VM {
         result.skipped += 1;
         continue;
       }
-      changed.push({ rel: file.rel, abs: file.abs });
+      changed.push({ rel: file.rel, abs: file.abs, bytes: file.sig.size, mode: file.sig.mode & 0o7777 });
       result.sent += 1;
       result.bytesSent += file.sig.size;
     }
@@ -1326,10 +1356,17 @@ export class VM {
     // 4. Ship the changed files as ONE tarball and extract it in the guest. The
     //    extract's exit is checked, so a failure surfaces (never a silent partial);
     //    the manifest also fails safe — any omitted file is re-sent next call.
-    if (changed.length > 0) await this.uploadAndExtractTarball(changed, localRoot, remoteRoot, fsp);
+    if (options.dryRun) {
+      result.dryRun = true;
+      result.planned = changed.map(({ rel, bytes, mode }) => ({ path: rel, bytes, mode }));
+      result.sent = 0;
+      result.bytesSent = 0;
+    } else if (changed.length > 0) {
+      await this.uploadAndExtractTarball(changed, localRoot, remoteRoot, fsp, sessionId);
+    }
     // Only after the upload succeeded — persisting earlier would record files
     // as synced that never made it.
-    if (!options.cache) await saveStatCache(cacheFile, fresh);
+    if (!options.cache && !options.dryRun) await saveStatCache(cacheFile, fresh);
     const round = (v: number) => Math.round(v * 10) / 10;
     result.timings = {
       manifestMs: round(manifestMs),
@@ -1427,6 +1464,7 @@ export class VM {
     localRoot: string,
     remoteRoot: string,
     fsp: typeof import("node:fs").promises,
+    sessionId?: string,
   ): Promise<void> {
     const tar = await import("tar");
     const os = await import("node:os");
@@ -1471,7 +1509,7 @@ export class VM {
       const cmd =
         `set -e; mkdir -p ${q(remoteRoot)}; ` +
         `tar -xpf ${q(remoteTar)} -C ${q(remoteRoot)}; rm -f ${q(remoteTar)}`;
-      const res = await this.run(cmd);
+      const res = await this.run(cmd, sessionId ? { session_id: sessionId } : {});
       if (res.state === "failed" || res.exitCode !== 0) {
         const stderr = (res.stderr ?? "").slice(0, 300);
         throw new ArkerError(
@@ -2340,6 +2378,10 @@ function bytesToBase64(data: Uint8Array): string {
 
 /** Result of {@link VM.syncDir}. */
 export interface SyncDirResult {
+  /** Present for previews; no files were uploaded. */
+  dryRun?: boolean;
+  /** Files that would be uploaded, in sorted relative-path order. Present only in a preview. */
+  planned?: Array<{ path: string; bytes: number; mode: number }>;
   /** Files uploaded (new or changed on the VM). */
   sent: number;
   /** Files already up-to-date on the VM (skipped). */
@@ -2361,6 +2403,15 @@ export interface SyncDirResult {
 
 /** Options for {@link VM.syncDir}. */
 export interface SyncDirOptions {
+  /** Resolve relative remote paths against this session's working directory. Defaults to session 0. */
+  sessionId?: string;
+  /** Plan the upload without writing guest files or running extraction. */
+  dryRun?: boolean;
+  /** Exclude globs. Bare patterns match any basename; patterns with slashes match relative paths. */
+  exclude?: string[];
+  /** Skip matching file paths before hashing. Directories are still visited so exceptions can match descendants. */
+  ignore?: (rel: string) => boolean;
+
   /** Caller-owned accelerator cache: absolute local path -> {size, mtimeMs, hash}.
    * Reused across calls it skips re-hashing files whose (size, mtime) are
    * unchanged. Pure optimization — it never affects which files are sent. */
