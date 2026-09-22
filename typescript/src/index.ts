@@ -348,8 +348,14 @@ export type RunRequest = ApiSchema<"RunRequest">;
  */
 export type RunSignal = NonNullable<RunRequest["signal"]>;
 export type RunOptions = Partial<Omit<RunRequest, "command">> & {
+  /** Abort the local request and polling; this does not cancel the remote run. */
+  abortSignal?: AbortSignal;
   /** Finite input (UTF-8 text or exact bytes, at most 1 MiB), followed by EOF. */
   stdin?: string | Uint8Array;
+  /** Called when the server assigns this run's ID, before any polling. */
+  onRunStarted?: (runId: string) => void;
+  /** Called for each run-status response while run() polls for completion. */
+  onRunStatus?: (run: RunRecord) => void;
   /**
    * Optional server-side deduplication key. Sent as the `Idempotency-Key`
    * HTTP header. It does not enable automatic network-failure retries.
@@ -357,6 +363,10 @@ export type RunOptions = Partial<Omit<RunRequest, "command">> & {
   idempotencyKey?: string;
 };
 export interface WaitForRunOptions {
+  /** Stop local polling without cancelling the remote run. */
+  abortSignal?: AbortSignal;
+  /** Called for every successful status poll. */
+  onStatus?: (run: RunRecord) => void;
   /** Server-side kill bound in seconds, used to allow the same completion margin as run(). */
   timeout?: number | null;
   /**
@@ -859,6 +869,7 @@ export class Arker {
     extraHeaders?: Record<string, string | undefined>,
     maxQueueingSecs?: number | null,
     retryNetworkFailures?: boolean,
+    abortSignal?: AbortSignal,
   ): Promise<T> {
     const url = `${baseUrl}${path}`;
     const headers: Record<string, string> = {
@@ -879,6 +890,7 @@ export class Arker {
       this.retry,
       maxQueueingSecs ?? undefined,
       retryNetworkFailures,
+      abortSignal,
     );
   }
 
@@ -1026,7 +1038,7 @@ export class VM {
   async run(command: string, options: RunOptions): Promise<RunResult>;
   async run(command: string, options: RunOptions = {}): Promise<RunResult> {
     rejectUnsupportedRunNetworkInputs(options);
-    const { idempotencyKey, stdin, ...body } = options;
+    const { idempotencyKey, stdin, onRunStarted, onRunStatus, abortSignal, ...body } = options;
     if (stdin !== undefined) {
       if (body.stdin_base64 != null) throw new Error("use stdin or stdin_base64, not both");
       const bytes = typeof stdin === "string" ? new TextEncoder().encode(stdin) : stdin;
@@ -1045,16 +1057,42 @@ export class VM {
       this.baseUrl,
       headers,
       options.queueing_timeout,
+      undefined,
+      abortSignal,
     );
     const result = parseRunResponse(response);
+    if (result.runId) onRunStarted?.(result.runId);
     // The server backgrounds a run that outlived its sync window. When the
     // caller did NOT ask to skip the wait, poll getRun() to a terminal state
     // and hand back the completed run so the synchronous call is transparent.
     // Explicit zero is a pure pass-through — return the ack immediately.
     if (result.type === "background" && options.time_to_background !== 0) {
-      return this.waitForRun(result.runId, { timeout: options.timeout });
+      return this.waitForRun(result.runId, { timeout: options.timeout, onStatus: onRunStatus, abortSignal });
     }
     return result;
+  }
+
+  /** Wait until a keyed request is recorded, without dispatching it again. */
+  async waitForRunAcknowledgement(command: string, options: RunOptions & { idempotencyKey: string }): Promise<string> {
+    let delay = RUN_POLL_INITIAL_MS;
+    for (;;) {
+      options.abortSignal?.throwIfAborted();
+      try {
+        const result = await this.run(command, { ...options, lookup_only: true, time_to_background: 0, onRunStarted: undefined, onRunStatus: undefined });
+        if (!result.runId) throw new Error("run lookup returned no ID");
+        return result.runId;
+      } catch (error) {
+        options.abortSignal?.throwIfAborted();
+        if (!(error instanceof ArkerError) || error.code !== "not_found") throw error;
+      }
+      await sleep(delay, options.abortSignal);
+      delay = Math.min(RUN_POLL_MAX_MS, Math.ceil(delay * RUN_POLL_BACKOFF));
+    }
+  }
+
+  /** Send SIGINT to this exact run. A completed run never signals later session work. */
+  async signalRun(runId: string, options: { abortSignal?: AbortSignal } = {}): Promise<void> {
+    await this._client._request("POST", `${vmPath(this.id)}/runs`, { signal: "SIGINT", signal_run_id: runId }, this.baseUrl, undefined, undefined, undefined, options.abortSignal);
   }
 
   /**
@@ -1066,7 +1104,7 @@ export class VM {
    * This is the recovery path when a session is stuck — e.g. an interactive
    * program (`python3`, `psql`, `cat`) holds the terminal and never returns to
    * a prompt the run matcher recognises. Nothing else clears that state:
-   * {@link cancelRun} cancels the run record but not the process, a run's
+   * A run's
    * `timeout` does not apply once a REPL owns the terminal, and attaching a
    * PTY to a busy session does not get through. A signal request
    * short-circuits before the exec dispatch, so it is not queued behind the
@@ -1136,11 +1174,12 @@ export class VM {
     let delay = RUN_POLL_INITIAL_MS;
     let consecutiveFailures = 0;
     for (;;) {
-      await sleep(delay);
+      await sleep(delay, options.abortSignal);
       let run: RunRecord;
       try {
-        run = await this.getRun(runId);
+        run = await this.getRun(runId, { abortSignal: options.abortSignal });
       } catch (error) {
+        options.abortSignal?.throwIfAborted();
         consecutiveFailures += 1;
         if (consecutiveFailures >= RUN_POLL_MAX_CONSECUTIVE_FAILURES) {
           const code = error instanceof ArkerError ? error.code : "unavailable";
@@ -1156,6 +1195,7 @@ export class VM {
         continue;
       }
       consecutiveFailures = 0;
+      options.onStatus?.(run);
       const terminal = TERMINAL_RUN_STATES.has(run.state);
       if (options.onOutput) {
         const replaced: ("stdout" | "stderr")[] = [];
@@ -1681,19 +1721,20 @@ export class VM {
    *
    * `stdout`/`stderr` come back decoded, the same as {@link run}, alongside
    * `stdoutBytes`/`stderrBytes` for output that is not text. */
-  async getRun(runId: string): Promise<RunRecord> {
+  async getRun(runId: string, options: { abortSignal?: AbortSignal } = {}): Promise<RunRecord> {
     return decodeWireRun(
       await this._client._request<Run>(
         "GET",
         `${vmPath(this.id)}/runs/${pathSegment(runId)}`,
         undefined,
         this.baseUrl,
+        undefined, undefined, undefined, options.abortSignal,
       ),
     );
   }
 
-  async cancelRun(runId: string): Promise<CancelRunResponse> {
-    return this._client._request("DELETE", `${vmPath(this.id)}/runs/${pathSegment(runId)}`, undefined, this.baseUrl);
+  async cancelRun(runId: string, options: { abortSignal?: AbortSignal } = {}): Promise<CancelRunResponse> {
+    return this._client._request("DELETE", `${vmPath(this.id)}/runs/${pathSegment(runId)}`, undefined, this.baseUrl, undefined, undefined, undefined, options.abortSignal);
   }
 
   // ── Sessions ──────────────────────────────────────────────────────
@@ -2175,6 +2216,7 @@ async function requestJson<T>(
   retry: RetryConfig,
   maxQueueingSecs?: number,
   retryNetworkFailures?: boolean,
+  abortSignal?: AbortSignal,
 ): Promise<T> {
   const headers = { ...requestHeaders };
   let requestBody: string | undefined;
@@ -2192,6 +2234,7 @@ async function requestJson<T>(
   const shouldRetryNetworkFailures = retryNetworkFailures ?? (method === "GET");
 
   for (let attempt = 0; ; attempt++) {
+    abortSignal?.throwIfAborted();
     if (queueingDeadline !== undefined && attempt > 0 && isObject(body)) {
       // Retries re-send the remaining window.
       const remainingSecs = Math.max(
@@ -2205,7 +2248,7 @@ async function requestJson<T>(
     try {
       const { status, ok, text } = await sendRequest(
         url,
-        { method, headers, body: requestBody },
+        { method, headers, body: requestBody, signal: abortSignal },
         fetchImpl,
         http2,
         shouldRetryNetworkFailures,
@@ -2216,7 +2259,7 @@ async function requestJson<T>(
       if (isRetryable(status, parsedError, shouldRetryNetworkFailures || Boolean(headers["Idempotency-Key"]))) {
         const delay = retryDelay(retry, attempt, parsedError);
         if (canRetryAgain(retry, attempt, queueingDeadline, delay)) {
-          await sleep(delay);
+          await sleep(delay, abortSignal);
           continue;
         }
       }
@@ -2234,13 +2277,14 @@ async function requestJson<T>(
 
       return payload as T;
     } catch (error) {
+      abortSignal?.throwIfAborted();
       if (error instanceof ArkerError) throw error;
       if (!shouldRetryNetworkFailures) {
         throw unknownOutcomeError(method, new URL(url).pathname, error);
       }
       const delay = retryDelay(retry, attempt);
       if (canRetryAgain(retry, attempt, queueingDeadline, delay)) {
-        await sleep(delay);
+        await sleep(delay, abortSignal);
         continue;
       }
       const message = error instanceof Error ? error.message : String(error);
@@ -2321,7 +2365,15 @@ function unknownOutcomeError(method: HttpMethod, path: string, error: unknown): 
 
 function jitter(maxMs: number): number { return Math.floor(Math.random() * (maxMs + 1)); }
 
-async function sleep(ms: number): Promise<void> { await new Promise((resolve) => setTimeout(resolve, ms)); }
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const done = (): void => { signal?.removeEventListener("abort", abort); resolve(); };
+    const timer = setTimeout(done, ms);
+    const abort = (): void => { clearTimeout(timer); signal?.removeEventListener("abort", abort); reject(signal?.reason); };
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
 
 function objectPayload(value: unknown, context: string): JsonObject {
   if (!isObject(value)) throw new ArkerError("internal", `${context} must be an object`, 200);
@@ -2500,13 +2552,13 @@ class Http2Connection {
     return this.session.closed || this.session.destroyed;
   }
 
-  request(method: string, path: string, headers: Record<string, string>, body?: string): Promise<TransportResponse> {
+  request(method: string, path: string, headers: Record<string, string>, body?: string, signal?: AbortSignal): Promise<TransportResponse> {
     // Ref the socket only while requests are in flight, so a pending request keeps
     // the process alive but an idle connection still lets it exit.
     if (this.streams === 0) this.session.ref();
     this.streams++;
     return new Promise<TransportResponse>((resolve, reject) => {
-      const stream = this.session.request({ ...headers, ":method": method, ":path": path });
+      const stream = this.session.request({ ...headers, ":method": method, ":path": path }, { signal });
       let status = 0;
       let text = "";
       stream.setEncoding("utf8");
@@ -2557,7 +2609,7 @@ const http2Connections = new Map<string, Http2Connection | null>();
 
 async function sendRequest(
   url: string,
-  init: { method: string; headers: Record<string, string>; body?: string },
+  init: { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal },
   fetchImpl: FetchLike,
   http2Enabled: boolean,
   allowUnconfirmedHttp2Fallback: boolean,
@@ -2574,8 +2626,9 @@ async function sendRequest(
           http2Connections.set(origin, connection);
         }
         try {
-          return await connection.request(init.method, `${pathname}${search}`, init.headers, init.body);
+          return await connection.request(init.method, `${pathname}${search}`, init.headers, init.body, init.signal);
         } catch (error) {
+          init.signal?.throwIfAborted();
           // A safe request can probe the fetch transport on its next attempt.
           // An unsafe request has an unknown outcome, so preserve the origin's
           // HTTP/2 transport choice for later reconciliation.

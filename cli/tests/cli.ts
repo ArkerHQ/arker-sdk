@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { closeSync, openSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttp1Server, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -17,6 +17,7 @@ type CliResult = {
 };
 
 type CliOptions = {
+  onSpawn?: (child: ChildProcess) => void;
   onStdout?: (chunk: Buffer) => void;
   stdin?: string | Uint8Array;
   stdinFile?: string;
@@ -120,6 +121,7 @@ async function runCli(baseUrl: string | undefined, args: string[], options: CliO
     env,
     stdio: [inputFd ?? (options.stdin === undefined ? "ignore" : "pipe"), "pipe", "pipe"],
   });
+  options.onSpawn?.(child);
   if (inputFd !== undefined) closeSync(inputFd);
   if (options.stdin !== undefined) child.stdin!.end(options.stdin);
   const stdout: Buffer[] = [];
@@ -822,6 +824,79 @@ async function testFileKindsFailWithoutStackOrRequests(): Promise<void> {
   }
 }
 
+async function testRunInterruptEscalationBeforeAcknowledgement(): Promise<void> {
+  let child: ChildProcess;
+  let interrupted: ServerResponse | undefined;
+  let cancelled = false;
+  await withCapturedServer((request, res) => {
+    if (request.method === "POST" && (request.body as { command?: string }).command) {
+      child.kill("SIGINT");
+      jsonResponse(res, { type: "background", run_id: "run_target", state: "running" });
+    } else if (request.method === "POST") {
+      assert.deepEqual(request.body, { signal: "SIGINT", signal_run_id: "run_target" });
+      interrupted = res;
+      child.kill("SIGINT");
+    } else if (request.method === "DELETE") {
+      assert.equal(request.url, "/api/v1/vms/vm_1/runs/run_target");
+      assert.ok(interrupted, "force cancel must follow the first interrupt request");
+      cancelled = true;
+      jsonResponse(res, { cancelled: true });
+      // Keep the old SIGINT response open: force cancellation must retire it.
+    } else {
+      jsonResponse(res, cancelled
+        ? completedRun({ run_id: "run_target", state: "cancelled", stdout: "", stderr: "", exit_code: 130 })
+        : { run_id: "run_target", state: "running", stdout: "", stderr: "", exit_code: null });
+    }
+  }, async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["run", "--json", "vm_1", "sleep", "30"], { onSpawn: (value) => { child = value; } });
+    assert.equal(result.code, 130, result.stderr);
+    assert.equal(result.stderr, "");
+    const value = JSON.parse(stdoutText(result));
+    assert.equal(value.run_id, "run_target");
+    assert.equal(value.state, "cancelled");
+    assert.equal(requests.filter((request) => request.method === "DELETE").length, 1);
+    assert.equal(requests.filter((request) => request.method === "POST").length, 2);
+  });
+}
+
+async function testInlineRunInterruptKeepsMemoryMetadata(): Promise<void> {
+  let child: ChildProcess;
+  let inline: ServerResponse | undefined;
+  let key: string | undefined;
+  await withCapturedServer((request, res) => {
+    const body = request.body as { command?: string; signal?: string; time_to_background?: number };
+    if (request.method === "POST" && body.command && body.time_to_background !== 0) {
+      assert.ok(request.idempotencyKey);
+      key = request.idempotencyKey;
+      inline = res;
+      child.kill("SIGINT");
+    } else if (request.method === "POST" && body.command) {
+      assert.equal(request.idempotencyKey, key);
+      jsonResponse(res, { type: "background", run_id: "inline-run", state: "running" });
+    } else if (request.method === "POST") {
+      assert.deepEqual(body, { signal: "SIGINT", signal_run_id: "inline-run" });
+      assert.ok(inline);
+      jsonResponse(res, completedRun());
+      jsonResponse(inline, completedRun({ run_id: "inline-run", exit_code: 23, memory_requested_mib: 1024, memory_achieved_mib: 1536, memory_partial: true }));
+    } else {
+      jsonResponse(res, { run_id: "inline-run", state: "running", stdout: "", stderr: "", exit_code: null });
+    }
+  }, async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["run", "--json", "--memory-mib", "1024", "vm_1", "sleep", "30"], { onSpawn: (value) => { child = value; } });
+    assert.equal(result.code, 23, result.stderr);
+    assert.equal(result.stderr, "");
+    const value = JSON.parse(stdoutText(result));
+    assert.equal(value.memoryRequestedMib, 1024);
+    assert.equal(value.memoryAchievedMib, 1536);
+    assert.equal(value.memoryPartial, true);
+    const dispatches = requests.filter((request) => (request.body as { command?: string }).command);
+    assert.equal(dispatches.length, 2);
+    const { time_to_background: _window, lookup_only: lookup, ...discovery } = dispatches[1]!.body as Record<string, unknown>;
+    assert.equal(lookup, true);
+    assert.deepEqual(discovery, dispatches[0]!.body);
+  });
+}
+
 async function testRunJsonIncludesMemoryMetadata(): Promise<void> {
   let body: unknown;
   await withServer(async (req, res) => {
@@ -838,7 +913,7 @@ async function testRunJsonIncludesMemoryMetadata(): Promise<void> {
     const result = await runCli(baseUrl, ["run", "--json", "vm_1", "echo", "hello"]);
     assert.equal(result.code, 0);
     assert.equal(result.stderr, "");
-    assert.deepEqual(body, { command: "echo hello" });
+    assert.deepEqual(body, { command: "echo hello", time_to_background: 0 });
     const payload = JSON.parse(stdoutText(result));
     assert.equal(payload.stdout, "aGVsbG8K");
     assert.equal(payload.stdoutEncoding, "base64");
@@ -847,6 +922,44 @@ async function testRunJsonIncludesMemoryMetadata(): Promise<void> {
     assert.equal(payload.memoryRequestedMib, 1024);
     assert.equal(payload.memoryAchievedMib, 1536);
     assert.equal(payload.memoryPartial, true);
+  });
+}
+
+async function testInlineRunFailureStopsInterruptDiscovery(): Promise<void> {
+  let child: ChildProcess;
+  let inline: ServerResponse | undefined;
+  await withCapturedServer((request, res) => {
+    const body = request.body as { lookup_only?: boolean };
+    if (!body.lookup_only) {
+      inline = res;
+      child.kill("SIGINT");
+      return;
+    }
+    jsonResponse(res, { error: {
+      code: "not_found", message: "run not admitted", timestamp: "2026-09-22T00:00:00Z",
+      request_id: "lookup-test", request: { kind: "matched", operation_id: "createRun" },
+      details: { resource: "run" },
+    } }, 404);
+    if (inline) {
+      jsonResponse(inline, { error: { code: "invalid_request", message: "admission rejected" } }, 400);
+      inline = undefined;
+    }
+  }, async (baseUrl, requests) => {
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await runCli(baseUrl, ["run", "--memory-mib", "1024", "vm_1", "sleep", "30"], {
+        onSpawn: (value) => {
+          child = value;
+          watchdog = setTimeout(() => child.kill("SIGKILL"), 5000);
+        },
+      });
+      assert.equal(result.code, 1, "failed admission must exit without waiting for a missing run");
+      assert.match(result.stderr, /admission rejected/);
+      assert.doesNotMatch(result.stderr, /could not find the pending run/);
+      assert.equal(requests.filter((request) => (request.body as { lookup_only?: boolean }).lookup_only).length, 1);
+    } finally {
+      clearTimeout(watchdog);
+    }
   });
 }
 
@@ -1364,6 +1477,9 @@ await testWhoamiUsesAuthenticatedControlPlane();
 await testRemovedSecretAndUrlFlagsFailLocally();
 await testHelpMatchesSupportedSurface();
 await testPerCommandHelpIsCommandSpecific();
+await testRunInterruptEscalationBeforeAcknowledgement();
+await testInlineRunInterruptKeepsMemoryMetadata();
+await testInlineRunFailureStopsInterruptDiscovery();
 await testRunJsonIncludesMemoryMetadata();
 await testRunHumanWritesArbitraryBytes();
 await testRunFailureReasonIsVisible();

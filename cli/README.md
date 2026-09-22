@@ -128,3 +128,5 @@ Input is limited to 1 MiB and sent as exact bytes followed by EOF. An empty
 pipe still sends EOF. The command runs in a child shell with the selected
 session's working directory and exported environment; its `cd` and `export`
 changes do not persist. Interactive terminal input uses `arker shell`.
+
+During `arker run`, the first Ctrl-C sends SIGINT to that run. A second Ctrl-C force-cancels it. A signal received before the run ID arrives is held until the ID is known. Runs with an inline wait or memory override use an idempotency key so a read-only lookup can find that same run while the original request is pending. The lookup checks the original command and options and cannot create another run. `arker shell` remains the interactive terminal command.
