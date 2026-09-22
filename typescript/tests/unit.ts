@@ -1741,7 +1741,7 @@ async function testSyncDirUploadsThenExtracts(): Promise<void> {
     assert.equal(write.op, "write");
     const command = JSON.parse(fetch.calls[2]!.body!).command;
     assert.ok(command.includes(write.writes[0].path));
-    assert.ok(command.includes("tar -xf"));
+    assert.ok(command.includes("tar -xpf"));
     assert.ok(command.includes("/home/user/p"));
   } finally { cleanup(); }
 }
@@ -1939,10 +1939,10 @@ console.log("PASS unit");
 // answer means a silently skipped upload. These tests pin that boundary.
 
 /** A server that answers a syncDir: empty manifest, then accepts the tarball. */
-function syncDirServer(remoteEntries: Array<{ path: string; hash: string }> = []): FakeFetch {
+function syncDirServer(remoteEntries: Array<{ path: string; hash: string; mode?: number }> = []): FakeFetch {
   const fetch = new FakeFetch();
   fetch.addJson((m, url) => m === "POST" && url.endsWith("/sync"), 200, {
-    ok: true, op: "manifest", entries: remoteEntries, truncated: false,
+    ok: true, op: "manifest", entries: remoteEntries.map((entry) => ({ mode: 0o644, ...entry })), truncated: false,
   });
   acceptSyncArchive(fetch);
   return fetch;
@@ -1966,6 +1966,36 @@ function withCacheDir<T>(fn: (cacheDir: string) => Promise<T>): Promise<T> {
     if (previous === undefined) delete process.env.ARKER_CACHE_DIR;
     else process.env.ARKER_CACHE_DIR = previous;
     fs.rmSync(cacheDir, { recursive: true, force: true });
+  });
+}
+
+async function testSyncDirRepairsPermissionOnlyChanges(): Promise<void> {
+  await withCacheDir(async () => {
+    const dir = tmpTree({ "tool.sh": "#!/bin/sh\nprintf mode-ok\n" });
+    const path = nodePath.join(dir, "tool.sh");
+    const hash = createHash("sha256").update(fs.readFileSync(path)).digest("hex");
+    try {
+      for (const cache of [undefined, new Map()]) {
+        for (const [remoteMode, localMode] of [[0o644, 0o755], [0o755, 0o644]]) {
+          fs.chmodSync(path, localMode!);
+          const fetch = syncDirServer([{ path: "tool.sh", hash, mode: remoteMode! }]);
+          const result = await client(fetch).vm("vm_1").syncDir(dir, "/p", { cache });
+          assert.equal(result.sent, 1, "changed permissions must upload unchanged content");
+          const body = JSON.parse(fetch.calls[1]!.body!);
+          const archivePath = nodePath.join(dir, "upload.tar.gz");
+          fs.writeFileSync(archivePath, Buffer.from(body.writes[0].content, "base64"));
+          const entries: Array<{ path: string; mode?: number }> = [];
+          const tar = await import("tar");
+          await tar.list({ file: archivePath, onReadEntry: (entry) => { entries.push({ path: entry.path, mode: entry.mode }); } });
+          fs.unlinkSync(archivePath);
+          assert.deepEqual(entries, [{ path: "tool.sh", mode: localMode }]);
+          const unchanged = syncDirServer([{ path: "tool.sh", hash, mode: localMode! }]);
+          const repeated = await client(unchanged).vm("vm_1").syncDir(dir, "/p", { cache });
+          assert.equal(repeated.sent, 0, "matching content and mode must be skipped");
+          assert.equal(unchanged.calls.length, 1, "matching entries need only the manifest request");
+        }
+      }
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 }
 
@@ -2128,6 +2158,7 @@ async function testCallerSuppliedCacheBypassesDisk(): Promise<void> {
   });
 }
 
+await testSyncDirRepairsPermissionOnlyChanges();
 await testStatCacheSkipsRereadOnSecondSync();
 await testStatCacheCatchesForgedMtimeEdit();
 await testStatCacheDistrustsRacilyCleanEntries();

@@ -1165,8 +1165,8 @@ export class VM {
 
   /**
    * Recursively sync a local directory INTO this VM at `remoteDir`, rsync-style:
-   * fetch the VM's file *manifest* (per-file sha256) in ONE request, diff it
-   * against the local tree, and upload ONLY the files that are new or changed —
+   * fetch the VM's file manifest (content hashes and modes) in ONE request, diff it
+   * against the local tree, and upload files whose content or permissions differ —
    * packed into a single tarball the guest extracts with `tar -x` (so the guest
    * does the writes, always consistent with its own filesystem). Node-only: it
    * reads the local filesystem.
@@ -1194,7 +1194,7 @@ export class VM {
     const localRoot = nodePath.resolve(localDir);
     const remoteRoot = "/" + remoteDir.replace(/^\/+/, "").replace(/\/+$/, "");
 
-    // 1. Authoritative remote manifest: rel_path -> sha256. A directory that
+    // 1. Authoritative remote manifest: relative path -> content hash and mode. A directory that
     //    doesn't exist yet (or an empty VM) yields {} -> everything is sent.
     const clock = () => Number(process.hrtime.bigint() / 1000n) / 1000;
     //    `assumeEmpty` skips the round-trip on a destination the caller knows
@@ -1203,7 +1203,7 @@ export class VM {
     //    tell "skipped" from "merely fast" — a real fetch is ~184ms.
     const tManifest0 = clock();
     const manifest = options.assumeEmpty
-      ? { entries: new Map<string, string>(), truncated: false }
+      ? { entries: new Map<string, { hash: string; mode?: number }>(), truncated: false }
       : await this.remoteManifest(remoteRoot);
     const remote = manifest.entries;
     const manifestMs = clock() - tManifest0;
@@ -1310,7 +1310,11 @@ export class VM {
     // counters are deterministic regardless of which hash finished first.
     for (let index = 0; index < localFiles.length; index++) {
       const file = localFiles[index]!;
-      if (remote.get(file.rel) === hashes[index]) { result.skipped += 1; continue; }
+      const entry = remote.get(file.rel);
+      if (entry?.hash === hashes[index] && entry.mode === (file.sig.mode & 0o7777)) {
+        result.skipped += 1;
+        continue;
+      }
       changed.push({ rel: file.rel, abs: file.abs });
       result.sent += 1;
       result.bytesSent += file.sig.size;
@@ -1336,13 +1340,13 @@ export class VM {
     return result;
   }
 
-  /** Fetch the VM's file manifest under `path` -> Map(rel_path -> sha256), via the
+  /** Fetch the VM's content hashes and permission bits under `path`, via the
    * host-first `op: "manifest"` op (no FC boot; works on a never-run VM). */
   private async remoteManifest(
     path: string,
-  ): Promise<{ entries: Map<string, string>; truncated: boolean }> {
+  ): Promise<{ entries: Map<string, { hash: string; mode?: number }>; truncated: boolean }> {
     const payload = await this._client._request<{
-      entries?: Array<{ path?: unknown; hash?: unknown }>;
+      entries?: Array<{ path?: unknown; hash?: unknown; mode?: unknown }>;
       truncated?: unknown;
     }>(
       "POST",
@@ -1353,11 +1357,15 @@ export class VM {
       undefined,
       true,
     );
-    const out = new Map<string, string>();
+    const out = new Map<string, { hash: string; mode?: number }>();
     if (Array.isArray(payload.entries)) {
       for (const entry of payload.entries) {
         if (entry && typeof entry.path === "string" && typeof entry.hash === "string") {
-          out.set(entry.path, entry.hash);
+          out.set(entry.path, {
+            hash: entry.hash,
+            mode: typeof entry.mode === "number" && Number.isInteger(entry.mode) && entry.mode >= 0
+              ? entry.mode & 0o7777 : undefined,
+          });
         }
       }
     }
@@ -1462,7 +1470,7 @@ export class VM {
       const q = shellQuoteSingle;
       const cmd =
         `set -e; mkdir -p ${q(remoteRoot)}; ` +
-        `tar -xf ${q(remoteTar)} -C ${q(remoteRoot)}; rm -f ${q(remoteTar)}`;
+        `tar -xpf ${q(remoteTar)} -C ${q(remoteRoot)}; rm -f ${q(remoteTar)}`;
       const res = await this.run(cmd);
       if (res.state === "failed" || res.exitCode !== 0) {
         const stderr = (res.stderr ?? "").slice(0, 300);
