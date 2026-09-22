@@ -2015,6 +2015,53 @@ async function testSyncDirPreviewUsesExclusionsWithoutWriting(): Promise<void> {
   });
 }
 
+async function testSyncDirPreservesLinksAndEmptyDirectories(): Promise<void> {
+  const dir = tmpTree({ "file.txt": "inside" });
+  const outside = tmpTree({ "secret.txt": "must not be uploaded" });
+  fs.mkdirSync(nodePath.join(dir, "empty"));
+  fs.symlinkSync("file.txt", nodePath.join(dir, "link"));
+  fs.symlinkSync("missing", nodePath.join(dir, "dangling"));
+  fs.symlinkSync(outside, nodePath.join(dir, "external"));
+  try {
+    const fetch = syncDirServer();
+    const result = await client(fetch).vm("vm_1").syncDir(dir, "/project");
+    assert.equal(result.sent, 5, "the file, links and empty directory must all be sent");
+    assert.equal(result.bytesSent, 6, "symlink targets must not be read");
+    const archive = nodePath.join(outside, "upload.tar.gz");
+    fs.writeFileSync(archive, Buffer.from(JSON.parse(fetch.calls[1]!.body!).writes[0].content, "base64"));
+    const entries: Array<{ path: string; type: string; linkpath: string }> = [];
+    await (await import("tar")).list({ file: archive, onReadEntry: (entry) => {
+      entries.push({ path: entry.path, type: entry.type, linkpath: entry.linkpath });
+    } });
+    assert.deepEqual(entries, [
+      { path: "dangling", type: "SymbolicLink", linkpath: "missing" },
+      { path: "empty/", type: "Directory", linkpath: "" },
+      { path: "external", type: "SymbolicLink", linkpath: outside },
+      { path: "file.txt", type: "File", linkpath: "" },
+      { path: "link", type: "SymbolicLink", linkpath: "file.txt" },
+    ]);
+    const repeated = await client(syncDirServer([{ path: "file.txt", hash: createHash("sha256").update("inside").digest("hex") }]))
+      .vm("vm_1").syncDir(dir, "/project");
+    assert.equal(repeated.skipped, 1);
+    assert.equal(repeated.sent, 4, "entries omitted from the remote manifest must be sent conservatively");
+    assert.equal(repeated.bytesSent, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+}
+
+async function testSyncDirCreatesAnEmptyDestination(): Promise<void> {
+  const dir = tmpTree({});
+  try {
+    const fetch = syncDirServer();
+    const result = await client(fetch).vm("vm_1").syncDir(dir, "/empty");
+    assert.equal(result.sent, 1);
+    assert.equal(result.bytesSent, 0);
+    assert.ok(JSON.parse(fetch.calls[2]!.body!).command.includes("'/empty'"));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
 async function testSyncDirRepairsPermissionOnlyChanges(): Promise<void> {
   await withCacheDir(async () => {
     const dir = tmpTree({ "tool.sh": "#!/bin/sh\nprintf mode-ok\n" });
@@ -2206,6 +2253,8 @@ async function testCallerSuppliedCacheBypassesDisk(): Promise<void> {
 
 await testSyncDirResolvesTheSelectedSessionDirectory();
 await testSyncDirPreviewUsesExclusionsWithoutWriting();
+await testSyncDirPreservesLinksAndEmptyDirectories();
+await testSyncDirCreatesAnEmptyDestination();
 await testSyncDirRepairsPermissionOnlyChanges();
 await testStatCacheSkipsRereadOnSecondSync();
 await testStatCacheCatchesForgedMtimeEdit();
