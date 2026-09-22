@@ -76,6 +76,7 @@
     "@computesdk/e2b": "^1.7.51",
     "@computesdk/modal": "^1.9.3",
     "@types/node": "^25.6.0",
+    "@types/picomatch": "^4.0.3",
     "@types/ws": "^8.18.1",
     "computesdk": "^4.1.3",
     "openapi-typescript": "^7.13.0",
@@ -106,6 +107,7 @@
   },
   "dependencies": {
     "dockerfile-ast": "^0.7.1",
+    "picomatch": "4.0.5",
     "tar": "^7.5.22",
     "ws": "^8.21.0"
   }
