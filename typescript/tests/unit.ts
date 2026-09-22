@@ -2001,7 +2001,7 @@ async function testSyncDirPreviewUsesExclusionsWithoutWriting(): Promise<void> {
       fetch.addJson((method, url) => method === "POST" && url.endsWith("/sync"), 200, { entries: [] });
       const preview = await client(fetch).vm("vm_1").syncDir(dir, "/project", {
         dryRun: true, exclude: [".env", ".git/", "node_modules", "docs/**", "*.log"],
-        ignore: (rel) => rel === "ignored",
+        ignore: (rel) => rel.startsWith("ignored/"),
       });
       assert.equal(preview.sent, 0);
       assert.equal(preview.bytesSent, 0);
@@ -2652,6 +2652,23 @@ async function testGlobDoesNotMatchDotfiles(): Promise<void> {
   }
 }
 
+async function testDirectoryCopyPreservesRootAndDockerignoreExceptions(): Promise<void> {
+  const dir = tmpTree({ ".dockerignore": "src\n!src/keep.ts\n", "src/keep.ts": "keep", "src/drop.ts": "drop" });
+  try {
+    for (const target of ["/app", "/"]) {
+      const fetch = syncDirServer();
+      await applySteps(client(fetch).vm("vm_1"), parseDockerfile(`FROM x\nCOPY . ${target}\n`).steps, dir);
+      assert.equal(JSON.parse(fetch.calls[0]!.body!).path, target);
+      const archivePath = nodePath.join(dir, "archive.tar.gz");
+      fs.writeFileSync(archivePath, Buffer.from(JSON.parse(fetch.calls[1]!.body!).writes[0].content, "base64"));
+      const entries: string[] = [];
+      await (await import("tar")).list({ file: archivePath, onReadEntry: (entry) => { entries.push(entry.path); } });
+      fs.unlinkSync(archivePath);
+      assert.deepEqual(entries, [".dockerignore", "src/keep.ts"]);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
 async function testDockerignoreExcludesFromACopiedDirectory(): Promise<void> {
   // `COPY . /app` shipped .git and .env. actions/checkout writes a
   // GITHUB_TOKEN into .git/config, so this leaked CI credentials.
@@ -2706,6 +2723,7 @@ async function testEnvWithAVariableExpands(): Promise<void> {
 }
 
 await testGlobDoesNotMatchDotfiles();
+await testDirectoryCopyPreservesRootAndDockerignoreExceptions();
 await testDockerignoreExcludesFromACopiedDirectory();
 await testEnvAndWorkdirAfterUserAreNotWrapped();
 await testEnvWithAVariableExpands();

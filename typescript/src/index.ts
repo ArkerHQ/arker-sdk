@@ -1223,8 +1223,7 @@ export class VM {
         matchers.push(picomatch(normalized, { dot: true, matchBase: !normalized.includes("/"), nonegate: true }));
       }
     }
-    const ignored = (rel: string, directory: boolean) => options.ignore?.(rel)
-      || matchers.some((match) => match(rel) || (directory && match(`${rel}/`)));
+    const ignored = (rel: string, directory: boolean) => matchers.some((match) => match(rel) || (directory && match(`${rel}/`)));
 
     // 1. Authoritative remote manifest: relative path -> content hash and mode. A directory that
     //    doesn't exist yet (or an empty VM) yields {} -> everything is sent.
@@ -1252,6 +1251,7 @@ export class VM {
         if (dirent.isSymbolicLink()) continue;
         if (dirent.isDirectory()) { await walk(abs); continue; }
         if (!dirent.isFile()) continue;
+        if (options.ignore?.(rel)) continue;
         // bigint stats: nanosecond timestamps, and ino/dev without precision loss.
         const st = await fsp.stat(abs, { bigint: true });
         localFiles.push({
@@ -2409,7 +2409,7 @@ export interface SyncDirOptions {
   dryRun?: boolean;
   /** Exclude globs. Bare patterns match any basename; patterns with slashes match relative paths. */
   exclude?: string[];
-  /** Skip matching relative paths before hashing or descending into directories. */
+  /** Skip matching file paths before hashing. Directories are still visited so exceptions can match descendants. */
   ignore?: (rel: string) => boolean;
 
   /** Caller-owned accelerator cache: absolute local path -> {size, mtimeMs, hash}.
