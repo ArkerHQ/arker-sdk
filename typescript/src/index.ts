@@ -1240,31 +1240,37 @@ export class VM {
     const manifestMs = clock() - tManifest0;
     const tWalk0 = clock();
 
-    // 2. Enumerate local regular files (skip symlinks — the manifest lists
-    //    regular files only, so a symlink would always look "missing").
-    const localFiles: Array<{ rel: string; abs: string; sig: StatSignature }> = [];
+    // 2. Walk without following links; preserve empty directories as entries.
+    type EntryKind = "file" | "directory" | "symlink";
+    const localFiles: Array<{ rel: string; abs: string; kind: EntryKind; sig: StatSignature }> = [];
+    const addEntry = async (abs: string, rel: string, kind: EntryKind) => {
+      const st = await fsp.lstat(abs, { bigint: true });
+      localFiles.push({
+        rel, abs, kind,
+        sig: {
+          size: Number(st.size),
+          mtimeNs: String(st.mtimeNs),
+          ctimeNs: String(st.ctimeNs),
+          ino: String(st.ino),
+          dev: String(st.dev),
+          mode: Number(st.mode),
+        },
+      });
+    };
     const walk = async (dir: string): Promise<void> => {
-      for (const dirent of await fsp.readdir(dir, { withFileTypes: true })) {
+      const dirents = await fsp.readdir(dir, { withFileTypes: true });
+      if (dirents.length === 0) {
+        const rel = nodePath.relative(localRoot, dir).split(nodePath.sep).join("/") || ".";
+        if (!options.ignore?.(rel)) await addEntry(dir, rel, "directory");
+      }
+      for (const dirent of dirents) {
         const abs = nodePath.join(dir, dirent.name);
         const rel = nodePath.relative(localRoot, abs).split(nodePath.sep).join("/");
         if (ignored(rel, dirent.isDirectory())) continue;
-        if (dirent.isSymbolicLink()) continue;
         if (dirent.isDirectory()) { await walk(abs); continue; }
-        if (!dirent.isFile()) continue;
         if (options.ignore?.(rel)) continue;
-        // bigint stats: nanosecond timestamps, and ino/dev without precision loss.
-        const st = await fsp.stat(abs, { bigint: true });
-        localFiles.push({
-          rel, abs,
-          sig: {
-            size: Number(st.size),
-            mtimeNs: String(st.mtimeNs),
-            ctimeNs: String(st.ctimeNs),
-            ino: String(st.ino),
-            dev: String(st.dev),
-            mode: Number(st.mode),
-          },
-        });
+        if (dirent.isSymbolicLink()) await addEntry(abs, rel, "symlink");
+        else if (dirent.isFile()) await addEntry(abs, rel, "file");
       }
     };
     await walk(localRoot);
@@ -1276,7 +1282,7 @@ export class VM {
     const cache = options.cache;
     const result: SyncDirResult = { sent: 0, skipped: 0, bytesSent: 0 };
     if (manifest.truncated) result.manifestTruncated = true;
-    const changed: Array<{ rel: string; abs: string; bytes: number; mode: number }> = [];
+    const changed: Array<{ rel: string; abs: string; bytes: number; mode: number; kind: EntryKind }> = [];
 
     // Hash with bounded concurrency, streaming each file rather than reading it
     // whole. Two distinct wins, and it is worth being precise about which:
@@ -1301,6 +1307,7 @@ export class VM {
           const index = nextIndex++;
           const file = localFiles[index];
           if (!file) return;
+          if (file.kind !== "file") continue;
           // Cheap change detection: if every stat field matches what we
           // recorded, the contents cannot have changed under us, so skip the
           // read entirely. This is the whole point of the cache — an untouched
@@ -1341,13 +1348,14 @@ export class VM {
     for (let index = 0; index < localFiles.length; index++) {
       const file = localFiles[index]!;
       const entry = remote.get(file.rel);
-      if (entry?.hash === hashes[index] && entry.mode === (file.sig.mode & 0o7777)) {
+      if (file.kind === "file" && entry?.hash === hashes[index] && entry.mode === (file.sig.mode & 0o7777)) {
         result.skipped += 1;
         continue;
       }
-      changed.push({ rel: file.rel, abs: file.abs, bytes: file.sig.size, mode: file.sig.mode & 0o7777 });
+      const bytes = file.kind === "file" ? file.sig.size : 0;
+      changed.push({ rel: file.rel, abs: file.abs, bytes, mode: file.sig.mode & 0o7777, kind: file.kind });
       result.sent += 1;
-      result.bytesSent += file.sig.size;
+      result.bytesSent += bytes;
     }
 
     const hashMs = clock() - tHash0;
@@ -1358,7 +1366,7 @@ export class VM {
     //    the manifest also fails safe — any omitted file is re-sent next call.
     if (options.dryRun) {
       result.dryRun = true;
-      result.planned = changed.map(({ rel, bytes, mode }) => ({ path: rel, bytes, mode }));
+      result.planned = changed.map(({ rel, bytes, mode, kind }) => ({ path: rel, bytes, mode, kind }));
       result.sent = 0;
       result.bytesSent = 0;
     } else if (changed.length > 0) {
@@ -1460,7 +1468,7 @@ export class VM {
 
   /** Upload the changed files as an archive and extract it in the VM. */
   private async uploadAndExtractTarball(
-    changed: Array<{ rel: string; abs: string }>,
+    changed: Array<{ rel: string; abs: string; kind: "file" | "directory" | "symlink" }>,
     localRoot: string,
     remoteRoot: string,
     fsp: typeof import("node:fs").promises,
@@ -1476,12 +1484,12 @@ export class VM {
     // wasted CPU here plus ~3.4x the extraction cost in the guest — so sample
     // first rather than always gzipping. `tar -xf` detects the compression
     // format, so either choice extracts correctly.
-    const compress = await this.shouldCompress(changed, fsp);
+    const compress = await this.shouldCompress(changed.filter((entry) => entry.kind === "file"), fsp);
     const mode = compress ? "tar.gz" : "tar";
     const localTar = nodePath.join(os.tmpdir(), `arker-sync-${ulid()}.${mode}`);
     try {
       await tar.create(
-        { file: localTar, cwd: localRoot, gzip: compress },
+        { file: localTar, cwd: localRoot, gzip: compress, noDirRecurse: true, follow: false },
         changed.map((entry) => entry.rel),
       );
 
@@ -2380,9 +2388,9 @@ function bytesToBase64(data: Uint8Array): string {
 export interface SyncDirResult {
   /** Present for previews; no files were uploaded. */
   dryRun?: boolean;
-  /** Files that would be uploaded, in sorted relative-path order. Present only in a preview. */
-  planned?: Array<{ path: string; bytes: number; mode: number }>;
-  /** Files uploaded (new or changed on the VM). */
+  /** Entries that would be uploaded, in sorted relative-path order. Present only in a preview. */
+  planned?: Array<{ path: string; bytes: number; mode: number; kind: "file" | "directory" | "symlink" }>;
+  /** Filesystem entries uploaded (files, symlinks and empty directories). */
   sent: number;
   /** Files already up-to-date on the VM (skipped). */
   skipped: number;
@@ -2409,7 +2417,7 @@ export interface SyncDirOptions {
   dryRun?: boolean;
   /** Exclude globs. Bare patterns match any basename; patterns with slashes match relative paths. */
   exclude?: string[];
-  /** Skip matching file paths before hashing. Directories are still visited so exceptions can match descendants. */
+  /** Skip matching files, links and empty directories. Parent directories are still visited so exceptions can match descendants. */
   ignore?: (rel: string) => boolean;
 
   /** Caller-owned accelerator cache: absolute local path -> {size, mtimeMs, hash}.

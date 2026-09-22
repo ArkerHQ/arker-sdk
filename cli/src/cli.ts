@@ -1168,11 +1168,11 @@ async function cmdSyncDir(args: ParsedArgs, client: Arker): Promise<void> {
   if (result.manifestTruncated) err("warning: remote manifest was truncated; files beyond the cap are treated as changed");
   if (result.dryRun) {
     const planned = result.planned ?? [];
-    out(`would upload ${planned.length} file(s), skip ${result.skipped}, ${planned.reduce((sum, file) => sum + file.bytes, 0)} byte(s) to ${remoteDir}`);
+    out(`would upload ${planned.length} ${planned.length === 1 ? "entry" : "entries"}, skip ${result.skipped}, ${planned.reduce((sum, file) => sum + file.bytes, 0)} byte(s) to ${remoteDir}`);
     for (const file of planned) out(`upload\t${file.path}`);
     return;
   }
-  out(`synced ${result.sent} file(s), skipped ${result.skipped}, ${result.bytesSent} byte(s) to ${remoteDir}`);
+  out(`synced ${result.sent} ${result.sent === 1 ? "entry" : "entries"}, skipped ${result.skipped}, ${result.bytesSent} byte(s) to ${remoteDir}`);
 }
 
 // Policies are a whole-document GET/PUT, so `set` replaces the document. It is
