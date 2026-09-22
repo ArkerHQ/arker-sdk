@@ -17,6 +17,7 @@ type CliResult = {
 };
 
 type CliOptions = {
+  onStdout?: (chunk: Buffer) => void;
   stdin?: string | Uint8Array;
   authenticated?: boolean;
   controlOnly?: boolean;
@@ -120,7 +121,7 @@ async function runCli(baseUrl: string | undefined, args: string[], options: CliO
   if (options.stdin !== undefined) child.stdin!.end(options.stdin);
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
-  child.stdout!.on("data", (chunk: Buffer) => { stdout.push(chunk); });
+  child.stdout!.on("data", (chunk: Buffer) => { stdout.push(chunk); options.onStdout?.(chunk); });
   child.stderr!.on("data", (chunk: Buffer) => { stderr.push(chunk); });
   const [code] = await once(child, "close") as [number | null];
   const stderrBytes = Buffer.concat(stderr);
@@ -206,7 +207,7 @@ async function testKnownFlagAfterRemoteCommandPassesThrough(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
     const result = await runCli(baseUrl, ["run", "vm_1", "echo", "hello", "--background"]);
     assert.equal(result.code, 0);
-    assert.deepEqual(requests[0]?.body, { command: "echo hello --background" });
+    assert.deepEqual(requests[0]?.body, { time_to_background: 0, command: "echo hello --background" });
   });
 }
 
@@ -214,7 +215,7 @@ async function testRunOptionAfterVmBeforeCommand(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
     const result = await runCli(baseUrl, ["run", "vm_1", "--session-idx", "0", "echo", "ok"]);
     assert.equal(result.code, 0);
-    assert.deepEqual(requests[0]?.body, { session_idx: 0, command: "echo ok" });
+    assert.deepEqual(requests[0]?.body, { time_to_background: 0, session_idx: 0, command: "echo ok" });
   });
 }
 
@@ -222,7 +223,7 @@ async function testRunOptionSeparator(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
     const result = await runCli(baseUrl, ["run", "vm_1", "--", "printf", "ok"]);
     assert.equal(result.code, 0);
-    assert.deepEqual(requests[0]?.body, { command: "printf ok" });
+    assert.deepEqual(requests[0]?.body, { time_to_background: 0, command: "printf ok" });
   });
 }
 
@@ -230,7 +231,7 @@ async function testRunPreservesArgumentBoundaries(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
     const result = await runCli(baseUrl, ["run", "vm_1", "printf", "%s", "hello world"]);
     assert.equal(result.code, 0);
-    assert.deepEqual(requests[0]?.body, { command: "printf %s 'hello world'" });
+    assert.deepEqual(requests[0]?.body, { time_to_background: 0, command: "printf %s 'hello world'" });
   });
 }
 
@@ -1073,6 +1074,32 @@ async function testShellRequiresVmOrSourceBeforeRequest(): Promise<void> {
   });
 }
 
+async function testRunShowsPartialOutputBeforeCompletion(): Promise<void> {
+  let polls = 0;
+  let sawOutput = false;
+  let sawOutputBeforeCompletion = false;
+  await withCapturedServer((request, res) => {
+    if (request.method === "POST") return jsonResponse(res, { run_id: "run_live", state: "running" });
+    polls++;
+    const completed = polls === 2;
+    if (completed) sawOutputBeforeCompletion = sawOutput;
+    jsonResponse(res, {
+      run_id: "run_live", state: completed ? "completed" : "running", started_at: "now",
+      exit_code: completed ? 7 : null,
+      stdout: completed ? "AP8D" : "AP8=", stdout_encoding: "base64",
+      stderr: completed ? "w6k=" : "ww==", stderr_encoding: "base64",
+    });
+  }, async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["run", "vm_1", "command"], { onStdout: () => { sawOutput = true; } });
+    assert.equal(result.code, 7, result.stderr);
+    assert.equal(sawOutputBeforeCompletion, true, "partial output must arrive before the terminal response");
+    assert.deepEqual(result.stdout, Buffer.from([0, 255, 3]));
+    assert.deepEqual(result.stderrBytes, Buffer.from([0xc3, 0xa9]));
+    assert.equal(requests.filter((request) => request.method === "POST").length, 1);
+    assert.equal((requests[0]!.body as { time_to_background: number }).time_to_background, 0);
+  });
+}
+
 async function testStructuredErrorsDoNotRepeatCode(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, {
     error: {
@@ -1333,6 +1360,7 @@ await testSessionsUpdateRequiresAField();
 await testNoPipeReadsFileBytes();
 await testShellSetupUsesPackagedCli();
 await testShellRequiresVmOrSourceBeforeRequest();
+await testRunShowsPartialOutputBeforeCompletion();
 await testStructuredErrorsDoNotRepeatCode();
 await testFalseMutationResultsExitNonzero();
 await testRemainingHttpCommandSurface();
