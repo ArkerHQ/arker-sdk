@@ -334,7 +334,7 @@ async function applyCopy(
       // A directory source copies its CONTENTS into the destination, which is
       // what syncDir does: `COPY src /app/src` puts src's files at /app/src,
       // not at /app/src/src.
-      const target = step.dest.replace(/\/+$/, "");
+      const target = step.dest.replace(/\/+$/, "") || "/";
       // `.dockerignore` patterns are context-relative but syncDir reports
       // paths relative to the directory being synced, so re-anchor them.
       const prefix = relTo(path) === "" ? "" : `${relTo(path)}/`;
