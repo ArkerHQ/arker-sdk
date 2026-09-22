@@ -2193,6 +2193,64 @@ function pollingClient(fetch: typeof globalThis.fetch): Arker {
   return new Arker({ apiKey: "ark_live_test", baseUrl: "https://test.invalid/api/", fetch, retry: false });
 }
 
+async function testWaitForRunEmitsOnlyNewOutputBytes(): Promise<void> {
+  const responses = [
+    { ...RUNNING_RUN, stdout: "AP8=", stdout_encoding: "base64", stderr: "ww==", stderr_encoding: "base64" },
+    RUNNING_RUN,
+    { ...RUNNING_RUN, stdout: "AA==", stdout_encoding: "base64" },
+    { ...COMPLETED_RUN, exit_code: 7, stdout: "AP8D", stdout_encoding: "base64", stderr: "w6k=", stderr_encoding: "base64" },
+  ];
+  const stub = pollingFetch((n) => ({ status: 200, body: responses[n] }));
+  const stdout: Uint8Array[] = [];
+  const stderr: Uint8Array[] = [];
+  const result = await withFakeClock(() => pollingClient(stub.fetch).vm("vm_1").waitForRun("run_bg", {
+    onOutput: (chunk) => { stdout.push(chunk.stdout); stderr.push(chunk.stderr); },
+  }));
+  assert.equal(result.exitCode, 7);
+  assert.deepEqual(Buffer.concat(stdout), Buffer.from([0, 255, 3]));
+  assert.deepEqual(Buffer.concat(stderr), Buffer.from([0xc3, 0xa9]));
+  assert.equal(stub.posts, 0, "watching an existing run must not launch another command");
+}
+
+async function testWaitForRunReportsReplacedCaptureWithoutFailingTheRun(): Promise<void> {
+  const stub = pollingFetch((n) => ({ status: 200, body: {
+    ...(n < 3 ? RUNNING_RUN : COMPLETED_RUN),
+    stdout: ["first", "…[TRUNCATED]tail", "…[TRUNCATED]later", "…[TRUNCATED]final"][n],
+    stderr: n < 3 ? "warning" : "warning\ndone",
+  } }));
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const replacements: string[][] = [];
+  const result = await withFakeClock(() => pollingClient(stub.fetch).vm("vm_1").waitForRun("run_bg", {
+    onOutput: (chunk) => {
+      if (chunk.stdout.length) stdout.push(Buffer.from(chunk.stdout).toString());
+      if (chunk.stderr.length) stderr.push(Buffer.from(chunk.stderr).toString());
+      if (chunk.replaced) replacements.push(chunk.replaced);
+    },
+  }));
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(stdout, ["first", "…[TRUNCATED]final"]);
+  assert.deepEqual(stderr, ["warning", "\ndone"]);
+  assert.deepEqual(replacements, [["stdout"]]);
+}
+
+async function testWaitForRunPreservesFailureWithTruncatedTerminalOutput(): Promise<void> {
+  for (const state of ["failed", "cancelled"]) {
+    const failure = { ...COMPLETED_RUN, state, stdout: "", stderr: "", exit_code: null,
+      fail_reason: state === "failed" ? "compute environment became unavailable" : null };
+    const stub = pollingFetch((n) => ({ status: 200, body: n === 0
+      ? { ...RUNNING_RUN, stdout: "working", stderr: "warning" } : failure }));
+    const chunks: { stdout: Uint8Array; stderr: Uint8Array }[] = [];
+    const result = await withFakeClock(() => pollingClient(stub.fetch).vm("vm_1").waitForRun("run_bg", {
+      onOutput: (chunk) => chunks.push(chunk),
+    }));
+    assert.equal(result.state, state);
+    assert.equal(result.failReason, failure.fail_reason);
+    assert.equal(chunks.length, 1);
+    assert.equal(Buffer.from(chunks[0]!.stderr).toString(), "warning");
+  }
+}
+
 async function testUnsetTimeoutNeverGivesUpOnAStillRunningRun(): Promise<void> {
   // THE regression assertion. The old client capped an unset timeout at a
   // 3600s CLIENT-side budget and threw "timeout" on a run that was perfectly
@@ -2265,6 +2323,9 @@ async function testTimeToBackgroundZeroReturnsTheAckWithoutPolling(): Promise<vo
   assert.equal(stub.posts, 1);
 }
 
+await testWaitForRunEmitsOnlyNewOutputBytes();
+await testWaitForRunReportsReplacedCaptureWithoutFailingTheRun();
+await testWaitForRunPreservesFailureWithTruncatedTerminalOutput();
 await testUnsetTimeoutNeverGivesUpOnAStillRunningRun();
 await testExplicitTimeoutStillBoundsTheWait();
 await testPollingGivesUpWhenTheServiceStopsAnswering();

@@ -936,24 +936,41 @@ async function cmdRun(args: ParsedArgs, client: Arker): Promise<void> {
   const policies = policiesFile === undefined
     ? undefined
     : readJsonObject(policiesFile, "policy document") as PolicyDoc;
+  const streamOutput = !args.flags.json && args.flags["time-to-background"] === undefined
+    && args.flags["memory-mib"] === undefined;
+  const vm = client.vm(vmId);
+  let streamed = false;
   const result: RunResult = await withSecretRedaction(
     policySecretValues(policies),
-    () => client.vm(vmId).run(command, {
-      timeout: numFlag(args, "timeout"),
-      time_to_background: numFlag(args, "time-to-background"),
-      queueing_timeout: numFlag(args, "queueing-timeout"),
-      session_id: args.flags["session-id"] as string | undefined,
-      ...(sessionIdx !== undefined ? { session_idx: sessionIdx } : {}),
-      end_symbol: args.flags["end-symbol"] as string | undefined,
-      vcpu_count: numFlag(args, "vcpu"),
-      memory_mib: numFlag(args, "memory-mib"),
-      disk_mib: numFlag(args, "disk-mib"),
-      memory_backend: args.flags["memory-backend"] as "file" | "uffd" | undefined,
-      ...(policies !== undefined ? { policies } : {}),
-      idempotencyKey: args.flags["idempotency-key"] as string | undefined,
-    }),
+    async () => {
+      const result = await vm.run(command, {
+        timeout: numFlag(args, "timeout"),
+        time_to_background: streamOutput ? 0 : numFlag(args, "time-to-background"),
+        queueing_timeout: numFlag(args, "queueing-timeout"),
+        session_id: args.flags["session-id"] as string | undefined,
+        ...(sessionIdx !== undefined ? { session_idx: sessionIdx } : {}),
+        end_symbol: args.flags["end-symbol"] as string | undefined,
+        vcpu_count: numFlag(args, "vcpu"),
+        memory_mib: numFlag(args, "memory-mib"),
+        disk_mib: numFlag(args, "disk-mib"),
+        memory_backend: args.flags["memory-backend"] as "file" | "uffd" | undefined,
+        ...(policies !== undefined ? { policies } : {}),
+        idempotencyKey: args.flags["idempotency-key"] as string | undefined,
+      });
+      if (!streamOutput || result.type !== "background") return result;
+      const completed = await vm.waitForRun(result.runId, {
+        timeout: numFlag(args, "timeout"),
+        onOutput: ({ stdout, stderr, replaced }) => {
+          if (replaced?.length) process.stderr.write(`arker: remote ${replaced.join(" and ")} capture changed; showing its final retained output at completion. Some bytes can repeat or be missing.\n`);
+          if (stdout.length) process.stdout.write(stdout);
+          if (stderr.length) process.stderr.write(stderr);
+        },
+      });
+      streamed = true;
+      return completed;
+    },
   );
-  printRunResult(result, Boolean(args.flags.json));
+  printRunResult(result, Boolean(args.flags.json), streamed);
 }
 
 function formatMib(value: number | null | undefined): string {
@@ -975,12 +992,12 @@ interface PrintableRun {
   memoryPartial?: boolean;
 }
 
-function printRunResult(result: RunResult, json: boolean): void {
+function printRunResult(result: RunResult, json: boolean, streamed = false): void {
   if (result.type === "background") {
     out({ run_id: result.runId, state: result.state });
     return;
   }
-  printCompletedRun({ ...result, stdout: result.stdoutBytes, stderr: result.stderrBytes }, json);
+  printCompletedRun({ ...result, stdout: streamed ? new Uint8Array(0) : result.stdoutBytes, stderr: streamed ? new Uint8Array(0) : result.stderrBytes }, json);
 }
 
 function printStoredRun(run: RunRecord, json: boolean): void {

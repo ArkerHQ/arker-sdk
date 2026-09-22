@@ -354,6 +354,17 @@ export type RunOptions = Partial<Omit<RunRequest, "command">> & {
    */
   idempotencyKey?: string;
 };
+export interface WaitForRunOptions {
+  /** Server-side kill bound in seconds, used to allow the same completion margin as run(). */
+  timeout?: number | null;
+  /**
+   * New bytes from growing output snapshots. If the server replaces a captured
+   * stream (for example, when its retention limit is exceeded), `replaced`
+   * names that stream. Further bytes for it arrive only at completion, as the
+   * final retained snapshot, which can overlap bytes already delivered.
+   */
+  onOutput?: (chunk: { stdout: Uint8Array; stderr: Uint8Array; replaced?: ("stdout" | "stderr")[] }) => void;
+}
 export type RunResponse = ApiSchema<"RunResponse">;
 export type CompletedRunResponse = ApiSchema<"CompletedRunResponse">;
 export type BackgroundRunResponse = ApiSchema<"BackgroundRunResponse">;
@@ -1030,7 +1041,7 @@ export class VM {
     // and hand back the completed run so the synchronous call is transparent.
     // Explicit zero is a pure pass-through — return the ack immediately.
     if (result.type === "background" && options.time_to_background !== 0) {
-      return this._awaitRun(result.runId, options.timeout);
+      return this.waitForRun(result.runId, { timeout: options.timeout });
     }
     return result;
   }
@@ -1098,14 +1109,16 @@ export class VM {
    * invoked only when the server backgrounds a run that outlived its sync
    * window.
    *
-   * Bounded by `timeoutSecs` (the run's kill bound) plus a margin, so the poll
+   * Bounded by `options.timeout` (the run's kill bound) plus a margin, so the poll
    * outlives the server-side kill and reports its outcome. An unset or `0`
    * timeout is unbounded server-side, so the poll is unbounded too — giving up
    * at a client-side deadline the caller never asked for would abandon a run
    * that is still going.
    */
-  private async _awaitRun(runId: string, timeoutSecs?: number | null): Promise<CompletedRunResult> {
-    const budgetMs = runPollBudgetMs(timeoutSecs);
+  async waitForRun(runId: string, options: WaitForRunOptions = {}): Promise<CompletedRunResult> {
+    const budgetMs = runPollBudgetMs(options.timeout);
+    const stdoutCursor: RunOutputCursor = { emitted: new Uint8Array(0), replaced: false };
+    const stderrCursor: RunOutputCursor = { emitted: new Uint8Array(0), replaced: false };
     const deadline = budgetMs === null ? null : Date.now() + budgetMs;
     // budgetMs and deadline are null together, so the throw below can read
     // budgetMs without a non-null assertion.
@@ -1132,7 +1145,20 @@ export class VM {
         continue;
       }
       consecutiveFailures = 0;
-      if (TERMINAL_RUN_STATES.has(run.state)) return runToCompletedResult(run);
+      const terminal = TERMINAL_RUN_STATES.has(run.state);
+      if (options.onOutput) {
+        const replaced: ("stdout" | "stderr")[] = [];
+        const wasStdoutReplaced = stdoutCursor.replaced;
+        const wasStderrReplaced = stderrCursor.replaced;
+        const stdout = runOutputDelta(stdoutCursor, run.stdoutBytes, terminal, run.state === "completed");
+        const stderr = runOutputDelta(stderrCursor, run.stderrBytes, terminal, run.state === "completed");
+        if (!wasStdoutReplaced && stdoutCursor.replaced) replaced.push("stdout");
+        if (!wasStderrReplaced && stderrCursor.replaced) replaced.push("stderr");
+        if (stdout.length || stderr.length || replaced.length) {
+          options.onOutput({ stdout, stderr, ...(replaced.length ? { replaced } : {}) });
+        }
+      }
+      if (terminal) return runToCompletedResult(run);
       if (budgetMs !== null && deadline !== null && Date.now() >= deadline) {
         throw new ArkerError(
           "timeout",
@@ -2083,6 +2109,29 @@ function decodeWireRun(wire: Run): RunRecord {
     stdoutBytes,
     stderrBytes,
   };
+}
+
+interface RunOutputCursor {
+  emitted: Uint8Array;
+  replaced: boolean;
+}
+
+function runOutputDelta(
+  cursor: RunOutputCursor,
+  current: Uint8Array,
+  terminal: boolean,
+  completed: boolean,
+): Uint8Array {
+  const { emitted } = cursor;
+  const sharedLength = Math.min(emitted.length, current.length);
+  if ((terminal && completed && current.length < emitted.length)
+      || !emitted.subarray(0, sharedLength).every((byte, index) => byte === current[index])) {
+    cursor.replaced = true;
+  }
+  if (cursor.replaced) return terminal ? current.slice() : new Uint8Array(0);
+  if (current.length <= emitted.length) return new Uint8Array(0);
+  cursor.emitted = current.slice();
+  return current.slice(emitted.length);
 }
 
 /** Project a terminal run-status (`Run`) into the `CompletedRunResult` shape
