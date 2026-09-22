@@ -2027,6 +2027,7 @@ class RunRequest:
     end_symbol: str | None = 'auto'
     signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
     policies: PolicyWriteRequest | None = None
+    stdin_base64: str | None = None
 
 
 SyncWriteResult: TypeAlias = (
