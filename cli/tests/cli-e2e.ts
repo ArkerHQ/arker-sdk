@@ -16,6 +16,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -83,8 +86,10 @@ async function testForkRunSyncAndRemove(): Promise<void> {
 }
 
 async function testUnauthenticatedRequestFails(): Promise<void> {
-  const child = { ...process.env };
+  const home = mkdtempSync(join(tmpdir(), "arker-cli-e2e-home-"));
+  const child: NodeJS.ProcessEnv = { ...process.env, HOME: home };
   delete child.ARKER_API_KEY;
+  try {
   const result = await new Promise<CliResult>((resolve) => {
     const proc = spawn(cliRuntime, [cliEntry, "whoami"], { cwd: packageRoot, env: child, stdio: ["ignore", "pipe", "pipe"] });
     const out: Buffer[] = [];
@@ -94,6 +99,9 @@ async function testUnauthenticatedRequestFails(): Promise<void> {
     proc.on("close", (code) => resolve({ code, stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(errs).toString() }));
   });
   assert.notEqual(result.code, 0, "whoami without an API key should fail");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 }
 
 if (!process.env.ARKER_API_KEY || !SOURCE_VM) {

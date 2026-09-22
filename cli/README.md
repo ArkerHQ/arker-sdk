@@ -38,7 +38,24 @@ export ARKER_PROVIDER=aws
 export ARKER_REGION=us-west-2
 ```
 
-For persistent configuration, create `~/.arker/config.json`:
+Save placement defaults with:
+
+```bash
+arker config set provider aws
+arker config set region us-west-2
+arker config get region
+arker config list
+arker config unset region
+```
+
+Flags override environment variables, which override stored defaults.
+The config commands read and write `~/.arker/config.json` without API access.
+`get` and `list` show stored values, not environment or flag overrides.
+Only provider and region are shown; other fields, including existing credentials,
+are preserved when the file is updated. `--json` emits a JSON result.
+An unset key makes `get` exit with status 1; unsetting it again succeeds.
+
+The file can also be edited directly:
 
 ```json
 {
