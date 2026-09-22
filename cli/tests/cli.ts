@@ -298,9 +298,6 @@ async function testInvalidNumbersFailBeforeRequest(): Promise<void> {
   }
 }
 
-/// `--vgpu` is the only fractional resource flag, so it exercises the number
-/// option type as well as the fork wiring — an integer-only parser would have
-/// refused `0.25` outright.
 async function testForkSelectsPool(): Promise<void> {
   for (const [flag, field, value] of [
     ["--pool", "pool_name", "main"],
@@ -329,6 +326,9 @@ async function testForkSelectsPool(): Promise<void> {
   );
 }
 
+/// `--vgpu` is the only fractional resource flag, so it exercises the number
+/// option type as well as the fork wiring — an integer-only parser would have
+/// refused `0.25` outright.
 async function testForkForwardsVgpu(): Promise<void> {
   await withCapturedServer(
     (_request, res) => jsonResponse(res, { vm_id: "vm_gpu" }),
