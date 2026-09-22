@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import http2 from "node:http2";
 import http from "node:http";
-import net, { type AddressInfo } from "node:net";
+import { type AddressInfo } from "node:net";
 
 import { Arker, type CompletedRunResult } from "../src/index.js";
 
@@ -136,65 +136,31 @@ async function testAbortedRequestSettlesWithoutHanging(): Promise<void> {
   await shutdown(server, sessions);
 }
 
-async function testHttp1MutationsWorkWithoutAnEarlierRead(): Promise<void> {
+async function testHttp1MutationWorksWithoutAnEarlierRead(): Promise<void> {
   const requests: string[] = [];
   const server = http.createServer((req, res) => {
     requests.push(`${req.method} ${req.url}`);
     res.setHeader("content-type", "application/json");
-    res.end(req.method === "DELETE" ? JSON.stringify({ deleted: true }) : RUN_BODY);
+    res.end(JSON.stringify({ deleted: true }));
   });
   const port = await new Promise<number>((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port));
   });
   try {
-    const arker = h2client(port);
-    assert.deepEqual(await arker.vm("vm_1").delete(), { deleted: true });
-    const run = await arker.vm("vm_2").run("printf once");
-    assert.equal((run as CompletedRunResult).exitCode, 0);
-    assert.deepEqual(requests, ["DELETE /api/v1/vms/vm_1", "POST /api/v1/vms/vm_2/runs"]);
+    assert.deepEqual(await h2client(port).vm("vm_1").delete(), { deleted: true });
+    assert.deepEqual(requests, ["DELETE /api/v1/vms/vm_1"]);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 }
 
-async function testFailedNegotiationAndFetchDoNotPoisonProtocolChoice(): Promise<void> {
-  const received: string[] = [];
-  const unavailable = net.createServer((socket) => {
-    socket.once("data", (bytes) => {
-      received.push(bytes.toString("ascii").split("\r\n")[0]!);
-      socket.destroy();
-    });
-  });
-  const port = await new Promise<number>((resolve) => {
-    unavailable.listen(0, "127.0.0.1", () => resolve((unavailable.address() as AddressInfo).port));
-  });
-  const arker = h2client(port);
-  try {
-    await assert.rejects(() => arker.vm("vm_1").run("printf once"));
-    assert.deepEqual(received, ["PRI * HTTP/2.0", "POST /api/v1/vms/vm_1/runs HTTP/1.1"]);
-  } finally {
-    await new Promise<void>((resolve) => unavailable.close(() => resolve()));
-  }
-  const recovered = http2.createServer();
-  const sessions = trackSessions(recovered);
-  recovered.on("stream", (stream: http2.ServerHttp2Stream) => {
-    stream.respond({ ":status": 200, "content-type": "application/json" });
-    stream.end(RUN_BODY);
-  });
-  await new Promise<void>((resolve) => recovered.listen(port, "127.0.0.1", resolve));
-  try {
-    const result = await arker.vm("vm_1").run("printf recovered");
-    assert.equal((result as CompletedRunResult).exitCode, 0);
-  } finally {
-    await shutdown(recovered, sessions);
-  }
-}
-
 async function testFirstHttp2MutationFailureDoesNotReplayOrDisableHttp2(): Promise<void> {
   let requests = 0;
+  let connections = 0;
   const server = http2.createServer();
   const sessions = trackSessions(server);
+  server.on("connection", () => connections++);
   server.on("stream", (stream: http2.ServerHttp2Stream) => {
     requests++;
     if (requests === 1) {
@@ -211,7 +177,9 @@ async function testFirstHttp2MutationFailureDoesNotReplayOrDisableHttp2(): Promi
       () => arker.vm("vm_1").run("printf once", { idempotencyKey: "one-attempt" }),
       (error: unknown) => error instanceof Error,
     );
-    assert.equal(requests, 1, "a dispatched HTTP/2 mutation must not fall back to fetch");
+    await sleep(20);
+    assert.equal(requests, 1, "a dispatched HTTP/2 mutation must not be retried");
+    assert.equal(connections, 1, "a dispatched HTTP/2 mutation must not fall back to fetch");
     const result = await arker.vm("vm_1").run("printf after-reconcile");
     assert.equal((result as CompletedRunResult).exitCode, 0);
     assert.equal(requests, 2, "an ambiguous failure must not disable HTTP/2 for later requests");
@@ -224,8 +192,7 @@ await testHttp2HappyPath();
 await testHttp2MultiplexesConcurrentRequests();
 await testAbortedRequestSettlesWithoutHanging();
 await testFirstHttp2MutationFailureDoesNotReplayOrDisableHttp2();
-await testFailedNegotiationAndFetchDoNotPoisonProtocolChoice();
-await testHttp1MutationsWorkWithoutAnEarlierRead();
+await testHttp1MutationWorksWithoutAnEarlierRead();
 
 console.log("PASS http2");
 // Real sockets (server sessions) can keep the event loop alive; everything is

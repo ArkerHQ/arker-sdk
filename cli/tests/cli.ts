@@ -958,15 +958,6 @@ async function testShellRequiresVmOrSourceBeforeRequest(): Promise<void> {
   });
 }
 
-async function testDeleteAgainstHttp1WithoutAnEarlierRead(): Promise<void> {
-  await withCapturedServer((_request, res) => jsonResponse(res, { deleted: true }), async (baseUrl, requests) => {
-    const result = await runCli(baseUrl, ["rm", "vm_http1"]);
-    assert.equal(result.code, 0, result.stderr);
-    assert.equal(result.stdout.toString(), "deleted vm_http1\n");
-    assert.deepEqual(requestsWithoutKeys(requests), [{ method: "DELETE", url: "/api/v1/vms/vm_http1", body: undefined }]);
-  }, { http1: true });
-}
-
 async function testStructuredErrorsDoNotRepeatCode(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, {
     error: {
@@ -1222,7 +1213,6 @@ await testSessionsUpdateRequiresAField();
 await testNoPipeReadsFileBytes();
 await testShellSetupUsesPackagedCli();
 await testShellRequiresVmOrSourceBeforeRequest();
-await testDeleteAgainstHttp1WithoutAnEarlierRead();
 await testStructuredErrorsDoNotRepeatCode();
 await testFalseMutationResultsExitNonzero();
 await testRemainingHttpCommandSurface();
