@@ -86,3 +86,27 @@ Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [e
 ## License
 
 Apache-2.0
+
+## Directory sync
+
+Remote paths are absolute or relative to the default guest session's working
+directory. Use `--session-id` to select another session. No shell expansion is
+applied to paths.
+
+```sh
+arker sync-dir <vm_id> ./project ./project --dry-run \
+  --exclude .env --exclude .git --exclude node_modules
+arker sync-dir <vm_id> ./project ./project \
+  --exclude .env --exclude .git --exclude node_modules
+```
+
+`--exclude` is repeatable. A pattern without a slash matches a file or directory
+name at any depth. A pattern with a slash matches a path relative to the local
+root; for example, `--exclude 'docs/**'`. Quote globs so the local shell does not
+expand them. Matching includes dotfiles. Excluding a directory skips its contents.
+There are no automatic exclusions, and `.gitignore` is not loaded.
+
+`--dry-run` reads the remote manifest and lists files that would be uploaded. It
+does not write guest files or run extraction. With `--json`, the preview has
+`dryRun: true`, a `planned` array of relative paths, byte counts and modes, and
+zero `sent` and `bytesSent` counts. Unchanged files are counted in `skipped`.

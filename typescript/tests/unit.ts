@@ -1970,6 +1970,51 @@ function withCacheDir<T>(fn: (cacheDir: string) => Promise<T>): Promise<T> {
   });
 }
 
+async function testSyncDirResolvesTheSelectedSessionDirectory(): Promise<void> {
+  const dir = tmpTree({ "file.txt": "relative-path" });
+  try {
+    for (const sessionId of [undefined, "session_explicit"]) {
+      const fetch = new FakeFetch();
+      const session = { session_id: sessionId ?? "session_default", session_idx: 0, cwd: "/home/user/work tree", state: "idle" };
+      fetch.addJson((method, url) => method === "GET" && url.endsWith(sessionId ? `/sessions/${sessionId}` : "/sessions"), 200,
+        sessionId ? session : { sessions: [{ ...session, session_id: "other", session_idx: 1, cwd: "/wrong" }, session] });
+      fetch.addJson((method, url) => method === "POST" && url.endsWith("/sync"), 200, { entries: [] });
+      acceptSyncArchive(fetch);
+      await client(fetch).vm("vm_1").syncDir(dir, "tmp/../output", { sessionId });
+      assert.equal(JSON.parse(fetch.calls[1]!.body!).path, "/home/user/work tree/output");
+      const extract = JSON.parse(fetch.calls[3]!.body!);
+      assert.equal(extract.session_id, session.session_id);
+      assert.ok(extract.command.includes("'/home/user/work tree/output'"));
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
+async function testSyncDirPreviewUsesExclusionsWithoutWriting(): Promise<void> {
+  await withCacheDir(async (cacheDir) => {
+    const dir = tmpTree({
+      ".env": "dummy", ".git/config": "dummy", "node_modules/module": "dummy",
+      "src/.env": "dummy", "src/nested/node_modules/module": "dummy", "src/main.ts": "source",
+      "docs/readme.txt": "docs", "src/debug.log": "log", "ignored/file": "ignored", ".gitignore": ".env",
+    });
+    try {
+      const fetch = new FakeFetch();
+      fetch.addJson((method, url) => method === "POST" && url.endsWith("/sync"), 200, { entries: [] });
+      const preview = await client(fetch).vm("vm_1").syncDir(dir, "/project", {
+        dryRun: true, exclude: [".env", ".git/", "node_modules", "docs/**", "*.log"],
+        ignore: (rel) => rel === "ignored",
+      });
+      assert.equal(preview.sent, 0);
+      assert.equal(preview.bytesSent, 0);
+      assert.equal(preview.dryRun, true);
+      assert.deepEqual(preview.planned?.map((entry) => entry.path), [".gitignore", "src/main.ts"]);
+      assert.equal(fetch.calls.length, 1, "preview must only read the manifest");
+      assert.deepEqual(fs.readdirSync(cacheDir), [], "preview must not persist a sync cache");
+      const all = await client(new FakeFetch()).vm("vm_1").syncDir(dir, "/project", { dryRun: true, assumeEmpty: true });
+      assert.equal(all.planned?.length, 10, "there are no automatic exclusions");
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+}
+
 async function testSyncDirRepairsPermissionOnlyChanges(): Promise<void> {
   await withCacheDir(async () => {
     const dir = tmpTree({ "tool.sh": "#!/bin/sh\nprintf mode-ok\n" });
@@ -2159,6 +2204,8 @@ async function testCallerSuppliedCacheBypassesDisk(): Promise<void> {
   });
 }
 
+await testSyncDirResolvesTheSelectedSessionDirectory();
+await testSyncDirPreviewUsesExclusionsWithoutWriting();
 await testSyncDirRepairsPermissionOnlyChanges();
 await testStatCacheSkipsRereadOnSecondSync();
 await testStatCacheCatchesForgedMtimeEdit();
