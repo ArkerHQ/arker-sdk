@@ -16,6 +16,32 @@ import (
 
 const forkVM = `{"vm_id":"vm_child","owner_org_id":"org","state":"idle"}`
 
+func TestForkPoolSelectionReachesServer(t *testing.T) {
+	for _, req := range []arker.ForkRequest{
+		{SourceVMName: "ubuntu", PoolName: "main"},
+		{SourceVMName: "ubuntu", PoolID: "00000000-0000-4000-8000-000000000001"},
+	} {
+		var body map[string]any
+		c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			fmt.Fprint(w, forkVM)
+		})
+		_, err := c.Fork(context.Background(), req)
+		done()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if req.PoolName != "" && body["pool_name"] != req.PoolName {
+			t.Fatalf("pool name missing: %v", body)
+		}
+		if req.PoolID != "" && body["pool_id"] != req.PoolID {
+			t.Fatalf("pool ID missing: %v", body)
+		}
+	}
+}
+
 func testClient(t *testing.T, h http.HandlerFunc) (*arker.Client, func()) {
 	t.Helper()
 	srv := httptest.NewServer(h)

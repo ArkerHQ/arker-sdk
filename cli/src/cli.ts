@@ -123,6 +123,8 @@ const FORK_OPTIONS: OptionSpecs = {
   "no-disk": { type: "boolean" },
   platform: { type: "string" },
   "policies-file": { type: "string" },
+  pool: { type: "string" },
+  "pool-id": { type: "string" },
   public: { type: "boolean" },
   "queueing-timeout": { type: "integer", min: 0 },
   "registry-auth-file": { type: "string" },
@@ -669,6 +671,9 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
   const name = args.flags.name as string | undefined;
   const description = args.flags.description as string | undefined;
   const publicFlag = boolFlag(args, "public");
+  const poolName = args.flags.pool as string | undefined;
+  const poolId = args.flags["pool-id"] as string | undefined;
+  if (poolName !== undefined && poolId !== undefined) die("--pool and --pool-id are mutually exclusive");
 
   if (args.positional.length > 1) die("fork accepts only one positional source VM name");
   if (refPositional && srcVmNameFlag) die("positional source cannot be combined with --source-vm-name");
@@ -767,6 +772,8 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
         : { dockerfile: dockerfile!, ...(context ? { context } : {}) };
   const forkOptions: ForkOptions = {
     ...source,
+    ...(poolName !== undefined ? { pool_name: poolName } : {}),
+    ...(poolId !== undefined ? { pool_id: poolId } : {}),
     name,
     description,
     public: publicFlag,
@@ -1623,6 +1630,8 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   persist: { desc: "keep the remote PTY process alive on disconnect" },
   platform: { placeholder: "<token[,token...]>", desc: "filter VMs or pin a fork to a compute platform" },
   "policies-file": { placeholder: "<path>", desc: "JSON policy document for a fork, run, or VM update" },
+  pool: { placeholder: "<name>", desc: "pool for the new VM, by name in your organization" },
+  "pool-id": { placeholder: "<id>", desc: "pool for the new VM, by ID instead of name" },
   provider: { placeholder: "<provider>", desc: "compute provider or activity filter (or env ARKER_PROVIDER)" },
   pty: { desc: "mark the new session for interactive PTY use" },
   public: { desc: "filter public VMs or make the forked VM public" },

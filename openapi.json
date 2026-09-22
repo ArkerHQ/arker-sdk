@@ -311,6 +311,16 @@
               "type": "string",
               "format": "date-time"
             }
+          },
+          {
+            "in": "query",
+            "name": "pool_id",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Filter the caller organization\u2019s VMs by pool membership."
           }
         ],
         "responses": {
@@ -4417,7 +4427,23 @@
             ],
             "nullable": true,
             "description": "Optional credentials for `image`. Ignored when forking from a source VM, which has no registry to authenticate against."
+          },
+          "pool_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optionally join an active pool in the same organization and provider/region. Membership is permanent and never inherited from the source VM."
+          },
+          "pool_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Optionally join an active pool by its unique name in the caller organization. Names are normalized and case-insensitive. Mutually exclusive with pool_id. Membership is permanent, uses the resolved pool ID, and is never inherited from the source VM."
           }
+        },
+        "not": {
+          "required": [
+            "pool_id",
+            "pool_name"
+          ]
         }
       },
       "Session": {
@@ -4718,6 +4744,14 @@
               "$ref": "#/components/schemas/CompatiblePlatform"
             },
             "description": "Source-compatible platforms structurally offered in this region. This is not a live-capacity signal."
+          },
+          "pool_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Immutable pool membership. Expired pools bill subsequent usage at normal rates."
           }
         }
       },
@@ -6905,7 +6939,10 @@
           "billing",
           "correction_review",
           "webhook",
-          "resource"
+          "resource",
+          "pool",
+          "pool_quote",
+          "pool_name"
         ],
         "description": "Use resource only when the actual kind cannot be identified safely."
       },
@@ -6929,7 +6966,11 @@
         "enum": [
           "running",
           "mutable",
-          "unclaimed"
+          "unclaimed",
+          "active",
+          "same_location",
+          "pool_purchases_enabled",
+          "pool_pricing_configured"
         ]
       },
       "UnsupportedReason": {
@@ -6944,7 +6985,8 @@
         "type": "string",
         "enum": [
           "accept_legal_terms",
-          "convert_billing_plan"
+          "convert_billing_plan",
+          "add_payment_method"
         ]
       },
       "OperationFailureReason": {

@@ -201,6 +201,7 @@ async function testForkPreservesTheCanonicalWireShape(): Promise<void> {
   await client(fetch).fork({
     source_vm_name: "ubuntu",
     source_org_name: "ArkerHQ",
+    pool_name: "main",
     resources: { vcpu: 2, memory_mib: 2048 },
     description: null,
     disk: false,
@@ -210,6 +211,7 @@ async function testForkPreservesTheCanonicalWireShape(): Promise<void> {
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), {
     source_vm_name: "ubuntu",
     source_org_name: "ArkerHQ",
+    pool_name: "main",
     resources: { vcpu: 2, memory_mib: 2048 },
     description: null,
     disk: false,

@@ -94,6 +94,8 @@ type VMNetwork struct {
 // so a field that varies between two otherwise identical retries turns a replay
 // into a 409.
 type ForkRequest struct {
+	PoolID        string `json:"pool_id,omitempty"`
+	PoolName      string `json:"pool_name,omitempty"`
 	SourceVMID    string `json:"source_vm_id,omitempty"`
 	SourceVMName  string `json:"source_vm_name,omitempty"`
 	SourceOrgID   string `json:"source_org_id,omitempty"`

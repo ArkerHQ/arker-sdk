@@ -307,6 +307,7 @@ def test_fork_preserves_the_canonical_wire_shape() -> None:
         client().fork(
             source_vm_name="ubuntu",
             source_org_id="org_123",
+            pool_name="main",
             resources={"vcpu": 2, "memory_mib": 2048},
             description=None,
             disk=False,
@@ -316,6 +317,7 @@ def test_fork_preserves_the_canonical_wire_shape() -> None:
     assert json.loads(t.calls[0]["body"]) == {
         "source_vm_name": "ubuntu",
         "source_org_id": "org_123",
+        "pool_name": "main",
         "resources": {"vcpu": 2, "memory_mib": 2048},
         "description": None,
         "disk": False,
