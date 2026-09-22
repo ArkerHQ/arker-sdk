@@ -2423,7 +2423,10 @@ const BUN_RUNTIME = Boolean((globalThis as unknown as {
 }).process?.versions?.bun);
 
 // One HTTP/2 session per origin; concurrent requests multiplex over it as streams.
-// Protocol negotiation completes before any application request is sent.
+// Protocol negotiation completes before any application request is sent. A TLS
+// handshake that selected h2 via ALPN is proof enough, a round trip before the
+// server's SETTINGS arrive. Cleartext, or a TLS server that ignores ALPN, has no
+// such proof, so it waits for SETTINGS.
 class Http2Connection {
   readonly ready: Promise<void>;
   private streams = 0;
@@ -2435,17 +2438,20 @@ class Http2Connection {
     this.ready = new Promise<void>((resolve, reject) => {
       const cleanup = () => {
         clearTimeout(timeout);
+        this.session.off("connect", onConnect);
         this.session.off("remoteSettings", onReady);
         this.session.off("error", onError);
         this.session.off("close", onClose);
       };
       const onReady = () => { cleanup(); resolve(); };
+      const onConnect = () => { if (this.session.alpnProtocol === "h2") onReady(); };
       const onError = (error: Error) => { cleanup(); this.session.destroy(); reject(error); };
       const onClose = () => onError(new Error("HTTP/2 connection closed before protocol negotiation"));
       const timeout = setTimeout(() => {
         onError(new Error("HTTP/2 protocol negotiation timed out"));
       }, HTTP2_REQUEST_TIMEOUT_MS);
       timeout.unref();
+      this.session.once("connect", onConnect);
       this.session.once("remoteSettings", onReady);
       this.session.once("error", onError);
       this.session.once("close", onClose);
