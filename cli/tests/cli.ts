@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttp1Server, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer as createHttp2Server } from "node:http2";
 import { tmpdir } from "node:os";
@@ -19,6 +19,7 @@ type CliResult = {
 type CliOptions = {
   onStdout?: (chunk: Buffer) => void;
   stdin?: string | Uint8Array;
+  stdinFile?: string;
   authenticated?: boolean;
   controlOnly?: boolean;
 };
@@ -113,11 +114,13 @@ async function runCli(baseUrl: string | undefined, args: string[], options: CliO
     delete env.ARKER_CONTROL_BASE_URL;
   }
 
+  const inputFd = options.stdinFile === undefined ? undefined : openSync(options.stdinFile, "r");
   const child = spawn(cliRuntime, [cliEntry, ...args], {
     cwd: packageRoot,
     env,
-    stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    stdio: [inputFd ?? (options.stdin === undefined ? "ignore" : "pipe"), "pipe", "pipe"],
   });
+  if (inputFd !== undefined) closeSync(inputFd);
   if (options.stdin !== undefined) child.stdin!.end(options.stdin);
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
@@ -164,6 +167,22 @@ function completedRun(overrides: Record<string, unknown> = {}): Record<string, u
 
 function stdoutText(result: CliResult): string {
   return result.stdout.toString("utf8");
+}
+
+async function testRunForwardsFiniteStdin(): Promise<void> {
+  for (const stdin of [Buffer.alloc(0), Buffer.from("hello\n"), Buffer.from([0, 255, 10, 128])]) {
+    await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
+      const result = await runCli(baseUrl, ["run", "vm_1", "cat"], { stdin });
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal((requests[0]!.body as { stdin_base64?: string }).stdin_base64, stdin.toString("base64"));
+    });
+  }
+  await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["run", "vm_1", "cat"], { stdin: Buffer.alloc(1024 * 1024 + 1) });
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /1 MiB/);
+    assert.equal(requests.length, 0);
+  });
 }
 
 async function testRunOptionsStopAtRemoteCommand(): Promise<void> {
@@ -1314,6 +1333,7 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
   }
 }
 
+await testRunForwardsFiniteStdin();
 await testSyncAndMutationJsonResults();
 await testRunJsonKeepsRunIdAcrossStates();
 await testExtraOperandsFailBeforeRequest();
@@ -1368,3 +1388,27 @@ await testPoliciesGetAndSet();
 await testPoliciesSetRejectsInvalidJson();
 
 console.log("PASS cli");
+
+
+async function testRunRedirectedFileAndInvalidInputOptions(): Promise<void> {
+  const directory = mkdtempSync(join(tmpdir(), "arker-run-input-"));
+  try {
+    const file = join(directory, "stdin");
+    for (const bytes of [Buffer.alloc(0), Buffer.from([0, 255, 128, 10])]) {
+      writeFileSync(file, bytes);
+      await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
+        const result = await runCli(baseUrl, ["run", "vm_1", "cat"], { stdinFile: file });
+        assert.equal(result.code, 0, result.stderr);
+        assert.equal((requests[0]!.body as { stdin_base64: string }).stdin_base64, bytes.toString("base64"));
+      });
+    }
+    await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
+      const result = await runCli(baseUrl, ["run", "--end-symbol", "done", "vm_1", "cat"], { stdin: "" });
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /piped input.*--end-symbol/);
+      assert.doesNotMatch(result.stderr, /at .*\.(ts|js):/);
+      assert.equal(requests.length, 0);
+    });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+}
+await testRunRedirectedFileAndInvalidInputOptions();

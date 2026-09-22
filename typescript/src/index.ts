@@ -348,6 +348,8 @@ export type RunRequest = ApiSchema<"RunRequest">;
  */
 export type RunSignal = NonNullable<RunRequest["signal"]>;
 export type RunOptions = Partial<Omit<RunRequest, "command">> & {
+  /** Finite input (UTF-8 text or exact bytes, at most 1 MiB), followed by EOF. */
+  stdin?: string | Uint8Array;
   /**
    * Optional server-side deduplication key. Sent as the `Idempotency-Key`
    * HTTP header. It does not enable automatic network-failure retries.
@@ -1024,7 +1026,16 @@ export class VM {
   async run(command: string, options: RunOptions): Promise<RunResult>;
   async run(command: string, options: RunOptions = {}): Promise<RunResult> {
     rejectUnsupportedRunNetworkInputs(options);
-    const { idempotencyKey, ...body } = options;
+    const { idempotencyKey, stdin, ...body } = options;
+    if (stdin !== undefined) {
+      if (body.stdin_base64 != null) throw new Error("use stdin or stdin_base64, not both");
+      const bytes = typeof stdin === "string" ? new TextEncoder().encode(stdin) : stdin;
+      if (bytes.length > 1024 * 1024) throw new Error("run stdin exceeds the 1 MiB input limit");
+      body.stdin_base64 = bytesToBase64(bytes);
+    }
+    if (body.stdin_base64 != null && (body.signal != null || (body.end_symbol != null && body.end_symbol !== "auto"))) {
+      throw new Error("stdin cannot be combined with signal or an explicit end_symbol");
+    }
     const headers = idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined;
     const request: RunRequest = { ...body, command };
     const response = await this._client._request<unknown>(

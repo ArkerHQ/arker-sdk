@@ -938,12 +938,18 @@ async function cmdRun(args: ParsedArgs, client: Arker): Promise<void> {
     : readJsonObject(policiesFile, "policy document") as PolicyDoc;
   const streamOutput = !args.flags.json && args.flags["time-to-background"] === undefined
     && args.flags["memory-mib"] === undefined;
+  const hasStdin = stdinHasDataSource();
+  if (hasStdin && args.flags["end-symbol"] !== undefined && args.flags["end-symbol"] !== "auto") {
+    die("piped input cannot be combined with an explicit --end-symbol");
+  }
+  const stdin = hasStdin ? await readAllStdin(1024 * 1024) : undefined;
   const vm = client.vm(vmId);
   let streamed = false;
   const result: RunResult = await withSecretRedaction(
     policySecretValues(policies),
     async () => {
       const result = await vm.run(command, {
+        stdin,
         timeout: numFlag(args, "timeout"),
         time_to_background: streamOutput ? 0 : numFlag(args, "time-to-background"),
         queueing_timeout: numFlag(args, "queueing-timeout"),
@@ -1589,9 +1595,14 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-async function readAllStdin(): Promise<Uint8Array> {
+async function readAllStdin(limit = Infinity): Promise<Uint8Array> {
   const chunks: Buffer[] = [];
-  for await (const chunk of input) chunks.push(chunk as Buffer);
+  let size = 0;
+  for await (const chunk of input) {
+    size += (chunk as Buffer).length;
+    if (size > limit) die("run stdin exceeds the 1 MiB input limit");
+    chunks.push(chunk as Buffer);
+  }
   return new Uint8Array(Buffer.concat(chunks));
 }
 

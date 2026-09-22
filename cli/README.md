@@ -115,3 +115,16 @@ backs off to 3 seconds.
 `--json` keeps one final JSON object. An explicit `--time-to-background` keeps its
 requested wait behavior; zero returns a run ID immediately. `--memory-mib` keeps
 the synchronous response so partial memory-allocation feedback is retained.
+
+
+Pipe a finite input into a command, or redirect a local file:
+
+```sh
+printf 'hello\n' | arker run <vm_id> cat
+arker run <vm_id> sha256sum < archive.tar
+```
+
+Input is limited to 1 MiB and sent as exact bytes followed by EOF. An empty
+pipe still sends EOF. The command runs in a child shell with the selected
+session's working directory and exported environment; its `cd` and `export`
+changes do not persist. Interactive terminal input uses `arker shell`.

@@ -914,6 +914,8 @@ export interface components {
             signal?: "SIGINT" | "SIGTERM" | "SIGKILL" | "SIGHUP" | null;
             /** @description Complete network policy replacement applied to the VM before this run and retained afterward. A non-empty document replaces the persisted policy; an empty document selects the default posture of allow-all outbound traffic and authenticated inbound traffic. Omit it to use the current policy unchanged. If the policy cannot be stored and applied, the command does not run. */
             policies?: components["schemas"]["PolicyWriteRequest"] | null;
+            /** @description Base64-encoded stdin bytes, at most 1 MiB decoded. The command runs in a child shell with the selected session's working directory and exported environment, receives these bytes followed by EOF, and does not change the persistent shell state. An empty string supplies immediate EOF. Omit to use the persistent shell. Cannot be combined with signal or an explicit end_symbol other than auto. */
+            stdin_base64?: string | null;
         };
         RunResponse: components["schemas"]["CompletedRunResponse"] | components["schemas"]["BackgroundRunResponse"];
         CompletedRunResponse: {
