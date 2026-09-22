@@ -1953,6 +1953,7 @@ function tmpTree(files: Record<string, string>): string {
   for (const [name, body] of Object.entries(files)) {
     fs.mkdirSync(nodePath.dirname(nodePath.join(dir, name)), { recursive: true });
     fs.writeFileSync(nodePath.join(dir, name), body);
+    fs.chmodSync(nodePath.join(dir, name), 0o644);
   }
   return dir;
 }
