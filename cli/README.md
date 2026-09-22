@@ -20,6 +20,24 @@ bun add --global @arker-ai/cli
 
 The CLI requires Node.js 18 or later.
 
+### Identify the active installation
+
+`@arker-ai/cli` is the standalone CLI package. The SDK package also includes a
+compatibility `arker` executable; its version is the SDK version. npm and Bun
+global installs can put different executables on your `PATH`.
+
+```bash
+type -a arker
+arker --version --json
+```
+
+The JSON result gives the owning package, version, and executable path without
+connecting to Arker. Run each path reported by `type -a arker` with
+`--version --json` to compare installations. Your shell uses the first match.
+Upgrade `@arker-ai/cli` with the same package manager that owns the executable
+you use, then check the path and version again. Older executables may print
+only their version; use their path to find the corresponding installation.
+
 ## Get started
 
 Sign up and get your API key at [arker.ai/console](https://arker.ai/console).

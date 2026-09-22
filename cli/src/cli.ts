@@ -27,6 +27,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
+import { fileURLToPath } from "node:url";
 import {
   Arker,
   ArkerError,
@@ -47,17 +48,15 @@ import type {
 /** Signals the service accepts, per RunRequest.signal in the OpenAPI contract. */
 const RUN_SIGNALS = ["SIGINT", "SIGTERM", "SIGKILL", "SIGHUP"] as const;
 
-// Version string for `--version` and the help header. Read from the
-// published package.json (dist/cli.js → ../package.json) so it never
-// drifts from the release. Falls back to "unknown" if unreadable.
-const VERSION: string = (() => {
+// The executable's adjacent package identifies both standalone and SDK installs.
+const PACKAGE: { name: string; version: string } = (() => {
   try {
-    return (createRequire(import.meta.url)("../package.json") as { version: string })
-      .version;
+    return createRequire(import.meta.url)("../package.json") as { name: string; version: string };
   } catch {
-    return "unknown";
+    return { name: "unknown", version: "unknown" };
   }
 })();
+const VERSION = PACKAGE.version;
 
 // ── Argv parsing ───────────────────────────────────────────────────
 
@@ -287,7 +286,7 @@ interface Invocation {
 
 type LocalAction =
   | { type: "help"; command?: string; positional?: string[] }
-  | { type: "version" };
+  | { type: "version"; json: boolean };
 
 function parseInvocation(argv: string[]): Invocation | LocalAction {
   if (argv.length === 0) return { type: "help" };
@@ -296,7 +295,11 @@ function parseInvocation(argv: string[]): Invocation | LocalAction {
   while (index < argv.length) {
     const arg = argv[index]!;
     if (arg === "--help" || arg === "-h") return { type: "help" };
-    if (arg === "--version" || arg === "-v") return { type: "version" };
+    if (arg === "--version" || arg === "-v") {
+      const args = parseArgs(argv.slice(index + 1), { json: GLOBAL_OPTIONS.json! }, flags);
+      if (args.positional.length) die("--version does not accept positional arguments");
+      return { type: "version", json: Boolean(args.flags.json) };
+    }
     if (!arg.startsWith("-")) break;
     index = parseOption(argv, index, GLOBAL_OPTIONS, flags);
   }
@@ -1931,7 +1934,7 @@ function usage(command?: string, positional: string[] = []): void {
       "  --provider <provider>      (or env ARKER_PROVIDER)",
       "  --json                     emit JSON instead of tabular output",
       "  -h, --help                 show help without connecting",
-      "  -v, --version              show version without connecting",
+      "  -v, --version              show version without connecting; --json adds package and path",
       "",
       "List flags (arker vms ls):",
       "  --source-org-id <org>      filter by owner (use ArkerHQ with --public)",
@@ -2007,7 +2010,9 @@ function usage(command?: string, positional: string[] = []): void {
 async function main(): Promise<void> {
   const invocation = parseInvocation(process.argv.slice(2));
   if ("type" in invocation) {
-    if (invocation.type === "version") out(`arker ${VERSION}`);
+    if (invocation.type === "version") out(invocation.json
+      ? { package: PACKAGE.name, version: VERSION, executable: fileURLToPath(import.meta.url) }
+      : `arker ${VERSION}`);
     else usage(invocation.command, invocation.positional);
     return;
   }

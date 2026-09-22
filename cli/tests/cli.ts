@@ -553,6 +553,17 @@ async function testHelpAndVersionAreLocalSuccesses(): Promise<void> {
   }
 }
 
+async function testVersionIdentifiesItsInstallation(): Promise<void> {
+  for (const args of [["--version", "--json"], ["--json", "--version"]]) {
+    const result = await runCli(undefined, args, { authenticated: false });
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(JSON.parse(stdoutText(result)), {
+      package: "@arker-ai/cli", version: packageVersion, executable: join(packageRoot, "dist", "cli.js"),
+    });
+    assert.equal(result.stderr, "");
+  }
+}
+
 async function testArbitraryProviderFlagIsAccepted(): Promise<void> {
   const result = await runCli(
     undefined,
@@ -1266,6 +1277,7 @@ await testForkUsesDockerfileAndContext();
 await testOrgRunListForwardsFilters();
 await testGlobalOptionsBeforeCommand();
 await testHelpAndVersionAreLocalSuccesses();
+await testVersionIdentifiesItsInstallation();
 await testArbitraryProviderFlagIsAccepted();
 await testComputeCommandRequiresProviderAndRegion();
 await testProviderOnlyVmListDoesNotRequireAComputeRegion();
