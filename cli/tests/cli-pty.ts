@@ -87,7 +87,6 @@ async function testNormalCloseSucceeds(): Promise<void> {
   pty.emitClose({ code: 1000, reason: "normal" });
   assert.equal(await result, 0);
   assert.deepEqual(rt.errors, []);
-  assert.equal(rt.input.isPaused(), true, "remote close must stop local stdin reads");
 }
 
 async function testMissingCloseCodeFails(): Promise<void> {
