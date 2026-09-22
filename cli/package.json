@@ -16,7 +16,7 @@
   "packageManager": "bun@1.3.8",
   "scripts": {
     "build": "tsup src/cli.ts --format esm --clean --target=node18",
-    "test": "bun run build && bun tests/cli.ts && bun tests/cli-pty.ts",
+    "test": "bun run build && bun tests/cli.ts && bun tests/cli-pty.ts && bun tests/cli-run-control.ts",
     "test:e2e": "bun run build && bun tests/cli-e2e.ts",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "bun run typecheck && bun run test"

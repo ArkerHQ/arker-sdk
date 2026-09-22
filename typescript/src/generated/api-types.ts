@@ -916,6 +916,8 @@ export interface components {
             policies?: components["schemas"]["PolicyWriteRequest"] | null;
             /** @description Base64-encoded stdin bytes, at most 1 MiB decoded. The command runs in a child shell with the selected session's working directory and exported environment, receives these bytes followed by EOF, and does not change the persistent shell state. An empty string supplies immediate EOF. Omit to use the persistent shell. Cannot be combined with signal or an explicit end_symbol other than auto. */
             stdin_base64?: string | null;
+            /** @description Exact run ID to interrupt with SIGINT. Cannot be combined with a command, session selector, or execution options. Completed runs are acknowledged without signalling later session work. */
+            signal_run_id?: string | null;
         };
         RunResponse: components["schemas"]["CompletedRunResponse"] | components["schemas"]["BackgroundRunResponse"];
         CompletedRunResponse: {

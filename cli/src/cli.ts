@@ -22,6 +22,7 @@
  * Placement: `ARKER_PROVIDER` + `ARKER_REGION`, or the matching flags.
  */
 
+import { randomUUID } from "node:crypto";
 import { readFileSync, existsSync, fstatSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
@@ -32,6 +33,7 @@ import {
   ArkerError,
   discoverRegions,
 } from "@arker-ai/sdk";
+import { RunInterrupts } from "./run-interrupts.js";
 import { bridgePty } from "./cli-pty.js";
 import type {
   PolicyDoc,
@@ -936,8 +938,9 @@ async function cmdRun(args: ParsedArgs, client: Arker): Promise<void> {
   const policies = policiesFile === undefined
     ? undefined
     : readJsonObject(policiesFile, "policy document") as PolicyDoc;
-  const streamOutput = !args.flags.json && args.flags["time-to-background"] === undefined
+  const waitAfterAck = args.flags["time-to-background"] === undefined
     && args.flags["memory-mib"] === undefined;
+  const streamOutput = waitAfterAck && !args.flags.json;
   const hasStdin = stdinHasDataSource();
   if (hasStdin && args.flags["end-symbol"] !== undefined && args.flags["end-symbol"] !== "auto") {
     die("piped input cannot be combined with an explicit --end-symbol");
@@ -945,38 +948,69 @@ async function cmdRun(args: ParsedArgs, client: Arker): Promise<void> {
   const stdin = hasStdin ? await readAllStdin(1024 * 1024) : undefined;
   const vm = client.vm(vmId);
   let streamed = false;
-  const result: RunResult = await withSecretRedaction(
-    policySecretValues(policies),
-    async () => {
-      const result = await vm.run(command, {
-        stdin,
-        timeout: numFlag(args, "timeout"),
-        time_to_background: streamOutput ? 0 : numFlag(args, "time-to-background"),
-        queueing_timeout: numFlag(args, "queueing-timeout"),
-        session_id: args.flags["session-id"] as string | undefined,
-        ...(sessionIdx !== undefined ? { session_idx: sessionIdx } : {}),
-        end_symbol: args.flags["end-symbol"] as string | undefined,
-        vcpu_count: numFlag(args, "vcpu"),
-        memory_mib: numFlag(args, "memory-mib"),
-        disk_mib: numFlag(args, "disk-mib"),
-        memory_backend: args.flags["memory-backend"] as "file" | "uffd" | undefined,
-        ...(policies !== undefined ? { policies } : {}),
-        idempotencyKey: args.flags["idempotency-key"] as string | undefined,
+  const discoverInlineRun = !waitAfterAck && numFlag(args, "time-to-background") !== 0;
+  const observer = new AbortController();
+  const runOptions = {
+    stdin,
+    timeout: numFlag(args, "timeout"),
+    time_to_background: waitAfterAck ? 0 : numFlag(args, "time-to-background"),
+    queueing_timeout: numFlag(args, "queueing-timeout"),
+    session_id: args.flags["session-id"] as string | undefined,
+    ...(sessionIdx !== undefined ? { session_idx: sessionIdx } : {}),
+    end_symbol: args.flags["end-symbol"] as string | undefined,
+    vcpu_count: numFlag(args, "vcpu"),
+    memory_mib: numFlag(args, "memory-mib"),
+    disk_mib: numFlag(args, "disk-mib"),
+    memory_backend: args.flags["memory-backend"] as "file" | "uffd" | undefined,
+    ...(policies !== undefined ? { policies } : {}),
+    idempotencyKey: (args.flags["idempotency-key"] as string | undefined) ?? (discoverInlineRun ? `cli-run-${randomUUID()}` : undefined),
+  };
+  let observedRun: Promise<unknown> | undefined;
+  const warn = (message: string): void => { process.stderr.write(`arker: ${redactValues(message, policySecretValues(policies))}\n`); };
+  const interrupts = new RunInterrupts(vm, process, warn,
+    discoverInlineRun ? async (abortSignal) => {
+      const result = await vm.run(command, { ...runOptions, time_to_background: 0, abortSignal });
+      if (!result.runId) throw new Error("run acknowledgement has no ID");
+      observedRun = vm.waitForRun(result.runId, {
+        abortSignal: observer.signal,
+        timeout: runOptions.timeout,
+        onStatus: (run) => interrupts.observed(run.state),
+      }).catch((error: unknown) => {
+        if (!observer.signal.aborted) warn(`could not observe interrupted run: ${String(error)}`);
       });
-      if (!streamOutput || result.type !== "background") return result;
-      const completed = await vm.waitForRun(result.runId, {
-        timeout: numFlag(args, "timeout"),
-        onOutput: ({ stdout, stderr, replaced }) => {
-          if (replaced?.length) process.stderr.write(`arker: remote ${replaced.join(" and ")} capture changed; showing its final retained output at completion. Some bytes can repeat or be missing.\n`);
-          if (stdout.length) process.stdout.write(stdout);
-          if (stderr.length) process.stderr.write(stderr);
-        },
-      });
-      streamed = true;
-      return completed;
-    },
-  );
-  printRunResult(result, Boolean(args.flags.json), streamed);
+      return result.runId;
+    } : undefined);
+  try {
+    const result: RunResult = await withSecretRedaction(
+      policySecretValues(policies),
+      async () => {
+        const result = await vm.run(command, {
+          ...runOptions,
+          onRunStarted: (runId) => interrupts.started(runId),
+          onRunStatus: (run) => interrupts.observed(run.state),
+        });
+        if (result.type !== "background" || (!waitAfterAck && !interrupts.requested)) return result;
+        const completed = await vm.waitForRun(result.runId, {
+          timeout: numFlag(args, "timeout"),
+          onStatus: (run) => interrupts.observed(run.state),
+          onOutput: streamOutput ? ({ stdout, stderr, replaced }) => {
+            if (replaced?.length) process.stderr.write(`arker: remote ${replaced.join(" and ")} capture changed; showing its final retained output at completion. Some bytes can repeat or be missing.\n`);
+            if (stdout.length) process.stdout.write(stdout);
+            if (stderr.length) process.stderr.write(stderr);
+          } : undefined,
+        });
+        streamed = streamOutput;
+        return completed;
+      },
+    );
+    interrupts.observed(result.state);
+    await interrupts.close();
+    printRunResult(result, Boolean(args.flags.json), streamed);
+    } finally {
+    observer.abort();
+    await observedRun;
+    await interrupts.close();
+  }
 }
 
 function formatMib(value: number | null | undefined): string {

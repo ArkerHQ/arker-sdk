@@ -4943,6 +4943,14 @@
               "null"
             ],
             "maxLength": 1398104
+          },
+          "signal_run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "description": "Exact run ID to interrupt with SIGINT. Cannot be combined with a command, session selector, or execution options. Completed runs are acknowledged without signalling later session work."
           }
         }
       },
