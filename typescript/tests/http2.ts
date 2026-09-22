@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import http2 from "node:http2";
 import http from "node:http";
-import type { AddressInfo } from "node:net";
+import net, { type AddressInfo } from "node:net";
 
 import { Arker, type CompletedRunResult } from "../src/index.js";
 
@@ -158,6 +158,39 @@ async function testHttp1MutationsWorkWithoutAnEarlierRead(): Promise<void> {
   }
 }
 
+async function testFailedNegotiationAndFetchDoNotPoisonProtocolChoice(): Promise<void> {
+  const received: string[] = [];
+  const unavailable = net.createServer((socket) => {
+    socket.once("data", (bytes) => {
+      received.push(bytes.toString("ascii").split("\r\n")[0]!);
+      socket.destroy();
+    });
+  });
+  const port = await new Promise<number>((resolve) => {
+    unavailable.listen(0, "127.0.0.1", () => resolve((unavailable.address() as AddressInfo).port));
+  });
+  const arker = h2client(port);
+  try {
+    await assert.rejects(() => arker.vm("vm_1").run("printf once"));
+    assert.deepEqual(received, ["PRI * HTTP/2.0", "POST /api/v1/vms/vm_1/runs HTTP/1.1"]);
+  } finally {
+    await new Promise<void>((resolve) => unavailable.close(() => resolve()));
+  }
+  const recovered = http2.createServer();
+  const sessions = trackSessions(recovered);
+  recovered.on("stream", (stream: http2.ServerHttp2Stream) => {
+    stream.respond({ ":status": 200, "content-type": "application/json" });
+    stream.end(RUN_BODY);
+  });
+  await new Promise<void>((resolve) => recovered.listen(port, "127.0.0.1", resolve));
+  try {
+    const result = await arker.vm("vm_1").run("printf recovered");
+    assert.equal((result as CompletedRunResult).exitCode, 0);
+  } finally {
+    await shutdown(recovered, sessions);
+  }
+}
+
 async function testFirstHttp2MutationFailureDoesNotReplayOrDisableHttp2(): Promise<void> {
   let requests = 0;
   const server = http2.createServer();
@@ -191,6 +224,7 @@ await testHttp2HappyPath();
 await testHttp2MultiplexesConcurrentRequests();
 await testAbortedRequestSettlesWithoutHanging();
 await testFirstHttp2MutationFailureDoesNotReplayOrDisableHttp2();
+await testFailedNegotiationAndFetchDoNotPoisonProtocolChoice();
 await testHttp1MutationsWorkWithoutAnEarlierRead();
 
 console.log("PASS http2");
