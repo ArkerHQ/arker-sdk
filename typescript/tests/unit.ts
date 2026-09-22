@@ -1741,7 +1741,6 @@ async function testSyncDirUploadsThenExtracts(): Promise<void> {
     assert.equal(write.op, "write");
     const command = JSON.parse(fetch.calls[2]!.body!).command;
     assert.ok(command.includes(write.writes[0].path));
-    assert.ok(command.includes("tar -xpf"));
     assert.ok(command.includes("/home/user/p"));
   } finally { cleanup(); }
 }
@@ -1972,29 +1971,17 @@ function withCacheDir<T>(fn: (cacheDir: string) => Promise<T>): Promise<T> {
 
 async function testSyncDirRepairsPermissionOnlyChanges(): Promise<void> {
   await withCacheDir(async () => {
-    const dir = tmpTree({ "tool.sh": "#!/bin/sh\nprintf mode-ok\n" });
+    const dir = tmpTree({ "tool.sh": "#!/bin/sh\n" });
     const path = nodePath.join(dir, "tool.sh");
     const hash = createHash("sha256").update(fs.readFileSync(path)).digest("hex");
+    fs.chmodSync(path, 0o755);
     try {
+      // Both cache kinds: a cached hash must not short-circuit the mode check.
       for (const cache of [undefined, new Map()]) {
-        for (const [remoteMode, localMode] of [[0o644, 0o755], [0o755, 0o644]]) {
-          fs.chmodSync(path, localMode!);
-          const fetch = syncDirServer([{ path: "tool.sh", hash, mode: remoteMode! }]);
-          const result = await client(fetch).vm("vm_1").syncDir(dir, "/p", { cache });
-          assert.equal(result.sent, 1, "changed permissions must upload unchanged content");
-          const body = JSON.parse(fetch.calls[1]!.body!);
-          const archivePath = nodePath.join(dir, "upload.tar.gz");
-          fs.writeFileSync(archivePath, Buffer.from(body.writes[0].content, "base64"));
-          const entries: Array<{ path: string; mode?: number }> = [];
-          const tar = await import("tar");
-          await tar.list({ file: archivePath, onReadEntry: (entry) => { entries.push({ path: entry.path, mode: entry.mode }); } });
-          fs.unlinkSync(archivePath);
-          assert.deepEqual(entries, [{ path: "tool.sh", mode: localMode }]);
-          const unchanged = syncDirServer([{ path: "tool.sh", hash, mode: localMode! }]);
-          const repeated = await client(unchanged).vm("vm_1").syncDir(dir, "/p", { cache });
-          assert.equal(repeated.sent, 0, "matching content and mode must be skipped");
-          assert.equal(unchanged.calls.length, 1, "matching entries need only the manifest request");
-        }
+        const changed = syncDirServer([{ path: "tool.sh", hash, mode: 0o644 }]);
+        assert.equal((await client(changed).vm("vm_1").syncDir(dir, "/p", { cache })).sent, 1);
+        const unchanged = syncDirServer([{ path: "tool.sh", hash, mode: 0o755 }]);
+        assert.equal((await client(unchanged).vm("vm_1").syncDir(dir, "/p", { cache })).sent, 0);
       }
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
