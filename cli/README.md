@@ -79,6 +79,18 @@ arker rm <vm-id>
 
 Run `arker --help` for the available commands and flags.
 
+## JSON output
+
+Use `--json` to keep results machine-readable. File reads return `path`,
+`content`, and `encoding: "base64"`, including for empty or binary files.
+File writes return `path`, `written`, and the number of `bytes` written.
+Delete and cancel commands return their API result object and exit nonzero
+when `deleted` or `cancelled` is false.
+
+Run results use `run_id` in pending, running, and terminal states. Completed
+results retain `runId` as a compatibility alias. Run stdout and stderr in JSON
+are base64 strings with explicit encoding fields. Human output remains raw bytes.
+
 ## Documentation and examples
 
 Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [examples](../examples).

@@ -624,6 +624,21 @@ function die(msg: string): never {
   process.exit(1);
 }
 
+function printMutationResult(
+  result: { deleted?: boolean; cancelled?: boolean },
+  field: "deleted" | "cancelled",
+  id: string,
+  json: boolean,
+): void {
+  if (json) out(result);
+  if (result[field]) {
+    if (!json) out(`${field} ${id}`);
+  } else {
+    err(`${field === "deleted" ? "delete" : "cancel"} failed`);
+    process.exitCode = 1;
+  }
+}
+
 function fmtVm(vm: VM | Vm): string {
   const provider = vm.provider ?? "?";
   const region = vm.region ?? "?";
@@ -686,7 +701,7 @@ async function cmdVms(args: ParsedArgs, client: Arker): Promise<void> {
     case "delete": {
       const id = rest[0] ?? die("usage: arker vms rm <vm_id>");
       const r = await client.vm(id).delete();
-      if (r.deleted) out(`deleted ${id}`); else { err("delete failed"); process.exitCode = 1; }
+      printMutationResult(r, "deleted", id, Boolean(args.flags.json));
       return;
     }
     case "fork": {
@@ -969,7 +984,7 @@ function printRunResult(result: RunResult, json: boolean): void {
 }
 
 function printStoredRun(run: RunRecord, json: boolean): void {
-  if (run.state === "running") {
+  if (run.state === "running" || run.state === "pending") {
     out({ run_id: run.run_id, state: run.state });
     return;
   }
@@ -989,6 +1004,7 @@ function printCompletedRun(result: PrintableRun, json: boolean): void {
   if (json) {
     out({
       type: result.type,
+      run_id: result.runId,
       runId: result.runId,
       state: result.state,
       stdout: Buffer.from(result.stdout).toString("base64"),
@@ -1087,8 +1103,7 @@ async function cmdRuns(args: ParsedArgs, client: Arker): Promise<void> {
       const [vm, runId] = rest;
       if (!vm || !runId) die("usage: arker runs rm <vm_id> <run_id>");
       const r = await client.vm(vm).cancelRun(runId);
-      if (r.cancelled) out(`cancelled ${runId}`);
-      else { err("cancel failed"); process.exitCode = 1; }
+      printMutationResult(r, "cancelled", runId, Boolean(args.flags.json));
       return;
     }
     default:
@@ -1140,8 +1155,7 @@ async function cmdSessions(args: ParsedArgs, client: Arker): Promise<void> {
       if (!vm) die("usage: arker sessions rm <vm_id> <session_id>");
       const sid = rest[1] ?? die("missing session_id");
       const r = await client.vm(vm).deleteSession(sid);
-      if (r.deleted) out(`deleted ${sid}`);
-      else { err("delete failed"); process.exitCode = 1; }
+      printMutationResult(r, "deleted", sid, Boolean(args.flags.json));
       return;
     }
     case "update": {
@@ -1282,8 +1296,7 @@ async function cmdMounts(args: ParsedArgs, client: Arker): Promise<void> {
       if (!vm) die("usage: arker mounts rm <vm_id> <mount_id>");
       const sid = rest[1] ?? die("missing mount_id");
       const r = await client.vm(vm).deleteMount(sid);
-      if (r.deleted) out(`deleted ${sid}`);
-      else { err("delete failed"); process.exitCode = 1; }
+      printMutationResult(r, "deleted", sid, Boolean(args.flags.json));
       return;
     }
     default:
@@ -1307,16 +1320,22 @@ async function cmdSync(args: ParsedArgs, client: Arker): Promise<void> {
   const path = args.positional[1] ?? die("missing path");
   const inline = args.positional[2];
 
+  const read = async (): Promise<void> => {
+    const data = await client.vm(vm).sync(path);
+    if (args.flags.json) out({ path, content: Buffer.from(data).toString("base64"), encoding: "base64" });
+    else output.write(data);
+  };
+
   const write = async (data: Uint8Array | string): Promise<void> => {
     await client.vm(vm).sync(path, data);
     const n = typeof data === "string" ? Buffer.byteLength(data) : data.length;
-    out(`wrote ${n} bytes to ${path}`);
+    if (args.flags.json) out({ path, written: true, bytes: n });
+    else out(`wrote ${n} bytes to ${path}`);
   };
 
   if (args.flags.read) {
     if (inline !== undefined) die("sync: --read takes no data argument");
-    output.write(await client.vm(vm).sync(path));
-    return;
+    return read();
   }
   // Explicit stdin write: the user said so, so wait as long as it takes.
   if (inline === "-") return write(await readAllStdin());
@@ -1338,7 +1357,7 @@ async function cmdSync(args: ParsedArgs, client: Arker): Promise<void> {
       return write(piped);
     }
     default:
-      output.write(await client.vm(vm).sync(path));
+      return read();
   }
 }
 
@@ -1417,8 +1436,7 @@ async function cmdFilesystems(args: ParsedArgs, client: Arker): Promise<void> {
     case "delete": {
       const id = rest[0] ?? die("usage: arker fs rm <filesystem_id>");
       const r = await client.deleteFilesystem(id);
-      if (r.deleted) out(`deleted ${id}`);
-      else { err("delete failed"); process.exitCode = 1; }
+      printMutationResult(r, "deleted", id, Boolean(args.flags.json));
       return;
     }
     default:

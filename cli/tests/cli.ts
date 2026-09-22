@@ -717,6 +717,47 @@ async function testExtraOperandsFailBeforeRequest(): Promise<void> {
   });
 }
 
+async function testSyncAndMutationJsonResults(): Promise<void> {
+  const bytes = Buffer.from([0, 255, 10, 128]);
+  const cases = [
+    { args: ["sync", "vm_1", "/tmp/file", "--read"], response: { content: bytes.toString("base64"), encoding: "base64" }, expected: { path: "/tmp/file", content: bytes.toString("base64"), encoding: "base64" } },
+    { args: ["sync", "vm_1", "/tmp/file", "hello"], response: { results: [{ complete: true, written: true }] }, expected: { path: "/tmp/file", written: true, bytes: 5 } },
+    { args: ["rm", "vm_1"], response: { deleted: true }, expected: { deleted: true } },
+    { args: ["vms", "delete", "vm_1"], response: { deleted: true }, expected: { deleted: true } },
+    { args: ["sessions", "rm", "vm_1", "session_1"], response: { deleted: true }, expected: { deleted: true } },
+    { args: ["mounts", "rm", "vm_1", "mount_1"], response: { deleted: true }, expected: { deleted: true } },
+    { args: ["fs", "rm", "fs_1"], response: { deleted: true }, expected: { deleted: true } },
+    { args: ["runs", "cancel", "vm_1", "run_1"], response: { cancelled: true }, expected: { cancelled: true } },
+  ];
+  for (const { args, response, expected } of cases) {
+    await withCapturedServer((_request, res) => jsonResponse(res, response), async (baseUrl) => {
+      const result = await runCli(baseUrl, [...args, "--json"]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.deepEqual(JSON.parse(stdoutText(result)), expected, args.join(" "));
+    });
+  }
+  await withCapturedServer((_request, res) => jsonResponse(res, { deleted: false }), async (baseUrl) => {
+    const result = await runCli(baseUrl, ["rm", "vm_1", "--json"]);
+    assert.equal(result.code, 1);
+    assert.deepEqual(JSON.parse(stdoutText(result)), { deleted: false });
+  });
+}
+
+async function testRunJsonKeepsRunIdAcrossStates(): Promise<void> {
+  for (const state of ["pending", "running", "completed", "cancelled", "failed"]) {
+    await withCapturedServer((_request, res) => jsonResponse(res, {
+      ...completedRun(), run_id: "run_1", state,
+      ...(state === "running" || state === "pending" ? { exit_code: null } : {}),
+    }), async (baseUrl) => {
+      const result = await runCli(baseUrl, ["runs", "get", "vm_1", "run_1", "--json"]);
+      const value = JSON.parse(stdoutText(result));
+      assert.equal(value.run_id, "run_1", state);
+      assert.equal(value.state, state);
+      if (state === "completed") assert.equal(value.runId, "run_1");
+    });
+  }
+}
+
 async function testSubcommandHelpUsesAcceptedOptions(): Promise<void> {
   const cases = [
     { args: ["sessions", "ls"], accepts: "--state", rejects: "--env" },
@@ -1246,6 +1287,8 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
   }
 }
 
+await testSyncAndMutationJsonResults();
+await testRunJsonKeepsRunIdAcrossStates();
 await testExtraOperandsFailBeforeRequest();
 await testSubcommandHelpUsesAcceptedOptions();
 await testFileKindsFailWithoutStackOrRequests();
