@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, constants, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { createServer as createHttp1Server, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer as createHttp2Server } from "node:http2";
 import { tmpdir } from "node:os";
@@ -779,23 +780,31 @@ async function testPoliciesGetAndSet(): Promise<void> {
   });
 }
 
-// `--file` must read pipes (`<(jq ...)`, `/dev/stdin`) and refuse only directories.
+// `--file` must read pipes (`<(jq ...)` is a FIFO) and refuse only directories.
 async function testPoliciesSetFileReadsPipesAndRejectsDirectories(): Promise<void> {
   const doc = { policies: [], mitm_domains: [] };
-  await withCapturedServer((_request, res) => jsonResponse(res, { ok: true }), async (baseUrl, requests) => {
-    const piped = await runCli(baseUrl, ["policies", "set", "vm_1", "--file", "/dev/stdin"], { stdin: JSON.stringify(doc) });
-    assert.equal(piped.code, 0, piped.stderr);
-    assert.deepEqual(requests.find((r) => r.method === "PUT")?.body, doc);
+  const dir = mkdtempSync(join(tmpdir(), "arker-policy-file-"));
+  try {
+    await withCapturedServer((_request, res) => jsonResponse(res, { ok: true }), async (baseUrl, requests) => {
+      const fifo = join(dir, "policy.fifo");
+      execFileSync("mkfifo", [fifo]);
+      // Opening a FIFO for writing waits for its reader, the CLI.
+      const writing = writeFile(fifo, JSON.stringify(doc));
+      const piped = await runCli(baseUrl, ["policies", "set", "vm_1", "--file", fifo]);
+      // A CLI that never opened the FIFO would leave the writer waiting forever.
+      const release = piped.code === 0 ? undefined : openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
+      await writing.catch(() => {});
+      if (release !== undefined) closeSync(release);
+      assert.equal(piped.code, 0, piped.stderr);
+      assert.deepEqual(requests.find((r) => r.method === "PUT")?.body, doc);
 
-    const dir = mkdtempSync(join(tmpdir(), "arker-policy-dir-"));
-    try {
       requests.length = 0;
       const directory = await runCli(baseUrl, ["policies", "set", "vm_1", "--file", dir]);
       assert.equal(directory.code, 1);
       assert.match(directory.stderr, /is not a file/);
       assert.equal(requests.length, 0);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
-  });
+    });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
 async function testPoliciesSetRejectsInvalidJson(): Promise<void> {
