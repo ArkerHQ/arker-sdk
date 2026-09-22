@@ -969,16 +969,15 @@ async function cmdRun(args: ParsedArgs, client: Arker): Promise<void> {
   const warn = (message: string): void => { process.stderr.write(`arker: ${redactValues(message, policySecretValues(policies))}\n`); };
   const interrupts = new RunInterrupts(vm, process, warn,
     discoverInlineRun ? async (abortSignal) => {
-      const result = await vm.run(command, { ...runOptions, time_to_background: 0, abortSignal });
-      if (!result.runId) throw new Error("run acknowledgement has no ID");
-      observedRun = vm.waitForRun(result.runId, {
+      const runId = await vm.waitForRunAcknowledgement(command, { ...runOptions, idempotencyKey: runOptions.idempotencyKey!, abortSignal });
+      observedRun = vm.waitForRun(runId, {
         abortSignal: observer.signal,
         timeout: runOptions.timeout,
         onStatus: (run) => interrupts.observed(run.state),
       }).catch((error: unknown) => {
         if (!observer.signal.aborted) warn(`could not observe interrupted run: ${String(error)}`);
       });
-      return result.runId;
+      return runId;
     } : undefined);
   try {
     const result: RunResult = await withSecretRedaction(
@@ -1006,10 +1005,10 @@ async function cmdRun(args: ParsedArgs, client: Arker): Promise<void> {
     interrupts.observed(result.state);
     await interrupts.close();
     printRunResult(result, Boolean(args.flags.json), streamed);
-    } finally {
+  } finally {
     observer.abort();
-    await observedRun;
     await interrupts.close();
+    await observedRun;
   }
 }
 

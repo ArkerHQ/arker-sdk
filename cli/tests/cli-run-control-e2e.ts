@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import { Arker, ArkerError, type VM } from "@arker-ai/sdk";
+import { Arker, ArkerError, type VM, type CompletedRunResult } from "@arker-ai/sdk";
 
 const source = process.env.ARKER_SOURCE_VM;
 assert.ok(source && process.env.ARKER_API_KEY, "set ARKER_API_KEY and ARKER_SOURCE_VM plus placement");
@@ -17,13 +17,13 @@ try {
     const trap = scenario === "force" ? "printf 'INT\\n'" : "printf 'INT\\n'; exit 23";
     const command = `trap ${JSON.stringify(trap)} INT; printf ready > ${marker}; printf 'READY\\n'; while :; do sleep 1; done`;
     const flags = scenario === "inline" ? ["--memory-mib", "1024", "--json"] : [];
-    const child = spawn("node", ["dist/cli.js", "run", vm.id, "--timeout", "30", ...flags, "--", "sh", "-c", command],
+    const child: ChildProcess = spawn("node", ["dist/cli.js", "run", vm.id, "--timeout", "30", ...flags, "--", "sh", "-c", command],
       { cwd: packageRoot, stdio: ["ignore", "pipe", "pipe"] });
-    const finished = once(child, "close");
+    const finished: Promise<unknown[]> = once(child, "close");
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let sent = 0;
-    child.stdout.on("data", (bytes: Buffer) => {
+    child.stdout!.on("data", (bytes: Buffer) => {
       stdout.push(bytes);
       const output = Buffer.concat(stdout).toString();
       if (scenario !== "inline" && sent === 0 && output.includes("READY\n")) {
@@ -35,7 +35,7 @@ try {
         child.kill("SIGINT");
       }
     });
-    child.stderr.on("data", (bytes: Buffer) => stderr.push(bytes));
+    child.stderr!.on("data", (bytes: Buffer) => stderr.push(bytes));
     try {
       if (scenario === "inline") {
         const deadline = Date.now() + 20_000;
@@ -61,7 +61,7 @@ try {
       } else {
         assert.equal(Buffer.concat(stdout).toString(), "READY\nINT\n");
       }
-      const after = await vm.run("printf alive");
+      const after: CompletedRunResult = await vm.run("printf alive");
       assert.equal(after.stdout, "alive");
       console.log(`PASS live CLI ${scenario}`);
     } finally {

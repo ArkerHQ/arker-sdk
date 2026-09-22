@@ -891,7 +891,8 @@ async function testInlineRunInterruptKeepsMemoryMetadata(): Promise<void> {
     assert.equal(value.memoryPartial, true);
     const dispatches = requests.filter((request) => (request.body as { command?: string }).command);
     assert.equal(dispatches.length, 2);
-    const { time_to_background: _window, ...discovery } = dispatches[1]!.body as Record<string, unknown>;
+    const { time_to_background: _window, lookup_only: lookup, ...discovery } = dispatches[1]!.body as Record<string, unknown>;
+    assert.equal(lookup, true);
     assert.deepEqual(discovery, dispatches[0]!.body);
   });
 }
@@ -921,6 +922,44 @@ async function testRunJsonIncludesMemoryMetadata(): Promise<void> {
     assert.equal(payload.memoryRequestedMib, 1024);
     assert.equal(payload.memoryAchievedMib, 1536);
     assert.equal(payload.memoryPartial, true);
+  });
+}
+
+async function testInlineRunFailureStopsInterruptDiscovery(): Promise<void> {
+  let child: ChildProcess;
+  let inline: ServerResponse | undefined;
+  await withCapturedServer((request, res) => {
+    const body = request.body as { lookup_only?: boolean };
+    if (!body.lookup_only) {
+      inline = res;
+      child.kill("SIGINT");
+      return;
+    }
+    jsonResponse(res, { error: {
+      code: "not_found", message: "run not admitted", timestamp: "2026-09-22T00:00:00Z",
+      request_id: "lookup-test", request: { kind: "matched", operation_id: "createRun" },
+      details: { resource: "run" },
+    } }, 404);
+    if (inline) {
+      jsonResponse(inline, { error: { code: "invalid_request", message: "admission rejected" } }, 400);
+      inline = undefined;
+    }
+  }, async (baseUrl, requests) => {
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await runCli(baseUrl, ["run", "--memory-mib", "1024", "vm_1", "sleep", "30"], {
+        onSpawn: (value) => {
+          child = value;
+          watchdog = setTimeout(() => child.kill("SIGKILL"), 5000);
+        },
+      });
+      assert.equal(result.code, 1, "failed admission must exit without waiting for a missing run");
+      assert.match(result.stderr, /admission rejected/);
+      assert.doesNotMatch(result.stderr, /could not find the pending run/);
+      assert.equal(requests.filter((request) => (request.body as { lookup_only?: boolean }).lookup_only).length, 1);
+    } finally {
+      clearTimeout(watchdog);
+    }
   });
 }
 
@@ -1440,6 +1479,7 @@ await testHelpMatchesSupportedSurface();
 await testPerCommandHelpIsCommandSpecific();
 await testRunInterruptEscalationBeforeAcknowledgement();
 await testInlineRunInterruptKeepsMemoryMetadata();
+await testInlineRunFailureStopsInterruptDiscovery();
 await testRunJsonIncludesMemoryMetadata();
 await testRunHumanWritesArbitraryBytes();
 await testRunFailureReasonIsVisible();

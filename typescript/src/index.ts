@@ -1072,6 +1072,24 @@ export class VM {
     return result;
   }
 
+  /** Wait until a keyed request is recorded, without dispatching it again. */
+  async waitForRunAcknowledgement(command: string, options: RunOptions & { idempotencyKey: string }): Promise<string> {
+    let delay = RUN_POLL_INITIAL_MS;
+    for (;;) {
+      options.abortSignal?.throwIfAborted();
+      try {
+        const result = await this.run(command, { ...options, lookup_only: true, time_to_background: 0, onRunStarted: undefined, onRunStatus: undefined });
+        if (!result.runId) throw new Error("run lookup returned no ID");
+        return result.runId;
+      } catch (error) {
+        options.abortSignal?.throwIfAborted();
+        if (!(error instanceof ArkerError) || error.code !== "not_found") throw error;
+      }
+      await sleep(delay, options.abortSignal);
+      delay = Math.min(RUN_POLL_MAX_MS, Math.ceil(delay * RUN_POLL_BACKOFF));
+    }
+  }
+
   /** Send SIGINT to this exact run. A completed run never signals later session work. */
   async signalRun(runId: string, options: { abortSignal?: AbortSignal } = {}): Promise<void> {
     await this._client._request("POST", `${vmPath(this.id)}/runs`, { signal: "SIGINT", signal_run_id: runId }, this.baseUrl, undefined, undefined, undefined, options.abortSignal);

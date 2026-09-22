@@ -109,8 +109,11 @@ export class RunInterrupts {
   }
 
   async close(): Promise<void> {
-    while (this.pending.size) await Promise.allSettled([...this.pending]);
     this.closed = true;
     this.signals.removeListener("SIGINT", this.interrupt);
+    this.discoveryRequest.abort();
+    this.interruptRequest.abort();
+    this.cancelRequest.abort();
+    while (this.pending.size) await Promise.allSettled([...this.pending]);
   }
 }

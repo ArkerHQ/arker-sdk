@@ -918,6 +918,8 @@ export interface components {
             stdin_base64?: string | null;
             /** @description Exact run ID to interrupt with SIGINT. Cannot be combined with a command, session selector, or execution options. Completed runs are acknowledged without signalling later session work. */
             signal_run_id?: string | null;
+            /** @description Read an existing run with the Idempotency-Key header and matching command intent. Never creates a run, session, or runtime. Returns 404 until the key is recorded and 409 if the intent differs. Omit for normal execution. */
+            lookup_only?: boolean | null;
         };
         RunResponse: components["schemas"]["CompletedRunResponse"] | components["schemas"]["BackgroundRunResponse"];
         CompletedRunResponse: {
