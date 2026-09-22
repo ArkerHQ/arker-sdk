@@ -65,17 +65,21 @@ async function testForkRunSyncAndRemove(): Promise<void> {
   assert.ok(vmId, `fork returned no vm_id: ${fork.stdout}`);
 
   try {
-    const run = await ok(["run", vmId, `printf '${MARKER}\\n'`]);
-    assert.ok(run.stdout.includes(MARKER), `run stdout missing marker: ${run.stdout}`);
+    const run = JSON.parse((await ok(["run", "--json", vmId, `printf '${MARKER}\\n'`])).stdout);
+    assert.equal(Buffer.from(run.stdout, "base64").toString(), MARKER + "\n");
+    assert.ok(run.run_id, "completed JSON run must include run_id");
+    assert.equal(run.runId, run.run_id);
 
-    await ok(["sync", vmId, REMOTE_PATH, MARKER]);
-    const read = await ok(["sync", vmId, REMOTE_PATH]);
-    assert.equal(read.stdout, MARKER);
+    const write = JSON.parse((await ok(["sync", vmId, REMOTE_PATH, MARKER, "--json"])).stdout);
+    assert.deepEqual(write, { path: REMOTE_PATH, written: true, bytes: Buffer.byteLength(MARKER) });
+    const read = JSON.parse((await ok(["sync", vmId, REMOTE_PATH, "--read", "--json"])).stdout);
+    assert.equal(read.encoding, "base64");
+    assert.equal(Buffer.from(read.content, "base64").toString(), MARKER);
 
     const get = await ok(["vms", "get", vmId]);
     assert.ok(get.stdout.includes(vmId), `vms get did not name the VM: ${get.stdout}`);
   } finally {
-    await ok(["vms", "rm", vmId]);
+    assert.equal(JSON.parse((await ok(["vms", "rm", vmId, "--json"])).stdout).deleted, true);
   }
 
   const gone = await runCli(["vms", "get", vmId]);
