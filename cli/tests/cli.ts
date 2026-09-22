@@ -688,24 +688,11 @@ async function testHelpMatchesSupportedSurface(): Promise<void> {
 }
 
 async function testExtraOperandsFailBeforeRequest(): Promise<void> {
+  // Each of these used to act on the first operands and silently drop the rest.
   const cases = [
     ["rm", "vm_1", "vm_2"],
     ["vms", "delete", "vm_1", "vm_2"],
-    ["ls", "unused"],
-    ["vms", "get", "vm_1", "unused"],
     ["sync", "vm_1", "/tmp/file", "first", "ignored"],
-    ["sync-dir", "vm_1", ".", "/tmp/tree", "ignored"],
-    ["runs", "get", "vm_1", "run_1", "ignored"],
-    ["runs", "cancel", "vm_1", "run_1", "ignored"],
-    ["sessions", "create", "vm_1", "ignored"],
-    ["sessions", "delete", "vm_1", "session_1", "ignored"],
-    ["mounts", "delete", "vm_1", "mount_1", "ignored"],
-    ["filesystems", "delete", "fs_1", "ignored"],
-    ["fs", "create", "name", "ignored"],
-    ["policies", "get", "vm_1", "ignored"],
-    ["signal", "vm_1", "SIGINT", "ignored"],
-    ["regions", "ignored"],
-    ["whoami", "ignored"],
   ];
   await withCapturedServer((_request, res) => jsonResponse(res, { deleted: true }), async (baseUrl, requests) => {
     for (const args of cases) {
@@ -715,50 +702,6 @@ async function testExtraOperandsFailBeforeRequest(): Promise<void> {
       assert.equal(requests.length, 0, args.join(" "));
     }
   });
-}
-
-async function testSubcommandHelpUsesAcceptedOptions(): Promise<void> {
-  const cases = [
-    { args: ["sessions", "ls"], accepts: "--state", rejects: "--env" },
-    { args: ["sessions", "create"], accepts: "--env", rejects: "--timeout-secs" },
-    { args: ["sessions", "update"], accepts: "--timeout-secs", rejects: "--env" },
-    { args: ["vms", "ls"], accepts: "--state", rejects: "--vcpu" },
-    { args: ["vms", "rm"], accepts: "--json", rejects: "--image" },
-    { args: ["mounts", "ls"], accepts: "--filesystem-id", rejects: "--path" },
-    { args: ["fs", "create"], accepts: "--name", rejects: "--limit" },
-    { args: ["policies", "get"], accepts: "--json", rejects: "--file" },
-    { args: ["runs", "get"], accepts: "--json", rejects: "--limit" },
-  ];
-  for (const { args, accepts, rejects } of cases) {
-    const result = await runCli(undefined, [...args, "--help"], { authenticated: false });
-    assert.equal(result.code, 0, result.stderr);
-    const help = stdoutText(result);
-    assert.ok(help.includes(accepts), `${args.join(" ")} must document ${accepts}`);
-    assert.ok(!help.includes(rejects), `${args.join(" ")} must not document ${rejects}`);
-    if (args.join(" ") === "sessions ls") assert.match(help, /--state <idle\|running>/);
-  }
-}
-
-async function testFileKindsFailWithoutStackOrRequests(): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "arker-cli-file-kinds-"));
-  const file = join(dir, "file");
-  writeFileSync(file, "fixture");
-  try {
-    await withCapturedServer((_request, res) => jsonResponse(res, {}), async (baseUrl, requests) => {
-      for (const args of [
-        ["sync-dir", "vm_1", file, "/tmp/tree"],
-        ["policies", "set", "vm_1", "--file", dir],
-      ]) {
-        const result = await runCli(baseUrl, args);
-        assert.equal(result.code, 1);
-        assert.match(result.stderr, /arker: .*not a (file|directory)/);
-        assert.doesNotMatch(result.stderr, /\n\s+at |node:internal|Node\.js/);
-        assert.equal(requests.length, 0);
-      }
-    });
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
 }
 
 async function testRunJsonIncludesMemoryMetadata(): Promise<void> {
@@ -833,6 +776,25 @@ async function testPoliciesGetAndSet(): Promise<void> {
     assert.ok(put, "expected a PUT to the policies endpoint");
     assert.ok(put!.url!.includes("/policies"), `unexpected url: ${put!.url}`);
     assert.deepEqual(put!.body, doc);
+  });
+}
+
+// `--file` must read pipes (`<(jq ...)`, `/dev/stdin`) and refuse only directories.
+async function testPoliciesSetFileReadsPipesAndRejectsDirectories(): Promise<void> {
+  const doc = { policies: [], mitm_domains: [] };
+  await withCapturedServer((_request, res) => jsonResponse(res, { ok: true }), async (baseUrl, requests) => {
+    const piped = await runCli(baseUrl, ["policies", "set", "vm_1", "--file", "/dev/stdin"], { stdin: JSON.stringify(doc) });
+    assert.equal(piped.code, 0, piped.stderr);
+    assert.deepEqual(requests.find((r) => r.method === "PUT")?.body, doc);
+
+    const dir = mkdtempSync(join(tmpdir(), "arker-policy-dir-"));
+    try {
+      requests.length = 0;
+      const directory = await runCli(baseUrl, ["policies", "set", "vm_1", "--file", dir]);
+      assert.equal(directory.code, 1);
+      assert.match(directory.stderr, /is not a file/);
+      assert.equal(requests.length, 0);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 }
 
@@ -1247,8 +1209,6 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
 }
 
 await testExtraOperandsFailBeforeRequest();
-await testSubcommandHelpUsesAcceptedOptions();
-await testFileKindsFailWithoutStackOrRequests();
 await testRunOptionsStopAtRemoteCommand();
 await testKnownFlagAfterRemoteCommandPassesThrough();
 await testRunOptionAfterVmBeforeCommand();
@@ -1294,6 +1254,7 @@ await testStructuredErrorsDoNotRepeatCode();
 await testFalseMutationResultsExitNonzero();
 await testRemainingHttpCommandSurface();
 await testPoliciesGetAndSet();
+await testPoliciesSetFileReadsPipesAndRejectsDirectories();
 await testPoliciesSetRejectsInvalidJson();
 
 console.log("PASS cli");

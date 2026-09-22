@@ -840,11 +840,14 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
   out({ vm_id: computer.id });
 }
 
+// Reads anything but a directory, so `--file <(jq ...)` and `--file /dev/stdin` work.
 function readTextFile(path: string, label: string): string {
-  requirePathKind(path, label, "file");
   try {
     return readFileSync(path, "utf8");
   } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") die(`${label} does not exist: ${path}`);
+    if (code === "EISDIR") die(`${label} is not a file: ${path}`);
     die(`cannot read ${label} file: ${path}: ${(error as Error).message}`);
   }
 }
