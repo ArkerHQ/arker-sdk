@@ -361,7 +361,7 @@ export interface WaitForRunOptions {
    * New bytes from growing output snapshots. If the server replaces a captured
    * stream (for example, when its retention limit is exceeded), `replaced`
    * names that stream. Further bytes for it arrive only at completion, as the
-   * final retained snapshot, which can overlap previously delivered bytes.
+   * final retained snapshot, which can overlap bytes already delivered.
    */
   onOutput?: (chunk: { stdout: Uint8Array; stderr: Uint8Array; replaced?: ("stdout" | "stderr")[] }) => void;
 }
