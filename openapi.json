@@ -4935,6 +4935,14 @@
                 "type": "null"
               }
             ]
+          },
+          "stdin_base64": {
+            "description": "Base64-encoded stdin bytes, at most 1 MiB decoded. The command runs in a child shell with the selected session's working directory and exported environment, receives these bytes followed by EOF, and does not change the persistent shell state. An empty string supplies immediate EOF. Omit to use the persistent shell. Cannot be combined with signal or an explicit end_symbol other than auto.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 1398104
           }
         }
       },

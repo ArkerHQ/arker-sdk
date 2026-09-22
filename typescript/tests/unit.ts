@@ -2856,3 +2856,29 @@ await testBuildStepsInheritTheForkQueueingWindow();
 await testBuildStepsOmitTheWindowWhenTheForkHadNone();
 await testForkDockerfileGivesBuildStepsTheQueueingWindow();
 await testAFailedDockerfileBuildDeletesTheVm();
+
+
+async function testRunFiniteStdin(): Promise<void> {
+  for (const stdin of ["", "hello\n", new Uint8Array([0, 255, 10])]) {
+    const fetch = new FakeFetch();
+    fetch.addJson((method) => method === "POST", 200, { run_id: "r", state: "running" });
+    await client(fetch).vm("vm_1").run("cat", { time_to_background: 0, stdin });
+    assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { command: "cat", time_to_background: 0, stdin_base64: Buffer.from(stdin).toString("base64") });
+  }
+  const fetch = new FakeFetch();
+  await assert.rejects(() => client(fetch).vm("vm_1").run("cat", { stdin: new Uint8Array(1024 * 1024 + 1) }), /1 MiB/);
+  await assert.rejects(() => client(fetch).vm("vm_1").run("cat", { stdin: "", end_symbol: "done" }), /end_symbol/);
+  await assert.rejects(() => client(fetch).vm("vm_1").run("cat", { stdin: "", stdin_base64: "" }), /not both/);
+  assert.equal(fetch.calls.length, 0);
+}
+await testRunFiniteStdin();
+
+
+const savedBuffer = globalThis.Buffer;
+try {
+  (globalThis as { Buffer?: unknown }).Buffer = undefined;
+  const fetch = new FakeFetch();
+  fetch.addJson((method) => method === "POST", 200, { run_id: "r", state: "running" });
+  await client(fetch).vm("vm_1").run("cat", { stdin: "hello\0🌍", time_to_background: 0 });
+  assert.equal(JSON.parse(fetch.calls[0]!.body!).stdin_base64, savedBuffer.from("hello\0🌍").toString("base64"));
+} finally { globalThis.Buffer = savedBuffer; }
