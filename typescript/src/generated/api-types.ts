@@ -1920,6 +1920,8 @@ export interface components {
         PayloadTooLargeDetails: {
             /** @description Known enforced payload limit in bytes. */
             maximum_bytes?: number;
+            /** @description Size of the refused request body in bytes, as the caller declared it in Content-Length. */
+            request_bytes?: number;
         };
         MethodNotAllowedDetails: {
             /** @description Must match the HTTP Allow header. */

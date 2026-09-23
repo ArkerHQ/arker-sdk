@@ -2476,7 +2476,12 @@ class Http2Connection {
     if (this.streams === 0) this.session.ref();
     this.streams++;
     return new Promise<TransportResponse>((resolve, reject) => {
-      const stream = this.session.request({ ...headers, ":method": method, ":path": path });
+      const stream = this.session.request({
+        ...headers,
+        ...(body === undefined ? {} : { "content-length": String(Buffer.byteLength(body)) }),
+        ":method": method,
+        ":path": path,
+      });
       let status = 0;
       let text = "";
       stream.setEncoding("utf8");

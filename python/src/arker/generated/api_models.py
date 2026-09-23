@@ -910,6 +910,7 @@ class InvalidStateDetails:
 @dataclass(frozen=True)
 class PayloadTooLargeDetails:
     maximum_bytes: int | None = None
+    request_bytes: int | None = None
 
 
 @dataclass(frozen=True)

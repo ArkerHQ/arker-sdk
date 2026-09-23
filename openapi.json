@@ -8105,6 +8105,12 @@
             "minimum": 0,
             "description": "Known enforced payload limit in bytes.",
             "maximum": 18446744073709551615
+          },
+          "request_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Size of the refused request body in bytes, as the caller declared it in Content-Length.",
+            "maximum": 18446744073709551615
           }
         },
         "additionalProperties": false
