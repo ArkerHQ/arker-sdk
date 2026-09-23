@@ -55,6 +55,32 @@ async function shutdown(server: http2.Http2Server, sessions: Set<http2.ServerHtt
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
+// The server can only report a refused body's size if the client declares it.
+// A non-ASCII command makes the byte length differ from the character count.
+async function testHttp2DeclaresContentLength(): Promise<void> {
+  let declared: string | undefined;
+  let received = 0;
+  const server = http2.createServer();
+  const sessions = trackSessions(server);
+  server.on("stream", (stream: http2.ServerHttp2Stream, headers: http2.IncomingHttpHeaders) => {
+    declared = headers["content-length"] as string | undefined;
+    stream.on("data", (chunk: Buffer) => {
+      received += chunk.length;
+    });
+    stream.on("end", () => {
+      stream.respond({ ":status": 200, "content-type": "application/json" });
+      stream.end(RUN_BODY);
+    });
+  });
+  const port = await listen(server);
+  try {
+    await h2client(port).vm("vm_1").run("printf é");
+    assert.equal(Number(declared), received);
+  } finally {
+    await shutdown(server, sessions);
+  }
+}
+
 async function testHttp2HappyPath(): Promise<void> {
   const received: http2.IncomingHttpHeaders[] = [];
   const server = http2.createServer();
@@ -189,6 +215,7 @@ async function testFirstHttp2MutationFailureDoesNotReplayOrDisableHttp2(): Promi
 }
 
 await testHttp2HappyPath();
+await testHttp2DeclaresContentLength();
 await testHttp2MultiplexesConcurrentRequests();
 await testAbortedRequestSettlesWithoutHanging();
 await testFirstHttp2MutationFailureDoesNotReplayOrDisableHttp2();
