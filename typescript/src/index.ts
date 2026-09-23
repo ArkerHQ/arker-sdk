@@ -1165,8 +1165,8 @@ export class VM {
 
   /**
    * Recursively sync a local directory INTO this VM at `remoteDir`, rsync-style:
-   * fetch the VM's file *manifest* (per-file sha256) in ONE request, diff it
-   * against the local tree, and upload ONLY the files that are new or changed —
+   * fetch the VM's file manifest (content hashes and modes) in ONE request, diff it
+   * against the local tree, and upload files whose content or permissions differ —
    * packed into a single tarball the guest extracts with `tar -x` (so the guest
    * does the writes, always consistent with its own filesystem). Node-only: it
    * reads the local filesystem.
@@ -1194,7 +1194,7 @@ export class VM {
     const localRoot = nodePath.resolve(localDir);
     const remoteRoot = "/" + remoteDir.replace(/^\/+/, "").replace(/\/+$/, "");
 
-    // 1. Authoritative remote manifest: rel_path -> sha256. A directory that
+    // 1. Authoritative remote manifest: relative path -> content hash and mode. A directory that
     //    doesn't exist yet (or an empty VM) yields {} -> everything is sent.
     const clock = () => Number(process.hrtime.bigint() / 1000n) / 1000;
     //    `assumeEmpty` skips the round-trip on a destination the caller knows
@@ -1203,7 +1203,7 @@ export class VM {
     //    tell "skipped" from "merely fast" — a real fetch is ~184ms.
     const tManifest0 = clock();
     const manifest = options.assumeEmpty
-      ? { entries: new Map<string, string>(), truncated: false }
+      ? { entries: new Map<string, { hash: string; mode?: number }>(), truncated: false }
       : await this.remoteManifest(remoteRoot);
     const remote = manifest.entries;
     const manifestMs = clock() - tManifest0;
@@ -1310,7 +1310,11 @@ export class VM {
     // counters are deterministic regardless of which hash finished first.
     for (let index = 0; index < localFiles.length; index++) {
       const file = localFiles[index]!;
-      if (remote.get(file.rel) === hashes[index]) { result.skipped += 1; continue; }
+      const entry = remote.get(file.rel);
+      if (entry?.hash === hashes[index] && entry.mode === (file.sig.mode & 0o7777)) {
+        result.skipped += 1;
+        continue;
+      }
       changed.push({ rel: file.rel, abs: file.abs });
       result.sent += 1;
       result.bytesSent += file.sig.size;
@@ -1336,13 +1340,13 @@ export class VM {
     return result;
   }
 
-  /** Fetch the VM's file manifest under `path` -> Map(rel_path -> sha256), via the
+  /** Fetch the VM's content hashes and permission bits under `path`, via the
    * host-first `op: "manifest"` op (no FC boot; works on a never-run VM). */
   private async remoteManifest(
     path: string,
-  ): Promise<{ entries: Map<string, string>; truncated: boolean }> {
+  ): Promise<{ entries: Map<string, { hash: string; mode?: number }>; truncated: boolean }> {
     const payload = await this._client._request<{
-      entries?: Array<{ path?: unknown; hash?: unknown }>;
+      entries?: Array<{ path?: unknown; hash?: unknown; mode?: unknown }>;
       truncated?: unknown;
     }>(
       "POST",
@@ -1353,11 +1357,15 @@ export class VM {
       undefined,
       true,
     );
-    const out = new Map<string, string>();
+    const out = new Map<string, { hash: string; mode?: number }>();
     if (Array.isArray(payload.entries)) {
       for (const entry of payload.entries) {
         if (entry && typeof entry.path === "string" && typeof entry.hash === "string") {
-          out.set(entry.path, entry.hash);
+          out.set(entry.path, {
+            hash: entry.hash,
+            mode: typeof entry.mode === "number" && Number.isInteger(entry.mode) && entry.mode >= 0
+              ? entry.mode & 0o7777 : undefined,
+          });
         }
       }
     }
@@ -1462,7 +1470,7 @@ export class VM {
       const q = shellQuoteSingle;
       const cmd =
         `set -e; mkdir -p ${q(remoteRoot)}; ` +
-        `tar -xf ${q(remoteTar)} -C ${q(remoteRoot)}; rm -f ${q(remoteTar)}`;
+        `tar -xpf ${q(remoteTar)} -C ${q(remoteRoot)}; rm -f ${q(remoteTar)}`;
       const res = await this.run(cmd);
       if (res.state === "failed" || res.exitCode !== 0) {
         const stderr = (res.stderr ?? "").slice(0, 300);
@@ -2152,7 +2160,6 @@ async function requestJson<T>(
         { method, headers, body: requestBody },
         fetchImpl,
         http2,
-        shouldRetryNetworkFailures,
       );
       const payload = parseJson(text);
       const parsedError = extractError(payload, status);
@@ -2428,16 +2435,39 @@ const BUN_RUNTIME = Boolean((globalThis as unknown as {
 }).process?.versions?.bun);
 
 // One HTTP/2 session per origin; concurrent requests multiplex over it as streams.
-// `confirmed` flips on the first response so the caller can fall back to fetch if the
-// origin turns out not to speak HTTP/2.
+// Protocol negotiation completes before any application request is sent. A TLS
+// handshake that selected h2 via ALPN is proof enough, a round trip before the
+// server's SETTINGS arrive. Cleartext, or a TLS server that ignores ALPN, has no
+// such proof, so it waits for SETTINGS.
 class Http2Connection {
-  confirmed = false;
+  readonly ready: Promise<void>;
   private streams = 0;
   private readonly session: Http2Session;
 
   constructor(http2: Http2Module, origin: string) {
     this.session = http2.connect(origin);
     this.session.on("error", () => {});
+    this.ready = new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.session.off("connect", onConnect);
+        this.session.off("remoteSettings", onReady);
+        this.session.off("error", onError);
+        this.session.off("close", onClose);
+      };
+      const onReady = () => { cleanup(); resolve(); };
+      const onConnect = () => { if (this.session.alpnProtocol === "h2") onReady(); };
+      const onError = (error: Error) => { cleanup(); this.session.destroy(); reject(error); };
+      const onClose = () => onError(new Error("HTTP/2 connection closed before protocol negotiation"));
+      const timeout = setTimeout(() => {
+        onError(new Error("HTTP/2 protocol negotiation timed out"));
+      }, HTTP2_REQUEST_TIMEOUT_MS);
+      timeout.unref();
+      this.session.once("connect", onConnect);
+      this.session.once("remoteSettings", onReady);
+      this.session.once("error", onError);
+      this.session.once("close", onClose);
+    }).finally(() => this.session.unref());
   }
 
   get closed(): boolean {
@@ -2467,7 +2497,6 @@ class Http2Connection {
       }
       stream.on("response", (responseHeaders) => {
         timeout?.refresh();
-        this.confirmed = true;
         status = Number(responseHeaders[":status"]) || 0;
       });
       stream.on("data", (chunk: string) => {
@@ -2504,12 +2533,15 @@ async function sendRequest(
   init: { method: string; headers: Record<string, string>; body?: string },
   fetchImpl: FetchLike,
   http2Enabled: boolean,
-  allowUnconfirmedHttp2Fallback: boolean,
 ): Promise<TransportResponse> {
+  let failedNegotiation: Http2Connection | undefined;
+  let origin: string | undefined;
   if (http2Enabled) {
     const http2 = await loadHttp2();
     if (http2) {
-      const { origin, pathname, search } = new URL(url);
+      const parsed = new URL(url);
+      origin = parsed.origin;
+      const { pathname, search } = parsed;
       const cached = http2Connections.get(origin); // null => origin known not to speak HTTP/2
       if (cached !== null) {
         let connection = cached;
@@ -2518,20 +2550,22 @@ async function sendRequest(
           http2Connections.set(origin, connection);
         }
         try {
-          return await connection.request(init.method, `${pathname}${search}`, init.headers, init.body);
-        } catch (error) {
-          // A safe request can probe the fetch transport on its next attempt.
-          // An unsafe request has an unknown outcome, so preserve the origin's
-          // HTTP/2 transport choice for later reconciliation.
-          if (!connection.confirmed && allowUnconfirmedHttp2Fallback) {
-            http2Connections.set(origin, null);
-          }
-          throw error;
+          await connection.ready;
+        } catch {
+          // No request stream exists yet, so switching transport cannot replay
+          // an operation. Do not cache HTTP/1 until it returns a response.
+          failedNegotiation = connection;
+        }
+        if (!failedNegotiation) {
+          return connection.request(init.method, `${pathname}${search}`, init.headers, init.body);
         }
       }
     }
   }
   const response = await fetchImpl(url, init as RequestInit);
+  if (origin && failedNegotiation && http2Connections.get(origin) === failedNegotiation) {
+    http2Connections.set(origin, null);
+  }
   let text: string;
   try {
     text = await response.text();

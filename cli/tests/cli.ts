@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, constants, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { createServer as createHttp1Server, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer as createHttp2Server } from "node:http2";
 import { tmpdir } from "node:os";
@@ -49,8 +50,7 @@ async function withServer(
   try {
     await fn(`http://127.0.0.1:${address.port}/api`, server);
   } finally {
-    server.close();
-    await once(server, "close");
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 }
 
@@ -717,6 +717,23 @@ async function testHelpMatchesSupportedSurface(): Promise<void> {
   assert.match(help, /CLI options must appear before <command>/);
 }
 
+async function testExtraOperandsFailBeforeRequest(): Promise<void> {
+  // Each of these used to act on the first operands and silently drop the rest.
+  const cases = [
+    ["rm", "vm_1", "vm_2"],
+    ["vms", "delete", "vm_1", "vm_2"],
+    ["sync", "vm_1", "/tmp/file", "first", "ignored"],
+  ];
+  await withCapturedServer((_request, res) => jsonResponse(res, { deleted: true }), async (baseUrl, requests) => {
+    for (const args of cases) {
+      const result = await runCli(baseUrl, args);
+      assert.equal(result.code, 1, args.join(" "));
+      assert.match(result.stderr, /unexpected argument/, args.join(" "));
+      assert.equal(requests.length, 0, args.join(" "));
+    }
+  });
+}
+
 async function testRunJsonIncludesMemoryMetadata(): Promise<void> {
   let body: unknown;
   await withServer(async (req, res) => {
@@ -790,6 +807,33 @@ async function testPoliciesGetAndSet(): Promise<void> {
     assert.ok(put!.url!.includes("/policies"), `unexpected url: ${put!.url}`);
     assert.deepEqual(put!.body, doc);
   });
+}
+
+// `--file` must read pipes (`<(jq ...)` is a FIFO) and refuse only directories.
+async function testPoliciesSetFileReadsPipesAndRejectsDirectories(): Promise<void> {
+  const doc = { policies: [], mitm_domains: [] };
+  const dir = mkdtempSync(join(tmpdir(), "arker-policy-file-"));
+  try {
+    await withCapturedServer((_request, res) => jsonResponse(res, { ok: true }), async (baseUrl, requests) => {
+      const fifo = join(dir, "policy.fifo");
+      execFileSync("mkfifo", [fifo]);
+      // Opening a FIFO for writing waits for its reader, the CLI.
+      const writing = writeFile(fifo, JSON.stringify(doc));
+      const piped = await runCli(baseUrl, ["policies", "set", "vm_1", "--file", fifo]);
+      // A CLI that never opened the FIFO would leave the writer waiting forever.
+      const release = piped.code === 0 ? undefined : openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
+      await writing.catch(() => {});
+      if (release !== undefined) closeSync(release);
+      assert.equal(piped.code, 0, piped.stderr);
+      assert.deepEqual(requests.find((r) => r.method === "PUT")?.body, doc);
+
+      requests.length = 0;
+      const directory = await runCli(baseUrl, ["policies", "set", "vm_1", "--file", dir]);
+      assert.equal(directory.code, 1);
+      assert.match(directory.stderr, /is not a file/);
+      assert.equal(requests.length, 0);
+    });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
 async function testPoliciesSetRejectsInvalidJson(): Promise<void> {
@@ -986,6 +1030,56 @@ async function testShellRequiresVmOrSourceBeforeRequest(): Promise<void> {
     assert.equal(requests.length, 0);
     assert.match(result.stderr, /--source-vm-name/);
   });
+}
+
+async function testRemoteShellCloseExitsWithOpenLocalStdin(): Promise<void> {
+  const wss = new WebSocketServer({ noServer: true });
+  try {
+    await withServer((_req, res) => jsonResponse(res, { vm_id: "vm_1", state: "idle" }), async (baseUrl, server) => {
+      server.on("upgrade", (req, socket, head) => {
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          const finish = () => {
+            ws.send("remote-exit\n");
+            ws.close(1000, "shell exited");
+          };
+          if (ws.readyState === 1) finish();
+          else ws.once("open", finish);
+        });
+      });
+      const child = spawn(cliRuntime, [cliEntry, "shell", "vm_1", "--session-id", "session_1"], {
+        cwd: packageRoot,
+        env: { ...process.env, ARKER_API_KEY: "ark_live_test", ARKER_BASE_URL: baseUrl, ARKER_CONTROL_BASE_URL: baseUrl },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const chunks: Buffer[] = [];
+      const errors: Buffer[] = [];
+      child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+      child.stderr.on("data", (chunk: Buffer) => errors.push(chunk));
+      const closed = once(child, "close");
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([
+          closed,
+          new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 5000); }),
+        ]);
+        assert.notEqual(result, null, "remote shell closed, but CLI stayed alive with local stdin open");
+        assert.equal(result![0], 0, Buffer.concat(errors).toString());
+        assert.equal(Buffer.concat(chunks).toString(), "remote-exit\n");
+      } finally {
+        clearTimeout(timer);
+        if (child.exitCode === null) child.kill("SIGKILL");
+        child.stdin.destroy();
+        child.stdout.destroy();
+        child.stderr.destroy();
+        for (const client of wss.clients) client.terminate();
+        server.closeAllConnections();
+        await closed;
+      }
+    }, { http1: true });
+  } finally {
+    for (const client of wss.clients) client.terminate();
+    wss.close();
+  }
 }
 
 async function testStructuredErrorsDoNotRepeatCode(): Promise<void> {
@@ -1203,6 +1297,8 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
 }
 
 await testForkSelectsPool();
+await testExtraOperandsFailBeforeRequest();
+await testRemoteShellCloseExitsWithOpenLocalStdin();
 await testRunOptionsStopAtRemoteCommand();
 await testKnownFlagAfterRemoteCommandPassesThrough();
 await testRunOptionAfterVmBeforeCommand();
@@ -1248,6 +1344,7 @@ await testStructuredErrorsDoNotRepeatCode();
 await testFalseMutationResultsExitNonzero();
 await testRemainingHttpCommandSurface();
 await testPoliciesGetAndSet();
+await testPoliciesSetFileReadsPipesAndRejectsDirectories();
 await testPoliciesSetRejectsInvalidJson();
 
 console.log("PASS cli");

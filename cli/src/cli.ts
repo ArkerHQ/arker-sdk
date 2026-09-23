@@ -290,7 +290,7 @@ interface Invocation {
 }
 
 type LocalAction =
-  | { type: "help"; command?: string; sub?: string }
+  | { type: "help"; command?: string; positional?: string[] }
   | { type: "version" };
 
 function parseInvocation(argv: string[]): Invocation | LocalAction {
@@ -315,15 +315,14 @@ function parseInvocation(argv: string[]): Invocation | LocalAction {
       : undefined;
   const args = parseArgs(argv.slice(index + 1), COMMAND_OPTIONS[command]!, flags, remoteBoundary);
   if (args.flags.help === true) {
-    const sub = args.positional[0];
-    return { type: "help", command, sub: typeof sub === "string" ? sub : undefined };
+    return { type: "help", command, positional: args.positional };
   }
   validateInvocationOptions(command, args);
   return { command, args };
 }
 
-function validateInvocationOptions(command: string, args: ParsedArgs): void {
-  const subcommand = args.positional[0];
+function invocationOptions(command: string, positional: string[]): { options: OptionSpecs; context: string } {
+  const subcommand = positional[0];
   let allowed = COMMAND_OPTIONS[command]!;
   let context = command;
   if (command === "vms") {
@@ -344,10 +343,18 @@ function validateInvocationOptions(command: string, args: ParsedArgs): void {
     allowed = subcommand === "ls" || subcommand === "list"
       ? RUN_LIST_OPTIONS
       : GLOBAL_OPTIONS;
+    if (subcommand === "ls" || subcommand === "list") {
+      const vm = positional[1];
+      const excluded = vm
+        ? ["actions", "dir", "endpoint", "lite", "offset", "provider", "region", "runtime", "search", "since", "sort", "status", "status-max", "status-min", "until", "vm", "vms"]
+        : ["completed-after", "cursor", "started-after", "started-before", "state"];
+      allowed = Object.fromEntries(Object.entries(allowed).filter(([name]) => !excluded.includes(name)));
+      if (vm) allowed.limit = PAGINATION_OPTIONS.limit!;
+    }
   } else if (command === "sessions") {
     context = `sessions ${subcommand ?? ""}`.trim();
     allowed = subcommand === "ls" || subcommand === "list"
-      ? { ...GLOBAL_OPTIONS, ...PAGINATION_OPTIONS, state: { type: "string" } }
+      ? { ...GLOBAL_OPTIONS, ...PAGINATION_OPTIONS, state: COMMAND_OPTIONS.sessions!.state! }
       : subcommand === "create"
         ? {
             ...GLOBAL_OPTIONS,
@@ -381,6 +388,48 @@ function validateInvocationOptions(command: string, args: ParsedArgs): void {
       : subcommand === "create"
         ? { ...GLOBAL_OPTIONS, name: { type: "string" } }
         : GLOBAL_OPTIONS;
+  } else if (command === "policies") {
+    context = `policies ${subcommand ?? "get"}`;
+    allowed = subcommand === "set" ? COMMAND_OPTIONS.policies! : GLOBAL_OPTIONS;
+  }
+
+  return { options: allowed, context };
+}
+
+const POSITIONAL_LIMITS: Record<string, number | Record<string, number>> = {
+  delete: 1,
+  filesystems: { ls: 0, list: 0, create: 1, get: 1, rm: 1, delete: 1 },
+  fork: 1,
+  list: 0,
+  ls: 0,
+  rm: 1,
+  run: Infinity,
+  runs: { ls: 1, list: 1, get: 2, rm: 2, cancel: 2 },
+  sessions: { ls: 1, list: 1, get: 2, create: 1, rm: 2, delete: 2, update: 2 },
+  shell: 1,
+  policies: { get: 1, set: 1 },
+  regions: 0,
+  whoami: 0,
+  signal: 2,
+  sync: 3,
+  "sync-dir": 3,
+  mounts: { ls: 1, list: 1, create: 1, rm: 2, delete: 2 },
+  update: 1,
+  vms: { ls: 0, list: 0, get: 1, rm: 1, delete: 1, fork: 1, run: Infinity, update: 1 },
+};
+POSITIONAL_LIMITS.fs = POSITIONAL_LIMITS.filesystems!;
+
+function validateInvocationOptions(command: string, args: ParsedArgs): void {
+  const { options: allowed, context } = invocationOptions(command, args.positional);
+  const limits = POSITIONAL_LIMITS[command]!;
+  const nested = typeof limits !== "number";
+  const subcommand = args.positional[0];
+  if (nested && subcommand !== undefined && !(subcommand in limits)) {
+    die(`unknown subcommand: ${command} ${subcommand}. Run 'arker ${command} --help'.`);
+  }
+  const maximum = nested ? (subcommand === undefined ? 0 : limits[subcommand]! + 1) : limits;
+  if (args.positional.length > maximum) {
+    die(`unexpected argument for ${context}: ${args.positional[maximum]}`);
   }
 
   for (const flag of Object.keys(args.flags)) {
@@ -800,11 +849,14 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
   out({ vm_id: computer.id });
 }
 
+// Reads anything but a directory, so `--file <(jq ...)` and `--file /dev/stdin` work.
 function readTextFile(path: string, label: string): string {
-  requirePathKind(path, label, "file");
   try {
     return readFileSync(path, "utf8");
   } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") die(`${label} does not exist: ${path}`);
+    if (code === "EISDIR") die(`${label} is not a file: ${path}`);
     die(`cannot read ${label} file: ${path}: ${(error as Error).message}`);
   }
 }
@@ -986,11 +1038,6 @@ async function cmdRuns(args: ParsedArgs, client: Arker): Promise<void> {
       if (rest.length > 1) die("usage: arker runs ls [vm_id] [flags]");
       const vm = rest[0];
       if (vm) {
-        rejectPresentFlags(args, [
-          "actions", "dir", "endpoint", "lite", "offset", "provider", "region",
-          "runtime", "search", "since", "sort", "status", "status-max", "status-min",
-          "until", "vm", "vms",
-        ], "runs ls <vm_id>");
         const limit = numFlag(args, "limit");
         if (limit !== undefined && limit > 1000) {
           die('parameter "limit" must be an integer >= 1 and <= 1000 for "runs ls <vm_id>"');
@@ -1011,9 +1058,6 @@ async function cmdRuns(args: ParsedArgs, client: Arker): Promise<void> {
         return;
       }
 
-      rejectPresentFlags(args, [
-        "completed-after", "cursor", "started-after", "started-before", "state",
-      ], "organization-wide runs ls");
       const limit = numFlag(args, "limit");
       if (limit !== undefined && limit > 200 && boolFlag(args, "lite") !== true) {
         die('parameter "limit" must be <= 200 unless --lite is enabled');
@@ -1163,7 +1207,7 @@ async function cmdSyncDir(args: ParsedArgs, client: Arker): Promise<void> {
   const vm = args.positional[0] ?? die("usage: arker sync-dir <vm_id> <local_dir> <remote_dir> [--assume-empty]");
   const localDir = args.positional[1] ?? die("missing local_dir");
   const remoteDir = args.positional[2] ?? die("missing remote_dir");
-  if (!existsSync(localDir)) die(`no such directory: ${localDir}`);
+  requirePathKind(localDir, "local source", "directory");
   const result = await client.vm(vm).syncDir(localDir, remoteDir, {
     ...(args.flags["assume-empty"] ? { assumeEmpty: true } : {}),
   });
@@ -1189,8 +1233,7 @@ async function cmdPolicies(args: ParsedArgs, client: Arker): Promise<void> {
       const file = args.flags.file as string | undefined;
       let raw: string;
       if (file) {
-        if (!existsSync(file)) die(`no such file: ${file}`);
-        raw = readFileSync(file, "utf8");
+        raw = readTextFile(file, "policy document");
       } else if (stdinHasDataSource()) {
         raw = new TextDecoder().decode(await readAllStdin());
       } else {
@@ -1498,14 +1541,6 @@ function commaListFlag(args: ParsedArgs, name: string): string[] | undefined {
   const items = value.split(",").map((item) => item.trim()).filter(Boolean);
   if (items.length === 0) die(`parameter "${name}" must include at least one value`);
   return items;
-}
-
-function rejectPresentFlags(args: ParsedArgs, names: string[], context: string): void {
-  for (const name of names) {
-    if (args.flags[name] !== undefined) {
-      die(`parameter "${name}" is not valid for "${context}"`);
-    }
-  }
 }
 
 function sessionEnvFromArgs(args: ParsedArgs): { provided: boolean; values: Record<string, string> } {
@@ -1828,10 +1863,13 @@ function optionLine(name: string, spec: OptionSpec): string {
   return left.padEnd(34) + " " + desc;
 }
 
-function commandUsage(command: string, sub?: string): string[] {
+function commandUsage(command: string, positional: string[] = []): string[] {
+  const sub = positional[0];
   const key = resolveHelpKey(command);
   const help = COMMAND_HELP[key]!;
-  const specs = COMMAND_OPTIONS[command] ?? COMMAND_OPTIONS[key] ?? {};
+  const specs = sub === undefined && help.subs
+    ? COMMAND_OPTIONS[command]!
+    : invocationOptions(command, positional).options;
   const names = Object.keys(specs);
   const own = names.filter((n) => !COMMON_FLAG_ORDER.includes(n)).sort();
   const common = COMMON_FLAG_ORDER.filter((n) => names.includes(n));
@@ -1863,9 +1901,9 @@ function commandUsage(command: string, sub?: string): string[] {
   return lines;
 }
 
-function usage(command?: string, sub?: string): void {
+function usage(command?: string, positional: string[] = []): void {
   if (command && COMMAND_HELP[resolveHelpKey(command)]) {
-    out(commandUsage(command, sub).join("\n"));
+    out(commandUsage(command, positional).join("\n"));
     return;
   }
   out(
@@ -1990,7 +2028,7 @@ async function main(): Promise<void> {
   const invocation = parseInvocation(process.argv.slice(2));
   if ("type" in invocation) {
     if (invocation.type === "version") out(`arker ${VERSION}`);
-    else usage(invocation.command, invocation.sub);
+    else usage(invocation.command, invocation.positional);
     return;
   }
   const { command: cmd, args } = invocation;

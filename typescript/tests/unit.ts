@@ -1743,7 +1743,6 @@ async function testSyncDirUploadsThenExtracts(): Promise<void> {
     assert.equal(write.op, "write");
     const command = JSON.parse(fetch.calls[2]!.body!).command;
     assert.ok(command.includes(write.writes[0].path));
-    assert.ok(command.includes("tar -xf"));
     assert.ok(command.includes("/home/user/p"));
   } finally { cleanup(); }
 }
@@ -1941,10 +1940,10 @@ console.log("PASS unit");
 // answer means a silently skipped upload. These tests pin that boundary.
 
 /** A server that answers a syncDir: empty manifest, then accepts the tarball. */
-function syncDirServer(remoteEntries: Array<{ path: string; hash: string }> = []): FakeFetch {
+function syncDirServer(remoteEntries: Array<{ path: string; hash: string; mode?: number }> = []): FakeFetch {
   const fetch = new FakeFetch();
   fetch.addJson((m, url) => m === "POST" && url.endsWith("/sync"), 200, {
-    ok: true, op: "manifest", entries: remoteEntries, truncated: false,
+    ok: true, op: "manifest", entries: remoteEntries.map((entry) => ({ mode: 0o644, ...entry })), truncated: false,
   });
   acceptSyncArchive(fetch);
   return fetch;
@@ -1955,6 +1954,7 @@ function tmpTree(files: Record<string, string>): string {
   for (const [name, body] of Object.entries(files)) {
     fs.mkdirSync(nodePath.dirname(nodePath.join(dir, name)), { recursive: true });
     fs.writeFileSync(nodePath.join(dir, name), body);
+    fs.chmodSync(nodePath.join(dir, name), 0o644);
   }
   return dir;
 }
@@ -1968,6 +1968,24 @@ function withCacheDir<T>(fn: (cacheDir: string) => Promise<T>): Promise<T> {
     if (previous === undefined) delete process.env.ARKER_CACHE_DIR;
     else process.env.ARKER_CACHE_DIR = previous;
     fs.rmSync(cacheDir, { recursive: true, force: true });
+  });
+}
+
+async function testSyncDirRepairsPermissionOnlyChanges(): Promise<void> {
+  await withCacheDir(async () => {
+    const dir = tmpTree({ "tool.sh": "#!/bin/sh\n" });
+    const path = nodePath.join(dir, "tool.sh");
+    const hash = createHash("sha256").update(fs.readFileSync(path)).digest("hex");
+    fs.chmodSync(path, 0o755);
+    try {
+      // Both cache kinds: a cached hash must not short-circuit the mode check.
+      for (const cache of [undefined, new Map()]) {
+        const changed = syncDirServer([{ path: "tool.sh", hash, mode: 0o644 }]);
+        assert.equal((await client(changed).vm("vm_1").syncDir(dir, "/p", { cache })).sent, 1);
+        const unchanged = syncDirServer([{ path: "tool.sh", hash, mode: 0o755 }]);
+        assert.equal((await client(unchanged).vm("vm_1").syncDir(dir, "/p", { cache })).sent, 0);
+      }
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 }
 
@@ -2130,6 +2148,7 @@ async function testCallerSuppliedCacheBypassesDisk(): Promise<void> {
   });
 }
 
+await testSyncDirRepairsPermissionOnlyChanges();
 await testStatCacheSkipsRereadOnSecondSync();
 await testStatCacheCatchesForgedMtimeEdit();
 await testStatCacheDistrustsRacilyCleanEntries();

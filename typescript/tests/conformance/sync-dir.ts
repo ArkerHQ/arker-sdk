@@ -14,7 +14,7 @@
  *   ARKER_SOURCE_VM=<source-name> bun tests/conformance/sync-dir.ts
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -92,6 +92,15 @@ async function main(): Promise<void> {
     // 6) The accelerator cache is a pure optimization — same delta result.
     const cache = new Map();
     eq(await vm.syncDir(local, remote, { cache }), 0, 4, "cached repeat sync");
+
+    // Permission-only changes must use the same diff and extraction path.
+    for (const mode of [0o755, 0o644]) {
+      chmodSync(join(local, "a.txt"), mode);
+      eq(await vm.syncDir(local, remote), 1, 3, "permission-only sync");
+      const permissions = await vm.run(`stat -c %a ${remote}/a.txt`);
+      assert(permissions.stdout.trim() === mode.toString(8), "remote mode mismatch");
+      eq(await vm.syncDir(local, remote), 0, 4, "repeat permission sync");
+    }
 
     console.log("PASS sync-dir");
   } finally {
