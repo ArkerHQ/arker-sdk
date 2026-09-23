@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, constants, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { createServer as createHttp1Server, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer as createHttp2Server } from "node:http2";
 import { tmpdir } from "node:os";
@@ -686,6 +687,23 @@ async function testHelpMatchesSupportedSurface(): Promise<void> {
   assert.match(help, /CLI options must appear before <command>/);
 }
 
+async function testExtraOperandsFailBeforeRequest(): Promise<void> {
+  // Each of these used to act on the first operands and silently drop the rest.
+  const cases = [
+    ["rm", "vm_1", "vm_2"],
+    ["vms", "delete", "vm_1", "vm_2"],
+    ["sync", "vm_1", "/tmp/file", "first", "ignored"],
+  ];
+  await withCapturedServer((_request, res) => jsonResponse(res, { deleted: true }), async (baseUrl, requests) => {
+    for (const args of cases) {
+      const result = await runCli(baseUrl, args);
+      assert.equal(result.code, 1, args.join(" "));
+      assert.match(result.stderr, /unexpected argument/, args.join(" "));
+      assert.equal(requests.length, 0, args.join(" "));
+    }
+  });
+}
+
 async function testRunJsonIncludesMemoryMetadata(): Promise<void> {
   let body: unknown;
   await withServer(async (req, res) => {
@@ -759,6 +777,33 @@ async function testPoliciesGetAndSet(): Promise<void> {
     assert.ok(put!.url!.includes("/policies"), `unexpected url: ${put!.url}`);
     assert.deepEqual(put!.body, doc);
   });
+}
+
+// `--file` must read pipes (`<(jq ...)` is a FIFO) and refuse only directories.
+async function testPoliciesSetFileReadsPipesAndRejectsDirectories(): Promise<void> {
+  const doc = { policies: [], mitm_domains: [] };
+  const dir = mkdtempSync(join(tmpdir(), "arker-policy-file-"));
+  try {
+    await withCapturedServer((_request, res) => jsonResponse(res, { ok: true }), async (baseUrl, requests) => {
+      const fifo = join(dir, "policy.fifo");
+      execFileSync("mkfifo", [fifo]);
+      // Opening a FIFO for writing waits for its reader, the CLI.
+      const writing = writeFile(fifo, JSON.stringify(doc));
+      const piped = await runCli(baseUrl, ["policies", "set", "vm_1", "--file", fifo]);
+      // A CLI that never opened the FIFO would leave the writer waiting forever.
+      const release = piped.code === 0 ? undefined : openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
+      await writing.catch(() => {});
+      if (release !== undefined) closeSync(release);
+      assert.equal(piped.code, 0, piped.stderr);
+      assert.deepEqual(requests.find((r) => r.method === "PUT")?.body, doc);
+
+      requests.length = 0;
+      const directory = await runCli(baseUrl, ["policies", "set", "vm_1", "--file", dir]);
+      assert.equal(directory.code, 1);
+      assert.match(directory.stderr, /is not a file/);
+      assert.equal(requests.length, 0);
+    });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
 async function testPoliciesSetRejectsInvalidJson(): Promise<void> {
@@ -1221,6 +1266,7 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
   }
 }
 
+await testExtraOperandsFailBeforeRequest();
 await testRemoteShellCloseExitsWithOpenLocalStdin();
 await testRunOptionsStopAtRemoteCommand();
 await testKnownFlagAfterRemoteCommandPassesThrough();
@@ -1267,6 +1313,7 @@ await testStructuredErrorsDoNotRepeatCode();
 await testFalseMutationResultsExitNonzero();
 await testRemainingHttpCommandSurface();
 await testPoliciesGetAndSet();
+await testPoliciesSetFileReadsPipesAndRejectsDirectories();
 await testPoliciesSetRejectsInvalidJson();
 
 console.log("PASS cli");
