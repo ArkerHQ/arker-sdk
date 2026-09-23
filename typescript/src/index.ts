@@ -1550,7 +1550,7 @@ export class VM {
     request:
       | PatchVmRequest
       | (ResourcesInput &
-          Pick<PatchVmRequest, "description" | "ssh_public_keys" | "policies">),
+          Pick<PatchVmRequest, "description" | "ssh_public_keys" | "policies" | "pool_id" | "pool_name">),
   ): Promise<Vm> {
     const r = request as PatchVmRequest &
       ResourcesInput & { resources?: ResourcesInput | null };
@@ -1559,12 +1559,16 @@ export class VM {
       (r.vcpu === undefined && r.memory_mib === undefined && r.disk_mib === undefined && r.vgpu === undefined)
         ? {
             description: r.description,
+            pool_id: r.pool_id,
+            pool_name: r.pool_name,
             resources: r.resources,
             ssh_public_keys: r.ssh_public_keys,
             policies: r.policies,
           }
         : {
             description: r.description,
+            pool_id: r.pool_id,
+            pool_name: r.pool_name,
             resources: {
               vcpu: r.vcpu ?? null,
               memory_mib: r.memory_mib ?? null,

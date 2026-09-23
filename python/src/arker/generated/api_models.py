@@ -1929,6 +1929,8 @@ class PatchVmRequest:
     resources: ResourcesInput | None = None
     ssh_public_keys: list[str] | None = None
     policies: PolicyWriteRequest | None = None
+    pool_id: str | None = None
+    pool_name: str | None = None
 
 
 @dataclass(frozen=True)

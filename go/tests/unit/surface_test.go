@@ -867,3 +867,28 @@ func syncDirectoryServer(t *testing.T, manifest string, archive func([]byte)) *a
 		fmt.Fprintf(w, `{"ok":true,"op":"write","results":[{"complete":%t,"written":%t}]}`, entry.End == entry.Size, entry.End == entry.Size)
 	}, reject(t, "control"))
 }
+
+func TestUpdatePoolSelection(t *testing.T) {
+	for _, req := range []arker.UpdateRequest{{PoolName: arker.Ptr("main")}, {PoolID: arker.Ptr("22222222-2222-4222-8222-222222222222")}} {
+		var body map[string]any
+		c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPatch {
+				t.Errorf("method = %s", r.Method)
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			fmt.Fprint(w, forkVM)
+		}, reject(t, "control"))
+		if _, err := c.VM("vm_1").Update(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+		if len(body) != 1 {
+			t.Fatalf("unexpected fields: %v", body)
+		}
+		if req.PoolName != nil && body["pool_name"] != *req.PoolName {
+			t.Fatalf("pool name: %v", body)
+		}
+		if req.PoolID != nil && body["pool_id"] != *req.PoolID {
+			t.Fatalf("pool id: %v", body)
+		}
+	}
+}

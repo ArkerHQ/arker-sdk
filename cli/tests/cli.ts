@@ -299,31 +299,33 @@ async function testInvalidNumbersFailBeforeRequest(): Promise<void> {
 }
 
 async function testForkSelectsPool(): Promise<void> {
-  for (const [flag, field, value] of [
-    ["--pool", "pool_name", "main"],
-    ["--pool-id", "pool_id", "00000000-0000-4000-8000-000000000001"],
-  ]) {
+  for (const command of ["fork", "update"]) {
+    for (const [flag, field, value] of [
+      ["--pool", "pool_name", "main"],
+      ["--pool-id", "pool_id", "00000000-0000-4000-8000-000000000001"],
+    ]) {
+      await withCapturedServer(
+        (_request, res) => jsonResponse(res, { vm_id: "vm_pool" }),
+        async (baseUrl, requests) => {
+          const result = await runCli(baseUrl, [command!, "ubuntu", flag!, value!]);
+          assert.equal(result.code, 0, result.stderr);
+          assert.deepEqual(requestsWithoutKeys(requests), [{
+            method: command === "fork" ? "POST" : "PATCH", url: command === "fork" ? "/api/v1/fork" : "/api/v1/vms/ubuntu",
+            body: { ...(command === "fork" ? { source_vm_name: "ubuntu" } : {}), [field!]: value },
+          }]);
+        },
+      );
+    }
     await withCapturedServer(
       (_request, res) => jsonResponse(res, { vm_id: "vm_pool" }),
       async (baseUrl, requests) => {
-        const result = await runCli(baseUrl, ["fork", "ubuntu", flag!, value!]);
-        assert.equal(result.code, 0, result.stderr);
-        assert.deepEqual(requestsWithoutKeys(requests), [{
-          method: "POST", url: "/api/v1/fork",
-          body: { source_vm_name: "ubuntu", [field!]: value },
-        }]);
+        const result = await runCli(baseUrl, [command!, "ubuntu", "--pool", "main", "--pool-id", "00000000-0000-4000-8000-000000000001"]);
+        assert.equal(result.code, 1);
+        assert.match(result.stderr, /--pool and --pool-id are mutually exclusive/);
+        assert.equal(requests.length, 0);
       },
     );
   }
-  await withCapturedServer(
-    (_request, res) => jsonResponse(res, { vm_id: "vm_pool" }),
-    async (baseUrl, requests) => {
-      const result = await runCli(baseUrl, ["fork", "ubuntu", "--pool", "main", "--pool-id", "00000000-0000-4000-8000-000000000001"]);
-      assert.equal(result.code, 1);
-      assert.match(result.stderr, /--pool and --pool-id are mutually exclusive/);
-      assert.equal(requests.length, 0);
-    },
-  );
 }
 
 /// `--vgpu` is the only fractional resource flag, so it exercises the number

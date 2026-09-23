@@ -2797,3 +2797,13 @@ await testBuildStepsInheritTheForkQueueingWindow();
 await testBuildStepsOmitTheWindowWhenTheForkHadNone();
 await testForkDockerfileGivesBuildStepsTheQueueingWindow();
 await testAFailedDockerfileBuildDeletesTheVm();
+
+
+for (const selector of [{ pool_name: "main" }, { pool_id: "22222222-2222-4222-8222-222222222222" }]) {
+  for (const resources of [false, true]) {
+    const fetch = new FakeFetch();
+    fetch.addJson((method, url) => method === "PATCH" && url.endsWith("/v1/vms/vm_1"), 200, { vm_id: "vm_1" });
+    await client(fetch).vm("vm_1").update({ ...selector, ...(resources ? { vcpu: 2 } : {}) });
+    assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { ...selector, ...(resources ? { resources: { vcpu: 2, memory_mib: null, disk_mib: null } } : {}) });
+  }
+}

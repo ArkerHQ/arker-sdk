@@ -336,6 +336,8 @@ func (v *VM) Fork(ctx context.Context, req ForkRequest) (*VM, error) {
 // against a live deployment: PATCH {"description":null} left the value intact
 // while {"description":""} cleared it.
 type UpdateRequest struct {
+	PoolID        *string    `json:"pool_id,omitempty"`
+	PoolName      *string    `json:"pool_name,omitempty"`
 	Description   *string    `json:"description,omitempty"`
 	Resources     *Resources `json:"resources,omitempty"`
 	SSHPublicKeys *[]string  `json:"ssh_public_keys,omitempty"`

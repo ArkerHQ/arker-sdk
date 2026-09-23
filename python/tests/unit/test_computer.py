@@ -2859,3 +2859,13 @@ def test_generated_fork_key_fits_the_server_limit() -> None:
         client().fork(source_vm_id="source-vm-id", idempotency=True)
 
     assert 0 < len(t.calls[0]["headers"]["idempotency-key"]) <= 64
+
+
+@pytest.mark.parametrize("selector", [{"pool_name": "main"}, {"pool_id": "22222222-2222-4222-8222-222222222222"}])
+@pytest.mark.parametrize("description", [{}, {"description": "runner"}])
+def test_update_preserves_pool_selector(selector, description) -> None:
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"), 200, _fork_response("vm_1"))
+    with use_transport(t):
+        client().vm("vm_1").update(**selector, **description)
+    assert json.loads(t.calls[0]["body"]) == {**selector, **description}

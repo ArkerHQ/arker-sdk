@@ -719,10 +719,10 @@ export interface components {
             registry_auth?: components["schemas"]["RegistryAuth"] | null;
             /**
              * Format: uuid
-             * @description Optionally join an active pool in the same organization and provider/region. Membership is permanent and never inherited from the source VM.
+             * @description Optionally join an active pool in the same organization and provider/region. Membership can be changed with VM PATCH and is never inherited from the source VM.
              */
             pool_id?: string;
-            /** @description Optionally join an active pool by its unique name in the caller organization. Names are normalized and case-insensitive. Mutually exclusive with pool_id. Membership is permanent, uses the resolved pool ID, and is never inherited from the source VM. */
+            /** @description Optionally join an active pool by its unique name in the caller organization. Names are normalized and case-insensitive. Mutually exclusive with pool_id. Membership uses the resolved pool ID, can be changed with VM PATCH, and is never inherited from the source VM. */
             pool_name?: string;
         } & ({
             source_vm_id: string;
@@ -853,7 +853,7 @@ export interface components {
             compatible_platforms?: components["schemas"]["CompatiblePlatform"][] | null;
             /**
              * Format: uuid
-             * @description Immutable pool membership. Expired pools bill subsequent usage at normal rates.
+             * @description Current pool membership. Expired pools bill subsequent usage at normal rates.
              */
             pool_id?: string | null;
         };
@@ -1477,6 +1477,13 @@ export interface components {
             ssh_public_keys?: string[];
             /** @description Complete network policy replacement for the VM. A non-empty document replaces the persisted policy and applies it to the running VM. An empty document selects the default posture of allow-all outbound traffic and authenticated inbound traffic. Omit it to leave the current policy unchanged. If the policy cannot be stored and applied, the request fails. */
             policies?: components["schemas"]["PolicyWriteRequest"] | null;
+            /**
+             * Format: uuid
+             * @description Move the VM to an active pool in the same organization and provider/region. Mutually exclusive with pool_name. Omit both fields to keep its current pool.
+             */
+            pool_id?: string;
+            /** @description Move the VM to a pool by its unique, case-insensitive name in the caller organization. Only the resolved pool ID is stored. Mutually exclusive with pool_id. */
+            pool_name?: string;
         };
         /** @description One platform this source can be forked onto, with the resource limits that apply there. This is the authoritative per-platform record: when an entry carries bounds they win over the flat `min_*`/`max_*` fields on the VM, which are a single-platform convenience projection of the same data. CPU, memory, and disk limits come from the source VM; GPU limits come from the platform catalog. */
         CompatiblePlatform: {

@@ -842,6 +842,8 @@ class VM:
         disk_mib: int | None = None,
         vgpu: float | None = None,
         description: str | _UnsetType | None = _UNSET,
+        pool_id: str | None = None,
+        pool_name: str | None = None,
         ssh_public_keys: list[str] | None = None,
         policies: PolicyDoc | dict[str, Any] | None = None,
     ) -> Vm:
@@ -871,6 +873,8 @@ class VM:
         if description is _UNSET:
             body = PatchVmRequest(
                 resources=resources,
+                pool_id=pool_id,
+                pool_name=pool_name,
                 ssh_public_keys=ssh_public_keys,
                 policies=policies,
             )
@@ -878,6 +882,8 @@ class VM:
             body = {
                 "description": _EXPLICIT_NULL if description is None else description,
                 "resources": resources,
+                "pool_id": pool_id,
+                "pool_name": pool_name,
                 "ssh_public_keys": ssh_public_keys,
                 "policies": policies,
             }
