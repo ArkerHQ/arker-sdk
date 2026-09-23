@@ -50,8 +50,7 @@ async function withServer(
   try {
     await fn(`http://127.0.0.1:${address.port}/api`, server);
   } finally {
-    server.close();
-    await once(server, "close");
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 }
 
@@ -1003,6 +1002,56 @@ async function testShellRequiresVmOrSourceBeforeRequest(): Promise<void> {
   });
 }
 
+async function testRemoteShellCloseExitsWithOpenLocalStdin(): Promise<void> {
+  const wss = new WebSocketServer({ noServer: true });
+  try {
+    await withServer((_req, res) => jsonResponse(res, { vm_id: "vm_1", state: "idle" }), async (baseUrl, server) => {
+      server.on("upgrade", (req, socket, head) => {
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          const finish = () => {
+            ws.send("remote-exit\n");
+            ws.close(1000, "shell exited");
+          };
+          if (ws.readyState === 1) finish();
+          else ws.once("open", finish);
+        });
+      });
+      const child = spawn(cliRuntime, [cliEntry, "shell", "vm_1", "--session-id", "session_1"], {
+        cwd: packageRoot,
+        env: { ...process.env, ARKER_API_KEY: "ark_live_test", ARKER_BASE_URL: baseUrl, ARKER_CONTROL_BASE_URL: baseUrl },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const chunks: Buffer[] = [];
+      const errors: Buffer[] = [];
+      child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+      child.stderr.on("data", (chunk: Buffer) => errors.push(chunk));
+      const closed = once(child, "close");
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([
+          closed,
+          new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 5000); }),
+        ]);
+        assert.notEqual(result, null, "remote shell closed, but CLI stayed alive with local stdin open");
+        assert.equal(result![0], 0, Buffer.concat(errors).toString());
+        assert.equal(Buffer.concat(chunks).toString(), "remote-exit\n");
+      } finally {
+        clearTimeout(timer);
+        if (child.exitCode === null) child.kill("SIGKILL");
+        child.stdin.destroy();
+        child.stdout.destroy();
+        child.stderr.destroy();
+        for (const client of wss.clients) client.terminate();
+        server.closeAllConnections();
+        await closed;
+      }
+    }, { http1: true });
+  } finally {
+    for (const client of wss.clients) client.terminate();
+    wss.close();
+  }
+}
+
 async function testStructuredErrorsDoNotRepeatCode(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, {
     error: {
@@ -1218,6 +1267,7 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
 }
 
 await testExtraOperandsFailBeforeRequest();
+await testRemoteShellCloseExitsWithOpenLocalStdin();
 await testRunOptionsStopAtRemoteCommand();
 await testKnownFlagAfterRemoteCommandPassesThrough();
 await testRunOptionAfterVmBeforeCommand();

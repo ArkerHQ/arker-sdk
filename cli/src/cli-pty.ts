@@ -18,6 +18,7 @@ interface PtyInputStream extends EventSource {
   isRaw?: boolean;
   setRawMode?(enabled: boolean): void;
   resume(): unknown;
+  pause(): unknown;
 }
 
 interface PtyOutputStream {
@@ -61,6 +62,7 @@ export function bridgePty(
       restoreTerminal();
       input.off("data", onInput);
       input.off("end", onInputEnd);
+      input.pause();
       signals.off("SIGWINCH", onResize);
       signals.off("SIGINT", onSigint);
       signals.off("SIGTERM", onSigterm);
