@@ -75,14 +75,6 @@ async function withCapturedServer(
   }, async (baseUrl) => fn(baseUrl, requests), options);
 }
 
-// Every fork carries a generated `Idempotency-Key`, so a captured fork request
-// has one more field than the body under test. Asserted here rather than
-// stripped: a fork that stops sending a key is exactly the regression the key
-// exists to prevent, and dropping the field quietly would let that pass.
-/// Fork idempotency is opt-in, so a plain `arker fork` must send no key at all
-/// -- an unkeyed fork is never deduplicated, which is the API's own behaviour.
-/// Asserted rather than ignored: a key appearing here would mean the CLI had
-/// started opting callers in without being asked.
 function assertNoForkKeys(requests: CapturedRequest[]): void {
   for (const [index, { idempotencyKey }] of requests.entries()) {
     assert.equal(idempotencyKey, undefined, `request ${index} sent an unrequested Idempotency-Key`);
@@ -298,20 +290,21 @@ async function testInvalidNumbersFailBeforeRequest(): Promise<void> {
   }
 }
 
-async function testForkSelectsPool(): Promise<void> {
+async function testForkAndUpdateSelectPools(): Promise<void> {
   for (const command of ["fork", "update"]) {
     for (const [flag, field, value] of [
       ["--pool", "pool_name", "main"],
       ["--pool-id", "pool_id", "00000000-0000-4000-8000-000000000001"],
-    ]) {
+    ] as const) {
       await withCapturedServer(
         (_request, res) => jsonResponse(res, { vm_id: "vm_pool" }),
         async (baseUrl, requests) => {
-          const result = await runCli(baseUrl, [command!, "ubuntu", flag!, value!]);
+          const result = await runCli(baseUrl, [command, "ubuntu", flag, value]);
           assert.equal(result.code, 0, result.stderr);
           assert.deepEqual(requestsWithoutKeys(requests), [{
-            method: command === "fork" ? "POST" : "PATCH", url: command === "fork" ? "/api/v1/fork" : "/api/v1/vms/ubuntu",
-            body: { ...(command === "fork" ? { source_vm_name: "ubuntu" } : {}), [field!]: value },
+            method: command === "fork" ? "POST" : "PATCH",
+            url: command === "fork" ? "/api/v1/fork" : "/api/v1/vms/ubuntu",
+            body: { ...(command === "fork" ? { source_vm_name: "ubuntu" } : {}), [field]: value },
           }]);
         },
       );
@@ -319,7 +312,7 @@ async function testForkSelectsPool(): Promise<void> {
     await withCapturedServer(
       (_request, res) => jsonResponse(res, { vm_id: "vm_pool" }),
       async (baseUrl, requests) => {
-        const result = await runCli(baseUrl, [command!, "ubuntu", "--pool", "main", "--pool-id", "00000000-0000-4000-8000-000000000001"]);
+        const result = await runCli(baseUrl, [command, "ubuntu", "--pool", "main", "--pool-id", "00000000-0000-4000-8000-000000000001"]);
         assert.equal(result.code, 1);
         assert.match(result.stderr, /--pool and --pool-id are mutually exclusive/);
         assert.equal(requests.length, 0);
@@ -1296,7 +1289,7 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
   }
 }
 
-await testForkSelectsPool();
+await testForkAndUpdateSelectPools();
 await testExtraOperandsFailBeforeRequest();
 await testRemoteShellCloseExitsWithOpenLocalStdin();
 await testRunOptionsStopAtRemoteCommand();

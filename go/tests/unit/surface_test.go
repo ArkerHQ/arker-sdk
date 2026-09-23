@@ -228,6 +228,45 @@ func TestUpdateLeavesDescriptionAloneByDefault(t *testing.T) {
 	}
 }
 
+func TestPoolSelectionReachesRegionalServer(t *testing.T) {
+	for _, tc := range []struct {
+		field, value string
+		fork         arker.ForkRequest
+		update       arker.UpdateRequest
+	}{
+		{"pool_name", "main", arker.ForkRequest{PoolName: "main"}, arker.UpdateRequest{PoolName: arker.Ptr("main")}},
+		{"pool_id", "22222222-2222-4222-8222-222222222222", arker.ForkRequest{PoolID: "22222222-2222-4222-8222-222222222222"}, arker.UpdateRequest{PoolID: arker.Ptr("22222222-2222-4222-8222-222222222222")}},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+				want := map[string]any{tc.field: tc.value}
+				switch r.Method + " " + r.URL.Path {
+				case "POST /v1/fork":
+					want["source_vm_name"] = "ubuntu"
+				case "PATCH /v1/vms/vm_1":
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				if !reflect.DeepEqual(body, want) {
+					t.Errorf("body = %v, want %v", body, want)
+				}
+				fmt.Fprint(w, forkVM)
+			}, reject(t, "control"))
+			tc.fork.SourceVMName = "ubuntu"
+			if _, err := c.Fork(context.Background(), tc.fork); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.VM("vm_1").Update(context.Background(), tc.update); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 // ── Runs ────────────────────────────────────────────────────────────────
 
 func TestRunPollsABackgroundedRunToCompletion(t *testing.T) {
@@ -866,29 +905,4 @@ func syncDirectoryServer(t *testing.T, manifest string, archive func([]byte)) *a
 		data = append(data, chunk...)
 		fmt.Fprintf(w, `{"ok":true,"op":"write","results":[{"complete":%t,"written":%t}]}`, entry.End == entry.Size, entry.End == entry.Size)
 	}, reject(t, "control"))
-}
-
-func TestUpdatePoolSelection(t *testing.T) {
-	for _, req := range []arker.UpdateRequest{{PoolName: arker.Ptr("main")}, {PoolID: arker.Ptr("22222222-2222-4222-8222-222222222222")}} {
-		var body map[string]any
-		c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPatch {
-				t.Errorf("method = %s", r.Method)
-			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			fmt.Fprint(w, forkVM)
-		}, reject(t, "control"))
-		if _, err := c.VM("vm_1").Update(context.Background(), req); err != nil {
-			t.Fatal(err)
-		}
-		if len(body) != 1 {
-			t.Fatalf("unexpected fields: %v", body)
-		}
-		if req.PoolName != nil && body["pool_name"] != *req.PoolName {
-			t.Fatalf("pool name: %v", body)
-		}
-		if req.PoolID != nil && body["pool_id"] != *req.PoolID {
-			t.Fatalf("pool id: %v", body)
-		}
-	}
 }

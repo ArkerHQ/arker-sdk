@@ -847,8 +847,8 @@ class VM:
         ssh_public_keys: list[str] | None = None,
         policies: PolicyDoc | dict[str, Any] | None = None,
     ) -> Vm:
-        """Update this VM's description, resource allocation, authorized SSH
-        keys, and/or network policy via ``PATCH /v1/vms/{id}``.
+        """Update this VM's description, resources, pool, SSH keys, or network
+        policy via ``PATCH /v1/vms/{id}``.
 
         Pass an empty ``ssh_public_keys`` list to remove all authorized keys.
 
