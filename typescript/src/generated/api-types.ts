@@ -903,11 +903,6 @@ export interface components {
             /** @description Disk allocation in mebibytes. */
             disk_mib?: number | null;
             /**
-             * @description Preferred guest-memory mode when this run restores the VM. `file` maps the memory image from the host page cache; `uffd` supplies pages on demand. Omit this field to let the service choose. The setting has no effect when the VM is already running, and the response reports the mode used.
-             * @enum {string|null}
-             */
-            memory_backend?: "file" | "uffd" | null;
-            /**
              * @description Deliver a signal to the selected persistent session's foreground process group. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. Use `session_id` or `session_idx` to select the session.
              * @enum {string|null}
              */
@@ -947,11 +942,6 @@ export interface components {
             memory_achieved_mib?: number | null;
             /** @description True when a requested memory reduction was only partially applied. The command runs with the achieved allocation, and `memory_achieved_mib` reports that allocation. Defaults to false. */
             memory_partial?: boolean;
-            /**
-             * @description Which guest-memory mode this VM is restored with: `file` maps the memory image from the host page cache, `uffd` supplies pages on demand through a userfaultfd handler. Absent when this run involved no Firecracker restore — a `brush` dispatch, or a VM that was already running. Informational only: the mode is chosen per restore from the image's resident size, and an image reconstructed from object storage always uses `uffd`, which is a correctness requirement rather than a tuning choice.
-             * @enum {string|null}
-             */
-            memory_backend?: "file" | "uffd" | null;
         };
         BackgroundRunResponse: {
             /** @description Session used by this run. Use this identifier to inspect or stop work that continues after the initial response. Absent for resource and signal requests that execute no command. */

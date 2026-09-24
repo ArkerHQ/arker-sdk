@@ -177,7 +177,6 @@ async function testRunOptionsStopAtRemoteCommand(): Promise<void> {
       "--vcpu", "2",
       "--memory-mib", "4096",
       "--disk-mib", "8192",
-      "--memory-backend", "uffd",
       "--idempotency-key", "run-request-1",
       "vm_1",
       "npm",
@@ -195,7 +194,6 @@ async function testRunOptionsStopAtRemoteCommand(): Promise<void> {
         vcpu_count: 2,
         memory_mib: 4096,
         disk_mib: 8192,
-        memory_backend: "uffd",
       },
       idempotencyKey: "run-request-1",
     }]);
