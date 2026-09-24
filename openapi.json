@@ -4899,18 +4899,6 @@
             ],
             "minimum": 0
           },
-          "memory_backend": {
-            "description": "Preferred guest-memory mode when this run restores the VM. `file` maps the memory image from the host page cache; `uffd` supplies pages on demand. Omit this field to let the service choose. The setting has no effect when the VM is already running, and the response reports the mode used.",
-            "type": [
-              "string",
-              "null"
-            ],
-            "enum": [
-              "file",
-              "uffd",
-              null
-            ]
-          },
           "signal": {
             "type": [
               "string",
@@ -5032,18 +5020,6 @@
           "memory_partial": {
             "description": "True when a requested memory reduction was only partially applied. The command runs with the achieved allocation, and `memory_achieved_mib` reports that allocation. Defaults to false.",
             "type": "boolean"
-          },
-          "memory_backend": {
-            "description": "Which guest-memory mode this VM is restored with: `file` maps the memory image from the host page cache, `uffd` supplies pages on demand through a userfaultfd handler. Absent when this run involved no Firecracker restore \u2014 a `brush` dispatch, or a VM that was already running. Informational only: the mode is chosen per restore from the image's resident size, and an image reconstructed from object storage always uses `uffd`, which is a correctness requirement rather than a tuning choice.",
-            "type": [
-              "string",
-              "null"
-            ],
-            "enum": [
-              "file",
-              "uffd",
-              null
-            ]
           }
         }
       },
