@@ -25,6 +25,7 @@ class RegionPlacement:
     provider: str
     region: str
     endpoint: str
+    platforms: list[str]
 
 
 @dataclass(frozen=True)

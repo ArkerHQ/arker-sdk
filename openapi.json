@@ -106,7 +106,7 @@
             "$ref": "#/components/responses/UnavailableError"
           }
         },
-        "description": "Public placement catalog. Each item supplies the provider, region, and regional endpoint. Every listed placement accepts fork, run, and sync requests. Unavailable placements are omitted."
+        "description": "Public placement catalog. Each item supplies the provider, region, regional endpoint, and the platforms the placement serves. Every listed placement accepts fork, run, and sync requests. Unavailable placements are omitted."
       }
     },
     "/v1/whoami": {
@@ -3562,7 +3562,8 @@
         "required": [
           "provider",
           "region",
-          "endpoint"
+          "endpoint",
+          "platforms"
         ],
         "additionalProperties": false,
         "properties": {
@@ -3578,6 +3579,13 @@
             "type": "string",
             "format": "uri",
             "description": "Base URL for this placement's regional API."
+          },
+          "platforms": {
+            "type": "array",
+            "description": "Platform identifiers this placement currently serves, sorted. Empty when the placement's platforms could not be read.",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -3590,7 +3598,7 @@
         "properties": {
           "regions": {
             "type": "array",
-            "description": "Provider and region placements that accept public API requests.",
+            "description": "Provider and region placements that accept public API requests, sorted by provider, then region.",
             "items": {
               "$ref": "#/components/schemas/RegionPlacement"
             }

@@ -202,6 +202,7 @@ def test_list_regions_uses_public_control_plane_catalog() -> None:
         "region": "region-two",
         # The catalog always carries an endpoint, and the contract now says so.
         "endpoint": "https://provider-two-region-two.arker.ai/",
+        "platforms": ["graviton4", "icelake"],
     }
     t.add_json(
         lambda method, url: method == "GET" and url == "https://arker.ai/api/v1/regions",
@@ -215,6 +216,7 @@ def test_list_regions_uses_public_control_plane_catalog() -> None:
     assert regions.regions[0].provider == "aws"
     assert regions.regions[0].region == "region-two"
     assert regions.regions[0].endpoint == "https://provider-two-region-two.arker.ai/"
+    assert regions.regions[0].platforms == ["graviton4", "icelake"]
 
 
 def test_discover_regions_requires_no_configured_client() -> None:

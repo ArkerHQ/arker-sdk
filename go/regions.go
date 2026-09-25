@@ -5,12 +5,13 @@ import (
 	"net/http"
 )
 
-// RegionPlacement is one public provider/region pair and the endpoint serving
-// it.
+// RegionPlacement is one public provider/region pair, the endpoint serving
+// it, and the platforms it serves.
 type RegionPlacement struct {
-	Provider string `json:"provider"`
-	Region   string `json:"region"`
-	Endpoint string `json:"endpoint"`
+	Provider  string   `json:"provider"`
+	Region    string   `json:"region"`
+	Endpoint  string   `json:"endpoint"`
+	Platforms []string `json:"platforms"`
 }
 
 // Whoami identifies the organization behind the credentials.
