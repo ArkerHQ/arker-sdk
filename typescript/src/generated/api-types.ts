@@ -33,7 +33,7 @@ export interface paths {
         };
         /**
          * List available provider regions
-         * @description Public placement catalog. Each item supplies the provider, region, and regional endpoint. Every listed placement accepts fork, run, and sync requests. Unavailable placements are omitted.
+         * @description Public placement catalog. Each item supplies the provider, region, regional endpoint, and the platforms the placement serves. Every listed placement accepts fork, run, and sync requests. Unavailable placements are omitted.
          */
         get: operations["listRegions"];
         put?: never;
@@ -520,9 +520,11 @@ export interface components {
              * @description Base URL for this placement's regional API.
              */
             endpoint: string;
+            /** @description Platform identifiers this placement currently serves, sorted. Empty when the placement's platforms could not be read. */
+            platforms: string[];
         };
         ListRegionsResponse: {
-            /** @description Provider and region placements that accept public API requests. */
+            /** @description Provider and region placements that accept public API requests, sorted by provider, then region. */
             regions: components["schemas"]["RegionPlacement"][];
         };
         /**
