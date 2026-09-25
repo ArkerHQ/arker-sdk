@@ -939,6 +939,7 @@ export class VM {
   // from `arker.vm(id)` until you call `refresh()`. Names mirror the
   // contract (`Vm`).
   readonly vm_id?: Vm["vm_id"];
+  readonly pool_id?: Vm["pool_id"];
   readonly name?: Vm["name"];
   readonly state?: Vm["state"];
   readonly owner_org_id?: Vm["owner_org_id"];
@@ -1543,8 +1544,8 @@ export class VM {
   }
 
   /**
-   * Update this VM's description, resource allocation, authorized SSH keys,
-   * and/or network policy via `PATCH /v1/vms/{id}`. Returns the updated `Vm`.
+   * Update this VM's description, resources, pool, SSH keys, or network
+   * policy via `PATCH /v1/vms/{id}`. Returns the updated `Vm`.
    *
    * Accepts either a `PatchVmRequest` or flat resource fields
    * (`{ vcpu, memory_mib, disk_mib, vgpu }`), which are folded into
@@ -1558,33 +1559,29 @@ export class VM {
     request:
       | PatchVmRequest
       | (ResourcesInput &
-          Pick<PatchVmRequest, "description" | "ssh_public_keys" | "policies">),
+          Pick<PatchVmRequest, "description" | "ssh_public_keys" | "policies" | "pool_id" | "pool_name">),
   ): Promise<Vm> {
     const r = request as PatchVmRequest &
       ResourcesInput & { resources?: ResourcesInput | null };
-    const body: PatchVmRequest =
+    const resources =
       r.resources !== undefined ||
       (r.vcpu === undefined && r.memory_mib === undefined && r.disk_mib === undefined && r.vgpu === undefined)
-        ? {
-            description: r.description,
-            resources: r.resources,
-            ssh_public_keys: r.ssh_public_keys,
-            policies: r.policies,
-          }
+        ? r.resources
         : {
-            description: r.description,
-            resources: {
-              vcpu: r.vcpu ?? null,
-              memory_mib: r.memory_mib ?? null,
-              disk_mib: r.disk_mib ?? null,
-              // Left undefined (and so pruned) when unset: `vgpu` is mutually
-              // exclusive with the hardware GPU fields, so it must not appear
-              // on the wire for a CPU-only resize.
-              vgpu: r.vgpu,
-            },
-            ssh_public_keys: r.ssh_public_keys,
-            policies: r.policies,
+            vcpu: r.vcpu ?? null,
+            memory_mib: r.memory_mib ?? null,
+            disk_mib: r.disk_mib ?? null,
+            // Null conflicts with hardware GPU fields; omit vGPU when unset.
+            vgpu: r.vgpu,
           };
+    const body: PatchVmRequest = {
+      description: r.description,
+      pool_id: r.pool_id,
+      pool_name: r.pool_name,
+      resources,
+      ssh_public_keys: r.ssh_public_keys,
+      policies: r.policies,
+    };
     return this._client._request("PATCH", vmPath(this.id), body, this.baseUrl);
   }
 

@@ -623,6 +623,7 @@ class VM:
     # handle from ``arker.vm(id)`` until you call ``refresh()``. Names mirror
     # the contract ``Vm``.
     vm_id: str | None
+    pool_id: str | None
     name: str | None
     description: str | None
     state: str | None
@@ -842,11 +843,13 @@ class VM:
         disk_mib: int | None = None,
         vgpu: float | None = None,
         description: str | _UnsetType | None = _UNSET,
+        pool_id: str | None = None,
+        pool_name: str | None = None,
         ssh_public_keys: list[str] | None = None,
         policies: PolicyDoc | dict[str, Any] | None = None,
     ) -> Vm:
-        """Update this VM's description, resource allocation, authorized SSH
-        keys, and/or network policy via ``PATCH /v1/vms/{id}``.
+        """Update this VM's description, resources, pool, SSH keys, or network
+        policy via ``PATCH /v1/vms/{id}``.
 
         Pass an empty ``ssh_public_keys`` list to remove all authorized keys.
 
@@ -871,6 +874,8 @@ class VM:
         if description is _UNSET:
             body = PatchVmRequest(
                 resources=resources,
+                pool_id=pool_id,
+                pool_name=pool_name,
                 ssh_public_keys=ssh_public_keys,
                 policies=policies,
             )
@@ -878,6 +883,8 @@ class VM:
             body = {
                 "description": _EXPLICIT_NULL if description is None else description,
                 "resources": resources,
+                "pool_id": pool_id,
+                "pool_name": pool_name,
                 "ssh_public_keys": ssh_public_keys,
                 "policies": policies,
             }

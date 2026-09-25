@@ -570,6 +570,9 @@ ResourceKind: TypeAlias = Literal[
     'correction_review',
     'webhook',
     'resource',
+    'pool',
+    'pool_quote',
+    'pool_name',
 ]
 
 
@@ -579,7 +582,15 @@ CapacityScope: TypeAlias = Literal['worker', 'region', 'platform']
 RateLimiter: TypeAlias = Literal['arker', 'upstream']
 
 
-StateRequirement: TypeAlias = Literal['running', 'mutable', 'unclaimed']
+StateRequirement: TypeAlias = Literal[
+    'running',
+    'mutable',
+    'unclaimed',
+    'active',
+    'same_location',
+    'pool_purchases_enabled',
+    'pool_pricing_configured',
+]
 
 
 UnsupportedReason: TypeAlias = Literal[
@@ -587,7 +598,9 @@ UnsupportedReason: TypeAlias = Literal[
 ]
 
 
-RequiredAction: TypeAlias = Literal['accept_legal_terms', 'convert_billing_plan']
+RequiredAction: TypeAlias = Literal[
+    'accept_legal_terms', 'convert_billing_plan', 'add_payment_method'
+]
 
 
 OperationFailureReason: TypeAlias = Literal[
@@ -1363,6 +1376,7 @@ class ListVmsParameters:
     platform: str | None = None
     created_after: str | None = None
     created_before: str | None = None
+    pool_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1656,6 +1670,7 @@ class Vm:
     max_disk_mib: int | None = None
     platform: str | None = None
     compatible_platforms: list[CompatiblePlatform] | None = None
+    pool_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1747,6 +1762,8 @@ class ForkRequest1:
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
     registry_auth: RegistryAuth | None = None
+    pool_id: str | None = None
+    pool_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1770,6 +1787,8 @@ class ForkRequest2:
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
     registry_auth: RegistryAuth | None = None
+    pool_id: str | None = None
+    pool_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1793,6 +1812,8 @@ class ForkRequest3:
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
     registry_auth: RegistryAuth | None = None
+    pool_id: str | None = None
+    pool_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1816,6 +1837,8 @@ class ForkRequest4:
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
     registry_auth: RegistryAuth | None = None
+    pool_id: str | None = None
+    pool_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1839,6 +1862,8 @@ class ForkRequest5:
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
     registry_auth: RegistryAuth | None = None
+    pool_id: str | None = None
+    pool_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1862,6 +1887,8 @@ class ForkRequest6:
     policies: PolicyWriteRequest | None = None
     resources: ResourcesInput | None = None
     registry_auth: RegistryAuth | None = None
+    pool_id: str | None = None
+    pool_name: str | None = None
 
 
 ForkRequest: TypeAlias = (
@@ -1902,6 +1929,8 @@ class PatchVmRequest:
     resources: ResourcesInput | None = None
     ssh_public_keys: list[str] | None = None
     policies: PolicyWriteRequest | None = None
+    pool_id: str | None = None
+    pool_name: str | None = None
 
 
 @dataclass(frozen=True)

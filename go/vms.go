@@ -94,6 +94,8 @@ type VMNetwork struct {
 // so a field that varies between two otherwise identical retries turns a replay
 // into a 409.
 type ForkRequest struct {
+	PoolID        string `json:"pool_id,omitempty"`
+	PoolName      string `json:"pool_name,omitempty"`
 	SourceVMID    string `json:"source_vm_id,omitempty"`
 	SourceVMName  string `json:"source_vm_name,omitempty"`
 	SourceOrgID   string `json:"source_org_id,omitempty"`
@@ -139,6 +141,7 @@ type ForkRequest struct {
 // VMInfo is a virtual machine as the API reports it, mirroring the contract Vm.
 type VMInfo struct {
 	VMID                string               `json:"vm_id"`
+	PoolID              *string              `json:"pool_id,omitempty"`
 	Name                string               `json:"name,omitempty"`
 	Description         string               `json:"description,omitempty"`
 	OwnerOrgID          string               `json:"owner_org_id,omitempty"`
@@ -334,6 +337,8 @@ func (v *VM) Fork(ctx context.Context, req ForkRequest) (*VM, error) {
 // against a live deployment: PATCH {"description":null} left the value intact
 // while {"description":""} cleared it.
 type UpdateRequest struct {
+	PoolID        *string    `json:"pool_id,omitempty"`
+	PoolName      *string    `json:"pool_name,omitempty"`
 	Description   *string    `json:"description,omitempty"`
 	Resources     *Resources `json:"resources,omitempty"`
 	SSHPublicKeys *[]string  `json:"ssh_public_keys,omitempty"`

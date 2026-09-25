@@ -228,6 +228,54 @@ func TestUpdateLeavesDescriptionAloneByDefault(t *testing.T) {
 	}
 }
 
+func TestPoolSelectionReachesRegionalServer(t *testing.T) {
+	const poolID = "22222222-2222-4222-8222-222222222222"
+	for _, tc := range []struct {
+		field, value string
+		fork         arker.ForkRequest
+		update       arker.UpdateRequest
+	}{
+		{"pool_name", "main", arker.ForkRequest{PoolName: "main"}, arker.UpdateRequest{PoolName: arker.Ptr("main")}},
+		{"pool_id", "22222222-2222-4222-8222-222222222222", arker.ForkRequest{PoolID: "22222222-2222-4222-8222-222222222222"}, arker.UpdateRequest{PoolID: arker.Ptr("22222222-2222-4222-8222-222222222222")}},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+				want := map[string]any{tc.field: tc.value}
+				switch r.Method + " " + r.URL.Path {
+				case "POST /v1/fork":
+					want["source_vm_name"] = "ubuntu"
+				case "PATCH /v1/vms/vm_1":
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				if !reflect.DeepEqual(body, want) {
+					t.Errorf("body = %v, want %v", body, want)
+				}
+				fmt.Fprintf(w, `{"vm_id":"vm_1","pool_id":%q}`, poolID)
+			}, reject(t, "control"))
+			tc.fork.SourceVMName = "ubuntu"
+			vm, err := c.Fork(context.Background(), tc.fork)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if vm.Info.PoolID == nil || *vm.Info.PoolID != poolID {
+				t.Fatalf("fork pool_id = %v, want %s", vm.Info.PoolID, poolID)
+			}
+			info, err := vm.Update(context.Background(), tc.update)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.PoolID == nil || *info.PoolID != poolID {
+				t.Fatalf("update pool_id = %v, want %s", info.PoolID, poolID)
+			}
+		})
+	}
+}
+
 // ── Runs ────────────────────────────────────────────────────────────────
 
 func TestRunPollsABackgroundedRunToCompletion(t *testing.T) {
@@ -786,6 +834,9 @@ func TestForkedVMStaysOnTheConfiguredEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fork: %v", err)
 	}
+	if vm.Info.PoolID != nil {
+		t.Fatalf("missing pool_id decoded as %v", vm.Info.PoolID)
+	}
 	configured, err := c.BaseURL()
 	if err != nil {
 		t.Fatal(err)
@@ -797,12 +848,15 @@ func TestForkedVMStaysOnTheConfiguredEndpoint(t *testing.T) {
 
 func TestGetVMStaysOnTheConfiguredEndpoint(t *testing.T) {
 	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"vm_id":"vm_1","owner_org_id":"org","state":"idle","provider":"gcp","region":"us-central1"}`)
+		fmt.Fprint(w, `{"vm_id":"vm_1","owner_org_id":"org","state":"idle","provider":"gcp","region":"us-central1","pool_id":null}`)
 	}, reject(t, "control"))
 
 	vm, found, err := c.GetVM(context.Background(), "vm_1")
 	if err != nil || !found {
 		t.Fatalf("get: found=%v err=%v", found, err)
+	}
+	if vm.Info.PoolID != nil {
+		t.Fatalf("null pool_id decoded as %v", vm.Info.PoolID)
 	}
 	configured, _ := c.BaseURL()
 	if vm.BaseURL() != configured {

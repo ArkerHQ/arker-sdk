@@ -172,6 +172,7 @@ async function testForkPostsDirectlyToSourceVm(): Promise<void> {
 
   assert.equal(vm.id, "vm_child");
   assert.equal(vm.baseUrl, "https://attached.invalid/api");
+  assert.equal(vm.pool_id, undefined);
   assert.deepEqual(
     JSON.parse(fetch.calls[0]!.body!),
     {
@@ -185,11 +186,13 @@ async function testForkPostsDirectlyToSourceVm(): Promise<void> {
 
 async function testForkPreservesTheCanonicalWireShape(): Promise<void> {
   const fetch = new FakeFetch();
+  const poolId = "22222222-2222-4222-8222-222222222222";
   fetch.addJson(
     (method, url) => method === "POST" && url.endsWith("/v1/fork"),
     200,
     {
       vm_id: "vm_child",
+      pool_id: poolId,
       owner_org_id: "o",
       created_at: "now",
       public: false,
@@ -198,18 +201,21 @@ async function testForkPreservesTheCanonicalWireShape(): Promise<void> {
     },
   );
 
-  await client(fetch).fork({
+  const vm = await client(fetch).fork({
     source_vm_name: "ubuntu",
     source_org_name: "ArkerHQ",
+    pool_name: "main",
     resources: { vcpu: 2, memory_mib: 2048 },
     description: null,
     disk: false,
     layers: ["disk"],
   });
 
+  assert.equal(vm.pool_id, poolId);
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), {
     source_vm_name: "ubuntu",
     source_org_name: "ArkerHQ",
+    pool_name: "main",
     resources: { vcpu: 2, memory_mib: 2048 },
     description: null,
     disk: false,
@@ -335,6 +341,17 @@ async function testRemovedRunNetworkInputsFailBeforeRequests(): Promise<void> {
     isBadRequest,
   );
   assert.equal(fetch.calls.length, 0);
+}
+
+async function testUpdatePreservesPoolSelector(): Promise<void> {
+  for (const selector of [{ pool_name: "main" }, { pool_id: "22222222-2222-4222-8222-222222222222" }]) {
+    for (const resources of [false, true]) {
+      const fetch = new FakeFetch();
+      fetch.addJson((method, url) => method === "PATCH" && url.endsWith("/v1/vms/vm_1"), 200, { vm_id: "vm_1" });
+      await client(fetch).vm("vm_1").update({ ...selector, ...(resources ? { vcpu: 2 } : {}) });
+      assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { ...selector, ...(resources ? { resources: { vcpu: 2, memory_mib: null, disk_mib: null } } : {}) });
+    }
+  }
 }
 
 async function testUpdateSendsTopLevelSshPublicKeys(): Promise<void> {
@@ -809,6 +826,7 @@ async function testListVmsPreservesForkLimitFields(): Promise<void> {
     {
       vms: [{
         vm_id: "vm_1",
+        pool_id: null,
         owner_org_id: "ArkerHQ",
         created_at: "now",
         public: true,
@@ -832,6 +850,7 @@ async function testListVmsPreservesForkLimitFields(): Promise<void> {
   });
 
   assert.equal(result.vms[0]!.max_vcpus, 8);
+  assert.equal(result.vms[0]!.pool_id, null);
   assert.equal(result.vms[0]!.max_memory_mib, 32768);
   assert.equal(result.vms[0]!.min_memory_mib, 512);
   assert.deepEqual(result.vms[0]!.network, { ssh_public_keys: [] });
@@ -1217,6 +1236,7 @@ await testForkFromDockerfileBuildsFromItsBaseImage();
 await testForkOmitsSourceOrgWhenNotExplicit();
 await testForkOmitsUnconfiguredCapabilities();
 await testRemovedRunNetworkInputsFailBeforeRequests();
+await testUpdatePreservesPoolSelector();
 await testUpdateSendsTopLevelSshPublicKeys();
 await testUpdateSendsPolicies();
 await testNestedErrorWithoutOkStillParses();
