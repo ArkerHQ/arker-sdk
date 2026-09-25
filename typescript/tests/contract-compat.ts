@@ -7,7 +7,9 @@ import type {
   ListSessionsResponse,
   ListVmsResponse,
   OrgRunListRow,
+  CompletedRunResult,
   Run,
+  RunOptions,
   RunSummary,
   Session,
   SyncReadOperationRequest,
@@ -39,6 +41,14 @@ type ContractTypes = [
   Expect<Equal<SyncReadOperationRequest, Schema<"SyncReadOperationRequest">>>,
   Expect<Equal<SyncWriteOperationRequest, Schema<"SyncWriteOperationRequest">>>,
   Expect<Equal<SyncWriteEntry, Schema<"SyncWriteEntry">>>,
+  // Resources are set by fork and PATCH /v1/vms/{id}, never per run.
+  Expect<Equal<Extract<keyof RunOptions, "vcpu_count" | "memory_mib" | "disk_mib">, never>>,
+  Expect<
+    Equal<
+      Extract<keyof CompletedRunResult, "memoryRequestedMib" | "memoryAchievedMib" | "memoryPartial">,
+      never
+    >
+  >,
 ];
 
 declare const contractTypes: ContractTypes;

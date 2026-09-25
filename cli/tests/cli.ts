@@ -174,9 +174,6 @@ async function testRunOptionsStopAtRemoteCommand(): Promise<void> {
       "--timeout",
       "1000",
       "--end-symbol", "DONE",
-      "--vcpu", "2",
-      "--memory-mib", "4096",
-      "--disk-mib", "8192",
       "--idempotency-key", "run-request-1",
       "vm_1",
       "npm",
@@ -191,9 +188,6 @@ async function testRunOptionsStopAtRemoteCommand(): Promise<void> {
         timeout: 1000,
         command: "npm --version",
         end_symbol: "DONE",
-        vcpu_count: 2,
-        memory_mib: 4096,
-        disk_mib: 8192,
       },
       idempotencyKey: "run-request-1",
     }]);
@@ -702,7 +696,7 @@ async function testExtraOperandsFailBeforeRequest(): Promise<void> {
   });
 }
 
-async function testRunJsonIncludesMemoryMetadata(): Promise<void> {
+async function testRunJsonEncodesOutput(): Promise<void> {
   let body: unknown;
   await withServer(async (req, res) => {
     body = await readJson(req);
@@ -710,9 +704,6 @@ async function testRunJsonIncludesMemoryMetadata(): Promise<void> {
     jsonResponse(res, completedRun({
       stdout: "hello\n",
       stderr: "warning\0",
-      memory_requested_mib: 1024,
-      memory_achieved_mib: 1536,
-      memory_partial: true,
     }));
   }, async (baseUrl) => {
     const result = await runCli(baseUrl, ["run", "--json", "vm_1", "echo", "hello"]);
@@ -724,9 +715,6 @@ async function testRunJsonIncludesMemoryMetadata(): Promise<void> {
     assert.equal(payload.stdoutEncoding, "base64");
     assert.equal(payload.stderr, "d2FybmluZwA=");
     assert.equal(payload.stderrEncoding, "base64");
-    assert.equal(payload.memoryRequestedMib, 1024);
-    assert.equal(payload.memoryAchievedMib, 1536);
-    assert.equal(payload.memoryPartial, true);
   });
 }
 
@@ -837,18 +825,22 @@ async function testRunsGetUsesRunFormatter(): Promise<void> {
   });
 }
 
-async function testRunHumanWarnsOnPartialMemory(): Promise<void> {
-  await withCapturedServer((_request, res) => jsonResponse(res, completedRun({
-    stdout: "hello\n",
-    memory_requested_mib: 1024,
-    memory_achieved_mib: 1536,
-    memory_partial: true,
-  })), async (baseUrl) => {
-    const result = await runCli(baseUrl, ["run", "vm_1", "echo", "hello"]);
-    assert.equal(result.code, 0);
-    assert.equal(stdoutText(result), "hello\n");
-    assert.match(result.stderr, /Memory target partially applied: requested 1024 MiB, achieved 1536 MiB\./);
-  });
+/// Resources are set by fork and `arker update`, never per run: the resource
+/// flags are refused for `run` before any request is sent.
+async function testRunRejectsResourceFlags(): Promise<void> {
+  for (const args of [
+    ["run", "--vcpu", "2", "vm_1", "echo", "ok"],
+    ["run", "--memory-mib", "4096", "vm_1", "echo", "ok"],
+    ["run", "--disk-mib", "8192", "vm_1", "echo", "ok"],
+    ["vms", "run", "--memory-mib", "4096", "vm_1", "echo", "ok"],
+  ]) {
+    await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
+      const result = await runCli(baseUrl, args);
+      assert.equal(result.code, 1, args.join(" "));
+      assert.equal(requests.length, 0, args.join(" "));
+      assert.match(result.stderr, new RegExp(`parameter "${args[args.indexOf("vm_1") - 2]!.slice(2)}"`), args.join(" "));
+    });
+  }
 }
 
 async function testEmptyPipedInputWritesZeroBytes(): Promise<void> {
@@ -1291,11 +1283,11 @@ await testWhoamiUsesAuthenticatedControlPlane();
 await testRemovedSecretAndUrlFlagsFailLocally();
 await testHelpMatchesSupportedSurface();
 await testPerCommandHelpIsCommandSpecific();
-await testRunJsonIncludesMemoryMetadata();
+await testRunJsonEncodesOutput();
 await testRunHumanWritesArbitraryBytes();
 await testRunFailureReasonIsVisible();
 await testRunsGetUsesRunFormatter();
-await testRunHumanWarnsOnPartialMemory();
+await testRunRejectsResourceFlags();
 await testEmptyPipedInputWritesZeroBytes();
 await testSyncDashWritesStdin();
 await testSyncReadFlagIgnoresPipedStdin();

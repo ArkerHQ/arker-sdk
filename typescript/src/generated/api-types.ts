@@ -898,12 +898,6 @@ export interface components {
              * @default auto
              */
             end_symbol?: string | null;
-            /** @description Virtual CPU allocation for this run. */
-            vcpu_count?: number | null;
-            /** @description Memory allocation in mebibytes. */
-            memory_mib?: number | null;
-            /** @description Disk allocation in mebibytes. */
-            disk_mib?: number | null;
             /**
              * @description Deliver a signal to the selected persistent session's foreground process group. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. Use `session_id` or `session_idx` to select the session.
              * @enum {string|null}
@@ -938,12 +932,6 @@ export interface components {
             exit_code: number | null;
             /** @description Execution mode selected by the service, when reported. */
             dispatch?: string | null;
-            /** @description Requested total memory in MiB when this run included a memory override. Absent when no override was requested. */
-            memory_requested_mib?: number | null;
-            /** @description Achieved total memory in MiB after applying the run's memory override. A memory reduction is best-effort, so this value can exceed `memory_requested_mib` when guest pages cannot be released. Absent when no override was requested. */
-            memory_achieved_mib?: number | null;
-            /** @description True when a requested memory reduction was only partially applied. The command runs with the achieved allocation, and `memory_achieved_mib` reports that allocation. Defaults to false. */
-            memory_partial?: boolean;
         };
         BackgroundRunResponse: {
             /** @description Session used by this run. Use this identifier to inspect or stop work that continues after the initial response. Absent for resource and signal requests that execute no command. */

@@ -41,9 +41,6 @@ type RunRequest struct {
 	QueueingTimeout *int `json:"queueing_timeout,omitempty"`
 
 	EndSymbol string     `json:"end_symbol,omitempty"`
-	VCPUCount *int       `json:"vcpu_count,omitempty"`
-	MemoryMiB *int       `json:"memory_mib,omitempty"`
-	DiskMiB   *int       `json:"disk_mib,omitempty"`
 	Signal    string     `json:"signal,omitempty"`
 	Policies  *PolicyDoc `json:"policies,omitempty"`
 
@@ -78,11 +75,8 @@ type RunResult struct {
 	ExitCode *int `json:"exit_code,omitempty"`
 	// FailReason is the PLATFORM explaining a failed run. Stderr is the
 	// program's own error output; the two are not the same.
-	FailReason         string `json:"fail_reason,omitempty"`
-	Dispatch           string `json:"dispatch,omitempty"`
-	MemoryRequestedMiB *int   `json:"memory_requested_mib,omitempty"`
-	MemoryAchievedMiB  *int   `json:"memory_achieved_mib,omitempty"`
-	MemoryPartial      bool   `json:"memory_partial,omitempty"`
+	FailReason string `json:"fail_reason,omitempty"`
+	Dispatch   string `json:"dispatch,omitempty"`
 }
 
 // Completed reports whether this result carries a finished run.
@@ -91,24 +85,21 @@ func (r *RunResult) Completed() bool { return r.Type == "completed" }
 // runWire is the on-the-wire run shape shared by POST /runs and GET /runs/{id}:
 // output arrives as strings tagged by an encoding.
 type runWire struct {
-	RunID              string `json:"run_id"`
-	SessionID          string `json:"session_id"`
-	Command            string `json:"command"`
-	State              string `json:"state"`
-	StartedAt          string `json:"started_at"`
-	CompletedAt        string `json:"completed_at"`
-	ExitCode           *int   `json:"exit_code"`
-	FailReason         string `json:"fail_reason"`
-	Stdout             string `json:"stdout"`
-	StdoutEncoding     string `json:"stdout_encoding"`
-	Stderr             string `json:"stderr"`
-	StderrEncoding     string `json:"stderr_encoding"`
-	RetryCount         int    `json:"retry_count"`
-	Dispatch           string `json:"dispatch"`
-	VMID               string `json:"vm_id"`
-	MemoryRequestedMiB *int   `json:"memory_requested_mib"`
-	MemoryAchievedMiB  *int   `json:"memory_achieved_mib"`
-	MemoryPartial      bool   `json:"memory_partial"`
+	RunID          string `json:"run_id"`
+	SessionID      string `json:"session_id"`
+	Command        string `json:"command"`
+	State          string `json:"state"`
+	StartedAt      string `json:"started_at"`
+	CompletedAt    string `json:"completed_at"`
+	ExitCode       *int   `json:"exit_code"`
+	FailReason     string `json:"fail_reason"`
+	Stdout         string `json:"stdout"`
+	StdoutEncoding string `json:"stdout_encoding"`
+	Stderr         string `json:"stderr"`
+	StderrEncoding string `json:"stderr_encoding"`
+	RetryCount     int    `json:"retry_count"`
+	Dispatch       string `json:"dispatch"`
+	VMID           string `json:"vm_id"`
 }
 
 func decodeOutput(text, encoding string) []byte {
@@ -130,8 +121,6 @@ func (w runWire) result(background bool) *RunResult {
 	out := &RunResult{
 		Type: "completed", RunID: w.RunID, SessionID: w.SessionID, State: w.State,
 		ExitCode: w.ExitCode, FailReason: w.FailReason, Dispatch: w.Dispatch,
-		MemoryRequestedMiB: w.MemoryRequestedMiB, MemoryAchievedMiB: w.MemoryAchievedMiB,
-		MemoryPartial: w.MemoryPartial,
 	}
 	out.StdoutBytes = decodeOutput(w.Stdout, w.StdoutEncoding)
 	out.StderrBytes = decodeOutput(w.Stderr, w.StderrEncoding)
