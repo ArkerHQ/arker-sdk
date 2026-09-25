@@ -939,6 +939,7 @@ export class VM {
   // from `arker.vm(id)` until you call `refresh()`. Names mirror the
   // contract (`Vm`).
   readonly vm_id?: Vm["vm_id"];
+  readonly pool_id?: Vm["pool_id"];
   readonly name?: Vm["name"];
   readonly state?: Vm["state"];
   readonly owner_org_id?: Vm["owner_org_id"];

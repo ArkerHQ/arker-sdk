@@ -229,6 +229,7 @@ func TestUpdateLeavesDescriptionAloneByDefault(t *testing.T) {
 }
 
 func TestPoolSelectionReachesRegionalServer(t *testing.T) {
+	const poolID = "22222222-2222-4222-8222-222222222222"
 	for _, tc := range []struct {
 		field, value string
 		fork         arker.ForkRequest
@@ -254,14 +255,22 @@ func TestPoolSelectionReachesRegionalServer(t *testing.T) {
 				if !reflect.DeepEqual(body, want) {
 					t.Errorf("body = %v, want %v", body, want)
 				}
-				fmt.Fprint(w, forkVM)
+				fmt.Fprintf(w, `{"vm_id":"vm_1","pool_id":%q}`, poolID)
 			}, reject(t, "control"))
 			tc.fork.SourceVMName = "ubuntu"
-			if _, err := c.Fork(context.Background(), tc.fork); err != nil {
+			vm, err := c.Fork(context.Background(), tc.fork)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := c.VM("vm_1").Update(context.Background(), tc.update); err != nil {
+			if vm.Info.PoolID == nil || *vm.Info.PoolID != poolID {
+				t.Fatalf("fork pool_id = %v, want %s", vm.Info.PoolID, poolID)
+			}
+			info, err := vm.Update(context.Background(), tc.update)
+			if err != nil {
 				t.Fatal(err)
+			}
+			if info.PoolID == nil || *info.PoolID != poolID {
+				t.Fatalf("update pool_id = %v, want %s", info.PoolID, poolID)
 			}
 		})
 	}
@@ -825,6 +834,9 @@ func TestForkedVMStaysOnTheConfiguredEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fork: %v", err)
 	}
+	if vm.Info.PoolID != nil {
+		t.Fatalf("missing pool_id decoded as %v", vm.Info.PoolID)
+	}
 	configured, err := c.BaseURL()
 	if err != nil {
 		t.Fatal(err)
@@ -836,12 +848,15 @@ func TestForkedVMStaysOnTheConfiguredEndpoint(t *testing.T) {
 
 func TestGetVMStaysOnTheConfiguredEndpoint(t *testing.T) {
 	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"vm_id":"vm_1","owner_org_id":"org","state":"idle","provider":"gcp","region":"us-central1"}`)
+		fmt.Fprint(w, `{"vm_id":"vm_1","owner_org_id":"org","state":"idle","provider":"gcp","region":"us-central1","pool_id":null}`)
 	}, reject(t, "control"))
 
 	vm, found, err := c.GetVM(context.Background(), "vm_1")
 	if err != nil || !found {
 		t.Fatalf("get: found=%v err=%v", found, err)
+	}
+	if vm.Info.PoolID != nil {
+		t.Fatalf("null pool_id decoded as %v", vm.Info.PoolID)
 	}
 	configured, _ := c.BaseURL()
 	if vm.BaseURL() != configured {

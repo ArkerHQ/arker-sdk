@@ -284,6 +284,7 @@ def test_fork_posts_directly_to_source_vm() -> None:
         )
 
     assert vm.id == "vm_child"
+    assert vm.pool_id is None
     body = json.loads(t.calls[0]["body"])
     # Computer.fork passes source_vm_id; `disk` is omitted unless the caller
     # sets it, so the server derives it from the source when inheritance is unavailable.
@@ -295,16 +296,17 @@ def test_fork_posts_directly_to_source_vm() -> None:
     }
 
 
-def test_fork_preserves_the_canonical_wire_shape() -> None:
+@pytest.mark.parametrize("pool_id", [None, "22222222-2222-4222-8222-222222222222"])
+def test_fork_preserves_the_canonical_wire_shape(pool_id: str | None) -> None:
     t = FakeTransport()
     t.add_json(
         lambda method, url: method == "POST" and url.endswith("/v1/fork"),
         200,
-        _fork_response("vm_child"),
+        {**_fork_response("vm_child"), "pool_id": pool_id},
     )
 
     with use_transport(t):
-        client().fork(
+        vm = client().fork(
             source_vm_name="ubuntu",
             source_org_id="org_123",
             pool_name="main",
@@ -314,6 +316,7 @@ def test_fork_preserves_the_canonical_wire_shape() -> None:
             layers=["disk"],
         )
 
+    assert vm.pool_id == pool_id
     assert json.loads(t.calls[0]["body"]) == {
         "source_vm_name": "ubuntu",
         "source_org_id": "org_123",

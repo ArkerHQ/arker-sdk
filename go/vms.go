@@ -141,6 +141,7 @@ type ForkRequest struct {
 // VMInfo is a virtual machine as the API reports it, mirroring the contract Vm.
 type VMInfo struct {
 	VMID                string               `json:"vm_id"`
+	PoolID              *string              `json:"pool_id,omitempty"`
 	Name                string               `json:"name,omitempty"`
 	Description         string               `json:"description,omitempty"`
 	OwnerOrgID          string               `json:"owner_org_id,omitempty"`

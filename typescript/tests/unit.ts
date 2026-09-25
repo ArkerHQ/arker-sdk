@@ -172,6 +172,7 @@ async function testForkPostsDirectlyToSourceVm(): Promise<void> {
 
   assert.equal(vm.id, "vm_child");
   assert.equal(vm.baseUrl, "https://attached.invalid/api");
+  assert.equal(vm.pool_id, undefined);
   assert.deepEqual(
     JSON.parse(fetch.calls[0]!.body!),
     {
@@ -185,11 +186,13 @@ async function testForkPostsDirectlyToSourceVm(): Promise<void> {
 
 async function testForkPreservesTheCanonicalWireShape(): Promise<void> {
   const fetch = new FakeFetch();
+  const poolId = "22222222-2222-4222-8222-222222222222";
   fetch.addJson(
     (method, url) => method === "POST" && url.endsWith("/v1/fork"),
     200,
     {
       vm_id: "vm_child",
+      pool_id: poolId,
       owner_org_id: "o",
       created_at: "now",
       public: false,
@@ -198,7 +201,7 @@ async function testForkPreservesTheCanonicalWireShape(): Promise<void> {
     },
   );
 
-  await client(fetch).fork({
+  const vm = await client(fetch).fork({
     source_vm_name: "ubuntu",
     source_org_name: "ArkerHQ",
     pool_name: "main",
@@ -208,6 +211,7 @@ async function testForkPreservesTheCanonicalWireShape(): Promise<void> {
     layers: ["disk"],
   });
 
+  assert.equal(vm.pool_id, poolId);
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), {
     source_vm_name: "ubuntu",
     source_org_name: "ArkerHQ",
@@ -822,6 +826,7 @@ async function testListVmsPreservesForkLimitFields(): Promise<void> {
     {
       vms: [{
         vm_id: "vm_1",
+        pool_id: null,
         owner_org_id: "ArkerHQ",
         created_at: "now",
         public: true,
@@ -845,6 +850,7 @@ async function testListVmsPreservesForkLimitFields(): Promise<void> {
   });
 
   assert.equal(result.vms[0]!.max_vcpus, 8);
+  assert.equal(result.vms[0]!.pool_id, null);
   assert.equal(result.vms[0]!.max_memory_mib, 32768);
   assert.equal(result.vms[0]!.min_memory_mib, 512);
   assert.deepEqual(result.vms[0]!.network, { ssh_public_keys: [] });

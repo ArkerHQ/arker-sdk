@@ -623,6 +623,7 @@ class VM:
     # handle from ``arker.vm(id)`` until you call ``refresh()``. Names mirror
     # the contract ``Vm``.
     vm_id: str | None
+    pool_id: str | None
     name: str | None
     description: str | None
     state: str | None
