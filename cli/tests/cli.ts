@@ -636,6 +636,63 @@ async function testWhoamiUsesAuthenticatedControlPlane(): Promise<void> {
   );
 }
 
+const POOL_TERMS = { resources: { vcpu: 8, memory_mib: 32768 }, duration_seconds: 2_592_000 };
+const CLI_POOL = {
+  pool_id: "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61",
+  name: "ci",
+  provider: "aws",
+  region: "us-west-2",
+  ...POOL_TERMS,
+  status: "active",
+  created_at: "2026-09-25T00:00:00Z",
+  starts_at: "2026-09-25T00:00:00Z",
+  ends_at: "2026-10-25T00:00:00Z",
+  currency: "usd",
+  amount_cents: 12_345,
+  invoice_id: null,
+};
+const CLI_POOL_QUOTE = {
+  name: "ci",
+  catalog_version: "v1",
+  baseline_cents: 15_000,
+  discount_percent: 17.7,
+  provider: "aws",
+  region: "us-west-2",
+  ...POOL_TERMS,
+  currency: "usd",
+  amount_cents: 12_345,
+};
+const POOL_ARGS = [
+  "--provider", "aws", "--region", "us-west-2", "--vcpu", "8", "--memory-mib", "32768", "--days", "30", "--name", "ci",
+];
+
+function poolResponder(request: CapturedRequest, res: ServerResponse): void {
+  jsonResponse(res, request.url === "/api/v1/pools/quote" ? CLI_POOL_QUOTE : CLI_POOL);
+}
+
+async function testPoolsCreateNeedsConfirmationWithoutATerminal(): Promise<void> {
+  await withCapturedServer(poolResponder, async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["pools", "create", ...POOL_ARGS], { controlOnly: true });
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /pass --yes/);
+    assert.equal(requests.length, 0, "nothing may be quoted or bought without confirmation");
+  });
+}
+
+async function testPoolsCreateYesBuysAtTheQuotedPrice(): Promise<void> {
+  await withCapturedServer(poolResponder, async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["pools", "create", "--yes", ...POOL_ARGS], { controlOnly: true });
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(stdoutText(result)).pool_id, CLI_POOL.pool_id);
+    const [quote, buy] = requests;
+    assert.equal(quote!.url, "/api/v1/pools/quote");
+    assert.equal(quote!.idempotencyKey, undefined);
+    assert.equal(buy!.url, "/api/v1/pools");
+    assert.deepEqual(buy!.body, { ...(quote!.body as object), amount_cents: 12_345 });
+    assert.match(buy!.idempotencyKey ?? "", /^cli-pool-/);
+  });
+}
+
 async function testRemovedSecretAndUrlFlagsFailLocally(): Promise<void> {
   for (const args of [
     ["--api-key", "secret", "ls"],
@@ -655,7 +712,7 @@ async function testPerCommandHelpIsCommandSpecific(): Promise<void> {
   for (const command of [
     "delete", "filesystems", "fork", "fs", "list", "ls", "policies", "regions",
     "rm", "run", "runs", "sessions", "shell", "signal", "sync", "sync-dir",
-    "mounts", "update", "vms", "whoami",
+    "mounts", "pools", "update", "vms", "whoami",
   ]) {
     const result = await runCli(undefined, [command, "--help"], { authenticated: false });
     assert.equal(result.code, 0, `${command} --help should succeed`);
@@ -1288,6 +1345,8 @@ await testComputeCommandRequiresProviderAndRegion();
 await testProviderOnlyVmListDoesNotRequireAComputeRegion();
 await testRegionsDiscoveryNeedsNoCredentialsOrPlacement();
 await testWhoamiUsesAuthenticatedControlPlane();
+await testPoolsCreateNeedsConfirmationWithoutATerminal();
+await testPoolsCreateYesBuysAtTheQuotedPrice();
 await testRemovedSecretAndUrlFlagsFailLocally();
 await testHelpMatchesSupportedSurface();
 await testPerCommandHelpIsCommandSpecific();

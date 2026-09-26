@@ -257,6 +257,90 @@ def test_whoami_uses_authenticated_control_plane() -> None:
     assert identity.org_name == "ArkerHQ"
 
 
+POOL_ID = "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61"
+POOL_TERMS = {"resources": {"vcpu": 8, "memory_mib": 32768}, "duration_seconds": 2_592_000}
+POOL = {
+    "pool_id": POOL_ID,
+    "name": None,
+    "provider": "aws",
+    "region": "us-west-2",
+    **POOL_TERMS,
+    "status": "active",
+    "created_at": "2026-09-25T00:00:00Z",
+    "starts_at": "2026-09-25T00:00:00Z",
+    "ends_at": "2026-10-25T00:00:00Z",
+    "currency": "usd",
+    "amount_cents": 12_345,
+    "invoice_id": None,
+}
+POOL_QUOTE = {
+    "name": None,
+    "catalog_version": "v1",
+    "baseline_cents": 15_000,
+    "discount_percent": 17.7,
+    "provider": "aws",
+    "region": "us-west-2",
+    **POOL_TERMS,
+    "currency": "usd",
+    "amount_cents": 12_345,
+}
+CONTROL = "https://control.invalid/api"
+
+
+def pool_client(attempts: int = 1) -> sdk.Arker:
+    return sdk.Arker(
+        api_key="ark_live_test",
+        provider="aws",
+        region="us-west-2",
+        control_base_url=CONTROL,
+        retry={"attempts": attempts, "base_delay_s": 0.001, "max_delay_s": 0.001, "jitter_s": 0}
+        if attempts > 1
+        else False,
+    )
+
+
+def is_quote(method: str, url: str) -> bool:
+    return method == "POST" and url == f"{CONTROL}/v1/pools/quote"
+
+
+def is_buy(method: str, url: str) -> bool:
+    return method == "POST" and url == f"{CONTROL}/v1/pools"
+
+
+def test_create_pool_buys_at_the_quoted_price() -> None:
+    t = FakeTransport()
+    t.add_json(is_quote, 200, POOL_QUOTE)
+    t.add_json(is_buy, 200, POOL)
+
+    with use_transport(t):
+        pool = pool_client().create_pool(**POOL_TERMS, name="ci")
+
+    assert pool.pool_id == POOL_ID
+    quote, buy = t.calls
+    # Placement comes from the client when the caller does not give one.
+    terms = {"provider": "aws", "region": "us-west-2", **POOL_TERMS, "name": "ci"}
+    assert json.loads(quote["body"]) == terms
+    assert json.loads(buy["body"]) == {**terms, "amount_cents": 12_345}
+    assert buy["headers"]["idempotency-key"].startswith("sdk-pool-")
+    assert "idempotency-key" not in quote["headers"]
+
+
+def test_create_pool_retry_replays_the_same_purchase() -> None:
+    # A purchase whose response was lost must be retried with the same key and
+    # price, so the service returns the original pool instead of a second one.
+    t = FakeTransport()
+    t.add_json(is_quote, 200, POOL_QUOTE)
+    t.add_network_error(is_buy)
+    t.add_json(is_buy, 200, POOL)
+
+    with use_transport(t):
+        pool_client(attempts=2).create_pool(**POOL_TERMS, idempotency_key="buy-1")
+
+    buys = [call for call in t.calls if is_buy(call["method"], call["url"])]
+    assert [call["headers"]["idempotency-key"] for call in buys] == ["buy-1", "buy-1"]
+    assert buys[0]["body"] == buys[1]["body"]
+
+
 def test_fork_posts_directly_to_source_vm() -> None:
     t = FakeTransport()
     # Contract 0.3 routes forks to `/v1/fork`, with the source vm id
