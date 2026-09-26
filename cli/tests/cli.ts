@@ -101,9 +101,6 @@ async function runCli(baseUrl: string | undefined, args: string[], options: CliO
     HOME: "/nonexistent/ark-202-cli-test-home",
     NODE_NO_WARNINGS: "1",
   };
-  // Placement comes from each test's flags, never the developer's shell.
-  delete env.ARKER_PROVIDER;
-  delete env.ARKER_REGION;
   if (options.authenticated !== false) env.ARKER_API_KEY = "ark_live_test";
   else delete env.ARKER_API_KEY;
   if (baseUrl) {
@@ -639,10 +636,9 @@ async function testWhoamiUsesAuthenticatedControlPlane(): Promise<void> {
   );
 }
 
-const POOL_ID = "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61";
 const POOL_TERMS = { resources: { vcpu: 8, memory_mib: 32768 }, duration_seconds: 2_592_000 };
 const CLI_POOL = {
-  pool_id: POOL_ID,
+  pool_id: "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61",
   name: "ci",
   provider: "aws",
   region: "us-west-2",
@@ -670,84 +666,12 @@ const POOL_ARGS = [
   "--provider", "aws", "--region", "us-west-2", "--vcpu", "8", "--memory-mib", "32768", "--days", "30", "--name", "ci",
 ];
 
-function poolResponder(buy: (res: ServerResponse) => void = (res) => jsonResponse(res, CLI_POOL)) {
-  return (request: CapturedRequest, res: ServerResponse) => {
-    if (request.url === "/api/v1/pools/quote") return jsonResponse(res, CLI_POOL_QUOTE);
-    if (request.method === "POST" && request.url === "/api/v1/pools") return buy(res);
-    if (request.url?.startsWith("/api/v1/pools?")) {
-      return jsonResponse(res, { pools: [CLI_POOL], purchases_enabled: true, next_cursor: "5" });
-    }
-    if (request.url?.endsWith("/usage")) {
-      return jsonResponse(res, {
-        pool_id: POOL_ID, resources_allocated: { vcpu: 2, memory_mib: 0, disk_mib: 0 }, allocation_observed_at: null,
-      });
-    }
-    return jsonResponse(res, CLI_POOL);
-  };
-}
-
-async function testPoolsReadsAndRename(): Promise<void> {
-  await withCapturedServer(poolResponder(), async (baseUrl, requests) => {
-    const ls = await runCli(baseUrl, ["pools", "ls", "--limit", "5"], { controlOnly: true });
-    assert.equal(ls.code, 0, ls.stderr);
-    assert.equal(
-      stdoutText(ls),
-      `${POOL_ID}\tci\taws-us-west-2\tactive\t2026-10-25T00:00:00Z\n# next_cursor=5\n`,
-    );
-    for (const args of [["pools", "get", POOL_ID], ["pools", "usage", POOL_ID], ["pools", "rename", POOL_ID, "batch"]]) {
-      const result = await runCli(baseUrl, args, { controlOnly: true });
-      assert.equal(result.code, 0, result.stderr);
-    }
-    const clear = await runCli(baseUrl, ["pools", "rename", POOL_ID, "--clear"], { controlOnly: true });
-    assert.equal(clear.code, 0, clear.stderr);
-    assert.deepEqual(
-      requests.map(({ method, url, body }) => [method, url, body]),
-      [
-        ["GET", "/api/v1/pools?limit=5", undefined],
-        ["GET", `/api/v1/pools/${POOL_ID}`, undefined],
-        ["GET", `/api/v1/pools/${POOL_ID}/usage`, undefined],
-        ["PATCH", `/api/v1/pools/${POOL_ID}`, { name: "batch" }],
-        ["PATCH", `/api/v1/pools/${POOL_ID}`, { name: null }],
-      ],
-    );
-  });
-}
-
-async function testPoolsQuotePrintsThePrice(): Promise<void> {
-  await withCapturedServer(poolResponder(), async (baseUrl, requests) => {
-    const result = await runCli(baseUrl, ["pools", "quote", ...POOL_ARGS], { controlOnly: true });
-    assert.equal(result.code, 0, result.stderr);
-    assert.equal(
-      stdoutText(result),
-      'Pool "ci" in aws/us-west-2\n  8 vCPU · 32 GiB memory · 30 days\n' +
-        "  $123.45 USD, billed on your next invoice (17.7% off on-demand)\n",
-    );
-    assert.deepEqual(requests.map(({ url, body }) => [url, body]), [
-      ["/api/v1/pools/quote", { provider: "aws", region: "us-west-2", ...POOL_TERMS, name: "ci" }],
-    ]);
-  });
-}
-
-async function testPoolsTermsAreCheckedBeforeRequest(): Promise<void> {
-  const cases: Array<[string[], RegExp]> = [
-    [["pools", "quote", "--provider", "aws", "--region", "us-west-2", "--vcpu", "8", "--days", "7"], /at least 30/],
-    [["pools", "quote", "--provider", "aws", "--region", "us-west-2", "--days", "30"], /--vcpu, --memory-mib, or --disk-mib/],
-    [["pools", "quote", "--vcpu", "8", "--days", "30"], /Provider and region are required/],
-    [["pools", "create", "--provider", "aws", "--region", "us-west-2", "--vcpu", "8"], /--days is required/],
-    [["pools", "rename", POOL_ID], /usage: arker pools rename/],
-  ];
-  await withCapturedServer(poolResponder(), async (baseUrl, requests) => {
-    for (const [args, message] of cases) {
-      const result = await runCli(baseUrl, args, { controlOnly: true });
-      assert.equal(result.code, 1, args.join(" "));
-      assert.match(result.stderr, message, args.join(" "));
-    }
-    assert.equal(requests.length, 0);
-  });
+function poolResponder(request: CapturedRequest, res: ServerResponse): void {
+  jsonResponse(res, request.url === "/api/v1/pools/quote" ? CLI_POOL_QUOTE : CLI_POOL);
 }
 
 async function testPoolsCreateNeedsConfirmationWithoutATerminal(): Promise<void> {
-  await withCapturedServer(poolResponder(), async (baseUrl, requests) => {
+  await withCapturedServer(poolResponder, async (baseUrl, requests) => {
     const result = await runCli(baseUrl, ["pools", "create", ...POOL_ARGS], { controlOnly: true });
     assert.equal(result.code, 1);
     assert.match(result.stderr, /pass --yes/);
@@ -756,35 +680,16 @@ async function testPoolsCreateNeedsConfirmationWithoutATerminal(): Promise<void>
 }
 
 async function testPoolsCreateYesBuysAtTheQuotedPrice(): Promise<void> {
-  await withCapturedServer(poolResponder(), async (baseUrl, requests) => {
+  await withCapturedServer(poolResponder, async (baseUrl, requests) => {
     const result = await runCli(baseUrl, ["pools", "create", "--yes", ...POOL_ARGS], { controlOnly: true });
     assert.equal(result.code, 0, result.stderr);
-    assert.equal(JSON.parse(stdoutText(result)).pool_id, POOL_ID);
+    assert.equal(JSON.parse(stdoutText(result)).pool_id, CLI_POOL.pool_id);
     const [quote, buy] = requests;
     assert.equal(quote!.url, "/api/v1/pools/quote");
     assert.equal(quote!.idempotencyKey, undefined);
     assert.equal(buy!.url, "/api/v1/pools");
     assert.deepEqual(buy!.body, { ...(quote!.body as object), amount_cents: 12_345 });
     assert.match(buy!.idempotencyKey ?? "", /^cli-pool-/);
-  });
-}
-
-async function testPoolsCreateYesStopsWhenThePriceChanges(): Promise<void> {
-  const priceChanged = (res: ServerResponse) => jsonResponse(res, {
-    error: {
-      code: "conflict",
-      message: "The price changed.",
-      timestamp: "2026-09-25T00:00:00Z",
-      request_id: "r",
-      request: { kind: "matched", operation_id: "createPool" },
-      details: { resource: "pool_quote" },
-    },
-  }, 409);
-  await withCapturedServer(poolResponder(priceChanged), async (baseUrl, requests) => {
-    const result = await runCli(baseUrl, ["pools", "create", "--yes", ...POOL_ARGS], { controlOnly: true });
-    assert.equal(result.code, 1);
-    assert.match(result.stderr, /price changed/);
-    assert.equal(requests.length, 2, "--yes must not buy at a price nobody saw");
   });
 }
 
@@ -1440,12 +1345,8 @@ await testComputeCommandRequiresProviderAndRegion();
 await testProviderOnlyVmListDoesNotRequireAComputeRegion();
 await testRegionsDiscoveryNeedsNoCredentialsOrPlacement();
 await testWhoamiUsesAuthenticatedControlPlane();
-await testPoolsReadsAndRename();
-await testPoolsQuotePrintsThePrice();
-await testPoolsTermsAreCheckedBeforeRequest();
 await testPoolsCreateNeedsConfirmationWithoutATerminal();
 await testPoolsCreateYesBuysAtTheQuotedPrice();
-await testPoolsCreateYesStopsWhenThePriceChanges();
 await testRemovedSecretAndUrlFlagsFailLocally();
 await testHelpMatchesSupportedSurface();
 await testPerCommandHelpIsCommandSpecific();

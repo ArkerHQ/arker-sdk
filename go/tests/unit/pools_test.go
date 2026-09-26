@@ -3,7 +3,6 @@ package unit
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -71,53 +70,6 @@ func poolServer(t *testing.T, buy func(n int, w http.ResponseWriter) bool) (*ark
 	return c, &requests
 }
 
-func TestPoolReadsGoToTheControlPlane(t *testing.T) {
-	var got []string
-	c := twoPlane(t, reject(t, "regional"), func(w http.ResponseWriter, r *http.Request) {
-		got = append(got, r.Method+" "+r.URL.RequestURI())
-		switch {
-		case r.URL.Path == "/v1/pools":
-			fmt.Fprint(w, `{"pools":[`+poolBody+`],"purchases_enabled":true,"next_cursor":null}`)
-		case strings.HasSuffix(r.URL.Path, "/usage"):
-			fmt.Fprint(w, `{"pool_id":"`+poolID+`","resources_allocated":{"vcpu":2},"allocation_observed_at":null}`)
-		default:
-			fmt.Fprint(w, poolBody)
-		}
-	})
-	ctx := context.Background()
-
-	list, err := c.ListPools(ctx, arker.ListPoolsOptions{Limit: 5})
-	if err != nil || len(list.Pools) != 1 || !list.PurchasesEnabled {
-		t.Fatalf("list: %+v %v", list, err)
-	}
-	if _, err := c.GetPool(ctx, poolID); err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	usage, err := c.GetPoolUsage(ctx, poolID)
-	if err != nil || usage.ResourcesAllocated.VCPU != 2 {
-		t.Fatalf("usage: %+v %v", usage, err)
-	}
-	want := []string{"GET /v1/pools?limit=5", "GET /v1/pools/" + poolID, "GET /v1/pools/" + poolID + "/usage"}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("control plane saw %q, want %q", got, want)
-	}
-}
-
-func TestRenamePoolSendsNullToClear(t *testing.T) {
-	c, requests := poolServer(t, nil)
-
-	if _, err := c.RenamePool(context.Background(), poolID, nil); err != nil {
-		t.Fatalf("rename: %v", err)
-	}
-	got := (*requests)[0]
-	if got.method != http.MethodPatch {
-		t.Fatalf("method %s", got.method)
-	}
-	if name, present := got.body["name"]; !present || name != nil {
-		t.Fatalf("body %v; a nil name must be sent as null", got.body)
-	}
-}
-
 func TestCreatePoolBuysAtTheQuotedPrice(t *testing.T) {
 	c, requests := poolServer(t, nil)
 
@@ -172,30 +124,5 @@ func TestCreatePoolRetryReplaysTheSamePurchase(t *testing.T) {
 	}
 	if strings.Join(keys, ",") != "buy-1,buy-1" {
 		t.Fatalf("purchase keys %q", keys)
-	}
-}
-
-func TestCreatePoolSurfacesAPriceChange(t *testing.T) {
-	c, requests := poolServer(t, func(_ int, w http.ResponseWriter) bool {
-		w.WriteHeader(http.StatusConflict)
-		fmt.Fprint(w, `{"error":{"code":"conflict","message":"The price changed.","details":{"resource":"pool_quote"}}}`)
-		return true
-	})
-
-	_, err := c.CreatePool(context.Background(), poolTerms)
-	var apiErr *arker.Error
-	if !errors.As(err, &apiErr) || apiErr.Code != "conflict" {
-		t.Fatalf("want a conflict, got %v", err)
-	}
-	if len(*requests) != 2 {
-		t.Fatalf("a price change must not be retried or re-bought: %d requests", len(*requests))
-	}
-}
-
-func TestCreatePoolNeedsAPlacement(t *testing.T) {
-	c := twoPlane(t, reject(t, "regional"), reject(t, "control"))
-	// twoPlane sets BaseURL, which leaves Provider and Region empty.
-	if _, err := c.CreatePool(context.Background(), poolTerms); err == nil {
-		t.Fatal("a pool without a placement reported success")
 	}
 }

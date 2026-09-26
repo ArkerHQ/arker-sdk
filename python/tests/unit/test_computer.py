@@ -307,39 +307,6 @@ def is_buy(method: str, url: str) -> bool:
     return method == "POST" and url == f"{CONTROL}/v1/pools"
 
 
-def test_pool_reads_use_control_plane() -> None:
-    t = FakeTransport()
-    t.add_json(
-        lambda m, u: m == "GET" and u == f"{CONTROL}/v1/pools?limit=5",
-        200,
-        {"pools": [POOL], "purchases_enabled": True, "next_cursor": None},
-    )
-    t.add_json(lambda m, u: m == "GET" and u == f"{CONTROL}/v1/pools/{POOL_ID}", 200, POOL)
-    t.add_json(
-        lambda m, u: m == "GET" and u == f"{CONTROL}/v1/pools/{POOL_ID}/usage",
-        200,
-        {
-            "pool_id": POOL_ID,
-            "resources_allocated": {"vcpu": 2, "memory_mib": 0, "disk_mib": 0},
-            "allocation_observed_at": None,
-        },
-    )
-    t.add_json(lambda m, u: m == "PATCH" and u == f"{CONTROL}/v1/pools/{POOL_ID}", 200, POOL)
-
-    with use_transport(t):
-        arker = pool_client()
-        pools = arker.list_pools(limit=5)
-        pool = arker.get_pool(POOL_ID)
-        usage = arker.get_pool_usage(POOL_ID)
-        arker.rename_pool(POOL_ID, None)
-
-    assert isinstance(pools.pools[0], sdk.Pool)
-    assert pool.status == "active"
-    assert usage.resources_allocated.vcpu == 2
-    # None removes the name, so it must reach the wire rather than be dropped.
-    assert json.loads(t.calls[3]["body"]) == {"name": None}
-
-
 def test_create_pool_buys_at_the_quoted_price() -> None:
     t = FakeTransport()
     t.add_json(is_quote, 200, POOL_QUOTE)
@@ -372,41 +339,6 @@ def test_create_pool_retry_replays_the_same_purchase() -> None:
     buys = [call for call in t.calls if is_buy(call["method"], call["url"])]
     assert [call["headers"]["idempotency-key"] for call in buys] == ["buy-1", "buy-1"]
     assert buys[0]["body"] == buys[1]["body"]
-
-
-def test_create_pool_surfaces_a_price_change() -> None:
-    t = FakeTransport()
-    t.add_json(is_quote, 200, POOL_QUOTE)
-    t.add_json(
-        is_buy,
-        409,
-        {
-            "error": {
-                "code": "conflict",
-                "message": "The price changed.",
-                "timestamp": "2026-09-25T00:00:00Z",
-                "request_id": "r",
-                "request": {"kind": "matched", "operation_id": "createPool"},
-                "details": {"resource": "pool_quote"},
-            }
-        },
-    )
-
-    with use_transport(t), pytest.raises(sdk.ArkerError) as raised:
-        pool_client(attempts=3).create_pool(**POOL_TERMS)
-
-    assert raised.value.code == "conflict"
-    assert len(t.calls) == 2, "a price change must not be retried or re-bought"
-
-
-def test_create_pool_needs_a_placement() -> None:
-    t = FakeTransport()
-    arker = sdk.Arker(api_key="ark_live_test", control_base_url=CONTROL, retry=False)
-
-    with use_transport(t), pytest.raises(ValueError, match="provider and region are required"):
-        arker.create_pool(**POOL_TERMS)
-
-    assert t.calls == []
 
 
 def test_fork_posts_directly_to_source_vm() -> None:

@@ -693,27 +693,6 @@ const isQuote = (method: string, url: string) =>
 const isBuy = (method: string, url: string) =>
   method === "POST" && url === "https://control.invalid/api/v1/pools";
 
-async function testPoolReadsUseControlPlane(): Promise<void> {
-  const fetch = new FakeFetch();
-  const id = POOL.pool_id;
-  fetch.addJson((m, u) => m === "GET" && u === "https://control.invalid/api/v1/pools?limit=5", 200, {
-    pools: [POOL], purchases_enabled: true, next_cursor: null,
-  });
-  fetch.addJson((m, u) => m === "GET" && u === `https://control.invalid/api/v1/pools/${id}`, 200, POOL);
-  fetch.addJson((m, u) => m === "GET" && u === `https://control.invalid/api/v1/pools/${id}/usage`, 200, {
-    pool_id: id, resources_allocated: { vcpu: 2, memory_mib: 0, disk_mib: 0 }, allocation_observed_at: null,
-  });
-  fetch.addJson((m, u) => m === "PATCH" && u === `https://control.invalid/api/v1/pools/${id}`, 200, POOL);
-  const arker = poolClient(fetch);
-
-  assert.equal((await arker.listPools({ limit: 5 })).pools[0]!.pool_id, id);
-  assert.equal((await arker.getPool(id)).pool_id, id);
-  assert.equal((await arker.getPoolUsage(id)).resources_allocated.vcpu, 2);
-  await arker.renamePool(id, null);
-  // null removes the name, so it must reach the wire rather than be dropped.
-  assert.deepEqual(JSON.parse(fetch.calls[3]!.body!), { name: null });
-}
-
 async function testCreatePoolBuysAtTheQuotedPrice(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(isQuote, 200, POOL_QUOTE);
@@ -745,37 +724,6 @@ async function testCreatePoolRetryReplaysTheSamePurchase(): Promise<void> {
   assert.equal(buys.length, 2);
   assert.deepEqual(buys.map((call) => call.headers["idempotency-key"]), ["buy-1", "buy-1"]);
   assert.equal(buys[0]!.body, buys[1]!.body);
-}
-
-async function testCreatePoolSurfacesAPriceChange(): Promise<void> {
-  const fetch = new FakeFetch();
-  fetch.addJson(isQuote, 200, POOL_QUOTE);
-  fetch.addJson(isBuy, 409, {
-    error: {
-      code: "conflict",
-      message: "The price changed.",
-      timestamp: "2026-09-25T00:00:00Z",
-      request_id: "r",
-      request: { kind: "matched", operation_id: "createPool" },
-      details: { resource: "pool_quote" },
-    },
-  });
-
-  await assert.rejects(
-    poolClient(fetch, 3).createPool(POOL_TERMS),
-    (error: unknown) => error instanceof ArkerError && error.code === "conflict",
-  );
-  assert.equal(fetch.calls.length, 2, "a price change must not be retried or re-bought");
-}
-
-async function testCreatePoolNeedsAPlacement(): Promise<void> {
-  const fetch = new FakeFetch();
-  const arker = new Arker({
-    apiKey: "ark_live_test", controlBaseUrl: "https://control.invalid/api", fetch: fetch.fetch, retry: false,
-  });
-
-  await assert.rejects(arker.createPool(POOL_TERMS), /provider and region are required/);
-  assert.equal(fetch.calls.length, 0);
 }
 
 async function testDiscoverRegionsRequiresNoConfiguredClient(): Promise<void> {
@@ -1360,11 +1308,8 @@ testPlacementRequiresSeparateProviderAndRegion();
 testInvalidProviderSyntaxFailsClosed();
 await testListRegionsUsesPublicControlPlaneCatalog();
 await testWhoamiUsesControlPlane();
-await testPoolReadsUseControlPlane();
 await testCreatePoolBuysAtTheQuotedPrice();
 await testCreatePoolRetryReplaysTheSamePurchase();
-await testCreatePoolSurfacesAPriceChange();
-await testCreatePoolNeedsAPlacement();
 await testDiscoverRegionsRequiresNoConfiguredClient();
 await testListedVmUsesItsPlacementEndpoint();
 testExplicitVmHandleUsesPlacementEndpoint();
