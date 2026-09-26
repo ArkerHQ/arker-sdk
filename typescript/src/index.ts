@@ -295,6 +295,40 @@ export async function discoverRegions(
   );
 }
 
+/**
+ * Resolve a placement to its API base URL using the published catalog.
+ *
+ * `computeBaseUrl` derives `<provider>-<region>.arker.ai`, which is right for
+ * most placements and wrong for any whose endpoint does not follow that shape
+ * — `arker`/`eu-central` is served from `arker-eu.arker.ai`, so the derived
+ * host does not resolve at all. This asks `/v1/regions`, which already
+ * publishes the real endpoint for every placement, and falls back to the
+ * derived host when the catalog is unreachable or does not list the placement.
+ */
+export async function resolvePlacementBaseUrl(
+  provider: string,
+  region: string,
+  opts: RegionDiscoveryOptions = {},
+): Promise<string> {
+  try {
+    const catalog = await discoverRegions(opts);
+    const wanted = {
+      provider: provider.trim().toLowerCase(),
+      region: region.trim().toLowerCase(),
+    };
+    const match = catalog.regions.find(
+      (entry) =>
+        entry.provider.toLowerCase() === wanted.provider &&
+        entry.region.toLowerCase() === wanted.region,
+    );
+    if (match) return normalizeBaseUrl(match.endpoint);
+  } catch {
+    // Offline, or the catalog is unavailable: fall back to the derived host,
+    // which is correct for every placement that follows the naming pattern.
+  }
+  return computeBaseUrl(provider, region);
+}
+
 // ── Core resources ─────────────────────────────────────────────────
 export type PolicyDoc = ApiSchema<"PolicyDoc">;
 export type PolicyWriteRequest = ApiSchema<"PolicyWriteRequest">;
@@ -2034,6 +2068,22 @@ function clampPtyDimension(value: number): number {
 function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, "");
   if (!trimmed) throw new Error("baseUrl must not be empty");
+  // A base URL is the API root: request paths are "/v1/...", and both
+  // computeBaseUrl and DEFAULT_CONTROL_BASE_URL end in "/api". But `arker
+  // regions` publishes each placement's endpoint without that suffix
+  // ("https://arker-eu.arker.ai/"), so pasting the published value into
+  // ARKER_BASE_URL produced "/v1/fork" and a bare 404 with nothing to
+  // suggest the cause. Accept the published form for Arker's own hosts.
+  // Other origins are left exactly as given, so a dev target that serves
+  // "/v1" at its root keeps working.
+  try {
+    const url = new URL(trimmed);
+    if (url.pathname === "" || url.pathname === "/") {
+      if (/(^|\.)arker\.ai$/i.test(url.hostname)) return `${url.origin}/api`;
+    }
+  } catch {
+    // Not an absolute URL; leave it to the caller's own validation.
+  }
   return trimmed;
 }
 
@@ -2046,7 +2096,11 @@ function normalizePlacementLabel(name: "provider" | "region", value: string): st
 }
 
 function computeBaseUrl(provider: string, region: string): string {
-  // Regional endpoints encode the provider and region in the hostname.
+  // Most regional endpoints encode the provider and region in the hostname,
+  // but not all of them: arker/eu-central is served from arker-eu.arker.ai,
+  // so deriving the host gives arker-eu-central.arker.ai and NXDOMAIN. The
+  // placement catalog at /v1/regions is the authority; resolvePlacementBaseUrl
+  // consults it and falls back here. Keep this as the offline default only.
   const normalizedProvider = normalizePlacementLabel("provider", provider);
   const normalizedRegion = normalizePlacementLabel("region", region);
   const placement = `${normalizedProvider}-${normalizedRegion}`;
