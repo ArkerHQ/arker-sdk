@@ -15,18 +15,20 @@
  *     arker sync <vm> ...      → read or write files on <vm>
  *     arker shell [vm]         → native PTY shell over WebSocket
  *
- * Resources: vms, runs, sessions, mounts, filesystems (alias `fs`).
+ * Resources: vms, runs, sessions, mounts, filesystems (alias `fs`), pools.
  * Each supports `ls`, `get`, `rm`, and the resource-specific verbs.
  *
  * Auth: reads `ARKER_API_KEY` from the environment (or `~/.arker/config`).
  * Placement: `ARKER_PROVIDER` + `ARKER_REGION`, or the matching flags.
  */
 
+import { randomUUID } from "node:crypto";
 import { readFileSync, existsSync, fstatSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
+import { createInterface } from "node:readline/promises";
 import {
   Arker,
   ArkerError,
@@ -35,6 +37,9 @@ import {
 import { bridgePty } from "./cli-pty.js";
 import type {
   PolicyDoc,
+  PoolQuote,
+  PoolQuoteRequest,
+  PoolResources,
   ForkOptions,
   RunRecord,
   RunSignal,
@@ -183,6 +188,21 @@ const RUN_LIST_OPTIONS: OptionSpecs = {
   vms: { type: "string" },
 };
 
+const POOL_TERM_OPTIONS: OptionSpecs = {
+  ...GLOBAL_OPTIONS,
+  ...RESOURCE_OPTIONS,
+  // The 30-day floor is checked with its own message in cmdPools.
+  days: { type: "integer", min: 1 },
+  name: { type: "string" },
+};
+
+const POOL_OPTIONS: Record<string, OptionSpecs> = {
+  ls: { ...GLOBAL_OPTIONS, cursor: PAGINATION_OPTIONS.cursor!, limit: { type: "integer", min: 1, max: 100 } },
+  quote: POOL_TERM_OPTIONS,
+  create: { ...POOL_TERM_OPTIONS, yes: { type: "boolean" } },
+  rename: { ...GLOBAL_OPTIONS, clear: { type: "boolean" } },
+};
+
 const UPDATE_OPTIONS: OptionSpecs = {
   ...GLOBAL_OPTIONS,
   ...FORK_RESOURCE_OPTIONS,
@@ -241,6 +261,7 @@ const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
     ...GLOBAL_OPTIONS,
     file: { type: "string" },
   },
+  pools: Object.assign({}, ...Object.values(POOL_OPTIONS)) as OptionSpecs,
   regions: {
     help: { type: "boolean" },
     json: { type: "boolean" },
@@ -383,6 +404,10 @@ function invocationOptions(command: string, positional: string[]): { options: Op
       : subcommand === "create"
         ? { ...GLOBAL_OPTIONS, name: { type: "string" } }
         : GLOBAL_OPTIONS;
+  } else if (command === "pools") {
+    context = `pools ${subcommand ?? "ls"}`;
+    const key = subcommand === undefined || subcommand === "list" ? "ls" : subcommand;
+    allowed = POOL_OPTIONS[key] ?? GLOBAL_OPTIONS;
   } else if (command === "policies") {
     context = `policies ${subcommand ?? "get"}`;
     allowed = subcommand === "set" ? COMMAND_OPTIONS.policies! : GLOBAL_OPTIONS;
@@ -403,6 +428,7 @@ const POSITIONAL_LIMITS: Record<string, number | Record<string, number>> = {
   sessions: { ls: 1, list: 1, get: 2, create: 1, rm: 2, delete: 2, update: 2 },
   shell: 1,
   policies: { get: 1, set: 1 },
+  pools: { ls: 0, list: 0, get: 1, usage: 1, rename: 2, quote: 0, create: 0 },
   regions: 0,
   whoami: 0,
   signal: 2,
@@ -594,7 +620,9 @@ function commandRequiresComputePlacement(
   command: string,
   args: ParsedArgs,
 ): boolean {
-  if (command === "ls" || command === "list" || command === "whoami") return false;
+  // Pools live on the control plane; quote and create take their placement
+  // from --provider/--region in cmdPools.
+  if (command === "ls" || command === "list" || command === "whoami" || command === "pools") return false;
   if (command === "runs") {
     const [subcommand, vm] = args.positional;
     if ((subcommand === "ls" || subcommand === "list") && vm === undefined) return false;
@@ -1427,6 +1455,148 @@ async function cmdFilesystems(args: ParsedArgs, client: Arker): Promise<void> {
   }
 }
 
+// ── Pools ──────────────────────────────────────────────────────────
+
+const MIN_POOL_DAYS = 30;
+
+async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
+  const sub = args.positional[0];
+  const rest = args.positional.slice(1);
+  switch (sub) {
+    case undefined:
+    case "ls":
+    case "list": {
+      const res = await client.listPools({
+        cursor: args.flags.cursor as string | undefined,
+        limit: numFlag(args, "limit"),
+      });
+      if (args.flags.json) return out(res);
+      for (const p of res.pools) {
+        out(`${p.pool_id}\t${p.name ?? "—"}\t${p.provider}-${p.region}\t${p.status}\t${p.ends_at}`);
+      }
+      if (res.next_cursor) out(`# next_cursor=${res.next_cursor}`);
+      return;
+    }
+    case "get": {
+      out(await client.getPool(rest[0] ?? die("usage: arker pools get <pool_id>")));
+      return;
+    }
+    case "usage": {
+      out(await client.getPoolUsage(rest[0] ?? die("usage: arker pools usage <pool_id>")));
+      return;
+    }
+    case "rename": {
+      const usage = "usage: arker pools rename <pool_id> <name>  (or: --clear to remove the name)";
+      const id = rest[0] ?? die(usage);
+      const name = rest[1];
+      if ((name === undefined) === (args.flags.clear !== true)) die(usage);
+      out(await client.renamePool(id, name ?? null));
+      return;
+    }
+    case "quote": {
+      const quote = await client._quotePool(poolRequestFromArgs(args, client));
+      if (args.flags.json) return out(quote);
+      out(describePoolQuote(quote));
+      return;
+    }
+    case "create":
+      return await cmdPoolsCreate(args, client);
+    default:
+      die("usage: arker pools <ls|get|usage|rename|quote|create> ...");
+  }
+}
+
+/** Show the price, confirm, then buy at exactly that price. */
+async function cmdPoolsCreate(args: ParsedArgs, client: Arker): Promise<void> {
+  const request = poolRequestFromArgs(args, client);
+  const yes = args.flags.yes === true;
+  if (!yes && !input.isTTY) {
+    die("refusing to buy a pool without confirmation; run in a terminal or pass --yes");
+  }
+  for (;;) {
+    const quote = await client._quotePool(request);
+    if (!yes) {
+      process.stderr.write(`${describePoolQuote(quote)}\n`);
+      if (!(await confirm("Buy this pool? [y/N] "))) die("cancelled; nothing was bought");
+    }
+    try {
+      // A fresh key per confirmed price: every retry of this attempt replays
+      // it, and a re-confirmed price is a new purchase.
+      out(await client._buyPool(request, quote.amount_cents, `cli-pool-${randomUUID()}`));
+      return;
+    } catch (error) {
+      if (!isPoolPriceChange(error)) throw error;
+      if (yes) die("the pool price changed after it was quoted; rerun to buy at the new price");
+      err("The price changed after it was quoted. Here is the new price.");
+    }
+  }
+}
+
+function poolRequestFromArgs(args: ParsedArgs, client: Arker): PoolQuoteRequest {
+  const file = readFileConfig();
+  const provider = (args.flags.provider as string | undefined) ?? process.env.ARKER_PROVIDER ?? file.provider;
+  const region = (args.flags.region as string | undefined) ?? process.env.ARKER_REGION ?? file.region;
+  if (!provider || !region) {
+    die("Provider and region are required for a pool. Set --provider and --region, or ARKER_PROVIDER and ARKER_REGION.");
+  }
+  const days = numFlag(args, "days") ?? die(`--days is required (at least ${MIN_POOL_DAYS})`);
+  if (days < MIN_POOL_DAYS) die(`--days must be at least ${MIN_POOL_DAYS}; that is the shortest pool term`);
+  const resources: PoolResources = {
+    vcpu: numFlag(args, "vcpu"),
+    memory_mib: numFlag(args, "memory-mib"),
+    disk_mib: numFlag(args, "disk-mib"),
+  };
+  if (!Object.values(resources).some((amount) => amount !== undefined && amount > 0)) {
+    die("give at least one of --vcpu, --memory-mib, or --disk-mib");
+  }
+  return client._poolRequest({
+    provider,
+    region,
+    resources,
+    duration_seconds: days * 86_400,
+    name: args.flags.name as string | undefined,
+  });
+}
+
+function describePoolQuote(quote: PoolQuote): string {
+  const { vcpu, memory_mib, disk_mib } = quote.resources;
+  const size = [
+    vcpu ? `${vcpu} vCPU` : undefined,
+    memory_mib ? `${formatPoolSize(memory_mib)} memory` : undefined,
+    disk_mib ? `${formatPoolSize(disk_mib)} disk` : undefined,
+    `${Math.round(quote.duration_seconds / 86_400)} days`,
+  ].filter(Boolean).join(" · ");
+  const price = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: quote.currency.toUpperCase(),
+  }).format(quote.amount_cents / 100);
+  const discount = quote.discount_percent > 0 ? ` (${quote.discount_percent}% off on-demand)` : "";
+  return [
+    `Pool${quote.name ? ` "${quote.name}"` : ""} in ${quote.provider}/${quote.region}`,
+    `  ${size}`,
+    `  ${price} ${quote.currency.toUpperCase()}, billed on your next invoice${discount}`,
+  ].join("\n");
+}
+
+function formatPoolSize(mib: number): string {
+  return mib % 1024 === 0 ? `${mib / 1024} GiB` : `${mib} MiB`;
+}
+
+function isPoolPriceChange(error: unknown): boolean {
+  if (!(error instanceof ArkerError) || error.code !== "conflict") return false;
+  const details = (error.body as { details?: { resource?: string } } | undefined)?.details;
+  return details?.resource === "pool_quote";
+}
+
+async function confirm(question: string): Promise<boolean> {
+  const prompt = createInterface({ input, output: process.stderr });
+  try {
+    return /^y(es)?$/i.test((await prompt.question(question)).trim());
+  } finally {
+    prompt.close();
+  }
+}
+
 // ── Shell ──────────────────────────────────────────────────────────
 
 async function cmdShell(args: ParsedArgs, client: Arker): Promise<void> {
@@ -1640,6 +1810,9 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   help: { desc: "show help without connecting" },
   image: { placeholder: "<reference>", desc: "fork from an OCI image" },
   "idempotency-key": { placeholder: "<key>", desc: "deduplicate retries of this run request" },
+  clear: { desc: "remove the pool's name" },
+  days: { placeholder: "<n>", desc: "pool term in days (at least 30)" },
+  yes: { desc: "buy without asking for confirmation" },
   json: { desc: "emit JSON instead of tabular output" },
   limit: { placeholder: "<n>", desc: "maximum rows to return; the command-specific service cap applies" },
   layers: { placeholder: "<disk[,memory]>", desc: "state layers to inherit from a source VM" },
@@ -1739,6 +1912,27 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     synopsis: ["arker policies <get|set> <vm_id> [flags]"],
     summary: "Read or replace a VM's policy document.",
     subs: { get: "show the current policy document", set: "replace it (use --file)" },
+  },
+  pools: {
+    synopsis: [
+      "arker pools <ls|get|usage|rename> [args] [flags]",
+      "arker pools <quote|create> --days <n> [--vcpu <n>] [--memory-mib <n>] [--disk-mib <n>] [flags]",
+    ],
+    summary: "Buy and manage prepaid regional capacity for your organization's VMs.",
+    subs: {
+      ls: "list pools",
+      get: "show one pool",
+      usage: "show resources allocated to the pool's VMs",
+      rename: "rename a pool, or remove its name with --clear",
+      quote: "price a pool without buying it",
+      create: "show the price, confirm, and buy a pool",
+    },
+    notes: [
+      "quote and create use --provider and --region (or ARKER_PROVIDER and ARKER_REGION).",
+      "Terms are at least 30 days. A pool is billed on your next invoice; buying and",
+      "renaming need an admin API key. create asks before buying; --yes skips the question,",
+      "and without a terminal create refuses unless --yes is given.",
+    ],
   },
   regions: {
     synopsis: ["arker regions [flags]"],
@@ -1920,6 +2114,8 @@ function usage(command?: string, positional: string[] = []): void {
       "  arker sessions    <ls|get|create|rm|update> <vm_id> ...",
       "  arker mounts       <ls|create|rm> <vm_id> ...",
       "  arker filesystems <ls|create|get|rm> ...   (alias: fs)",
+      "  arker pools <ls|get|usage|rename|quote|create> ...",
+      "                                              buy and manage prepaid capacity",
       "  arker sync <vm_id> <path> [data|-]          read a file, or write data/stdin",
       "  arker sync <vm_id> <path> --read            read a file, ignoring stdin",
       "  arker sync-dir <vm_id> <local> <remote>     sync a directory into the VM",
@@ -2055,6 +2251,8 @@ async function main(): Promise<void> {
       case "filesystems":
       case "fs":
         return await cmdFilesystems(args, client);
+      case "pools":
+        return await cmdPools(args, client);
       default:
         die(`unknown command: ${cmd}. Run 'arker --help'.`);
     }

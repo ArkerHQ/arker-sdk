@@ -491,6 +491,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List pools
+         * @description List the organization's pools, newest first. Any API key in the organization can read pools. Returns 404 when pools are not enabled for the organization.
+         */
+        get: operations["listPools"];
+        put?: never;
+        /**
+         * Buy a pool
+         * @description Buy prepaid capacity in one provider and region for a fixed term. The pool is billed on the organization's next invoice. `amount_cents` must match the current price for the same request; get it from the quote operation. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.
+         */
+        post: operations["createPool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Quote a pool
+         * @description Price a pool without buying it. Any API key in the organization can request a quote. Returns 404 when pools are not enabled for the organization.
+         */
+        post: operations["quotePool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{pool_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a pool
+         * @description Return one pool owned by the organization. Returns 404 when pools are not enabled for the organization.
+         */
+        get: operations["getPool"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename a pool
+         * @description Set or remove a pool's name. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.
+         */
+        patch: operations["updatePool"];
+        trace?: never;
+    };
+    "/v1/pools/{pool_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get pool usage
+         * @description Return the resources currently allocated to VMs in the pool. Returns 404 when pools are not enabled for the organization.
+         */
+        get: operations["getPoolUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1529,7 +1623,7 @@ export interface components {
          * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
          * @enum {string}
          */
-        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem";
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "quotePool" | "getPool" | "updatePool" | "getPoolUsage";
         /** @enum {string} */
         HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
         /**
@@ -2516,6 +2610,139 @@ export interface components {
             /** @description The error category and its details, request metadata, and recovery context. */
             error: components["schemas"]["CapacityUnavailable"] | components["schemas"]["Unavailable"];
         };
+        /** @description Reserved capacity. At least one quantity must be positive. */
+        PoolResources: {
+            /** @description Reserved vCPUs. */
+            vcpu?: number;
+            /** @description Reserved memory in MiB. */
+            memory_mib?: number;
+            /** @description Reserved disk in MiB. */
+            disk_mib?: number;
+        };
+        /**
+         * @description `expired` once `ends_at` has passed. Usage by member VMs after that bills at normal rates.
+         * @enum {string}
+         */
+        PoolStatus: "active" | "expired";
+        PoolQuoteRequest: {
+            provider: components["schemas"]["Provider"];
+            /** @description Customer-facing service region, for example `us-west`. */
+            region: string;
+            resources: components["schemas"]["PoolResources"];
+            /** @description Term length in seconds. The minimum is 30 days (2592000). */
+            duration_seconds: number;
+            /** @description Optional name, unique within the organization and case-insensitive. VMs can join the pool by this name. */
+            name?: string | null;
+        };
+        CreatePoolRequest: {
+            provider: components["schemas"]["Provider"];
+            /** @description Customer-facing service region, for example `us-west`. */
+            region: string;
+            resources: components["schemas"]["PoolResources"];
+            /** @description Term length in seconds. The minimum is 30 days (2592000). */
+            duration_seconds: number;
+            /** @description Optional name, unique within the organization and case-insensitive. VMs can join the pool by this name. */
+            name?: string | null;
+            /** @description The price you agree to pay, from a quote for the same request. The purchase fails with a pool_quote conflict if the current price differs. */
+            amount_cents: number;
+        };
+        UpdatePoolRequest: {
+            /** @description New pool name, or null to remove it. */
+            name: string | null;
+        };
+        PoolQuote: {
+            /** @description Normalized pool name, if one was given. */
+            name: string | null;
+            /** @description Price catalog used for this quote. */
+            catalog_version: string;
+            /** @description Price of the same resources and term at on-demand rates, in cents. */
+            baseline_cents: number;
+            /** @description Discount applied to the baseline, as a percentage. */
+            discount_percent: number;
+            provider: components["schemas"]["Provider"];
+            /** @description Customer-facing service region. */
+            region: string;
+            resources: components["schemas"]["PoolResources"];
+            /** @description Term length in seconds. */
+            duration_seconds: number;
+            /**
+             * @description Price currency.
+             * @enum {string}
+             */
+            currency: "usd";
+            /** @description Price to pay, in cents. Send this as `amount_cents` to buy. */
+            amount_cents: number;
+        };
+        Pool: {
+            /**
+             * Format: uuid
+             * @description Pool identifier. Pass it as `pool_id` when forking or updating a VM.
+             */
+            pool_id: string;
+            /** @description Pool name, if set. */
+            name: string | null;
+            provider: components["schemas"]["Provider"];
+            /** @description Customer-facing service region. Only VMs in this provider and region can join. */
+            region: string;
+            resources: components["schemas"]["PoolResources"];
+            /** @description Term length in seconds. */
+            duration_seconds: number;
+            status: components["schemas"]["PoolStatus"];
+            /**
+             * Format: date-time
+             * @description When the pool was bought.
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Start of the term.
+             */
+            starts_at: string;
+            /**
+             * Format: date-time
+             * @description End of the term.
+             */
+            ends_at: string;
+            /**
+             * @description Price currency.
+             * @enum {string}
+             */
+            currency: "usd";
+            /** @description Price paid, in cents. */
+            amount_cents: number;
+            /** @description Invoice that bills this pool, once one exists. */
+            invoice_id: string | null;
+        };
+        ListPoolsResponse: {
+            /** @description Pools owned by the organization, newest first. */
+            pools: components["schemas"]["Pool"][];
+            /** @description Whether the organization can buy new pools. */
+            purchases_enabled: boolean;
+            /** @description Cursor for the next page, or null when no further page is available. */
+            next_cursor: string | null;
+        };
+        PoolUsage: {
+            /**
+             * Format: uuid
+             * @description Pool identifier.
+             */
+            pool_id: string;
+            /** @description Resources currently allocated to member VMs. */
+            resources_allocated: components["schemas"]["PoolResources"];
+            /**
+             * Format: date-time
+             * @description When the allocation was last measured, or null if no measurement exists yet.
+             */
+            allocation_observed_at: string | null;
+        };
+        ActionRequiredOrForbiddenErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["ActionRequired"] | components["schemas"]["Forbidden"];
+        };
+        ConflictOrIdempotencyConflictOrInvalidStateErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["Conflict"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["InvalidState"];
+        };
     };
     responses: {
         Conflict: {
@@ -2908,6 +3135,26 @@ export interface components {
                 "application/json": components["schemas"]["HealthUnavailableResponse"];
             };
         };
+        /** @description HTTP 403: action_required, forbidden. The code selects the required details. */
+        ActionRequiredOrForbiddenError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ActionRequiredOrForbiddenErrorResponse"];
+            };
+        };
+        /** @description HTTP 409: conflict, idempotency_conflict, invalid_state. The code selects the required details. */
+        ConflictOrIdempotencyConflictOrInvalidStateError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ConflictOrIdempotencyConflictOrInvalidStateErrorResponse"];
+            };
+        };
     };
     parameters: {
         /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result — the same run, or the same VM for a fork — instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
@@ -2926,6 +3173,10 @@ export interface components {
         Cursor: string | null;
         /** @description Maximum items per page. Service caps may apply. */
         Limit: number;
+        /** @description Pool identifier returned as `pool_id`. */
+        PoolId: string;
+        /** @description Required. Makes the purchase safely retryable. Reusing a key with the same request returns the original pool instead of buying another; reusing it with a different request returns idempotency_conflict. */
+        RequiredIdempotencyKey: string;
     };
     requestBodies: never;
     headers: {
@@ -4053,6 +4304,200 @@ export interface operations {
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
             504: components["responses"]["GatewayTimeoutError"];
+        };
+    };
+    listPools: {
+        parameters: {
+            query?: {
+                /** @description Opaque pagination cursor returned by the previous page's `next_cursor`. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Maximum pools per page. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of pools. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListPoolsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    createPool: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required. Makes the purchase safely retryable. Reusing a key with the same request returns the original pool instead of buying another; reusing it with a different request returns idempotency_conflict. */
+                "Idempotency-Key": components["parameters"]["RequiredIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePoolRequest"];
+            };
+        };
+        responses: {
+            /** @description The purchased pool, or the original pool when the idempotency key is replayed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pool"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ActionRequiredOrForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["ConflictOrIdempotencyConflictOrInvalidStateError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["CapacityUnavailableOrUnavailableError"];
+        };
+    };
+    quotePool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PoolQuoteRequest"];
+            };
+        };
+        responses: {
+            /** @description The current price for the requested pool. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoolQuote"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    getPool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pool details. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pool"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    updatePool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePoolRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated pool. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pool"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["ConflictError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    getPoolUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current pool allocation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoolUsage"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
         };
     };
 }

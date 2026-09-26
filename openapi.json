@@ -48,6 +48,10 @@
     {
       "name": "Filesystems",
       "description": "Create shared filesystems and mount them into VMs."
+    },
+    {
+      "name": "Pools",
+      "description": "Buy and manage prepaid regional resource pools."
     }
   ],
   "paths": {
@@ -2123,6 +2127,330 @@
           }
         }
       }
+    },
+    "/v1/pools": {
+      "get": {
+        "operationId": "listPools",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "List pools",
+        "description": "List the organization's pools, newest first. Any API key in the organization can read pools. Returns 404 when pools are not enabled for the organization.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum pools per page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of pools.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPoolsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createPool",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Buy a pool",
+        "description": "Buy prepaid capacity in one provider and region for a fixed term. The pool is billed on the organization's next invoice. `amount_cents` must match the current price for the same request; get it from the quote operation. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequiredIdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePoolRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The purchased pool, or the original pool when the idempotency key is replayed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pool"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ActionRequiredOrForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ConflictOrIdempotencyConflictOrInvalidStateError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/CapacityUnavailableOrUnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/pools/quote": {
+      "post": {
+        "operationId": "quotePool",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Quote a pool",
+        "description": "Price a pool without buying it. Any API key in the organization can request a quote. Returns 404 when pools are not enabled for the organization.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PoolQuoteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The current price for the requested pool.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoolQuote"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/InvalidStateError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/pools/{pool_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/PoolId"
+        }
+      ],
+      "get": {
+        "operationId": "getPool",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Get a pool",
+        "description": "Return one pool owned by the organization. Returns 404 when pools are not enabled for the organization.",
+        "responses": {
+          "200": {
+            "description": "Pool details.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pool"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updatePool",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Rename a pool",
+        "description": "Set or remove a pool's name. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePoolRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated pool.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pool"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ConflictError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/pools/{pool_id}/usage": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/PoolId"
+        }
+      ],
+      "get": {
+        "operationId": "getPoolUsage",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Get pool usage",
+        "description": "Return the resources currently allocated to VMs in the pool. Returns 404 when pools are not enabled for the organization.",
+        "responses": {
+          "200": {
+            "description": "Current pool allocation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoolUsage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2218,6 +2546,28 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 1000
+        }
+      },
+      "PoolId": {
+        "name": "pool_id",
+        "in": "path",
+        "required": true,
+        "description": "Pool identifier returned as `pool_id`.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "RequiredIdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "description": "Required. Makes the purchase safely retryable. Reusing a key with the same request returns the original pool instead of buying another; reusing it with a different request returns idempotency_conflict.",
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[ -~]+$"
         }
       }
     },
@@ -3513,6 +3863,57 @@
                     }
                   }
                 }
+              }
+            }
+          }
+        }
+      },
+      "ActionRequiredOrForbiddenError": {
+        "description": "HTTP 403: action_required, forbidden. The code selects the required details.",
+        "x-http-status": 403,
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ActionRequiredOrForbiddenErrorResponse"
+            },
+            "examples": {
+              "action_required": {
+                "$ref": "#/components/responses/ActionRequiredError/content/application~1json/examples/action_required"
+              },
+              "forbidden": {
+                "$ref": "#/components/responses/ForbiddenError/content/application~1json/examples/forbidden"
+              }
+            }
+          }
+        }
+      },
+      "ConflictOrIdempotencyConflictOrInvalidStateError": {
+        "description": "HTTP 409: conflict, idempotency_conflict, invalid_state. The code selects the required details.",
+        "x-http-status": 409,
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ConflictOrIdempotencyConflictOrInvalidStateErrorResponse"
+            },
+            "examples": {
+              "conflict": {
+                "$ref": "#/components/responses/ConflictError/content/application~1json/examples/conflict"
+              },
+              "idempotency_conflict": {
+                "$ref": "#/components/responses/IdempotencyConflictError/content/application~1json/examples/idempotency_conflict"
+              },
+              "invalid_state": {
+                "$ref": "#/components/responses/InvalidStateError/content/application~1json/examples/invalid_state"
               }
             }
           }
@@ -6830,7 +7231,13 @@
           "listFilesystems",
           "createFilesystem",
           "getFilesystem",
-          "deleteFilesystem"
+          "deleteFilesystem",
+          "listPools",
+          "createPool",
+          "quotePool",
+          "getPool",
+          "updatePool",
+          "getPoolUsage"
         ],
         "description": "Exact operationId values declared by this API. Refresh this enum when operations are added or removed."
       },
@@ -9823,6 +10230,398 @@
               "mapping": {
                 "capacity_unavailable": "#/components/schemas/CapacityUnavailable",
                 "unavailable": "#/components/schemas/Unavailable"
+              }
+            },
+            "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
+      },
+      "PoolResources": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "description": "Reserved capacity. At least one quantity must be positive.",
+        "properties": {
+          "vcpu": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Reserved vCPUs."
+          },
+          "memory_mib": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Reserved memory in MiB."
+          },
+          "disk_mib": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Reserved disk in MiB."
+          }
+        }
+      },
+      "PoolStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "expired"
+        ],
+        "description": "`expired` once `ends_at` has passed. Usage by member VMs after that bills at normal rates."
+      },
+      "PoolQuoteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "region",
+          "resources",
+          "duration_seconds"
+        ],
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/Provider"
+          },
+          "region": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+            "description": "Customer-facing service region, for example `us-west`."
+          },
+          "resources": {
+            "$ref": "#/components/schemas/PoolResources"
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "minimum": 2592000,
+            "maximum": 3153600000,
+            "description": "Term length in seconds. The minimum is 30 days (2592000)."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64,
+            "description": "Optional name, unique within the organization and case-insensitive. VMs can join the pool by this name."
+          }
+        }
+      },
+      "CreatePoolRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "region",
+          "resources",
+          "duration_seconds",
+          "amount_cents"
+        ],
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/Provider"
+          },
+          "region": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+            "description": "Customer-facing service region, for example `us-west`."
+          },
+          "resources": {
+            "$ref": "#/components/schemas/PoolResources"
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "minimum": 2592000,
+            "maximum": 3153600000,
+            "description": "Term length in seconds. The minimum is 30 days (2592000)."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64,
+            "description": "Optional name, unique within the organization and case-insensitive. VMs can join the pool by this name."
+          },
+          "amount_cents": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The price you agree to pay, from a quote for the same request. The purchase fails with a pool_quote conflict if the current price differs."
+          }
+        }
+      },
+      "UpdatePoolRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64,
+            "description": "New pool name, or null to remove it."
+          }
+        }
+      },
+      "PoolQuote": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "catalog_version",
+          "baseline_cents",
+          "discount_percent",
+          "provider",
+          "region",
+          "resources",
+          "duration_seconds",
+          "currency",
+          "amount_cents"
+        ],
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Normalized pool name, if one was given."
+          },
+          "catalog_version": {
+            "type": "string",
+            "description": "Price catalog used for this quote."
+          },
+          "baseline_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Price of the same resources and term at on-demand rates, in cents."
+          },
+          "discount_percent": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Discount applied to the baseline, as a percentage."
+          },
+          "provider": {
+            "$ref": "#/components/schemas/Provider"
+          },
+          "region": {
+            "type": "string",
+            "description": "Customer-facing service region."
+          },
+          "resources": {
+            "$ref": "#/components/schemas/PoolResources"
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "description": "Term length in seconds."
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "usd"
+            ],
+            "description": "Price currency."
+          },
+          "amount_cents": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Price to pay, in cents. Send this as `amount_cents` to buy."
+          }
+        }
+      },
+      "Pool": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pool_id",
+          "name",
+          "provider",
+          "region",
+          "resources",
+          "duration_seconds",
+          "status",
+          "created_at",
+          "starts_at",
+          "ends_at",
+          "currency",
+          "amount_cents",
+          "invoice_id"
+        ],
+        "properties": {
+          "pool_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pool identifier. Pass it as `pool_id` when forking or updating a VM."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pool name, if set."
+          },
+          "provider": {
+            "$ref": "#/components/schemas/Provider"
+          },
+          "region": {
+            "type": "string",
+            "description": "Customer-facing service region. Only VMs in this provider and region can join."
+          },
+          "resources": {
+            "$ref": "#/components/schemas/PoolResources"
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "description": "Term length in seconds."
+          },
+          "status": {
+            "$ref": "#/components/schemas/PoolStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the pool was bought."
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Start of the term."
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "End of the term."
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "usd"
+            ],
+            "description": "Price currency."
+          },
+          "amount_cents": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Price paid, in cents."
+          },
+          "invoice_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Invoice that bills this pool, once one exists."
+          }
+        }
+      },
+      "ListPoolsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pools",
+          "purchases_enabled",
+          "next_cursor"
+        ],
+        "properties": {
+          "pools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Pool"
+            },
+            "description": "Pools owned by the organization, newest first."
+          },
+          "purchases_enabled": {
+            "type": "boolean",
+            "description": "Whether the organization can buy new pools."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor for the next page, or null when no further page is available."
+          }
+        }
+      },
+      "PoolUsage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pool_id",
+          "resources_allocated",
+          "allocation_observed_at"
+        ],
+        "properties": {
+          "pool_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pool identifier."
+          },
+          "resources_allocated": {
+            "$ref": "#/components/schemas/PoolResources",
+            "description": "Resources currently allocated to member VMs."
+          },
+          "allocation_observed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the allocation was last measured, or null if no measurement exists yet."
+          }
+        }
+      },
+      "ActionRequiredOrForbiddenErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ActionRequired"
+              },
+              {
+                "$ref": "#/components/schemas/Forbidden"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "action_required": "#/components/schemas/ActionRequired",
+                "forbidden": "#/components/schemas/Forbidden"
+              }
+            },
+            "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
+      },
+      "ConflictOrIdempotencyConflictOrInvalidStateErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Conflict"
+              },
+              {
+                "$ref": "#/components/schemas/IdempotencyConflict"
+              },
+              {
+                "$ref": "#/components/schemas/InvalidState"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "conflict": "#/components/schemas/Conflict",
+                "idempotency_conflict": "#/components/schemas/IdempotencyConflict",
+                "invalid_state": "#/components/schemas/InvalidState"
               }
             },
             "description": "The error category and its details, request metadata, and recovery context."

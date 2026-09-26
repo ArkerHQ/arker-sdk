@@ -530,6 +530,12 @@ OpenApiOperationId: TypeAlias = Literal[
     'createFilesystem',
     'getFilesystem',
     'deleteFilesystem',
+    'listPools',
+    'createPool',
+    'quotePool',
+    'getPool',
+    'updatePool',
+    'getPoolUsage',
 ]
 
 
@@ -1352,6 +1358,95 @@ class CapacityUnavailableOrUnavailableErrorResponse:
 
 
 @dataclass(frozen=True)
+class PoolResources:
+    vcpu: int | None = None
+    memory_mib: int | None = None
+    disk_mib: int | None = None
+
+
+PoolStatus: TypeAlias = Literal['active', 'expired']
+
+
+@dataclass(frozen=True)
+class PoolQuoteRequest:
+    provider: Provider
+    region: str
+    resources: PoolResources
+    duration_seconds: int
+    name: str | None = None
+
+
+@dataclass(frozen=True)
+class CreatePoolRequest:
+    provider: Provider
+    region: str
+    resources: PoolResources
+    duration_seconds: int
+    amount_cents: int
+    name: str | None = None
+
+
+@dataclass(frozen=True)
+class UpdatePoolRequest:
+    name: str | None
+
+
+@dataclass(frozen=True)
+class PoolQuote:
+    name: str | None
+    catalog_version: str
+    baseline_cents: int
+    discount_percent: float
+    provider: Provider
+    region: str
+    resources: PoolResources
+    duration_seconds: int
+    currency: Literal['usd']
+    amount_cents: int
+
+
+@dataclass(frozen=True)
+class Pool:
+    pool_id: str
+    name: str | None
+    provider: Provider
+    region: str
+    resources: PoolResources
+    duration_seconds: int
+    status: PoolStatus
+    created_at: str
+    starts_at: str
+    ends_at: str
+    currency: Literal['usd']
+    amount_cents: int
+    invoice_id: str | None
+
+
+@dataclass(frozen=True)
+class ListPoolsResponse:
+    pools: list[Pool]
+    purchases_enabled: bool
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class PoolUsage:
+    pool_id: str
+    resources_allocated: PoolResources
+    allocation_observed_at: str | None
+
+
+@dataclass(frozen=True)
+class ActionRequiredOrForbiddenErrorResponse:
+    error: ActionRequired | Forbidden
+
+
+@dataclass(frozen=True)
+class ConflictOrIdempotencyConflictOrInvalidStateErrorResponse:
+    error: Conflict | IdempotencyConflict | InvalidState
+
+
+@dataclass(frozen=True)
 class ListVmsParameters:
     cursor: str | None = None
     limit: int | None = None
@@ -1531,6 +1626,27 @@ class GetFilesystemParameters:
 @dataclass(frozen=True)
 class DeleteFilesystemParameters:
     filesystem_id: str
+
+
+@dataclass(frozen=True)
+class ListPoolsParameters:
+    cursor: str | None = None
+    limit: int | None = None
+
+
+@dataclass(frozen=True)
+class GetPoolParameters:
+    pool_id: str
+
+
+@dataclass(frozen=True)
+class UpdatePoolParameters:
+    pool_id: str
+
+
+@dataclass(frozen=True)
+class GetPoolUsageParameters:
+    pool_id: str
 
 
 ErrorBody: TypeAlias = (

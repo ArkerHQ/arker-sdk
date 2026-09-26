@@ -43,6 +43,7 @@ from .generated.api_models import (
     BackgroundRunResponse,
     CancelRunResponse,
     CompletedRunResponse,
+    CreatePoolRequest,
     CreateSessionRequest,
     DeleteFilesystemResponse,
     DeleteMountResponse,
@@ -57,6 +58,8 @@ from .generated.api_models import (
     ListMountsResponse,
     ListOrgRunsParameters,
     ListOrgRunsResponse,
+    ListPoolsParameters,
+    ListPoolsResponse,
     ListRegionsResponse,
     ListRunsParameters,
     ListRunsResponse,
@@ -69,6 +72,11 @@ from .generated.api_models import (
     PatchSessionResponse,
     PatchVmRequest,
     PolicyDoc,
+    Pool,
+    PoolQuote,
+    PoolQuoteRequest,
+    PoolResources,
+    PoolUsage,
     PtyTicketResponse,
     ResourcesInput,
     Run,
@@ -588,6 +596,107 @@ class Arker:
             base_url=self.base_url,
         )
         return _decode_model(DeleteFilesystemResponse, payload)
+
+    # ── Pools (org-scoped, control-plane) ───────────────────────────────
+    # Available to organizations with pools enabled; others get `not_found`.
+    def list_pools(self, *, cursor: str | None = None, limit: int | None = None) -> ListPoolsResponse:
+        """List the organization's pools, newest first."""
+        path = _build_query("/v1/pools", ListPoolsParameters(cursor=cursor, limit=limit))
+        return _decode_model(ListPoolsResponse, self._request("GET", path, base_url=self._control_base_url))
+
+    def get_pool(self, pool_id: str) -> Pool:
+        payload = self._request("GET", f"/v1/pools/{_segment(pool_id)}", base_url=self._control_base_url)
+        return _decode_model(Pool, payload)
+
+    def get_pool_usage(self, pool_id: str) -> PoolUsage:
+        """Resources currently allocated to VMs in the pool."""
+        payload = self._request("GET", f"/v1/pools/{_segment(pool_id)}/usage", base_url=self._control_base_url)
+        return _decode_model(PoolUsage, payload)
+
+    def rename_pool(self, pool_id: str, name: str | None) -> Pool:
+        """Set a pool's name, or pass ``None`` to remove it. Requires an admin key."""
+        payload = self._request(
+            "PATCH",
+            f"/v1/pools/{_segment(pool_id)}",
+            {"name": name},
+            base_url=self._control_base_url,
+            preserve_nulls=True,
+        )
+        return _decode_model(Pool, payload)
+
+    def create_pool(
+        self,
+        *,
+        resources: PoolResources | dict[str, int],
+        duration_seconds: int,
+        name: str | None = None,
+        provider: str | None = None,
+        region: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Pool:
+        """Buy a pool at the current price, billed on the next invoice. Requires an admin key.
+
+        Prices the pool, then buys it at exactly that price: if the price
+        changes in between, this raises a ``conflict`` rather than paying a
+        different amount. ``provider`` and ``region`` default to the client's
+        placement. Without ``idempotency_key`` a key is generated per call, so
+        this SDK's own retries can never buy twice.
+        """
+        request = self._pool_request(resources, duration_seconds, name, provider, region)
+        quote = self._quote_pool(request)
+        return self._buy_pool(request, quote.amount_cents, idempotency_key or f"sdk-pool-{_ulid()}")
+
+    def _pool_request(
+        self,
+        resources: PoolResources | dict[str, int],
+        duration_seconds: int,
+        name: str | None,
+        provider: str | None,
+        region: str | None,
+    ) -> PoolQuoteRequest:
+        provider = provider or self._provider
+        region = region or self._region
+        if not provider or not region:
+            raise ValueError(
+                "provider and region are required for a pool; pass them or configure the client's placement"
+            )
+        return PoolQuoteRequest(
+            provider=provider,
+            region=region,
+            resources=resources if isinstance(resources, PoolResources) else PoolResources(**resources),
+            duration_seconds=duration_seconds,
+            name=name,
+        )
+
+    def _quote_pool(self, request: PoolQuoteRequest) -> PoolQuote:
+        """Price a pool without buying it."""
+        payload = self._request("POST", "/v1/pools/quote", request, base_url=self._control_base_url)
+        return _decode_model(PoolQuote, payload)
+
+    def _buy_pool(self, request: PoolQuoteRequest, amount_cents: int, idempotency_key: str) -> Pool:
+        """Buy at a quoted price.
+
+        The key is bound once, so every retry replays the same purchase rather
+        than buying another -- which is what makes it safe to retry a purchase
+        whose response was lost.
+        """
+        body = CreatePoolRequest(
+            provider=request.provider,
+            region=request.region,
+            resources=request.resources,
+            duration_seconds=request.duration_seconds,
+            amount_cents=amount_cents,
+            name=request.name,
+        )
+        payload = self._request(
+            "POST",
+            "/v1/pools",
+            body,
+            base_url=self._control_base_url,
+            extra_headers={"Idempotency-Key": idempotency_key},
+            retry_network_failures=True,
+        )
+        return _decode_model(Pool, payload)
 
     def _request(
         self,
