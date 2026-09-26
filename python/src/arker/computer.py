@@ -250,9 +250,6 @@ class CompletedRunResult:
     # System failure explanation when state is "failed"; distinct from
     # stderr (the program's own error output). None otherwise.
     fail_reason: str | None = None
-    memory_requested_mib: int | None = None
-    memory_achieved_mib: int | None = None
-    memory_partial: bool = False
     type: str = "completed"
 
 
@@ -684,9 +681,6 @@ class VM:
         time_to_background: int | None = None,
         queueing_timeout: int | None = None,
         end_symbol: str | None = None,
-        vcpu_count: int | None = None,
-        memory_mib: int | None = None,
-        disk_mib: int | None = None,
         policies: PolicyDoc | dict[str, Any] | None = None,
         signal: str | None = None,
         idempotency_key: str | None = None,
@@ -756,6 +750,9 @@ class VM:
 
         ``idempotency_key`` asks the server to deduplicate the command. It does
         not make an ambiguous network failure safe to retry automatically.
+
+        A run does not change the VM's resources; set vCPU, memory and disk
+        with :meth:`update` (or when forking).
         """
         body = RunRequest(
             command=command,
@@ -765,9 +762,6 @@ class VM:
             time_to_background=time_to_background,
             queueing_timeout=queueing_timeout,
             end_symbol=end_symbol,
-            vcpu_count=vcpu_count,
-            memory_mib=memory_mib,
-            disk_mib=disk_mib,
             signal=signal,
             policies=policies,
         )
@@ -2073,9 +2067,6 @@ def _run_response(payload: dict[str, Any]) -> RunResult:
             run_id=response.run_id,
             state=_terminal_state(response.state, response.exit_code),
             fail_reason=_optional_str(payload.get("fail_reason")),
-            memory_requested_mib=response.memory_requested_mib,
-            memory_achieved_mib=response.memory_achieved_mib,
-            memory_partial=bool(response.memory_partial),
         )
 
     if isinstance(response, BackgroundRunResponse):

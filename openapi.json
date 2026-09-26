@@ -4882,31 +4882,6 @@
             ],
             "default": "auto"
           },
-          "vcpu_count": {
-            "description": "Virtual CPU allocation for this run.",
-            "type": [
-              "integer",
-              "null"
-            ],
-            "minimum": 0,
-            "maximum": 255
-          },
-          "memory_mib": {
-            "description": "Memory allocation in mebibytes.",
-            "type": [
-              "integer",
-              "null"
-            ],
-            "minimum": 0
-          },
-          "disk_mib": {
-            "description": "Disk allocation in mebibytes.",
-            "type": [
-              "integer",
-              "null"
-            ],
-            "minimum": 0
-          },
           "signal": {
             "type": [
               "string",
@@ -5010,24 +4985,6 @@
               "string",
               "null"
             ]
-          },
-          "memory_requested_mib": {
-            "description": "Requested total memory in MiB when this run included a memory override. Absent when no override was requested.",
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "memory_achieved_mib": {
-            "description": "Achieved total memory in MiB after applying the run's memory override. A memory reduction is best-effort, so this value can exceed `memory_requested_mib` when guest pages cannot be released. Absent when no override was requested.",
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "memory_partial": {
-            "description": "True when a requested memory reduction was only partially applied. The command runs with the achieved allocation, and `memory_achieved_mib` reports that allocation. Defaults to false.",
-            "type": "boolean"
           }
         }
       },

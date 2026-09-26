@@ -459,9 +459,6 @@ async function testCompletedRunDecodesOutput(): Promise<void> {
       stderr: "",
       stderr_encoding: "utf-8",
       exit_code: 0,
-      memory_requested_mib: 1024,
-      memory_achieved_mib: 1536,
-      memory_partial: true,
     },
   );
 
@@ -470,9 +467,6 @@ async function testCompletedRunDecodesOutput(): Promise<void> {
   assert.equal(result.type, "completed");
   const completed = result as CompletedRunResult;
   assert.equal(completed.exitCode, 0);
-  assert.equal(completed.memoryRequestedMib, 1024);
-  assert.equal(completed.memoryAchievedMib, 1536);
-  assert.equal(completed.memoryPartial, true);
   assert.equal(completed.stdout, "hello\n");
   assert.deepEqual(completed.stdoutBytes, new TextEncoder().encode("hello\n"));
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { command: "printf hello" });

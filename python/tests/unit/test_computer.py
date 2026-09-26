@@ -748,9 +748,6 @@ def test_run_sends_command_without_default_session_id() -> None:
             "stderr": "",
             "stderr_encoding": "utf-8",
             "exit_code": 0,
-            "memory_requested_mib": 1024,
-            "memory_achieved_mib": 1536,
-            "memory_partial": True,
         },
     )
 
@@ -763,10 +760,16 @@ def test_run_sends_command_without_default_session_id() -> None:
     assert result.stderr == ""
     assert result.stderr_bytes == b""
     assert result.exit_code == 0
-    assert result.memory_requested_mib == 1024
-    assert result.memory_achieved_mib == 1536
-    assert result.memory_partial is True
     assert json.loads(t.calls[0]["body"]) == {"command": "printf hi"}
+
+
+@pytest.mark.parametrize("resource", ["vcpu_count", "memory_mib", "disk_mib"])
+def test_run_does_not_accept_resources(resource: str) -> None:
+    # Resources are set by fork and update(), never per run.
+    t = FakeTransport()
+    with use_transport(t), pytest.raises(TypeError):
+        client().vm("vm_1").run("true", **{resource: 1})
+    assert t.calls == []
 
 
 def test_sync_run_polls_backgrounded_run_to_completion(monkeypatch) -> None:
