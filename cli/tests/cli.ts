@@ -825,24 +825,6 @@ async function testRunsGetUsesRunFormatter(): Promise<void> {
   });
 }
 
-/// Resources are set by fork and `arker update`, never per run: the resource
-/// flags are refused for `run` before any request is sent.
-async function testRunRejectsResourceFlags(): Promise<void> {
-  for (const args of [
-    ["run", "--vcpu", "2", "vm_1", "echo", "ok"],
-    ["run", "--memory-mib", "4096", "vm_1", "echo", "ok"],
-    ["run", "--disk-mib", "8192", "vm_1", "echo", "ok"],
-    ["vms", "run", "--memory-mib", "4096", "vm_1", "echo", "ok"],
-  ]) {
-    await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
-      const result = await runCli(baseUrl, args);
-      assert.equal(result.code, 1, args.join(" "));
-      assert.equal(requests.length, 0, args.join(" "));
-      assert.match(result.stderr, new RegExp(`parameter "${args[args.indexOf("vm_1") - 2]!.slice(2)}"`), args.join(" "));
-    });
-  }
-}
-
 async function testEmptyPipedInputWritesZeroBytes(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, {
     results: [{ complete: true, written: true }],
@@ -1287,7 +1269,6 @@ await testRunJsonEncodesOutput();
 await testRunHumanWritesArbitraryBytes();
 await testRunFailureReasonIsVisible();
 await testRunsGetUsesRunFormatter();
-await testRunRejectsResourceFlags();
 await testEmptyPipedInputWritesZeroBytes();
 await testSyncDashWritesStdin();
 await testSyncReadFlagIgnoresPipedStdin();

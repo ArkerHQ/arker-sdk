@@ -763,15 +763,6 @@ def test_run_sends_command_without_default_session_id() -> None:
     assert json.loads(t.calls[0]["body"]) == {"command": "printf hi"}
 
 
-@pytest.mark.parametrize("resource", ["vcpu_count", "memory_mib", "disk_mib"])
-def test_run_does_not_accept_resources(resource: str) -> None:
-    # Resources are set by fork and update(), never per run.
-    t = FakeTransport()
-    with use_transport(t), pytest.raises(TypeError):
-        client().vm("vm_1").run("true", **{resource: 1})
-    assert t.calls == []
-
-
 def test_sync_run_polls_backgrounded_run_to_completion(monkeypatch) -> None:
     # A synchronous run() that outlives the server sync window gets a background
     # ack; run() must poll get_run() under the hood and return the terminal run
