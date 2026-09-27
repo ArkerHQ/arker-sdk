@@ -751,8 +751,6 @@ class VM:
         ``idempotency_key`` asks the server to deduplicate the command. It does
         not make an ambiguous network failure safe to retry automatically.
 
-        A run does not change the VM's resources; set vCPU, memory and disk
-        with :meth:`update` (or when forking).
         """
         body = RunRequest(
             command=command,
