@@ -4978,13 +4978,6 @@
               "integer",
               "null"
             ]
-          },
-          "dispatch": {
-            "description": "Execution mode selected by the service, when reported.",
-            "type": [
-              "string",
-              "null"
-            ]
           }
         }
       },

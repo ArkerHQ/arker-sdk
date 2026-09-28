@@ -930,8 +930,6 @@ export interface components {
             stderr_encoding: "utf-8" | "base64";
             /** @description The command's exit status. `null` means a prompt ended the run before a command completion marker was received, so no exit status is available. This is expected for `end_symbol` and REPL commands. If it is unexpected, `stdout` can show that an interpreter from an earlier run received the command. Exit the interpreter, pass `end_symbol: "none"`, or use another session. */
             exit_code: number | null;
-            /** @description Execution mode selected by the service, when reported. */
-            dispatch?: string | null;
         };
         BackgroundRunResponse: {
             /** @description Session used by this run. Use this identifier to inspect or stop work that continues after the initial response. Absent for resource and signal requests that execute no command. */

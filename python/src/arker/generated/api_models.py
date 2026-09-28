@@ -168,7 +168,6 @@ class CompletedRunResponse:
     session_id: str | None = None
     run_id: str | None = None
     state: str | None = None
-    dispatch: str | None = None
 
 
 @dataclass(frozen=True)
