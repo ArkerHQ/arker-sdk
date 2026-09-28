@@ -62,9 +62,9 @@ type CreatePoolRequest struct {
 	Resources       PoolResources `json:"resources"`
 	DurationSeconds int64         `json:"duration_seconds"`
 	Name            string        `json:"name,omitempty"`
-	// IdempotencyKey makes a purchase replayable across processes. Without
-	// one, CreatePool generates a key per call, so its own retries can never
-	// buy twice.
+	// IdempotencyKey makes a purchase replayable across calls and processes.
+	// Without one, each CreatePool call buys a new pool; only the SDK's own
+	// retries within that call are deduplicated.
 	IdempotencyKey string `json:"-"`
 }
 
@@ -112,6 +112,7 @@ func (c *Client) RenamePool(ctx context.Context, poolID string, name *string) (*
 //
 // It prices the pool, then buys at exactly that price: if the price changes in
 // between, it returns a `conflict` rather than paying a different amount.
+// Member VMs' usage beyond the pool's resources bills at normal rates.
 func (c *Client) CreatePool(ctx context.Context, req CreatePoolRequest) (*Pool, error) {
 	req.Provider = firstNonEmpty(req.Provider, c.provider)
 	req.Region = firstNonEmpty(req.Region, c.region)

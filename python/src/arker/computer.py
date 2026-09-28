@@ -638,9 +638,10 @@ class Arker:
 
         Prices the pool, then buys it at exactly that price: if the price
         changes in between, this raises a ``conflict`` rather than paying a
-        different amount. ``provider`` and ``region`` default to the client's
-        placement. Without ``idempotency_key`` a key is generated per call, so
-        this SDK's own retries can never buy twice.
+        different amount. Member VMs' usage beyond the pool's resources bills at
+        normal rates. ``provider`` and ``region`` default to the client's
+        placement. Without ``idempotency_key`` each call buys a new pool; only
+        this SDK's own retries within that call are deduplicated.
         """
         request = self._pool_request(resources, duration_seconds, name, provider, region)
         quote = self._quote_pool(request)

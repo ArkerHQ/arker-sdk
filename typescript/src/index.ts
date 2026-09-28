@@ -328,9 +328,9 @@ export type ListPoolsResponse = ApiSchema<"ListPoolsResponse">;
 /** What to buy. `provider` and `region` default to the client's placement. */
 export type CreatePoolOptions = Omit<PoolQuoteRequest, "provider" | "region"> &
   Partial<Pick<PoolQuoteRequest, "provider" | "region">> & {
-    /** Use this key verbatim, to make a purchase replayable across processes.
-     * Without one, `createPool()` generates a key per call, so its own
-     * retries can never buy twice. */
+    /** Use this key verbatim, to make a purchase replayable across calls and
+     * processes. Without one, each `createPool()` call buys a new pool; only
+     * the SDK's own retries within that call are deduplicated. */
     idempotencyKey?: string;
   };
 
@@ -886,6 +886,7 @@ export class Arker {
    *
    * Prices the pool, then buys it at exactly that price: if the price changes
    * in between, this throws a `conflict` rather than paying a different amount.
+   * Member VMs' usage beyond the pool's resources bills at normal rates.
    */
   async createPool(options: CreatePoolOptions): Promise<Pool> {
     const { idempotencyKey, ...terms } = options;
