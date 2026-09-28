@@ -722,9 +722,7 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
   const name = args.flags.name as string | undefined;
   const description = args.flags.description as string | undefined;
   const publicFlag = boolFlag(args, "public");
-  const poolName = args.flags.pool as string | undefined;
-  const poolId = args.flags["pool-id"] as string | undefined;
-  if (poolName !== undefined && poolId !== undefined) die("--pool and --pool-id are mutually exclusive");
+  const pool = poolFlags(args);
 
   if (args.positional.length > 1) die("fork accepts only one positional source VM name");
   if (refPositional && srcVmNameFlag) die("positional source cannot be combined with --source-vm-name");
@@ -823,8 +821,7 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
         : { dockerfile: dockerfile!, ...(context ? { context } : {}) };
   const forkOptions: ForkOptions = {
     ...source,
-    ...(poolName !== undefined ? { pool_name: poolName } : {}),
-    ...(poolId !== undefined ? { pool_id: poolId } : {}),
+    ...pool,
     name,
     description,
     public: publicFlag,
@@ -1361,9 +1358,7 @@ async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
   const vcpu = numFlag(args, "vcpu");
   const diskMib = numFlag(args, "disk-mib");
   const vgpu = numFlag(args, "vgpu");
-  const poolName = args.flags.pool as string | undefined;
-  const poolId = args.flags["pool-id"] as string | undefined;
-  if (poolName !== undefined && poolId !== undefined) die("--pool and --pool-id are mutually exclusive");
+  const pool = poolFlags(args);
   const description = args.flags.description as string | undefined;
   const sshPublicKeys = sshPublicKeysFromArgs(args);
   const policiesFile = args.flags["policies-file"] as string | undefined;
@@ -1372,16 +1367,14 @@ async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
     : readJsonObject(policiesFile, "policy document") as PolicyDoc;
   if (
     memoryMib === undefined && vcpu === undefined && diskMib === undefined && vgpu === undefined &&
-    description === undefined && !sshPublicKeys.provided && policies === undefined &&
-    poolName === undefined && poolId === undefined
+    description === undefined && !sshPublicKeys.provided && policies === undefined && pool === undefined
   ) {
     die("update: pass at least one description, resource, pool, SSH key, or policy flag");
   }
   const updated = await withSecretRedaction(
     policySecretValues(policies),
     () => client.vm(vm).update({
-      ...(poolName !== undefined ? { pool_name: poolName } : {}),
-      ...(poolId !== undefined ? { pool_id: poolId } : {}),
+      ...pool,
       ...(description !== undefined ? { description } : {}),
       ...(memoryMib !== undefined || vcpu !== undefined || diskMib !== undefined || vgpu !== undefined
         ? {
@@ -1533,6 +1526,14 @@ function numFlag(args: ParsedArgs, name: string): number | undefined {
 function boolFlag(args: ParsedArgs, name: string): boolean | undefined {
   const v = args.flags[name];
   return typeof v === "boolean" ? v : undefined;
+}
+
+function poolFlags(args: ParsedArgs): { pool_name: string } | { pool_id: string } | undefined {
+  const poolName = args.flags.pool as string | undefined;
+  const poolId = args.flags["pool-id"] as string | undefined;
+  if (poolName !== undefined && poolId !== undefined) die("--pool and --pool-id are mutually exclusive");
+  if (poolName !== undefined) return { pool_name: poolName };
+  return poolId !== undefined ? { pool_id: poolId } : undefined;
 }
 
 function commaListFlag(args: ParsedArgs, name: string): string[] | undefined {
