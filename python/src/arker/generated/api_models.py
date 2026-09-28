@@ -168,7 +168,6 @@ class CompletedRunResponse:
     session_id: str | None = None
     run_id: str | None = None
     state: str | None = None
-    dispatch: str | None = None
     memory_requested_mib: int | None = None
     memory_achieved_mib: int | None = None
     memory_partial: bool | None = None

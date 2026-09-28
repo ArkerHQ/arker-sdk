@@ -79,7 +79,6 @@ type RunResult struct {
 	// FailReason is the PLATFORM explaining a failed run. Stderr is the
 	// program's own error output; the two are not the same.
 	FailReason         string `json:"fail_reason,omitempty"`
-	Dispatch           string `json:"dispatch,omitempty"`
 	MemoryRequestedMiB *int   `json:"memory_requested_mib,omitempty"`
 	MemoryAchievedMiB  *int   `json:"memory_achieved_mib,omitempty"`
 	MemoryPartial      bool   `json:"memory_partial,omitempty"`
@@ -104,7 +103,6 @@ type runWire struct {
 	Stderr             string `json:"stderr"`
 	StderrEncoding     string `json:"stderr_encoding"`
 	RetryCount         int    `json:"retry_count"`
-	Dispatch           string `json:"dispatch"`
 	VMID               string `json:"vm_id"`
 	MemoryRequestedMiB *int   `json:"memory_requested_mib"`
 	MemoryAchievedMiB  *int   `json:"memory_achieved_mib"`
@@ -129,7 +127,7 @@ func decodeOutput(text, encoding string) []byte {
 func (w runWire) result(background bool) *RunResult {
 	out := &RunResult{
 		Type: "completed", RunID: w.RunID, SessionID: w.SessionID, State: w.State,
-		ExitCode: w.ExitCode, FailReason: w.FailReason, Dispatch: w.Dispatch,
+		ExitCode: w.ExitCode, FailReason: w.FailReason,
 		MemoryRequestedMiB: w.MemoryRequestedMiB, MemoryAchievedMiB: w.MemoryAchievedMiB,
 		MemoryPartial: w.MemoryPartial,
 	}

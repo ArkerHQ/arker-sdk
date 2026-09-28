@@ -5004,13 +5004,6 @@
               "null"
             ]
           },
-          "dispatch": {
-            "description": "Execution mode selected by the service, when reported.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "memory_requested_mib": {
             "description": "Requested total memory in MiB when this run included a memory override. Absent when no override was requested.",
             "type": [
