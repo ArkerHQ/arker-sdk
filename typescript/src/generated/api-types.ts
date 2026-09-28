@@ -936,8 +936,6 @@ export interface components {
             stderr_encoding: "utf-8" | "base64";
             /** @description The command's exit status. `null` means a prompt ended the run before a command completion marker was received, so no exit status is available. This is expected for `end_symbol` and REPL commands. If it is unexpected, `stdout` can show that an interpreter from an earlier run received the command. Exit the interpreter, pass `end_symbol: "none"`, or use another session. */
             exit_code: number | null;
-            /** @description Execution mode selected by the service, when reported. */
-            dispatch?: string | null;
             /** @description Requested total memory in MiB when this run included a memory override. Absent when no override was requested. */
             memory_requested_mib?: number | null;
             /** @description Achieved total memory in MiB after applying the run's memory override. A memory reduction is best-effort, so this value can exceed `memory_requested_mib` when guest pages cannot be released. Absent when no override was requested. */
