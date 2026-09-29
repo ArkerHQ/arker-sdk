@@ -31,6 +31,7 @@ import {
   Arker,
   ArkerError,
   discoverRegions,
+  resolvePlacementBaseUrl,
 } from "@arker-ai/sdk";
 import { bridgePty } from "./cli-pty.js";
 import type {
@@ -551,10 +552,10 @@ function readFileConfig(): CliConfig {
   return {};
 }
 
-function clientFromArgs(
+async function clientFromArgs(
   args: ParsedArgs,
   { requiresComputePlacement }: { requiresComputePlacement: boolean },
-): Arker {
+): Promise<Arker> {
   const file = readFileConfig();
   const explicitBaseUrl = process.env.ARKER_BASE_URL;
   const explicitRegion =
@@ -579,12 +580,30 @@ function clientFromArgs(
   if (!apiKey) {
     die("Missing API key. Set ARKER_API_KEY or add apiKey to ~/.arker/config.json.");
   }
-  const resolvedBaseUrl = baseUrl ?? (requiresComputePlacement ? undefined : controlBaseUrl ?? "https://arker.ai/api");
+  // Ask the catalog which endpoint serves this placement rather than letting
+  // the client derive <provider>-<region>.arker.ai. Most placements match that
+  // pattern; arker/eu-central does not — it is served from arker-eu.arker.ai,
+  // so the derived host fails DNS and `arker fork --provider arker --region
+  // eu-central` could not reach a region that was otherwise healthy.
+  // resolvePlacementBaseUrl falls back to the derived host when the catalog is
+  // unreachable, so this cannot make an offline run worse.
+  let placementBaseUrl: string | undefined;
+  if (requiresComputePlacement && !baseUrl && provider && configuredRegion) {
+    placementBaseUrl = await resolvePlacementBaseUrl(provider, configuredRegion, {
+      controlBaseUrl,
+    });
+  }
+  const resolvedBaseUrl =
+    baseUrl ??
+    placementBaseUrl ??
+    (requiresComputePlacement ? undefined : controlBaseUrl ?? "https://arker.ai/api");
   return new Arker({
     apiKey,
     baseUrl: resolvedBaseUrl,
-    region: requiresComputePlacement ? configuredRegion : undefined,
-    provider: requiresComputePlacement ? provider : undefined,
+    // The placement is already resolved to a base URL above; passing it again
+    // would make the client re-derive the hostname and undo that.
+    region: requiresComputePlacement && !placementBaseUrl ? configuredRegion : undefined,
+    provider: requiresComputePlacement && !placementBaseUrl ? provider : undefined,
     controlBaseUrl,
   });
 }
@@ -1996,7 +2015,7 @@ async function main(): Promise<void> {
 
   try {
     if (cmd === "regions") return await cmdRegions(args);
-    const client = clientFromArgs(args, {
+    const client = await clientFromArgs(args, {
       requiresComputePlacement: commandRequiresComputePlacement(cmd, args),
     });
     switch (cmd) {
