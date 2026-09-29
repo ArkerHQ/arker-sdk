@@ -168,9 +168,6 @@ class CompletedRunResponse:
     session_id: str | None = None
     run_id: str | None = None
     state: str | None = None
-    memory_requested_mib: int | None = None
-    memory_achieved_mib: int | None = None
-    memory_partial: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -1883,9 +1880,6 @@ class RunRequest:
     background: bool | None = None
     queueing_timeout: int | None = None
     end_symbol: str | None = 'auto'
-    vcpu_count: int | None = None
-    memory_mib: int | None = None
-    disk_mib: int | None = None
     signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
     policies: PolicyWriteRequest | None = None
 

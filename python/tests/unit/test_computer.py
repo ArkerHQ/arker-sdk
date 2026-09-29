@@ -748,9 +748,6 @@ def test_run_sends_command_without_default_session_id() -> None:
             "stderr": "",
             "stderr_encoding": "utf-8",
             "exit_code": 0,
-            "memory_requested_mib": 1024,
-            "memory_achieved_mib": 1536,
-            "memory_partial": True,
         },
     )
 
@@ -763,9 +760,6 @@ def test_run_sends_command_without_default_session_id() -> None:
     assert result.stderr == ""
     assert result.stderr_bytes == b""
     assert result.exit_code == 0
-    assert result.memory_requested_mib == 1024
-    assert result.memory_achieved_mib == 1536
-    assert result.memory_partial is True
     assert json.loads(t.calls[0]["body"]) == {"command": "printf hi"}
 
 

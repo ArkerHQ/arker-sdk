@@ -136,7 +136,6 @@ const FORK_OPTIONS: OptionSpecs = {
 
 const RUN_OPTIONS: OptionSpecs = {
   ...GLOBAL_OPTIONS,
-  ...RESOURCE_OPTIONS,
   "end-symbol": { type: "string" },
   "idempotency-key": { type: "string" },
   "policies-file": { type: "string" },
@@ -932,18 +931,11 @@ async function cmdRun(args: ParsedArgs, client: Arker): Promise<void> {
       session_id: args.flags["session-id"] as string | undefined,
       ...(sessionIdx !== undefined ? { session_idx: sessionIdx } : {}),
       end_symbol: args.flags["end-symbol"] as string | undefined,
-      vcpu_count: numFlag(args, "vcpu"),
-      memory_mib: numFlag(args, "memory-mib"),
-      disk_mib: numFlag(args, "disk-mib"),
       ...(policies !== undefined ? { policies } : {}),
       idempotencyKey: args.flags["idempotency-key"] as string | undefined,
     }),
   );
   printRunResult(result, Boolean(args.flags.json));
-}
-
-function formatMib(value: number | null | undefined): string {
-  return typeof value === "number" ? `${value} MiB` : "unknown";
 }
 
 interface PrintableRun {
@@ -956,9 +948,6 @@ interface PrintableRun {
   stderr: Uint8Array;
   exitCode: number;
   failReason?: string | null;
-  memoryRequestedMib?: number | null;
-  memoryAchievedMib?: number | null;
-  memoryPartial?: boolean;
 }
 
 function printRunResult(result: RunResult, json: boolean): void {
@@ -998,14 +987,8 @@ function printCompletedRun(result: PrintableRun, json: boolean): void {
       stderrEncoding: "base64",
       exitCode: result.exitCode,
       failReason: result.failReason,
-      memoryRequestedMib: result.memoryRequestedMib,
-      memoryAchievedMib: result.memoryAchievedMib,
-      memoryPartial: result.memoryPartial,
     });
   } else {
-    if (result.memoryPartial) {
-      err(`Memory target partially applied: requested ${formatMib(result.memoryRequestedMib)}, achieved ${formatMib(result.memoryAchievedMib)}.`);
-    }
     if (result.stdout.length) process.stdout.write(result.stdout);
     if (result.stderr.length) process.stderr.write(result.stderr);
     if (result.failReason) err(result.failReason);
@@ -1972,7 +1955,6 @@ function usage(command?: string, positional: string[] = []): void {
       "  --timeout <seconds>             exec/kill bound in seconds (omitted or 0 = unbounded)",
       "  --time-to-background <seconds>  sync window; 0 returns a run id immediately (default 120)",
       "  --queueing-timeout <seconds>    queue up to this long instead of failing fast (also a fork flag)",
-      "  --vcpu <n> --memory-mib <n> --disk-mib <n>",
       "  --end-symbol <text>        stop synchronous output after this marker",
       "  --policies-file <path>     replace VM policy before the command",
       "  --idempotency-key <key>    deduplicate retries of the run request",

@@ -427,12 +427,6 @@ export interface CompletedRunResult {
   /** System failure explanation when `state` is "failed". Distinct from
    * `stderr` (the program's own error output); null otherwise. */
   failReason?: string | null;
-  /** Requested total memory (MiB), present when the run carried a memory override. */
-  memoryRequestedMib?: number | null;
-  /** Achieved total memory (MiB) after the run's resize. */
-  memoryAchievedMib?: number | null;
-  /** True when the runtime could not reach the requested memory target exactly. */
-  memoryPartial?: boolean;
 }
 
 export interface BackgroundRunResult {
@@ -2053,9 +2047,6 @@ function parseRunResponse(payload: unknown): RunResult {
       exitCode,
       sessionId: typeof body.session_id === "string" ? body.session_id : null,
       failReason: typeof body.fail_reason === "string" ? body.fail_reason : null,
-      memoryRequestedMib: optionalNumberOrNull(body.memory_requested_mib),
-      memoryAchievedMib: optionalNumberOrNull(body.memory_achieved_mib),
-      memoryPartial: typeof body.memory_partial === "boolean" ? body.memory_partial : undefined,
     };
   }
   if (typeof body.run_id === "string") {
@@ -2294,11 +2285,6 @@ function stringValue(value: unknown, context: string): string {
 function numberField(value: unknown, context: string): number {
   if (typeof value !== "number") throw new ArkerError("internal", `${context} must be a number`, 200);
   return value;
-}
-
-function optionalNumberOrNull(value: unknown): number | null | undefined {
-  if (value === null || typeof value === "number") return value;
-  return undefined;
 }
 
 function assertWriteComplete(result: SyncWriteResult, context: string): void {
