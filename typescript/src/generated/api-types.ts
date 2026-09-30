@@ -813,6 +813,13 @@ export interface components {
             resources?: components["schemas"]["ResourcesInput"] | null;
             /** @description Optional credentials for `image`. Ignored when forking from a source VM, which has no registry to authenticate against. */
             registry_auth?: components["schemas"]["RegistryAuth"] | null;
+            /**
+             * Format: uuid
+             * @description Optionally join an active pool in the same organization and provider/region. Membership can be changed with VM PATCH and is never inherited from the source VM.
+             */
+            pool_id?: string;
+            /** @description Optionally join an active pool by its unique name in the caller organization. Names are normalized and case-insensitive. Mutually exclusive with pool_id. Membership uses the resolved pool ID, can be changed with VM PATCH, and is never inherited from the source VM. */
+            pool_name?: string;
         } & ({
             source_vm_id: string;
             source_vm_name?: null;
@@ -940,6 +947,11 @@ export interface components {
             platform?: string | null;
             /** @description Source-compatible platforms structurally offered in this region. This is not a live-capacity signal. */
             compatible_platforms?: components["schemas"]["CompatiblePlatform"][] | null;
+            /**
+             * Format: uuid
+             * @description Current pool membership. Expired pools bill subsequent usage at normal rates.
+             */
+            pool_id?: string | null;
         };
         ListVmsResponse: {
             /** @description VMs visible to the authenticated caller. */
@@ -992,12 +1004,6 @@ export interface components {
              * @default auto
              */
             end_symbol?: string | null;
-            /** @description Virtual CPU allocation for this run. */
-            vcpu_count?: number | null;
-            /** @description Memory allocation in mebibytes. */
-            memory_mib?: number | null;
-            /** @description Disk allocation in mebibytes. */
-            disk_mib?: number | null;
             /**
              * @description Deliver a signal to the selected persistent session's foreground process group. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. Use `session_id` or `session_idx` to select the session.
              * @enum {string|null}
@@ -1030,14 +1036,6 @@ export interface components {
             stderr_encoding: "utf-8" | "base64";
             /** @description The command's exit status. `null` means a prompt ended the run before a command completion marker was received, so no exit status is available. This is expected for `end_symbol` and REPL commands. If it is unexpected, `stdout` can show that an interpreter from an earlier run received the command. Exit the interpreter, pass `end_symbol: "none"`, or use another session. */
             exit_code: number | null;
-            /** @description Execution mode selected by the service, when reported. */
-            dispatch?: string | null;
-            /** @description Requested total memory in MiB when this run included a memory override. Absent when no override was requested. */
-            memory_requested_mib?: number | null;
-            /** @description Achieved total memory in MiB after applying the run's memory override. A memory reduction is best-effort, so this value can exceed `memory_requested_mib` when guest pages cannot be released. Absent when no override was requested. */
-            memory_achieved_mib?: number | null;
-            /** @description True when a requested memory reduction was only partially applied. The command runs with the achieved allocation, and `memory_achieved_mib` reports that allocation. Defaults to false. */
-            memory_partial?: boolean;
         };
         BackgroundRunResponse: {
             /** @description Session used by this run. Use this identifier to inspect or stop work that continues after the initial response. Absent for resource and signal requests that execute no command. */
@@ -1551,6 +1549,13 @@ export interface components {
             ssh_public_keys?: string[];
             /** @description Complete network policy replacement for the VM. A non-empty document replaces the persisted policy and applies it to the running VM. An empty document selects the default posture of allow-all outbound traffic and authenticated inbound traffic. Omit it to leave the current policy unchanged. If the policy cannot be stored and applied, the request fails. */
             policies?: components["schemas"]["PolicyWriteRequest"] | null;
+            /**
+             * Format: uuid
+             * @description Move the VM to an active pool in the same organization and provider/region. Mutually exclusive with pool_name. Omit both fields to keep its current pool.
+             */
+            pool_id?: string;
+            /** @description Move the VM to a pool by its unique, case-insensitive name in the caller organization. Only the resolved pool ID is stored. Mutually exclusive with pool_id. */
+            pool_name?: string;
         };
         /** @description One platform this source can be forked onto, with the resource limits that apply there. This is the authoritative per-platform record: when an entry carries bounds they win over the flat `min_*`/`max_*` fields on the VM, which are a single-platform convenience projection of the same data. CPU, memory, and disk limits come from the source VM; GPU limits come from the platform catalog. */
         CompatiblePlatform: {
@@ -1637,17 +1642,17 @@ export interface components {
          * @description Use resource only when the actual kind cannot be identified safely.
          * @enum {string}
          */
-        ResourceKind: "vm" | "source" | "run" | "session" | "filesystem" | "mount" | "file" | "sync" | "upload" | "api_key" | "ssh_key" | "ssh_setup" | "organization" | "route" | "billing" | "correction_review" | "webhook" | "resource";
+        ResourceKind: "vm" | "source" | "run" | "session" | "filesystem" | "mount" | "file" | "sync" | "upload" | "api_key" | "ssh_key" | "ssh_setup" | "organization" | "route" | "billing" | "correction_review" | "webhook" | "resource" | "pool" | "pool_quote" | "pool_name";
         /** @enum {string} */
         CapacityScope: "worker" | "region" | "platform";
         /** @enum {string} */
         RateLimiter: "arker" | "upstream";
         /** @enum {string} */
-        StateRequirement: "running" | "mutable" | "unclaimed";
+        StateRequirement: "running" | "mutable" | "unclaimed" | "active" | "same_location" | "pool_purchases_enabled" | "pool_pricing_configured";
         /** @enum {string} */
         UnsupportedReason: "feature_not_supported" | "platform_mismatch" | "restore_requires_birth_host";
         /** @enum {string} */
-        RequiredAction: "accept_legal_terms" | "convert_billing_plan";
+        RequiredAction: "accept_legal_terms" | "convert_billing_plan" | "add_payment_method";
         /** @enum {string} */
         OperationFailureReason: "image_pull_failed" | "image_conversion_failed" | "command_failed" | "unexpected_interpreter" | "deadline_exceeded";
         /** @enum {string} */
@@ -3328,6 +3333,8 @@ export interface operations {
                 created_after?: string;
                 /** @description Include VMs created before this RFC 3339 timestamp. An explicit UTC offset is required. */
                 created_before?: string;
+                /** @description Filter the caller organization’s VMs by pool membership. */
+                pool_id?: string;
             };
             header?: never;
             path?: never;

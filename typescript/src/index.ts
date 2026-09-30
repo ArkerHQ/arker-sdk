@@ -445,12 +445,6 @@ export interface CompletedRunResult {
   /** System failure explanation when `state` is "failed". Distinct from
    * `stderr` (the program's own error output); null otherwise. */
   failReason?: string | null;
-  /** Requested total memory (MiB), present when the run carried a memory override. */
-  memoryRequestedMib?: number | null;
-  /** Achieved total memory (MiB) after the run's resize. */
-  memoryAchievedMib?: number | null;
-  /** True when the runtime could not reach the requested memory target exactly. */
-  memoryPartial?: boolean;
 }
 
 export interface BackgroundRunResult {
@@ -1029,6 +1023,7 @@ export class VM {
   // from `arker.vm(id)` until you call `refresh()`. Names mirror the
   // contract (`Vm`).
   readonly vm_id?: Vm["vm_id"];
+  readonly pool_id?: Vm["pool_id"];
   readonly name?: Vm["name"];
   readonly state?: Vm["state"];
   readonly owner_org_id?: Vm["owner_org_id"];
@@ -1633,8 +1628,8 @@ export class VM {
   }
 
   /**
-   * Update this VM's description, resource allocation, authorized SSH keys,
-   * and/or network policy via `PATCH /v1/vms/{id}`. Returns the updated `Vm`.
+   * Update this VM's description, resources, pool, SSH keys, or network
+   * policy via `PATCH /v1/vms/{id}`. Returns the updated `Vm`.
    *
    * Accepts either a `PatchVmRequest` or flat resource fields
    * (`{ vcpu, memory_mib, disk_mib, vgpu }`), which are folded into
@@ -1648,33 +1643,29 @@ export class VM {
     request:
       | PatchVmRequest
       | (ResourcesInput &
-          Pick<PatchVmRequest, "description" | "ssh_public_keys" | "policies">),
+          Pick<PatchVmRequest, "description" | "ssh_public_keys" | "policies" | "pool_id" | "pool_name">),
   ): Promise<Vm> {
     const r = request as PatchVmRequest &
       ResourcesInput & { resources?: ResourcesInput | null };
-    const body: PatchVmRequest =
+    const resources =
       r.resources !== undefined ||
       (r.vcpu === undefined && r.memory_mib === undefined && r.disk_mib === undefined && r.vgpu === undefined)
-        ? {
-            description: r.description,
-            resources: r.resources,
-            ssh_public_keys: r.ssh_public_keys,
-            policies: r.policies,
-          }
+        ? r.resources
         : {
-            description: r.description,
-            resources: {
-              vcpu: r.vcpu ?? null,
-              memory_mib: r.memory_mib ?? null,
-              disk_mib: r.disk_mib ?? null,
-              // Left undefined (and so pruned) when unset: `vgpu` is mutually
-              // exclusive with the hardware GPU fields, so it must not appear
-              // on the wire for a CPU-only resize.
-              vgpu: r.vgpu,
-            },
-            ssh_public_keys: r.ssh_public_keys,
-            policies: r.policies,
+            vcpu: r.vcpu ?? null,
+            memory_mib: r.memory_mib ?? null,
+            disk_mib: r.disk_mib ?? null,
+            // Null conflicts with hardware GPU fields; omit vGPU when unset.
+            vgpu: r.vgpu,
           };
+    const body: PatchVmRequest = {
+      description: r.description,
+      pool_id: r.pool_id,
+      pool_name: r.pool_name,
+      resources,
+      ssh_public_keys: r.ssh_public_keys,
+      policies: r.policies,
+    };
     return this._client._request("PATCH", vmPath(this.id), body, this.baseUrl);
   }
 
@@ -2143,9 +2134,6 @@ function parseRunResponse(payload: unknown): RunResult {
       exitCode,
       sessionId: typeof body.session_id === "string" ? body.session_id : null,
       failReason: typeof body.fail_reason === "string" ? body.fail_reason : null,
-      memoryRequestedMib: optionalNumberOrNull(body.memory_requested_mib),
-      memoryAchievedMib: optionalNumberOrNull(body.memory_achieved_mib),
-      memoryPartial: typeof body.memory_partial === "boolean" ? body.memory_partial : undefined,
     };
   }
   if (typeof body.run_id === "string") {
@@ -2384,11 +2372,6 @@ function stringValue(value: unknown, context: string): string {
 function numberField(value: unknown, context: string): number {
   if (typeof value !== "number") throw new ArkerError("internal", `${context} must be a number`, 200);
   return value;
-}
-
-function optionalNumberOrNull(value: unknown): number | null | undefined {
-  if (value === null || typeof value === "number") return value;
-  return undefined;
 }
 
 function assertWriteComplete(result: SyncWriteResult, context: string): void {

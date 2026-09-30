@@ -128,6 +128,8 @@ const FORK_OPTIONS: OptionSpecs = {
   "no-disk": { type: "boolean" },
   platform: { type: "string" },
   "policies-file": { type: "string" },
+  pool: { type: "string" },
+  "pool-id": { type: "string" },
   public: { type: "boolean" },
   "queueing-timeout": { type: "integer", min: 0 },
   "registry-auth-file": { type: "string" },
@@ -141,7 +143,6 @@ const FORK_OPTIONS: OptionSpecs = {
 
 const RUN_OPTIONS: OptionSpecs = {
   ...GLOBAL_OPTIONS,
-  ...RESOURCE_OPTIONS,
   "end-symbol": { type: "string" },
   "idempotency-key": { type: "string" },
   "policies-file": { type: "string" },
@@ -204,6 +205,8 @@ const POOL_OPTIONS: Record<string, OptionSpecs> = {
 };
 
 const UPDATE_OPTIONS: OptionSpecs = {
+  pool: { type: "string" },
+  "pool-id": { type: "string" },
   ...GLOBAL_OPTIONS,
   ...FORK_RESOURCE_OPTIONS,
   description: { type: "string", allowEmpty: true },
@@ -745,6 +748,7 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
   const name = args.flags.name as string | undefined;
   const description = args.flags.description as string | undefined;
   const publicFlag = boolFlag(args, "public");
+  const pool = poolFlags(args);
 
   if (args.positional.length > 1) die("fork accepts only one positional source VM name");
   if (refPositional && srcVmNameFlag) die("positional source cannot be combined with --source-vm-name");
@@ -843,6 +847,7 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
         : { dockerfile: dockerfile!, ...(context ? { context } : {}) };
   const forkOptions: ForkOptions = {
     ...source,
+    ...pool,
     name,
     description,
     public: publicFlag,
@@ -960,18 +965,11 @@ async function cmdRun(args: ParsedArgs, client: Arker): Promise<void> {
       session_id: args.flags["session-id"] as string | undefined,
       ...(sessionIdx !== undefined ? { session_idx: sessionIdx } : {}),
       end_symbol: args.flags["end-symbol"] as string | undefined,
-      vcpu_count: numFlag(args, "vcpu"),
-      memory_mib: numFlag(args, "memory-mib"),
-      disk_mib: numFlag(args, "disk-mib"),
       ...(policies !== undefined ? { policies } : {}),
       idempotencyKey: args.flags["idempotency-key"] as string | undefined,
     }),
   );
   printRunResult(result, Boolean(args.flags.json));
-}
-
-function formatMib(value: number | null | undefined): string {
-  return typeof value === "number" ? `${value} MiB` : "unknown";
 }
 
 interface PrintableRun {
@@ -984,9 +982,6 @@ interface PrintableRun {
   stderr: Uint8Array;
   exitCode: number;
   failReason?: string | null;
-  memoryRequestedMib?: number | null;
-  memoryAchievedMib?: number | null;
-  memoryPartial?: boolean;
 }
 
 function printRunResult(result: RunResult, json: boolean): void {
@@ -1026,14 +1021,8 @@ function printCompletedRun(result: PrintableRun, json: boolean): void {
       stderrEncoding: "base64",
       exitCode: result.exitCode,
       failReason: result.failReason,
-      memoryRequestedMib: result.memoryRequestedMib,
-      memoryAchievedMib: result.memoryAchievedMib,
-      memoryPartial: result.memoryPartial,
     });
   } else {
-    if (result.memoryPartial) {
-      err(`Memory target partially applied: requested ${formatMib(result.memoryRequestedMib)}, achieved ${formatMib(result.memoryAchievedMib)}.`);
-    }
     if (result.stdout.length) process.stdout.write(result.stdout);
     if (result.stderr.length) process.stderr.write(result.stderr);
     if (result.failReason) err(result.failReason);
@@ -1378,6 +1367,7 @@ async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
   const vcpu = numFlag(args, "vcpu");
   const diskMib = numFlag(args, "disk-mib");
   const vgpu = numFlag(args, "vgpu");
+  const pool = poolFlags(args);
   const description = args.flags.description as string | undefined;
   const sshPublicKeys = sshPublicKeysFromArgs(args);
   const policiesFile = args.flags["policies-file"] as string | undefined;
@@ -1386,13 +1376,14 @@ async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
     : readJsonObject(policiesFile, "policy document") as PolicyDoc;
   if (
     memoryMib === undefined && vcpu === undefined && diskMib === undefined && vgpu === undefined &&
-    description === undefined && !sshPublicKeys.provided && policies === undefined
+    description === undefined && !sshPublicKeys.provided && policies === undefined && pool === undefined
   ) {
-    die("update: pass at least one description, resource, SSH key, or policy flag");
+    die("update: pass at least one description, resource, pool, SSH key, or policy flag");
   }
   const updated = await withSecretRedaction(
     policySecretValues(policies),
     () => client.vm(vm).update({
+      ...pool,
       ...(description !== undefined ? { description } : {}),
       ...(memoryMib !== undefined || vcpu !== undefined || diskMib !== undefined || vgpu !== undefined
         ? {
@@ -1688,6 +1679,14 @@ function boolFlag(args: ParsedArgs, name: string): boolean | undefined {
   return typeof v === "boolean" ? v : undefined;
 }
 
+function poolFlags(args: ParsedArgs): { pool_name: string } | { pool_id: string } | undefined {
+  const poolName = args.flags.pool as string | undefined;
+  const poolId = args.flags["pool-id"] as string | undefined;
+  if (poolName !== undefined && poolId !== undefined) die("--pool and --pool-id are mutually exclusive");
+  if (poolName !== undefined) return { pool_name: poolName };
+  return poolId !== undefined ? { pool_id: poolId } : undefined;
+}
+
 function commaListFlag(args: ParsedArgs, name: string): string[] | undefined {
   const value = args.flags[name];
   if (typeof value !== "string") return undefined;
@@ -1828,6 +1827,8 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   persist: { desc: "keep the remote PTY process alive on disconnect" },
   platform: { placeholder: "<token[,token...]>", desc: "filter VMs or pin a fork to a compute platform" },
   "policies-file": { placeholder: "<path>", desc: "JSON policy document for a fork, run, or VM update" },
+  pool: { placeholder: "<name>", desc: "pool for the VM, by name in your organization" },
+  "pool-id": { placeholder: "<id>", desc: "pool for the VM, by ID instead of name" },
   provider: { placeholder: "<provider>", desc: "compute provider or activity filter (or env ARKER_PROVIDER)" },
   pty: { desc: "mark the new session for interactive PTY use" },
   public: { desc: "filter public VMs or make the forked VM public" },
@@ -2168,7 +2169,6 @@ function usage(command?: string, positional: string[] = []): void {
       "  --timeout <seconds>             exec/kill bound in seconds (omitted or 0 = unbounded)",
       "  --time-to-background <seconds>  sync window; 0 returns a run id immediately (default 120)",
       "  --queueing-timeout <seconds>    queue up to this long instead of failing fast (also a fork flag)",
-      "  --vcpu <n> --memory-mib <n> --disk-mib <n>",
       "  --end-symbol <text>        stop synchronous output after this marker",
       "  --policies-file <path>     replace VM policy before the command",
       "  --idempotency-key <key>    deduplicate retries of the run request",

@@ -370,6 +370,7 @@ def test_fork_posts_directly_to_source_vm() -> None:
         )
 
     assert vm.id == "vm_child"
+    assert vm.pool_id is None
     body = json.loads(t.calls[0]["body"])
     # Computer.fork passes source_vm_id; `disk` is omitted unless the caller
     # sets it, so the server derives it from the source when inheritance is unavailable.
@@ -381,27 +382,31 @@ def test_fork_posts_directly_to_source_vm() -> None:
     }
 
 
-def test_fork_preserves_the_canonical_wire_shape() -> None:
+@pytest.mark.parametrize("pool_id", [None, "22222222-2222-4222-8222-222222222222"])
+def test_fork_preserves_the_canonical_wire_shape(pool_id: str | None) -> None:
     t = FakeTransport()
     t.add_json(
         lambda method, url: method == "POST" and url.endswith("/v1/fork"),
         200,
-        _fork_response("vm_child"),
+        {**_fork_response("vm_child"), "pool_id": pool_id},
     )
 
     with use_transport(t):
-        client().fork(
+        vm = client().fork(
             source_vm_name="ubuntu",
             source_org_id="org_123",
+            pool_name="main",
             resources={"vcpu": 2, "memory_mib": 2048},
             description=None,
             disk=False,
             layers=["disk"],
         )
 
+    assert vm.pool_id == pool_id
     assert json.loads(t.calls[0]["body"]) == {
         "source_vm_name": "ubuntu",
         "source_org_id": "org_123",
+        "pool_name": "main",
         "resources": {"vcpu": 2, "memory_mib": 2048},
         "description": None,
         "disk": False,
@@ -832,9 +837,6 @@ def test_run_sends_command_without_default_session_id() -> None:
             "stderr": "",
             "stderr_encoding": "utf-8",
             "exit_code": 0,
-            "memory_requested_mib": 1024,
-            "memory_achieved_mib": 1536,
-            "memory_partial": True,
         },
     )
 
@@ -847,9 +849,6 @@ def test_run_sends_command_without_default_session_id() -> None:
     assert result.stderr == ""
     assert result.stderr_bytes == b""
     assert result.exit_code == 0
-    assert result.memory_requested_mib == 1024
-    assert result.memory_achieved_mib == 1536
-    assert result.memory_partial is True
     assert json.loads(t.calls[0]["body"]) == {"command": "printf hi"}
 
 
@@ -2943,3 +2942,13 @@ def test_generated_fork_key_fits_the_server_limit() -> None:
         client().fork(source_vm_id="source-vm-id", idempotency=True)
 
     assert 0 < len(t.calls[0]["headers"]["idempotency-key"]) <= 64
+
+
+@pytest.mark.parametrize("selector", [{"pool_name": "main"}, {"pool_id": "22222222-2222-4222-8222-222222222222"}])
+@pytest.mark.parametrize("description", [{}, {"description": "runner"}])
+def test_update_preserves_pool_selector(selector, description) -> None:
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"), 200, _fork_response("vm_1"))
+    with use_transport(t):
+        client().vm("vm_1").update(**selector, **description)
+    assert json.loads(t.calls[0]["body"]) == {**selector, **description}

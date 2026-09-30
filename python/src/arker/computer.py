@@ -258,9 +258,6 @@ class CompletedRunResult:
     # System failure explanation when state is "failed"; distinct from
     # stderr (the program's own error output). None otherwise.
     fail_reason: str | None = None
-    memory_requested_mib: int | None = None
-    memory_achieved_mib: int | None = None
-    memory_partial: bool = False
     type: str = "completed"
 
 
@@ -733,6 +730,7 @@ class VM:
     # handle from ``arker.vm(id)`` until you call ``refresh()``. Names mirror
     # the contract ``Vm``.
     vm_id: str | None
+    pool_id: str | None
     name: str | None
     description: str | None
     state: str | None
@@ -794,9 +792,6 @@ class VM:
         time_to_background: int | None = None,
         queueing_timeout: int | None = None,
         end_symbol: str | None = None,
-        vcpu_count: int | None = None,
-        memory_mib: int | None = None,
-        disk_mib: int | None = None,
         policies: PolicyDoc | dict[str, Any] | None = None,
         signal: str | None = None,
         idempotency_key: str | None = None,
@@ -875,9 +870,6 @@ class VM:
             time_to_background=time_to_background,
             queueing_timeout=queueing_timeout,
             end_symbol=end_symbol,
-            vcpu_count=vcpu_count,
-            memory_mib=memory_mib,
-            disk_mib=disk_mib,
             signal=signal,
             policies=policies,
         )
@@ -952,11 +944,13 @@ class VM:
         disk_mib: int | None = None,
         vgpu: float | None = None,
         description: str | _UnsetType | None = _UNSET,
+        pool_id: str | None = None,
+        pool_name: str | None = None,
         ssh_public_keys: list[str] | None = None,
         policies: PolicyDoc | dict[str, Any] | None = None,
     ) -> Vm:
-        """Update this VM's description, resource allocation, authorized SSH
-        keys, and/or network policy via ``PATCH /v1/vms/{id}``.
+        """Update this VM's description, resources, pool, SSH keys, or network
+        policy via ``PATCH /v1/vms/{id}``.
 
         Pass an empty ``ssh_public_keys`` list to remove all authorized keys.
 
@@ -981,6 +975,8 @@ class VM:
         if description is _UNSET:
             body = PatchVmRequest(
                 resources=resources,
+                pool_id=pool_id,
+                pool_name=pool_name,
                 ssh_public_keys=ssh_public_keys,
                 policies=policies,
             )
@@ -988,6 +984,8 @@ class VM:
             body = {
                 "description": _EXPLICIT_NULL if description is None else description,
                 "resources": resources,
+                "pool_id": pool_id,
+                "pool_name": pool_name,
                 "ssh_public_keys": ssh_public_keys,
                 "policies": policies,
             }
@@ -2183,9 +2181,6 @@ def _run_response(payload: dict[str, Any]) -> RunResult:
             run_id=response.run_id,
             state=_terminal_state(response.state, response.exit_code),
             fail_reason=_optional_str(payload.get("fail_reason")),
-            memory_requested_mib=response.memory_requested_mib,
-            memory_achieved_mib=response.memory_achieved_mib,
-            memory_partial=bool(response.memory_partial),
         )
 
     if isinstance(response, BackgroundRunResponse):
