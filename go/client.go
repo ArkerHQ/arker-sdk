@@ -118,7 +118,8 @@ type call struct {
 	out     any
 	// retryNetwork overrides the method-based rule. A few endpoints are reads
 	// carried over POST (the sync `read` and `manifest` ops), and there is no
-	// outcome to be unknown about on a read.
+	// outcome to be unknown about on a read. A pool purchase is also replayable,
+	// because its Idempotency-Key returns the original pool.
 	retryNetwork bool
 }
 
