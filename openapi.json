@@ -407,24 +407,6 @@
           },
           {
             "in": "query",
-            "name": "region",
-            "required": false,
-            "description": "Region filter.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "provider",
-            "required": false,
-            "description": "Provider filter.",
-            "schema": {
-              "$ref": "#/components/schemas/Provider"
-            }
-          },
-          {
-            "in": "query",
             "name": "search",
             "required": false,
             "description": "Free-text search across run metadata.",
@@ -583,7 +565,19 @@
             "$ref": "#/components/responses/UnavailableError"
           }
         },
-        "description": "Control-plane listing of run activity visible to the authenticated caller across VMs, providers, and regions."
+        "description": "Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Reads host-local runs and ClickHouse history. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.",
+        "servers": [
+          {
+            "url": "https://{regionalHost}/api",
+            "description": "Use the regional endpoint returned by GET /v1/regions.",
+            "variables": {
+              "regionalHost": {
+                "default": "aws-us-west-2.arker.ai",
+                "description": "Hostname of the regional endpoint to query."
+              }
+            }
+          }
+        ]
       }
     },
     "/v1/vms/{id}": {
@@ -955,7 +949,7 @@
             "$ref": "#/components/responses/GatewayTimeoutError"
           }
         },
-        "description": "Run a command. Set `time_to_background` to `0` to return a pollable run immediately after successful dispatch. A positive value bounds the synchronous wait, and omission uses the default window. A run that is still executing when the response is sent returns **202 Accepted** with a `run_id`; only a run that finished returns 200. Control requests do not accept `time_to_background`. `timeout` is the separate execution and kill bound."
+        "description": "Run a command. Set `time_to_background` to `0` to return a pollable run immediately after successful dispatch. A positive value bounds the synchronous wait, and omission uses the default window. A run that is still executing when the response is sent returns **202 Accepted** with a `run_id`; only a run that finished returns 200. Control requests do not accept `time_to_background`. `timeout` is the separate execution and kill bound. The request body is limited to 4 MiB (4194304 bytes) and a larger one returns 413. Write files with `sync` instead of embedding their content in `command`."
       },
       "get": {
         "operationId": "listRuns",
@@ -1355,7 +1349,7 @@
           "Sessions"
         ],
         "summary": "Update a session (resize PTY / set timeout)",
-        "description": "Resize the session's PTY (cols/rows) and/or update its idle timeout. Resize is delivered to a LIVE attached PTY in-band; if the PTY is detached, it is applied directly to the session's runtime; if no PTY has ever attached, the call is accepted as a no-op. REST equivalent of the WebSocket {\"type\":\"resize\"} control frame \u2014 usable from any client, attached or not.",
+        "description": "Resize the session's PTY (cols/rows) and/or update its idle timeout. A resize applies at once to the session's open terminal, attached or detached, and is the size the next attach opens at. REST equivalent of the WebSocket {\"type\":\"resize\"} control frame \u2014 usable from any client, attached or not.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1414,7 +1408,7 @@
           "Sessions"
         ],
         "summary": "Delete a session",
-        "description": "Close and remove a persistent VM session.",
+        "description": "Close and remove a persistent VM session. Every run admitted to the session ends `cancelled`, including queued and backgrounded runs, and everything the session started, detached processes included, is stopped. A request that names the session after the delete begins is refused. If the delete cannot complete it returns 503, and the session stays hidden and refuses new runs until a retried delete finishes it.",
         "responses": {
           "200": {
             "description": "Delete result.",
@@ -1899,7 +1893,7 @@
             "$ref": "#/components/responses/UnsupportedOperationError"
           },
           "429": {
-            "$ref": "#/components/responses/RateLimitedError"
+            "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -5266,7 +5260,7 @@
             ]
           },
           "session_idx": {
-            "description": "Numeric session selector. `session_id` takes precedence when both selectors are sent.",
+            "description": "Numeric session selector. `session_id` takes precedence when both selectors are sent. A session at this index that is being deleted refuses the run with 503; retry once the delete completes, which frees the index for a new session.",
             "type": [
               "integer",
               "null"
@@ -5329,7 +5323,7 @@
               "SIGHUP",
               null
             ],
-            "description": "Deliver a signal to the selected persistent session's foreground process group. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. Use `session_id` or `session_idx` to select the session."
+            "description": "Deliver a signal to the selected persistent session's foreground process group: the run holding the session or, with no run in flight, an interpreter waiting between turns or an attached terminal's foreground job. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. When nothing is running in the session, the request fails with 404 and nothing is signalled. A run made only of shell builtins starts no process of its own, so it may have nothing to signal; the request then fails with 404 as well. Use `session_id` or `session_idx` to select the session."
           },
           "policies": {
             "description": "Complete network policy replacement applied to the VM before this run and retained afterward. A non-empty document replaces the persisted policy; an empty document selects the default posture of allow-all outbound traffic and authenticated inbound traffic. Omit it to use the current policy unchanged. If the policy cannot be stored and applied, the command does not run.",
@@ -5380,7 +5374,7 @@
             ]
           },
           "state": {
-            "description": "Lifecycle state \u2014 \"completed\" for this shape. Read this (not the variant) for completion, uniformly with the run-status (`Run`) shape.",
+            "description": "Lifecycle state \u2014 \"completed\" when the command finished, or \"cancelled\" when the run was cancelled before it finished. A cancelled run reports the output recorded before the cancellation and a null `exit_code`. Read this (not the variant) for completion, uniformly with the run-status (`Run`) shape.",
             "type": "string"
           },
           "stdout": {
@@ -5388,11 +5382,7 @@
             "type": "string"
           },
           "stdout_encoding": {
-            "type": "string",
-            "enum": [
-              "utf-8",
-              "base64"
-            ],
+            "$ref": "#/components/schemas/OutputEncoding",
             "description": "Encoding used for stdout. Valid UTF-8 is returned directly; arbitrary bytes are base64 encoded."
           },
           "stderr": {
@@ -5400,15 +5390,11 @@
             "type": "string"
           },
           "stderr_encoding": {
-            "type": "string",
-            "enum": [
-              "utf-8",
-              "base64"
-            ],
+            "$ref": "#/components/schemas/OutputEncoding",
             "description": "Encoding used for stderr. Valid UTF-8 is returned directly; arbitrary bytes are base64 encoded."
           },
           "exit_code": {
-            "description": "The command's exit status. `null` means a prompt ended the run before a command completion marker was received, so no exit status is available. This is expected for `end_symbol` and REPL commands. If it is unexpected, `stdout` can show that an interpreter from an earlier run received the command. Exit the interpreter, pass `end_symbol: \"none\"`, or use another session.",
+            "description": "The command's exit status. `null` when `state` is `cancelled`. Otherwise `null` means a prompt ended the run before a command completion marker was received, so no exit status is available. This is expected for `end_symbol` and REPL commands. If it is unexpected, `stdout` can show that an interpreter from an earlier run received the command. Exit the interpreter, pass `end_symbol: \"none\"`, or use another session.",
             "type": [
               "integer",
               "null"
@@ -5505,11 +5491,7 @@
             "type": "string"
           },
           "stdout_encoding": {
-            "type": "string",
-            "enum": [
-              "utf-8",
-              "base64"
-            ],
+            "$ref": "#/components/schemas/OutputEncoding",
             "description": "Encoding used for stdout. Valid UTF-8 is returned directly; arbitrary bytes are base64 encoded."
           },
           "stderr": {
@@ -5517,11 +5499,7 @@
             "type": "string"
           },
           "stderr_encoding": {
-            "type": "string",
-            "enum": [
-              "utf-8",
-              "base64"
-            ],
+            "$ref": "#/components/schemas/OutputEncoding",
             "description": "Encoding used for stderr. Valid UTF-8 is returned directly; arbitrary bytes are base64 encoded."
           },
           "retry_count": {
@@ -5838,6 +5816,10 @@
           "body_out": {
             "description": "Captured response body preview when included in the response.",
             "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/RunState",
+            "description": "Run lifecycle state. Regional endpoints include this for host-local and archived activity."
           }
         }
       },
@@ -6545,7 +6527,7 @@
             "description": "Structured error details for this entry, when the operation failed.",
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SyncEntryError"
+                "$ref": "#/components/schemas/SyncFileError"
               },
               {
                 "type": "null"
@@ -6606,7 +6588,7 @@
             "description": "Structured error details for this entry, when the operation failed.",
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SyncEntryError"
+                "$ref": "#/components/schemas/SyncFileError"
               },
               {
                 "type": "null"
@@ -6646,7 +6628,7 @@
             "description": "Structured error details for this entry, when the operation failed.",
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SyncEntryError"
+                "$ref": "#/components/schemas/SyncFileError"
               },
               {
                 "type": "null"
@@ -6675,7 +6657,7 @@
           }
         }
       },
-      "SyncEntryError": {
+      "SyncFileError": {
         "oneOf": [
           {
             "$ref": "#/components/schemas/SyncBadRequestError"
@@ -10243,6 +10225,14 @@
             "description": "The error category and its details, request metadata, and recovery context."
           }
         }
+      },
+      "OutputEncoding": {
+        "type": "string",
+        "enum": [
+          "utf-8",
+          "base64"
+        ],
+        "description": "Encoding of command output bytes."
       },
       "PoolResources": {
         "type": "object",

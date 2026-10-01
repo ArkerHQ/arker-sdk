@@ -1073,8 +1073,6 @@ async function cmdRuns(args: ParsedArgs, client: Arker): Promise<void> {
         until: numFlag(args, "until"),
         vm: args.flags.vm as string | undefined,
         vmIds: commaListFlag(args, "vms"),
-        region: args.flags.region as string | undefined,
-        provider: args.flags.provider as string | undefined,
         search: args.flags.search as string | undefined,
         limit,
         offset: numFlag(args, "offset"),

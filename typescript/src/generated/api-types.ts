@@ -113,7 +113,7 @@ export interface paths {
         };
         /**
          * List organization runs
-         * @description Control-plane listing of run activity visible to the authenticated caller across VMs, providers, and regions.
+         * @description Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Reads host-local runs and ClickHouse history. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
          */
         get: operations["listOrgRuns"];
         put?: never;
@@ -200,7 +200,7 @@ export interface paths {
         put?: never;
         /**
          * Run a command
-         * @description Run a command. Set `time_to_background` to `0` to return a pollable run immediately after successful dispatch. A positive value bounds the synchronous wait, and omission uses the default window. A run that is still executing when the response is sent returns **202 Accepted** with a `run_id`; only a run that finished returns 200. Control requests do not accept `time_to_background`. `timeout` is the separate execution and kill bound.
+         * @description Run a command. Set `time_to_background` to `0` to return a pollable run immediately after successful dispatch. A positive value bounds the synchronous wait, and omission uses the default window. A run that is still executing when the response is sent returns **202 Accepted** with a `run_id`; only a run that finished returns 200. Control requests do not accept `time_to_background`. `timeout` is the separate execution and kill bound. The request body is limited to 4 MiB (4194304 bytes) and a larger one returns 413. Write files with `sync` instead of embedding their content in `command`.
          */
         post: operations["createRun"];
         delete?: never;
@@ -286,14 +286,14 @@ export interface paths {
         post?: never;
         /**
          * Delete a session
-         * @description Close and remove a persistent VM session.
+         * @description Close and remove a persistent VM session. Every run admitted to the session ends `cancelled`, including queued and backgrounded runs, and everything the session started, detached processes included, is stopped. A request that names the session after the delete begins is refused. If the delete cannot complete it returns 503, and the session stays hidden and refuses new runs until a retried delete finishes it.
          */
         delete: operations["deleteSession"];
         options?: never;
         head?: never;
         /**
          * Update a session (resize PTY / set timeout)
-         * @description Resize the session's PTY (cols/rows) and/or update its idle timeout. Resize is delivered to a LIVE attached PTY in-band; if the PTY is detached, it is applied directly to the session's runtime; if no PTY has ever attached, the call is accepted as a no-op. REST equivalent of the WebSocket {"type":"resize"} control frame — usable from any client, attached or not.
+         * @description Resize the session's PTY (cols/rows) and/or update its idle timeout. A resize applies at once to the session's open terminal, attached or detached, and is the size the next attach opens at. REST equivalent of the WebSocket {"type":"resize"} control frame — usable from any client, attached or not.
          */
         patch: operations["patchSession"];
         trace?: never;
@@ -984,7 +984,7 @@ export interface components {
         RunRequest: {
             /** @description The session to run in. Arker's run interface works like a terminal: sessions are tabs, each keeps its own state — working directory, environment, shell history — and each handles one run at a time. Create a session with `POST /v1/vms/{id}/sessions`, which also sets its starting directory and environment, then pass its id here. Run sequential commands in one session; for a long-running task, use `time_to_background: 0` in a session of its own so later work does not interrupt it. Distinct sessions run concurrently. A session that no longer exists is a 404. Omitted, the run uses the VM's default session, which every caller that omits it shares. */
             session_id?: string | null;
-            /** @description Numeric session selector. `session_id` takes precedence when both selectors are sent. */
+            /** @description Numeric session selector. `session_id` takes precedence when both selectors are sent. A session at this index that is being deleted refuses the run with 503; retry once the delete completes, which frees the index for a new session. */
             session_idx?: number | null;
             /** @description Command submitted for execution. Omit it only for a signal request. */
             command?: string;
@@ -1005,7 +1005,7 @@ export interface components {
              */
             end_symbol?: string | null;
             /**
-             * @description Deliver a signal to the selected persistent session's foreground process group. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. Use `session_id` or `session_idx` to select the session.
+             * @description Deliver a signal to the selected persistent session's foreground process group: the run holding the session or, with no run in flight, an interpreter waiting between turns or an attached terminal's foreground job. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. When nothing is running in the session, the request fails with 404 and nothing is signalled. A run made only of shell builtins starts no process of its own, so it may have nothing to signal; the request then fails with 404 as well. Use `session_id` or `session_idx` to select the session.
              * @enum {string|null}
              */
             signal?: "SIGINT" | "SIGTERM" | "SIGKILL" | "SIGHUP" | null;
@@ -1018,23 +1018,17 @@ export interface components {
             session_id?: string | null;
             /** @description The run's own id. Present for executed runs; absent for operation acks (signal) with no run record. */
             run_id?: string | null;
-            /** @description Lifecycle state — "completed" for this shape. Read this (not the variant) for completion, uniformly with the run-status (`Run`) shape. */
+            /** @description Lifecycle state — "completed" when the command finished, or "cancelled" when the run was cancelled before it finished. A cancelled run reports the output recorded before the cancellation and a null `exit_code`. Read this (not the variant) for completion, uniformly with the run-status (`Run`) shape. */
             state?: string;
             /** @description Standard output produced by the command. */
             stdout: string;
-            /**
-             * @description Encoding used for stdout. Valid UTF-8 is returned directly; arbitrary bytes are base64 encoded.
-             * @enum {string}
-             */
-            stdout_encoding: "utf-8" | "base64";
+            /** @description Encoding used for stdout. Valid UTF-8 is returned directly; arbitrary bytes are base64 encoded. */
+            stdout_encoding: components["schemas"]["OutputEncoding"];
             /** @description Standard error produced by the command. */
             stderr: string;
-            /**
-             * @description Encoding used for stderr. Valid UTF-8 is returned directly; arbitrary bytes are base64 encoded.
-             * @enum {string}
-             */
-            stderr_encoding: "utf-8" | "base64";
-            /** @description The command's exit status. `null` means a prompt ended the run before a command completion marker was received, so no exit status is available. This is expected for `end_symbol` and REPL commands. If it is unexpected, `stdout` can show that an interpreter from an earlier run received the command. Exit the interpreter, pass `end_symbol: "none"`, or use another session. */
+            /** @description Encoding used for stderr. Valid UTF-8 is returned directly; arbitrary bytes are base64 encoded. */
+            stderr_encoding: components["schemas"]["OutputEncoding"];
+            /** @description The command's exit status. `null` when `state` is `cancelled`. Otherwise `null` means a prompt ended the run before a command completion marker was received, so no exit status is available. This is expected for `end_symbol` and REPL commands. If it is unexpected, `stdout` can show that an interpreter from an earlier run received the command. Exit the interpreter, pass `end_symbol: "none"`, or use another session. */
             exit_code: number | null;
         };
         BackgroundRunResponse: {
@@ -1063,18 +1057,12 @@ export interface components {
             fail_reason?: string | null;
             /** @description Standard output produced by the command. Available while the run is still going: poll this run and `stdout` grows as the command writes, so a long task can be followed live rather than only read at the end. */
             stdout: string;
-            /**
-             * @description Encoding used for stdout. Valid UTF-8 is returned directly; arbitrary bytes are base64 encoded.
-             * @enum {string}
-             */
-            stdout_encoding: "utf-8" | "base64";
+            /** @description Encoding used for stdout. Valid UTF-8 is returned directly; arbitrary bytes are base64 encoded. */
+            stdout_encoding: components["schemas"]["OutputEncoding"];
             /** @description Standard error produced by the command. */
             stderr: string;
-            /**
-             * @description Encoding used for stderr. Valid UTF-8 is returned directly; arbitrary bytes are base64 encoded.
-             * @enum {string}
-             */
-            stderr_encoding: "utf-8" | "base64";
+            /** @description Encoding used for stderr. Valid UTF-8 is returned directly; arbitrary bytes are base64 encoded. */
+            stderr_encoding: components["schemas"]["OutputEncoding"];
             /**
              * @description Number of automatic recovery attempts for this run.
              * @default 0
@@ -1181,6 +1169,8 @@ export interface components {
             body_in: string;
             /** @description Captured response body preview when included in the response. */
             body_out: string;
+            /** @description Run lifecycle state. Regional endpoints include this for host-local and archived activity. */
+            state?: components["schemas"]["RunState"];
         };
         ListOrgRunsResponse: {
             /** @description Inclusive start of the activity window, as Unix epoch seconds. */
@@ -1426,7 +1416,7 @@ export interface components {
             /** @description True when the file was committed to the VM. */
             written: boolean;
             /** @description Structured error details for this entry, when the operation failed. */
-            error?: components["schemas"]["SyncEntryError"] | null;
+            error?: components["schemas"]["SyncFileError"] | null;
         };
         SyncPresignedWriteRequestResult: {
             /** @description Path inside the VM. */
@@ -1446,7 +1436,7 @@ export interface components {
             /** @description True when the file was committed to the VM. */
             written: boolean;
             /** @description Structured error details for this entry, when the operation failed. */
-            error?: components["schemas"]["SyncEntryError"] | null;
+            error?: components["schemas"]["SyncFileError"] | null;
         };
         SyncCommitWriteResult: {
             /** @description Path inside the VM. */
@@ -1458,7 +1448,7 @@ export interface components {
             /** @description True when the file was committed to the VM. */
             written: boolean;
             /** @description Structured error details for this entry, when the operation failed. */
-            error?: components["schemas"]["SyncEntryError"] | null;
+            error?: components["schemas"]["SyncFileError"] | null;
         };
         SyncByteRange: {
             /** @description Inclusive starting byte offset. */
@@ -1467,7 +1457,7 @@ export interface components {
             end: number;
         };
         /** @description Per-file error union for successful batch responses. It does not change the enclosing HTTP status. Checksum mismatches use bad_request. */
-        SyncEntryError: components["schemas"]["SyncBadRequestError"] | components["schemas"]["SyncNotFoundError"] | components["schemas"]["SyncConflictError"] | components["schemas"]["SyncPayloadTooLargeError"] | components["schemas"]["SyncUnsupportedOperationError"] | components["schemas"]["SyncUnavailableError"] | components["schemas"]["SyncInternalError"] | components["schemas"]["SyncExpiredError"];
+        SyncFileError: components["schemas"]["SyncBadRequestError"] | components["schemas"]["SyncNotFoundError"] | components["schemas"]["SyncConflictError"] | components["schemas"]["SyncPayloadTooLargeError"] | components["schemas"]["SyncUnsupportedOperationError"] | components["schemas"]["SyncUnavailableError"] | components["schemas"]["SyncInternalError"] | components["schemas"]["SyncExpiredError"];
         Filesystem: {
             /** @description Unique filesystem identifier. */
             filesystem_id: string;
@@ -2615,6 +2605,11 @@ export interface components {
             /** @description The error category and its details, request metadata, and recovery context. */
             error: components["schemas"]["CapacityUnavailable"] | components["schemas"]["Unavailable"];
         };
+        /**
+         * @description Encoding of command output bytes.
+         * @enum {string}
+         */
+        OutputEncoding: "utf-8" | "base64";
         /** @description Reserved capacity. At least one quantity must be positive. */
         PoolResources: {
             /** @description Reserved vCPUs. */
@@ -3370,10 +3365,6 @@ export interface operations {
                 vm?: string;
                 /** @description Comma-separated VM ID filter. */
                 vms?: string;
-                /** @description Region filter. */
-                region?: string;
-                /** @description Provider filter. */
-                provider?: components["schemas"]["Provider"];
                 /** @description Free-text search across run metadata. */
                 search?: string;
                 /** @description Maximum number of rows to return. The maximum is 200 normally and 20,000 when `lite=true`. */
@@ -4174,7 +4165,7 @@ export interface operations {
             409: components["responses"]["ConflictOrInvalidStateOrResourceBusyError"];
             413: components["responses"]["PayloadTooLargeError"];
             422: components["responses"]["UnsupportedOperationError"];
-            429: components["responses"]["RateLimitedError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["CapacityUnavailableOrUnavailableError"];
             504: components["responses"]["GatewayTimeoutError"];

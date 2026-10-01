@@ -354,7 +354,9 @@ export type SyncChunkWriteResult = ApiSchema<"SyncChunkWriteResult">;
 export type SyncPresignedWriteRequestResult = ApiSchema<"SyncPresignedWriteRequestResult">;
 export type SyncCommitWriteResult = ApiSchema<"SyncCommitWriteResult">;
 export type SyncByteRange = ApiSchema<"SyncByteRange">;
-export type SyncEntryError = ApiSchema<"SyncEntryError">;
+export type SyncFileError = ApiSchema<"SyncFileError">;
+/** Former name of SyncFileError, kept for existing callers. */
+export type SyncEntryError = SyncFileError;
 
 // ── Runs ───────────────────────────────────────────────────────────
 export type RunRequest = ApiSchema<"RunRequest">;
@@ -574,7 +576,7 @@ export class ArkerError extends Error {
   readonly status: number;
 
   constructor(code: string, message: string, status: number,
-    readonly body?: ErrorBody | SyncEntryError, readonly raw?: unknown) {
+    readonly body?: ErrorBody | SyncFileError, readonly raw?: unknown) {
     super(`${code}: ${message}`);
     this.name = "ArkerError";
     this.code = code;
@@ -791,8 +793,8 @@ export class Arker {
   }
 
   /**
-   * List run activity visible to the authenticated caller across VMs,
-   * providers, and regions. Admin call — routed through the control plane.
+   * List run activity visible to the authenticated caller across VMs in the
+   * serving region. Admin call — routed through the control plane.
    */
   async listRuns(opts: ListOrgRunsOptions = {}): Promise<ListOrgRunsResponse> {
     const query: ListOrgRunsParameters = {
@@ -800,8 +802,6 @@ export class Arker {
       until: opts.until,
       vm: opts.vm,
       vms: opts.vmIds && opts.vmIds.length > 0 ? opts.vmIds.join(",") : undefined,
-      region: opts.region,
-      provider: opts.provider,
       search: opts.search,
       limit: opts.limit,
       offset: opts.offset,
