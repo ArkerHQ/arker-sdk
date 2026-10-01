@@ -84,7 +84,7 @@ from .generated.api_models import (
     RunResponse,
     Session,
     SyncChunkWrite,
-    SyncEntryError,
+    SyncFileError,
     SyncManifestOperationRequest,
     SyncManifestResponse,
     SyncReadInlineResponse,
@@ -285,7 +285,7 @@ class ArkerError(Exception):
     code: str
     message: str
     status: int
-    body: ErrorBody | SyncEntryError | None = None
+    body: ErrorBody | SyncFileError | None = None
     raw: Any = None
 
     def __post_init__(self) -> None:
@@ -501,8 +501,6 @@ class Arker:
         until: int | None = None,
         vm: str | None = None,
         vm_ids: list[str] | None = None,
-        region: str | None = None,
-        provider: str | None = None,
         search: str | None = None,
         limit: int | None = None,
         offset: int | None = None,
@@ -522,8 +520,6 @@ class Arker:
             until=until,
             vm=vm,
             vms=",".join(vm_ids) if vm_ids else None,
-            region=region,
-            provider=provider,
             search=search,
             limit=limit,
             offset=offset,
@@ -2022,13 +2018,13 @@ def _parse_json(text: str) -> Any:
 
 
 _HTTP_ERROR_ADAPTER = TypeAdapter(ErrorBody)
-_FILE_ERROR_ADAPTER = TypeAdapter(SyncEntryError)
+_FILE_ERROR_ADAPTER = TypeAdapter(SyncFileError)
 _ERROR_SCHEMA = json.loads(package_files("arker").joinpath("_openapi.json").read_text())
 _ERROR_VALIDATORS = {
     file: Draft202012Validator(
         {**_ERROR_SCHEMA, "$ref": f"#/components/schemas/{name}"}, format_checker=FormatChecker()
     )
-    for file, name in ((False, "ErrorBody"), (True, "SyncEntryError"))
+    for file, name in ((False, "ErrorBody"), (True, "SyncFileError"))
 }
 
 

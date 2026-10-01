@@ -44,7 +44,7 @@ from .generated.api_models import (
     OrgRunListRow,
     RegionPlacement,
     RunSummary,
-    SyncEntryError,
+    SyncFileError,
     SyncPresignedWriteCommit,
     SyncPresignedWriteRequest,
     SyncPresignedWriteRequestResult,
@@ -88,6 +88,7 @@ __all__ = [
     "Session",
     "SyncDirResult",
     "SyncEntryError",
+    "SyncFileError",
     "SyncPresignedWriteCommit",
     "SyncPresignedWriteRequest",
     "SyncPresignedWriteRequestResult",
@@ -110,3 +111,6 @@ try:
     __version__ = _pkg_version("arker")
 except _PackageNotFoundError:  # source tree, not installed
     __version__ = "0.0.0.dev0"
+
+# Former name of SyncFileError, kept for existing callers.
+SyncEntryError = SyncFileError

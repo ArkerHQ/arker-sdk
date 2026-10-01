@@ -747,7 +747,7 @@ def test_list_runs_uses_control_plane_and_filters() -> None:
         lambda method, url: (
             method == "GET"
             and url
-            == "https://control.invalid/api/v1/runs?since=10&until=20&vm=vm_1&vms=vm_2%2Cvm_3&region=us-west-2&provider=aws&search=pytest&limit=25&offset=5&lite=True&runtime=fc&endpoint=run&actions=run%2Cfork&status=success%2Cinternal&status_min=200&status_max=599&sort=when&dir=asc"
+            == "https://control.invalid/api/v1/runs?since=10&until=20&vm=vm_1&vms=vm_2%2Cvm_3&search=pytest&limit=25&offset=5&lite=True&runtime=fc&endpoint=run&actions=run%2Cfork&status=success%2Cinternal&status_min=200&status_max=599&sort=when&dir=asc"
         ),
         200,
         {
@@ -803,8 +803,6 @@ def test_list_runs_uses_control_plane_and_filters() -> None:
             until=20,
             vm="vm_1",
             vm_ids=["vm_2", "vm_3"],
-            region="us-west-2",
-            provider="aws",
             search="pytest",
             limit=25,
             offset=5,

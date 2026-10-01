@@ -810,7 +810,7 @@ function testExplicitVmHandleUsesPlacementEndpoint(): void {
 async function testListRunsUsesControlPlaneAndFilters(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(
-    (method, url) => method === "GET" && url === "https://control.invalid/api/v1/runs?since=10&until=20&vm=vm_1&vms=vm_2%2Cvm_3&region=us-west-2&provider=aws&search=pytest&limit=25&offset=5&lite=true&runtime=fc&endpoint=run&actions=run%2Cfork&status=success%2Cinternal&status_min=200&status_max=599&sort=when&dir=asc",
+    (method, url) => method === "GET" && url === "https://control.invalid/api/v1/runs?since=10&until=20&vm=vm_1&vms=vm_2%2Cvm_3&search=pytest&limit=25&offset=5&lite=true&runtime=fc&endpoint=run&actions=run%2Cfork&status=success%2Cinternal&status_min=200&status_max=599&sort=when&dir=asc",
     200,
     {
       since: 10,
@@ -866,8 +866,6 @@ async function testListRunsUsesControlPlaneAndFilters(): Promise<void> {
     until: 20,
     vm: "vm_1",
     vmIds: ["vm_2", "vm_3"],
-    region: "us-west-2",
-    provider: "aws",
     search: "pytest",
     limit: 25,
     offset: 5,

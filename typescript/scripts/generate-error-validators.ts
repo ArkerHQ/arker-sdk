@@ -8,7 +8,7 @@ const contract = JSON.parse(readFileSync(new URL('openapi.json', root), 'utf8'))
 const ajv = new Ajv2020({strict: false, inlineRefs: false, code: {source: true, esm: true}});
 addFormats(ajv);
 ajv.addSchema({...contract, $id: 'arker'});
-const names = {validateHttpError: 'ErrorBody', validateFileError: 'SyncEntryError'};
+const names = {validateHttpError: 'ErrorBody', validateFileError: 'SyncFileError'};
 for (const [name, schema] of Object.entries(names)) {
   ajv.addSchema({$id: name, $ref: `arker#/components/schemas/${schema}`});
 }

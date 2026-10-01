@@ -343,8 +343,6 @@ type ListOrgRunsOptions struct {
 	Until     *int
 	VM        string
 	VMIDs     []string
-	Region    string
-	Provider  string
 	Search    string
 	Limit     int
 	Offset    int
@@ -367,8 +365,6 @@ func (c *Client) ListRuns(ctx context.Context, opts ListOrgRunsOptions) (*OrgRun
 	q.numPtr("until", opts.Until)
 	q.str("vm", opts.VM)
 	q.csv("vms", opts.VMIDs)
-	q.str("region", opts.Region)
-	q.str("provider", opts.Provider)
 	q.str("search", opts.Search)
 	q.num("limit", opts.Limit)
 	q.num("offset", opts.Offset)

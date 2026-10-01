@@ -159,44 +159,10 @@ class PatchSessionResponse:
 
 
 @dataclass(frozen=True)
-class CompletedRunResponse:
-    stdout: str
-    stdout_encoding: Literal['utf-8', 'base64']
-    stderr: str
-    stderr_encoding: Literal['utf-8', 'base64']
-    exit_code: int | None
-    session_id: str | None = None
-    run_id: str | None = None
-    state: str | None = None
-
-
-@dataclass(frozen=True)
 class BackgroundRunResponse:
     run_id: str
     session_id: str | None = None
     state: str | None = None
-
-
-@dataclass(frozen=True)
-class Run:
-    run_id: str
-    state: RunState
-    started_at: str
-    exit_code: int | None
-    stdout: str
-    stdout_encoding: Literal['utf-8', 'base64']
-    stderr: str
-    stderr_encoding: Literal['utf-8', 'base64']
-    session_id: str | None = None
-    command: str | None = None
-    completed_at: str | None = None
-    fail_reason: str | None = None
-    retry_count: int | None = 0
-    vm_id: str | None = None
-    vm_name: str | None = None
-    source_org_id: str | None = None
-    region: str | None = None
-    provider: Provider | None = None
 
 
 @dataclass(frozen=True)
@@ -252,6 +218,7 @@ class OrgRunListRow:
     body_in: str
     body_out: str
     source: str | None = None
+    state: RunState | None = None
 
 
 @dataclass(frozen=True)
@@ -1366,6 +1333,9 @@ class CapacityUnavailableOrUnavailableErrorResponse:
     error: CapacityUnavailable | Unavailable
 
 
+OutputEncoding: TypeAlias = Literal['utf-8', 'base64']
+
+
 @dataclass(frozen=True)
 class PoolResources:
     vcpu: int | None = None
@@ -1476,8 +1446,6 @@ class ListOrgRunsParameters:
     until: int | None = None
     vm: str | None = None
     vms: str | None = None
-    region: str | None = None
-    provider: Provider | None = None
     search: str | None = None
     limit: int | None = None
     offset: int | None = None
@@ -1702,7 +1670,38 @@ class PolicyAction1:
 PolicyAction: TypeAlias = Literal['allow', 'deny'] | PolicyAction1
 
 
-RunResponse: TypeAlias = CompletedRunResponse | BackgroundRunResponse
+@dataclass(frozen=True)
+class CompletedRunResponse:
+    stdout: str
+    stdout_encoding: OutputEncoding
+    stderr: str
+    stderr_encoding: OutputEncoding
+    exit_code: int | None
+    session_id: str | None = None
+    run_id: str | None = None
+    state: str | None = None
+
+
+@dataclass(frozen=True)
+class Run:
+    run_id: str
+    state: RunState
+    started_at: str
+    exit_code: int | None
+    stdout: str
+    stdout_encoding: OutputEncoding
+    stderr: str
+    stderr_encoding: OutputEncoding
+    session_id: str | None = None
+    command: str | None = None
+    completed_at: str | None = None
+    fail_reason: str | None = None
+    retry_count: int | None = 0
+    vm_id: str | None = None
+    vm_name: str | None = None
+    source_org_id: str | None = None
+    region: str | None = None
+    provider: Provider | None = None
 
 
 SyncWriteEntry: TypeAlias = (
@@ -1713,7 +1712,7 @@ SyncWriteEntry: TypeAlias = (
 SyncReadResponse: TypeAlias = SyncReadInlineResponse | SyncReadPresignedResponse
 
 
-SyncEntryError: TypeAlias = (
+SyncFileError: TypeAlias = (
     SyncBadRequestError
     | SyncNotFoundError
     | SyncConflictError
@@ -1791,6 +1790,9 @@ class ListVmsResponse:
     next_cursor: str | None = None
 
 
+RunResponse: TypeAlias = CompletedRunResponse | BackgroundRunResponse
+
+
 @dataclass(frozen=True)
 class SyncWriteOperationRequest:
     op: Literal['write']
@@ -1810,7 +1812,7 @@ class SyncChunkWriteResult:
     ranges: list[SyncByteRange]
     complete: bool
     written: bool
-    error: SyncEntryError | None = None
+    error: SyncFileError | None = None
 
 
 @dataclass(frozen=True)
@@ -1823,7 +1825,7 @@ class SyncPresignedWriteRequestResult:
     method: str
     complete: bool
     written: bool
-    error: SyncEntryError | None = None
+    error: SyncFileError | None = None
 
 
 @dataclass(frozen=True)
@@ -1832,7 +1834,7 @@ class SyncCommitWriteResult:
     size: int
     complete: bool
     written: bool
-    error: SyncEntryError | None = None
+    error: SyncFileError | None = None
 
 
 @dataclass(frozen=True)
