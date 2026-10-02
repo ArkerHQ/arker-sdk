@@ -91,6 +91,20 @@ Run results use `run_id` in pending, running, and terminal states. Completed
 results retain `runId` as a compatibility alias. Run stdout and stderr in JSON
 are base64 strings with explicit encoding fields. Human output remains raw bytes.
 
+## Live command output
+
+`arker run` prints stdout and stderr while the command runs and exits with the
+command's exit code. A command that finishes within a second is answered by one
+request. After that the CLI polls the run, starting at 500 ms and backing off to
+3 seconds, and writes each new byte once.
+
+The service retains the last 10 MiB of a run's output. If a stream outgrows
+that, the CLI warns, stops printing that stream, and prints what the service
+retained when the command finishes; those bytes can repeat or skip output.
+
+`--json` prints one JSON object when the command finishes, and
+`--time-to-background 0` returns a run ID immediately.
+
 ## Documentation and examples
 
 Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [examples](../examples).
