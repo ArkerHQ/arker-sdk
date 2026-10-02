@@ -1277,7 +1277,36 @@ export class VM {
     const fsp = fs.promises;
 
     const localRoot = nodePath.resolve(localDir);
-    const remoteRoot = "/" + remoteDir.replace(/^\/+/, "").replace(/\/+$/, "");
+    if (!remoteDir) throw new ArkerError("bad_request", "remoteDir must not be empty", 0);
+    let remoteRoot: string;
+    if (nodePath.posix.isAbsolute(remoteDir)) {
+      remoteRoot = nodePath.posix.normalize(remoteDir);
+    } else {
+      let session: Session | undefined;
+      if (options.sessionId) session = await this.getSession(options.sessionId);
+      else {
+        let cursor: string | undefined;
+        do {
+          const page = await this.listSessions({ cursor });
+          session = page.sessions.find((entry) => (entry.session_idx ?? 0) === 0);
+          cursor = page.next_cursor ?? undefined;
+        } while (!session && cursor);
+      }
+      if (!session) throw new ArkerError("not_found", "default guest session was not found", 0);
+      if (!nodePath.posix.isAbsolute(session.cwd)) {
+        throw new ArkerError("unexpected_response", "guest session returned a non-absolute working directory", 502);
+      }
+      remoteRoot = nodePath.posix.resolve(session.cwd, remoteDir);
+    }
+    let excluded = (_rel: string, _name: string) => false;
+    if (options.exclude?.length) {
+      const { patternToRegex } = await import("./dockerignore.js");
+      const rules = options.exclude.map((raw) => {
+        const pattern = raw.replace(/^\.\//, "").replace(/\/+$/, "");
+        return { regex: patternToRegex(pattern.replace(/^\/+/, "")), anchored: pattern.includes("/") };
+      });
+      excluded = (rel, name) => rules.some((rule) => rule.regex.test(rule.anchored ? rel : name));
+    }
 
     // 1. Authoritative remote manifest: relative path -> content hash and mode. A directory that
     //    doesn't exist yet (or an empty VM) yields {} -> everything is sent.
@@ -1300,12 +1329,13 @@ export class VM {
     const walk = async (dir: string): Promise<void> => {
       for (const dirent of await fsp.readdir(dir, { withFileTypes: true })) {
         const abs = nodePath.join(dir, dirent.name);
+        const rel = nodePath.relative(localRoot, abs).split(nodePath.sep).join("/");
+        if (excluded(rel, dirent.name)) continue;
         if (dirent.isSymbolicLink()) continue;
         if (dirent.isDirectory()) { await walk(abs); continue; }
         if (!dirent.isFile()) continue;
         // bigint stats: nanosecond timestamps, and ino/dev without precision loss.
         const st = await fsp.stat(abs, { bigint: true });
-        const rel = nodePath.relative(localRoot, abs).split(nodePath.sep).join("/");
         // Filtered BEFORE hashing, so an ignored file cannot perturb the
         // incremental diff — not merely skipped at upload time.
         if (options.ignore?.(rel)) continue;
@@ -1329,9 +1359,9 @@ export class VM {
 
     // 3. Diff local vs the REMOTE manifest -> the set to transfer.
     const cache = options.cache;
-    const result: SyncDirResult = { sent: 0, skipped: 0, bytesSent: 0 };
+    const result: SyncDirResult = { remoteDir: remoteRoot, sent: 0, skipped: 0, bytesSent: 0 };
     if (manifest.truncated) result.manifestTruncated = true;
-    const changed: Array<{ rel: string; abs: string }> = [];
+    const changed: Array<{ rel: string; abs: string; bytes: number }> = [];
 
     // Hash with bounded concurrency, streaming each file rather than reading it
     // whole. Two distinct wins, and it is worth being precise about which:
@@ -1400,7 +1430,7 @@ export class VM {
         result.skipped += 1;
         continue;
       }
-      changed.push({ rel: file.rel, abs: file.abs });
+      changed.push({ rel: file.rel, abs: file.abs, bytes: file.sig.size });
       result.sent += 1;
       result.bytesSent += file.sig.size;
     }
@@ -1411,10 +1441,17 @@ export class VM {
     // 4. Ship the changed files as ONE tarball and extract it in the guest. The
     //    extract's exit is checked, so a failure surfaces (never a silent partial);
     //    the manifest also fails safe — any omitted file is re-sent next call.
-    if (changed.length > 0) await this.uploadAndExtractTarball(changed, localRoot, remoteRoot, fsp);
+    if (options.dryRun) {
+      result.dryRun = true;
+      result.planned = changed.map(({ rel, bytes }) => ({ path: rel, bytes }));
+      result.sent = 0;
+      result.bytesSent = 0;
+    } else if (changed.length > 0) {
+      await this.uploadAndExtractTarball(changed, localRoot, remoteRoot, fsp);
+    }
     // Only after the upload succeeded — persisting earlier would record files
     // as synced that never made it.
-    if (!options.cache) await saveStatCache(cacheFile, fresh);
+    if (!options.cache && !options.dryRun) await saveStatCache(cacheFile, fresh);
     const round = (v: number) => Math.round(v * 10) / 10;
     result.timings = {
       manifestMs: round(manifestMs),
@@ -2412,6 +2449,12 @@ function bytesToBase64(data: Uint8Array): string {
 
 /** Result of {@link VM.syncDir}. */
 export interface SyncDirResult {
+  /** Absolute guest directory the files land in. */
+  remoteDir: string;
+  /** Present for previews; no files were uploaded. */
+  dryRun?: boolean;
+  /** Files that would be uploaded, in sorted relative-path order. Present only in a preview. */
+  planned?: Array<{ path: string; bytes: number }>;
   /** Files uploaded (new or changed on the VM). */
   sent: number;
   /** Files already up-to-date on the VM (skipped). */
@@ -2433,6 +2476,15 @@ export interface SyncDirResult {
 
 /** Options for {@link VM.syncDir}. */
 export interface SyncDirOptions {
+  /** Resolve a relative `remoteDir` against this session's working directory. Defaults to session 0. */
+  sessionId?: string;
+  /** Plan the upload without writing guest files or running extraction. */
+  dryRun?: boolean;
+  /** Globs (`*`, `?`, `**`) to leave out. A pattern without a slash matches a
+   * file or directory name at any depth; one with a slash matches the path
+   * relative to `localDir`. An excluded directory is not entered. */
+  exclude?: string[];
+
   /** Caller-owned accelerator cache: absolute local path -> {size, mtimeMs, hash}.
    * Reused across calls it skips re-hashing files whose (size, mtime) are
    * unchanged. Pure optimization — it never affects which files are sent. */

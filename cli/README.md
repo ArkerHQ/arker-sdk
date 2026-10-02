@@ -71,6 +71,17 @@ arker sync <vm-id> /tmp/hello.txt --read
 arker shell <vm-id>
 ```
 
+Sync a whole directory, uploading only the files whose content or permissions differ:
+
+```bash
+arker sync-dir <vm-id> ./project project --exclude .env --exclude .git --exclude node_modules --dry-run
+arker sync-dir <vm-id> ./project project --exclude .env --exclude .git --exclude node_modules
+```
+
+A relative remote path resolves against the working directory of the VM's default session, or of the session named by `--session-id`; `~` is not expanded. `--dry-run` lists what would be uploaded and writes nothing to the VM.
+
+`--exclude` takes a glob (`*`, `?`, `**`) and is repeatable. A pattern without a slash matches a file or directory name at any depth; a pattern with a slash, such as `/build` or `'docs/**'`, matches the path relative to the local directory. An excluded directory is skipped with everything under it. Nothing is excluded by default, `.gitignore` is not read, and files already on the VM are never deleted.
+
 Delete the VM when you are finished:
 
 ```bash
