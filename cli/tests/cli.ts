@@ -1114,6 +1114,19 @@ async function testStructuredErrorsDoNotRepeatCode(): Promise<void> {
   });
 }
 
+async function testNotFoundNamesAuthenticatedOrg(): Promise<void> {
+  await withCapturedServer((request, res) => {
+    if (request.url === "/api/v1/whoami") return jsonResponse(res, { org_id: "org_1", org_name: "Acme" });
+    jsonResponse(res, {
+      error: { code: "not_found", message: "VM missing", timestamp: "2026-07-21T00:00:00Z" },
+    }, 404);
+  }, async (baseUrl) => {
+    const result = await runCli(baseUrl, ["run", "vm_missing", "true"]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /authenticated as org Acme \(org_1\)/);
+  });
+}
+
 async function testFalseMutationResultsExitNonzero(): Promise<void> {
   const cases = [
     { args: ["runs", "rm", "vm_1", "run_1"], response: { cancelled: false } },
@@ -1360,6 +1373,7 @@ await testNoPipeReadsFileBytes();
 await testShellSetupUsesPackagedCli();
 await testShellRequiresVmOrSourceBeforeRequest();
 await testStructuredErrorsDoNotRepeatCode();
+await testNotFoundNamesAuthenticatedOrg();
 await testFalseMutationResultsExitNonzero();
 await testRemainingHttpCommandSurface();
 await testPoliciesGetAndSet();
