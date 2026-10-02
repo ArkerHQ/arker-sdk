@@ -654,6 +654,13 @@ function die(msg: string): never {
   process.exit(1);
 }
 
+async function hintAuthenticatedOrg(client: Arker): Promise<void> {
+  try {
+    const { org_id, org_name } = await client.whoami();
+    err(`hint: authenticated as org ${org_name} (${org_id}); a resource owned by another org is reported as not found.`);
+  } catch {}
+}
+
 function fmtVm(vm: VM | Vm): string {
   const provider = vm.provider ?? "?";
   const region = vm.region ?? "?";
@@ -2206,9 +2213,10 @@ async function main(): Promise<void> {
   }
   const { command: cmd, args } = invocation;
 
+  let client: Arker | undefined;
   try {
     if (cmd === "regions") return await cmdRegions(args);
-    const client = clientFromArgs(args, {
+    client = clientFromArgs(args, {
       requiresComputePlacement: commandRequiresComputePlacement(cmd, args),
     });
     switch (cmd) {
@@ -2257,6 +2265,7 @@ async function main(): Promise<void> {
   } catch (e) {
     if (e instanceof ArkerError) {
       err(e.message);
+      if (e.code === "not_found" && client) await hintAuthenticatedOrg(client);
       process.exit(1);
     }
     throw e;
