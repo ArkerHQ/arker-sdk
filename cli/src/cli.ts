@@ -41,6 +41,7 @@ import type {
   PoolQuoteRequest,
   PoolResources,
   ForkOptions,
+  RunOptions,
   RunRecord,
   RunSignal,
   VM,
@@ -48,6 +49,10 @@ import type {
   Vm,
   ListVmsParameters,
 } from "@arker-ai/sdk";
+
+/** A command that finishes within this window costs one request, as before;
+ *  a longer one is backgrounded and its output is polled while it runs. */
+const RUN_STREAM_AFTER_SECS = 1;
 
 /** Signals the service accepts, per RunRequest.signal in the OpenAPI contract. */
 const RUN_SIGNALS = ["SIGINT", "SIGTERM", "SIGKILL", "SIGHUP"] as const;
@@ -979,35 +984,29 @@ async function cmdRun(args: ParsedArgs, client: Arker): Promise<void> {
     ? undefined
     : readJsonObject(policiesFile, "policy document") as PolicyDoc;
   const streamOutput = !args.flags.json && args.flags["time-to-background"] === undefined;
-  const vm = client.vm(vmId);
-  let streamed = false;
   const result: RunResult = await withSecretRedaction(
     policySecretValues(policies),
-    async () => {
-      const result = await vm.run(command, {
-        timeout: numFlag(args, "timeout"),
-        time_to_background: streamOutput ? 0 : numFlag(args, "time-to-background"),
-        queueing_timeout: numFlag(args, "queueing-timeout"),
-        session_id: args.flags["session-id"] as string | undefined,
-        ...(sessionIdx !== undefined ? { session_idx: sessionIdx } : {}),
-        end_symbol: args.flags["end-symbol"] as string | undefined,
-        ...(policies !== undefined ? { policies } : {}),
-        idempotencyKey: args.flags["idempotency-key"] as string | undefined,
-      });
-      if (!streamOutput || result.type !== "background") return result;
-      const completed = await vm.waitForRun(result.runId, {
-        timeout: numFlag(args, "timeout"),
-        onOutput: ({ stdout, stderr, replaced }) => {
-          if (replaced?.length) process.stderr.write(`arker: remote ${replaced.join(" and ")} capture changed; showing its final retained output at completion. Some bytes can repeat or be missing.\n`);
-          if (stdout.length) process.stdout.write(stdout);
-          if (stderr.length) process.stderr.write(stderr);
-        },
-      });
-      streamed = true;
-      return completed;
-    },
+    () => client.vm(vmId).run(command, {
+      timeout: numFlag(args, "timeout"),
+      time_to_background: streamOutput ? RUN_STREAM_AFTER_SECS : numFlag(args, "time-to-background"),
+      queueing_timeout: numFlag(args, "queueing-timeout"),
+      session_id: args.flags["session-id"] as string | undefined,
+      ...(sessionIdx !== undefined ? { session_idx: sessionIdx } : {}),
+      end_symbol: args.flags["end-symbol"] as string | undefined,
+      ...(policies !== undefined ? { policies } : {}),
+      idempotencyKey: args.flags["idempotency-key"] as string | undefined,
+      ...(streamOutput ? { onOutput: writeRunOutput } : {}),
+    }),
   );
-  printRunResult(result, Boolean(args.flags.json), streamed);
+  printRunResult(result, Boolean(args.flags.json), streamOutput);
+}
+
+function writeRunOutput({ stdout, stderr, replaced }: Parameters<NonNullable<RunOptions["onOutput"]>>[0]): void {
+  if (replaced) {
+    err(`${replaced.join(" and ")} outgrew the output the service retains; the rest is printed when the command finishes and may repeat or skip bytes`);
+  }
+  if (stdout.length) process.stdout.write(stdout);
+  if (stderr.length) process.stderr.write(stderr);
 }
 
 interface PrintableRun {
@@ -1027,7 +1026,8 @@ function printRunResult(result: RunResult, json: boolean, streamed = false): voi
     out({ run_id: result.runId, state: result.state });
     return;
   }
-  printCompletedRun({ ...result, stdout: streamed ? new Uint8Array(0) : result.stdoutBytes, stderr: streamed ? new Uint8Array(0) : result.stderrBytes }, json);
+  const none = new Uint8Array(0);
+  printCompletedRun({ ...result, stdout: streamed ? none : result.stdoutBytes, stderr: streamed ? none : result.stderrBytes }, json);
 }
 
 function printStoredRun(run: RunRecord, json: boolean): void {
@@ -1992,6 +1992,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     notes: [
       "CLI options must appear before <command>; subsequent flags are passed to the",
       "remote command. Use -- before <command> when it itself begins with a dash.",
+      "Output is printed while the command runs; --json prints one object when it finishes.",
     ],
   },
   runs: {
