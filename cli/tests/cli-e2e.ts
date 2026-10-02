@@ -16,6 +16,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -74,12 +77,35 @@ async function testForkRunSyncAndRemove(): Promise<void> {
 
     const get = await ok(["vms", "get", vmId]);
     assert.ok(get.stdout.includes(vmId), `vms get did not name the VM: ${get.stdout}`);
+
+    await testSyncDir(vmId);
   } finally {
     await ok(["vms", "rm", vmId]);
   }
 
   const gone = await runCli(["vms", "get", vmId]);
   assert.notEqual(gone.code, 0, "vms get on a deleted VM should fail");
+}
+
+async function testSyncDir(vmId: string): Promise<void> {
+  const local = mkdtempSync(join(tmpdir(), "arker-cli-e2e-"));
+  try {
+    writeFileSync(join(local, "main.txt"), MARKER);
+    writeFileSync(join(local, ".env"), "dummy");
+    await ok(["run", vmId, "mkdir -p /tmp/cli-e2e && cd /tmp/cli-e2e"]);
+    const args = ["sync-dir", vmId, local, "project", "--exclude", ".env"];
+
+    const preview = await ok([...args, "--dry-run"]);
+    assert.match(preview.stdout, /^would upload 1 file.* to \/tmp\/cli-e2e\/project\nupload\tmain\.txt\n$/);
+    assert.equal((await ok(["run", vmId, "ls -A /tmp/cli-e2e"])).stdout, "", "a preview must not write to the VM");
+
+    await ok(args);
+    assert.equal((await ok(["run", vmId, "ls -A /tmp/cli-e2e/project"])).stdout, "main.txt\n");
+    assert.equal((await ok(["sync", vmId, "/tmp/cli-e2e/project/main.txt"])).stdout, MARKER);
+    assert.match((await ok([...args, "--dry-run"])).stdout, /^would upload 0 file\(s\), skip 1,/);
+  } finally {
+    rmSync(local, { recursive: true, force: true });
+  }
 }
 
 async function testUnauthenticatedRequestFails(): Promise<void> {
