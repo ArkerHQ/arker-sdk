@@ -382,6 +382,8 @@ export type RunOptions = Partial<Omit<RunRequest, "command">> & {
    * the final retained snapshot, which can overlap bytes already delivered.
    */
   onOutput?: (chunk: { stdout: Uint8Array; stderr: Uint8Array; replaced?: ("stdout" | "stderr")[] }) => void;
+  /** Called with the run's ID when the server backgrounds the run, before run() polls it. */
+  onRunStarted?: (runId: string) => void;
 };
 export type RunResponse = ApiSchema<"RunResponse">;
 export type CompletedRunResponse = ApiSchema<"CompletedRunResponse">;
@@ -1108,7 +1110,7 @@ export class VM {
   async run(command: string, options: RunOptions): Promise<RunResult>;
   async run(command: string, options: RunOptions = {}): Promise<RunResult> {
     rejectUnsupportedRunNetworkInputs(options);
-    const { idempotencyKey, onOutput, stdin, ...body } = options;
+    const { idempotencyKey, onOutput, onRunStarted, stdin, ...body } = options;
     if (stdin !== undefined) {
       if (body.stdin_base64 != null) throw new Error("use stdin or stdin_base64, not both");
       const bytes = typeof stdin === "string" ? new TextEncoder().encode(stdin) : stdin;
@@ -1129,6 +1131,7 @@ export class VM {
       options.queueing_timeout,
     );
     const result = parseRunResponse(response);
+    if (result.type === "background") onRunStarted?.(result.runId);
     // The server backgrounds a run that outlived its sync window. When the
     // caller did NOT ask to skip the wait, poll getRun() to a terminal state
     // and hand back the completed run so the synchronous call is transparent.
@@ -1170,13 +1173,18 @@ export class VM {
    * await vm.signal("SIGKILL", { sessionIdx: 0 });
    * await vm.run("echo back");               // session is usable again
    * ```
+   *
+   * `runId` instead interrupts exactly that run, and only with `SIGINT`: a run
+   * that has already finished is acknowledged without signalling whatever the
+   * session runs next. It cannot be combined with a session selector.
    */
   async signal(
     signal: RunSignal,
-    options: { sessionId?: string; sessionIdx?: number } = {},
+    options: { sessionId?: string; sessionIdx?: number; runId?: string } = {},
   ): Promise<CompletedRunResult> {
     const request: RunRequest = {
       signal,
+      ...(options.runId !== undefined ? { signal_run_id: options.runId } : {}),
       ...(options.sessionId !== undefined ? { session_id: options.sessionId } : {}),
       ...(options.sessionIdx !== undefined ? { session_idx: options.sessionIdx } : {}),
     } as RunRequest;
