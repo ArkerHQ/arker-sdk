@@ -24,7 +24,9 @@ until arker run "$VM" "command -v chromium" >/dev/null 2>&1; do sleep 5; done
 # open <url> fullscreen on the VNC desktop (display :99)
 arker sync "$VM" /usr/local/bin/open-url <<'SH'
 #!/usr/bin/env bash
-export DISPLAY=:99 HOME=/root
+# HOME is left unset here so it inherits the VM's default account home
+# directory rather than hardcoding one.
+export DISPLAY=:99
 pkill -f chromium 2>/dev/null; sleep 1
 nohup chromium --kiosk --no-sandbox --no-first-run --disable-gpu --disable-dev-shm-usage --user-data-dir=/tmp/c "$1" >/dev/null 2>&1 &
 until xdotool search --class chromium >/dev/null 2>&1; do sleep 0.5; done
