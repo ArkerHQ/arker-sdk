@@ -26,7 +26,7 @@ const SOURCE_VM = process.env.ARKER_SOURCE_VM;
 const MARKER = "hello-from-arker-cli";
 const REMOTE_PATH = "/home/user/cli-e2e.txt";
 
-type CliResult = { code: number | null; stdout: string; stderr: string };
+type CliResult = { code: number | null; stdout: string; stderr: string; msFromFirstStdoutToExit?: number };
 
 async function runCli(args: string[], stdin?: string): Promise<CliResult> {
   const child = spawn(cliRuntime, [cliEntry, ...args], {
@@ -37,11 +37,13 @@ async function runCli(args: string[], stdin?: string): Promise<CliResult> {
   if (stdin !== undefined) child.stdin!.end(stdin);
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
-  child.stdout!.on("data", (c: Buffer) => { stdout.push(c); });
+  let firstStdoutAt: number | undefined;
+  child.stdout!.on("data", (c: Buffer) => { firstStdoutAt ??= Date.now(); stdout.push(c); });
   child.stderr!.on("data", (c: Buffer) => { stderr.push(c); });
   const [code] = (await once(child, "close")) as [number | null];
   return {
     code,
+    msFromFirstStdoutToExit: firstStdoutAt === undefined ? undefined : Date.now() - firstStdoutAt,
     stdout: Buffer.concat(stdout).toString("utf8"),
     stderr: Buffer.concat(stderr).toString("utf8"),
   };
@@ -69,6 +71,12 @@ async function testForkRunSyncAndRemove(): Promise<void> {
     assert.equal(Buffer.from(run.stdout, "base64").toString(), MARKER + "\n");
     assert.ok(run.run_id, "completed JSON run must include run_id");
     assert.equal(run.runId, run.run_id);
+
+    const live = await runCli(["run", vmId, "printf 'start\\000'; echo warning >&2; sleep 4; echo done; exit 7"]);
+    assert.equal(live.code, 7, live.stderr);
+    assert.equal(live.stdout, "start\0done\n");
+    assert.equal(live.stderr, "warning\n");
+    assert.ok((live.msFromFirstStdoutToExit ?? 0) >= 1000, "run output was not printed before the command finished");
 
     const write = JSON.parse((await ok(["sync", vmId, REMOTE_PATH, MARKER, "--json"])).stdout);
     assert.deepEqual(write, { path: REMOTE_PATH, written: true, bytes: Buffer.byteLength(MARKER) });

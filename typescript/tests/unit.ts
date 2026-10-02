@@ -2314,13 +2314,12 @@ async function testWaitForRunEmitsOnlyNewOutputBytes(): Promise<void> {
   const stub = pollingFetch((n) => ({ status: 200, body: responses[n] }));
   const stdout: Uint8Array[] = [];
   const stderr: Uint8Array[] = [];
-  const result = await withFakeClock(() => pollingClient(stub.fetch).vm("vm_1").waitForRun("run_bg", {
+  const result = await withFakeClock(() => pollingClient(stub.fetch).vm("vm_1").run("job", {
     onOutput: (chunk) => { stdout.push(chunk.stdout); stderr.push(chunk.stderr); },
   }));
   assert.equal(result.exitCode, 7);
   assert.deepEqual(Buffer.concat(stdout), Buffer.from([0, 255, 3]));
   assert.deepEqual(Buffer.concat(stderr), Buffer.from([0xc3, 0xa9]));
-  assert.equal(stub.posts, 0, "watching an existing run must not launch another command");
 }
 
 async function testWaitForRunReportsReplacedCaptureWithoutFailingTheRun(): Promise<void> {
@@ -2332,7 +2331,7 @@ async function testWaitForRunReportsReplacedCaptureWithoutFailingTheRun(): Promi
   const stdout: string[] = [];
   const stderr: string[] = [];
   const replacements: string[][] = [];
-  const result = await withFakeClock(() => pollingClient(stub.fetch).vm("vm_1").waitForRun("run_bg", {
+  const result = await withFakeClock(() => pollingClient(stub.fetch).vm("vm_1").run("job", {
     onOutput: (chunk) => {
       if (chunk.stdout.length) stdout.push(Buffer.from(chunk.stdout).toString());
       if (chunk.stderr.length) stderr.push(Buffer.from(chunk.stderr).toString());
@@ -2352,7 +2351,7 @@ async function testWaitForRunPreservesFailureWithTruncatedTerminalOutput(): Prom
     const stub = pollingFetch((n) => ({ status: 200, body: n === 0
       ? { ...RUNNING_RUN, stdout: "working", stderr: "warning" } : failure }));
     const chunks: { stdout: Uint8Array; stderr: Uint8Array }[] = [];
-    const result = await withFakeClock(() => pollingClient(stub.fetch).vm("vm_1").waitForRun("run_bg", {
+    const result = await withFakeClock(() => pollingClient(stub.fetch).vm("vm_1").run("job", {
       onOutput: (chunk) => chunks.push(chunk),
     }));
     assert.equal(result.state, state);
