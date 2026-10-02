@@ -51,8 +51,9 @@ import type {
 } from "@arker-ai/sdk";
 
 /** A command that finishes within this window costs one request, as before;
- *  a longer one is backgrounded and its output is polled while it runs. */
-const RUN_STREAM_AFTER_SECS = 1;
+ *  a longer one is backgrounded, which is when its output can be polled and
+ *  its run ID is known for Ctrl-C. */
+const RUN_SYNC_WINDOW_SECS = 1;
 
 const RUN_STDIN_MAX_BYTES = 2 ** 20;
 
@@ -986,28 +987,98 @@ async function cmdRun(args: ParsedArgs, client: Arker): Promise<void> {
   const policies = policiesFile === undefined
     ? undefined
     : readJsonObject(policiesFile, "policy document") as PolicyDoc;
-  const streamOutput = !args.flags.json && args.flags["time-to-background"] === undefined;
+  const waited = args.flags["time-to-background"] === undefined;
+  const streamOutput = waited && !args.flags.json;
   const endSymbol = args.flags["end-symbol"] as string | undefined;
   if (args.flags.stdin && endSymbol !== undefined && endSymbol !== "auto") {
     die("--stdin cannot be combined with an explicit --end-symbol");
   }
   const stdin = args.flags.stdin ? await readAllStdin(RUN_STDIN_MAX_BYTES) : undefined;
-  const result: RunResult = await withSecretRedaction(
-    policySecretValues(policies),
-    () => client.vm(vmId).run(command, {
-      stdin,
-      timeout: numFlag(args, "timeout"),
-      time_to_background: streamOutput ? RUN_STREAM_AFTER_SECS : numFlag(args, "time-to-background"),
-      queueing_timeout: numFlag(args, "queueing-timeout"),
-      session_id: args.flags["session-id"] as string | undefined,
-      ...(sessionIdx !== undefined ? { session_idx: sessionIdx } : {}),
-      end_symbol: endSymbol,
-      ...(policies !== undefined ? { policies } : {}),
-      idempotencyKey: args.flags["idempotency-key"] as string | undefined,
-      ...(streamOutput ? { onOutput: writeRunOutput } : {}),
-    }),
-  );
+  const vm = client.vm(vmId);
+  const sigint = waited ? controlRunWithSigint(vm) : undefined;
+  let result: RunResult;
+  try {
+    result = await withSecretRedaction(
+      policySecretValues(policies),
+      () => vm.run(command, {
+        stdin,
+        timeout: numFlag(args, "timeout"),
+        time_to_background: waited ? RUN_SYNC_WINDOW_SECS : numFlag(args, "time-to-background"),
+        queueing_timeout: numFlag(args, "queueing-timeout"),
+        session_id: args.flags["session-id"] as string | undefined,
+        ...(sessionIdx !== undefined ? { session_idx: sessionIdx } : {}),
+        end_symbol: endSymbol,
+        ...(policies !== undefined ? { policies } : {}),
+        idempotencyKey: args.flags["idempotency-key"] as string | undefined,
+        ...(streamOutput ? { onOutput: writeRunOutput } : {}),
+        onRunStarted: sigint?.started,
+      }),
+    );
+  } finally {
+    sigint?.stop();
+  }
   printRunResult(result, Boolean(args.flags.json), streamOutput);
+  if (sigint?.cancelled && result.state === "cancelled") process.exitCode = 130;
+  if (sigint?.inFlight) process.stdout.write("", () => process.exit());
+}
+
+/** Ctrl-C while waiting on a run: the first interrupts it, the second cancels
+ *  it, the third stops waiting. Presses before the run has an ID are held. */
+function controlRunWithSigint(vm: VM) {
+  let runId: string | undefined;
+  let presses = 0;
+  let waiting = true;
+  let inFlight = 0;
+
+  const deliver = async (): Promise<void> => {
+    if (runId === undefined) return;
+    const id = runId;
+    const cancel = presses > 1;
+    inFlight += 1;
+    try {
+      while (waiting && cancel === presses > 1) {
+        try {
+          await (cancel ? vm.cancelRun(id) : vm.signal("SIGINT", { runId: id }));
+          return;
+        } catch (error) {
+          if (!waiting) return;
+          // An acknowledged run is unavailable until the guest can signal it.
+          if (!(error instanceof ArkerError) || error.code !== "unavailable") {
+            return err(`could not ${cancel ? "cancel" : "interrupt"} run ${id}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
+    } finally {
+      inFlight -= 1;
+    }
+  };
+
+  const onSigint = (): void => {
+    presses += 1;
+    if (presses > 2) {
+      err(runId === undefined ? "stopped waiting" : `stopped waiting; run ${runId} may still be going`);
+      process.exit(130);
+    }
+    err(presses === 1
+      ? "interrupting the run; press Ctrl-C again to cancel it"
+      : "cancelling the run; press Ctrl-C again to stop waiting");
+    void deliver();
+  };
+  process.on("SIGINT", onSigint);
+
+  return {
+    started(id: string): void {
+      runId = id;
+      if (presses) void deliver();
+    },
+    stop(): void {
+      waiting = false;
+      process.removeListener("SIGINT", onSigint);
+    },
+    get cancelled(): boolean { return presses > 1; },
+    get inFlight(): boolean { return inFlight > 0; },
+  };
 }
 
 function writeRunOutput({ stdout, stderr, replaced }: Parameters<NonNullable<RunOptions["onOutput"]>>[0]): void {
@@ -2008,6 +2079,8 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       "CLI options must appear before <command>; subsequent flags are passed to the",
       "remote command. Use -- before <command> when it itself begins with a dash.",
       "Output is printed while the command runs; --json prints one object when it finishes.",
+      "Ctrl-C interrupts the command, a second cancels it, and a third stops waiting.",
+      "With --time-to-background, Ctrl-C only stops the CLI.",
       "stdin is read only with --stdin: the command then runs in a child shell of the",
       "session, so its cd and export do not persist.",
     ],

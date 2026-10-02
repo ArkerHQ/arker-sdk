@@ -105,6 +105,14 @@ retained when the command finishes; those bytes can repeat or skip output.
 `--json` prints one JSON object when the command finishes, and
 `--time-to-background 0` returns a run ID immediately.
 
+## Interrupting a run
+
+While `arker run` waits for a command, Ctrl-C sends SIGINT to that run, a
+second Ctrl-C cancels it, and a third stops waiting and leaves the run to the
+service. A cancelled run exits 130. A Ctrl-C pressed before the service has
+assigned the run an ID is delivered as soon as it has one. With
+`--time-to-background`, Ctrl-C only stops the CLI.
+
 ## Standard input
 
 `arker run` reads stdin only with `--stdin`, so a caller that leaves a pipe
