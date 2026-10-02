@@ -23,10 +23,10 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { readFileSync, existsSync, fstatSync, statSync, mkdirSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { readFileSync, existsSync, fstatSync, statSync, mkdirSync, writeFileSync, renameSync, rmSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 import {
@@ -562,7 +562,7 @@ function parseOption(
 
 // ── Config + client ────────────────────────────────────────────────
 
-interface CliConfig extends Record<string, unknown> {
+interface CliConfig {
   apiKey?: string;
   baseUrl?: string;
   region?: string;
@@ -570,77 +570,84 @@ interface CliConfig extends Record<string, unknown> {
   controlBaseUrl?: string;
 }
 
-function readFileConfig(): CliConfig {
-  for (const name of ["config.json", "config"]) {
-    const path = join(homedir(), ".arker", name);
-    if (!existsSync(path)) continue;
-    try {
-      const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-      if (!value || typeof value !== "object" || Array.isArray(value)) {
-        die(`configuration must be a JSON object: ${path}`);
-      }
-      const config = value as CliConfig;
-      for (const key of ["apiKey", "baseUrl", "region", "provider", "controlBaseUrl"]) {
-        if (config[key] !== undefined && typeof config[key] !== "string") {
-          die(`configuration ${key} must be a string: ${path}`);
-        }
-      }
-      return config;
-    } catch {
-      die(`cannot read configuration JSON: ${path}`);
-    }
-  }
-  return {};
+function configPath(): string {
+  const paths = ["config.json", "config"].map((name) => join(homedir(), ".arker", name));
+  return paths.find((path) => existsSync(path)) ?? paths[0]!;
 }
 
-function writeFileConfig(config: CliConfig): void {
-  const directory = join(homedir(), ".arker");
-  const temporary = join(directory, `.config-${randomUUID()}.tmp`);
-  let failed = false;
+function readFileConfig(path = configPath()): CliConfig {
+  if (!existsSync(path)) return {};
+  let value: unknown;
   try {
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    writeFileSync(temporary, JSON.stringify(config, null, 2) + "\n", { mode: 0o600, flag: "wx" });
-    renameSync(temporary, join(directory, "config.json"));
+    value = JSON.parse(readFileSync(path, "utf8"));
   } catch {
-    failed = true;
-  } finally {
-    try { rmSync(temporary, { force: true }); } catch { failed = true; }
+    die(`cannot read configuration JSON: ${path}`);
   }
-  if (failed) die(`cannot write configuration: ${join(directory, "config.json")}`);
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    die(`configuration must be a JSON object: ${path}`);
+  }
+  const config = value as Record<string, unknown>;
+  for (const key of ["apiKey", "baseUrl", "region", "provider", "controlBaseUrl"]) {
+    if (config[key] !== undefined && typeof config[key] !== "string") {
+      die(`configuration ${key} must be a string: ${path}`);
+    }
+  }
+  return config as CliConfig;
 }
+
+function writeFileConfig(path: string, config: CliConfig): void {
+  const target = existsSync(path) ? realpathSync(path) : path;
+  const temporary = join(dirname(target), `.config-${randomUUID()}.tmp`);
+  try {
+    mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+    writeFileSync(temporary, JSON.stringify(config, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+    renameSync(temporary, target);
+  } catch {
+    rmSync(temporary, { force: true });
+    die(`cannot write configuration: ${path}`);
+  }
+}
+
+const CONFIG_KEYS = ["provider", "region"] as const;
 
 async function cmdConfig(args: ParsedArgs): Promise<void> {
-  const [subcommand, key, value] = args.positional;
-  const keys = ["provider", "region"] as const;
-  if (subcommand !== "list" && (key === undefined || !keys.includes(key as typeof keys[number]))) {
-    die("config requires a key: provider or region");
+  const [subcommand, name, value] = args.positional;
+  if (subcommand === undefined) die("usage: arker config <set|get|list|unset> ...");
+  const path = configPath();
+  const config = readFileConfig(path);
+  if (subcommand === "list") {
+    const stored = Object.fromEntries(CONFIG_KEYS.flatMap((key) => config[key] === undefined ? [] : [[key, config[key]]]));
+    if (args.flags.json) return out(stored);
+    for (const [key, value] of Object.entries(stored)) out(`${key}=${value}`);
+    return;
   }
-  if (subcommand === "set" && (value === undefined || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(value))) {
-    die("config value must be a non-empty provider or region label (lowercase letters, numbers, and hyphens)");
+  if (name === undefined) {
+    die(`usage: arker config ${subcommand} <provider|region>${subcommand === "set" ? " <value>" : ""}`);
   }
-  const config = readFileConfig();
+  const key = CONFIG_KEYS.find((candidate) => candidate === name) ??
+    die(`unknown config key: ${name} (expected provider or region)`);
   switch (subcommand) {
-    case "list": {
-      const stored = Object.fromEntries(keys.filter((name) => config[name] !== undefined).map((name) => [name, config[name]]));
-      if (args.flags.json) out(stored);
-      else for (const [name, value] of Object.entries(stored)) out(`${name}=${value}`);
+    case "get": {
+      const stored = config[key] ?? die(`${key} is not set`);
+      out(args.flags.json ? { [key]: stored } : stored);
       return;
     }
-    case "get":
-      if (config[key!] === undefined) die(`configuration ${key} is not set`);
-      out(args.flags.json ? { [key!]: config[key!] } : config[key!]);
-      return;
     case "set":
-      config[key!] = value;
-      break;
+      if (value === undefined) die(`usage: arker config set ${key} <value>`);
+      if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(value)) {
+        die(`invalid ${key}: ${value} (expected lowercase letters, numbers, and hyphens)`);
+      }
+      writeFileConfig(path, { ...config, [key]: value });
+      out(args.flags.json ? { [key]: value } : `${key}=${value}`);
+      return;
     case "unset":
-      delete config[key!];
-      break;
-    default:
-      die("usage: arker config <set|get|list|unset> [key] [value]");
+      if (config[key] !== undefined) {
+        delete config[key];
+        writeFileConfig(path, config);
+      }
+      out(args.flags.json ? { unset: key } : `unset ${key}`);
+      return;
   }
-  writeFileConfig(config);
-  if (args.flags.json) out(subcommand === "set" ? { [key!]: value } : { unset: key });
 }
 
 function clientFromArgs(
@@ -665,7 +672,7 @@ function clientFromArgs(
   const configuredRegion = explicitRegion ?? file.region;
   if (requiresComputePlacement && !baseUrl && (!provider || !configuredRegion)) {
     die(
-      "Provider and region are required for compute commands. Set --provider and --region, or set ARKER_BASE_URL.",
+      "Provider and region are required for compute commands. Set --provider and --region, save defaults with 'arker config set', or set ARKER_BASE_URL.",
     );
   }
   if (!apiKey) {
@@ -2160,7 +2167,6 @@ function usage(command?: string, positional: string[] = []): void {
       "",
       "Usage:",
       "  arker <command> [args]",
-      "  arker config <set|get|list|unset> ...           manage placement defaults",
       "",
       "Shortcuts:",
       "  arker ls                                       list VMs",
@@ -2182,6 +2188,7 @@ function usage(command?: string, positional: string[] = []): void {
       "Resources:",
       "  arker regions                                  list available public placements",
       "  arker whoami                                   show the authenticated organization",
+      "  arker config <set|get|list|unset> ...          manage stored provider and region defaults",
       "  arker vms         <ls|get|rm|fork|run|update> ...",
       "  arker vms ls --source-org-id ArkerHQ --public  list the public VM catalog",
       "  arker runs ls [vm_id] [flags]              list organization or VM runs",

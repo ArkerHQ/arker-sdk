@@ -49,11 +49,12 @@ arker config unset region
 ```
 
 Flags override environment variables, which override stored defaults.
-The config commands read and write `~/.arker/config.json` without API access.
-`get` and `list` show stored values, not environment or flag overrides.
-Only provider and region are shown; other fields, including existing credentials,
-are preserved when the file is updated. `--json` emits a JSON result.
-An unset key makes `get` exit with status 1; unsetting it again succeeds.
+The config commands work without an API key or network access. They read and
+write `~/.arker/config.json`, or an existing `~/.arker/config` when there is no
+`config.json`. `get` and `list` show stored values, not environment or flag
+overrides. Only provider and region are shown; other fields, including
+credentials, are preserved when the file is updated. `--json` emits a JSON result.
+`get` exits with status 1 when the key is not set.
 
 The file can also be edited directly:
 

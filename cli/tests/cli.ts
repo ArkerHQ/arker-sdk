@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { closeSync, constants, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, constants, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { createServer as createHttp1Server, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer as createHttp2Server } from "node:http2";
@@ -780,16 +780,19 @@ async function testConfigCommandsAreLocalAndPreserveExistingSettings(): Promise<
   const directory = join(home, ".arker");
   const options = { home, authenticated: false };
   try {
+    const file = join(directory, "config");
     mkdirSync(directory);
-    writeFileSync(join(directory, "config"), JSON.stringify({ apiKey: "private-value", custom: { keep: true } }));
+    writeFileSync(file, JSON.stringify({ apiKey: "private-value", custom: { keep: true } }));
     for (const args of [["set", "provider", "aws"], ["set", "region", "us-west-2"]]) {
       const result = await runCli(undefined, ["config", ...args], options);
       assert.equal(result.code, 0, result.stderr);
       assert.doesNotMatch(stdoutText(result) + result.stderr, /private-value/);
     }
-    assert.deepEqual(JSON.parse(readFileSync(join(directory, "config.json"), "utf8")), {
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), {
       apiKey: "private-value", custom: { keep: true }, provider: "aws", region: "us-west-2",
     });
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    assert.deepEqual(readdirSync(directory), ["config"]);
     const get = await runCli(undefined, ["config", "get", "region"], options);
     assert.equal(stdoutText(get).trim(), "us-west-2");
     const list = await runCli(undefined, ["config", "list", "--json"], options);
@@ -797,13 +800,13 @@ async function testConfigCommandsAreLocalAndPreserveExistingSettings(): Promise<
     assert.doesNotMatch(stdoutText(list), /private-value|apiKey/);
     const unset = await runCli(undefined, ["config", "unset", "region"], options);
     assert.equal(unset.code, 0, unset.stderr);
-    const persisted = JSON.parse(readFileSync(join(directory, "config.json"), "utf8"));
+    const persisted = JSON.parse(readFileSync(file, "utf8"));
     assert.equal(persisted.region, undefined);
     assert.equal(persisted.apiKey, "private-value");
     const missing = await runCli(undefined, ["config", "get", "region"], options);
     assert.equal(missing.code, 1);
     assert.match(missing.stderr, /not set/);
-    for (const args of [["set", "unknown", "value"], ["set", "region"], ["list", "ignored"]]) {
+    for (const args of [[], ["set", "apiKey", "value"], ["set", "region"], ["set", "region", "US West"], ["list", "ignored"]]) {
       assert.equal((await runCli(undefined, ["config", ...args], options)).code, 1);
     }
     writeFileSync(join(directory, "config.json"), "{not-json private-value");
