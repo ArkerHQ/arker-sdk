@@ -31,7 +31,7 @@ import nodePath from "node:path";
 
 export type DockerIgnore = { ignores(relPath: string): boolean };
 
-function patternToRegex(pattern: string): RegExp {
+export function patternToRegex(pattern: string): RegExp {
   let out = "^";
   let i = 0;
   while (i < pattern.length) {

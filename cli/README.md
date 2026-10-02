@@ -80,6 +80,17 @@ arker sync <vm-id> /tmp/hello.txt --read
 arker shell <vm-id>
 ```
 
+Sync a whole directory, uploading only the files whose content or permissions differ:
+
+```bash
+arker sync-dir <vm-id> ./project project --exclude .env --exclude .git --exclude node_modules --dry-run
+arker sync-dir <vm-id> ./project project --exclude .env --exclude .git --exclude node_modules
+```
+
+A relative remote path resolves against the working directory of the VM's default session, or of the session named by `--session-id`; `~` is not expanded. `--dry-run` lists what would be uploaded and writes nothing to the VM.
+
+`--exclude` takes a glob (`*`, `?`, `**`) and is repeatable. A pattern without a slash matches a file or directory name at any depth; a pattern with a slash, such as `/build` or `'docs/**'`, matches the path relative to the local directory. An excluded directory is skipped with everything under it. Nothing is excluded by default, `.gitignore` is not read, and files already on the VM are never deleted.
+
 Delete the VM when you are finished:
 
 ```bash
@@ -95,27 +106,3 @@ Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [e
 ## License
 
 Apache-2.0
-
-## Directory sync
-
-Remote paths are absolute or relative to the default guest session's working
-directory. Use `--session-id` to select another session. No shell expansion is
-applied to paths.
-
-```sh
-arker sync-dir <vm_id> ./project ./project --dry-run \
-  --exclude .env --exclude .git --exclude node_modules
-arker sync-dir <vm_id> ./project ./project \
-  --exclude .env --exclude .git --exclude node_modules
-```
-
-`--exclude` is repeatable. A pattern without a slash matches a file or directory
-name at any depth. A pattern with a slash matches a path relative to the local
-root; for example, `--exclude 'docs/**'`. Quote globs so the local shell does not
-expand them. Matching includes dotfiles. Excluding a directory skips its contents.
-There are no automatic exclusions, and `.gitignore` is not loaded.
-
-`--dry-run` reads the remote manifest and lists files that would be uploaded. It
-does not write guest files or run extraction. With `--json`, the preview has
-`dryRun: true`, a `planned` array of relative paths, byte counts and modes, and
-zero `sent` and `bytesSent` counts. Unchanged files are counted in `skipped`.
