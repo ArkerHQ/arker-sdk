@@ -20,7 +20,6 @@ type CliResult = {
 type CliOptions = {
   onStdout?: (chunk: Buffer) => void;
   stdin?: string | Uint8Array;
-  stdinFile?: string;
   authenticated?: boolean;
   controlOnly?: boolean;
   home?: string;
@@ -109,13 +108,11 @@ async function runCli(baseUrl: string | undefined, args: string[], options: CliO
   }
   Object.assign(env, options.environment);
 
-  const inputFd = options.stdinFile === undefined ? undefined : openSync(options.stdinFile, "r");
   const child = spawn(cliRuntime, [cliEntry, ...args], {
     cwd: packageRoot,
     env,
-    stdio: [inputFd ?? (options.stdin === undefined ? "ignore" : "pipe"), "pipe", "pipe"],
+    stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
   });
-  if (inputFd !== undefined) closeSync(inputFd);
   if (options.stdin !== undefined) child.stdin!.end(options.stdin);
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
@@ -164,20 +161,30 @@ function stdoutText(result: CliResult): string {
   return result.stdout.toString("utf8");
 }
 
-async function testRunForwardsFiniteStdin(): Promise<void> {
-  for (const stdin of [Buffer.alloc(0), Buffer.from("hello\n"), Buffer.from([0, 255, 10, 128])]) {
+async function testRunSendsStdinOnlyWithFlag(): Promise<void> {
+  for (const stdin of [Buffer.alloc(0), Buffer.from([0, 255, 10, 128])]) {
     await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
-      const result = await runCli(baseUrl, ["run", "vm_1", "cat"], { stdin });
+      const result = await runCli(baseUrl, ["run", "--stdin", "vm_1", "cat"], { stdin });
       assert.equal(result.code, 0, result.stderr);
       assert.equal((requests[0]!.body as { stdin_base64?: string }).stdin_base64, stdin.toString("base64"));
     });
   }
   await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
-    const result = await runCli(baseUrl, ["run", "vm_1", "cat"], { stdin: Buffer.alloc(1024 * 1024 + 1) });
-    assert.equal(result.code, 1);
-    assert.match(result.stderr, /1 MiB/);
-    assert.equal(requests.length, 0);
+    const result = await runCli(baseUrl, ["run", "vm_1", "cat"], { stdin: "not sent" });
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal("stdin_base64" in (requests[0]!.body as object), false);
   });
+  for (const { args, stdin, message } of [
+    { args: ["run", "--stdin", "vm_1", "cat"], stdin: Buffer.alloc(1024 * 1024 + 1), message: /1 MiB/ },
+    { args: ["run", "--stdin", "--end-symbol", "done", "vm_1", "cat"], stdin: "", message: /--stdin.*--end-symbol/ },
+  ]) {
+    await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
+      const result = await runCli(baseUrl, args, { stdin });
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, message);
+      assert.equal(requests.length, 0);
+    });
+  }
 }
 
 async function testRunOptionsStopAtRemoteCommand(): Promise<void> {
@@ -1450,7 +1457,7 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
 
 await testForkAndUpdateSelectPools();
 await testConfigCommandsAreLocalAndPreserveExistingSettings();
-await testRunForwardsFiniteStdin();
+await testRunSendsStdinOnlyWithFlag();
 await testSyncAndMutationJsonResults();
 await testRunJsonKeepsRunIdAcrossStates();
 await testExtraOperandsFailBeforeRequest();
@@ -1506,27 +1513,3 @@ await testPoliciesSetFileReadsPipesAndRejectsDirectories();
 await testPoliciesSetRejectsInvalidJson();
 
 console.log("PASS cli");
-
-
-async function testRunRedirectedFileAndInvalidInputOptions(): Promise<void> {
-  const directory = mkdtempSync(join(tmpdir(), "arker-run-input-"));
-  try {
-    const file = join(directory, "stdin");
-    for (const bytes of [Buffer.alloc(0), Buffer.from([0, 255, 128, 10])]) {
-      writeFileSync(file, bytes);
-      await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
-        const result = await runCli(baseUrl, ["run", "vm_1", "cat"], { stdinFile: file });
-        assert.equal(result.code, 0, result.stderr);
-        assert.equal((requests[0]!.body as { stdin_base64: string }).stdin_base64, bytes.toString("base64"));
-      });
-    }
-    await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
-      const result = await runCli(baseUrl, ["run", "--end-symbol", "done", "vm_1", "cat"], { stdin: "" });
-      assert.equal(result.code, 1);
-      assert.match(result.stderr, /piped input.*--end-symbol/);
-      assert.doesNotMatch(result.stderr, /at .*\.(ts|js):/);
-      assert.equal(requests.length, 0);
-    });
-  } finally { rmSync(directory, { recursive: true, force: true }); }
-}
-await testRunRedirectedFileAndInvalidInputOptions();

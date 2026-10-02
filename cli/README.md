@@ -102,6 +102,21 @@ warns and prints what was kept when the command finishes. `--json` prints one
 object when the command finishes, and `--time-to-background 0` returns a run
 ID immediately.
 
+## Standard input
+
+`arker run` reads stdin only with `--stdin`, so a caller that leaves a pipe
+open cannot stall it:
+
+```bash
+printf 'hello\n' | arker run --stdin <vm-id> cat
+arker run --stdin <vm-id> sha256sum < archive.tar
+```
+
+Input is limited to 1 MiB and sent as exact bytes followed by EOF; an empty
+input still sends EOF. The command then runs in a child shell with the
+session's working directory and exported environment, so its `cd` and `export`
+changes do not persist. Use `arker shell` for interactive input.
+
 ## Documentation and examples
 
 Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [examples](../examples).
