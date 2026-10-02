@@ -78,6 +78,10 @@ async function testForkRunSyncAndRemove(): Promise<void> {
     assert.equal(live.stderr, "warning\n");
     assert.ok((live.msFromFirstStdoutToExit ?? 0) >= 1000, "run output was not printed before the command finished");
 
+    const piped = await ok(["run", "--stdin", "--timeout", "30", vmId, "cat; wc -c"], "hello\n");
+    assert.equal(piped.stdout, "hello\n6\n");
+    assert.equal((await ok(["run", "--stdin", "--timeout", "30", vmId, "wc -c"], "")).stdout, "0\n");
+
     const write = JSON.parse((await ok(["sync", vmId, REMOTE_PATH, MARKER, "--json"])).stdout);
     assert.deepEqual(write, { path: REMOTE_PATH, written: true, bytes: Buffer.byteLength(MARKER) });
     const read = JSON.parse((await ok(["sync", vmId, REMOTE_PATH, "--read", "--json"])).stdout);
