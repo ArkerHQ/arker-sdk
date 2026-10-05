@@ -94,6 +94,14 @@ Run `arker --help` for the available commands and flags.
 and the delete and cancel commands. Run results use `run_id` in every state;
 completed results also keep `runId`.
 
+## Running commands
+
+`arker run` prints output as the command runs and exits with the command's
+exit code. The service keeps the last 10 MiB of output; past that the CLI
+warns and prints what was kept when the command finishes. `--json` prints one
+object when the command finishes, and `--time-to-background 0` returns a run
+ID immediately.
+
 ## Documentation and examples
 
 Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [examples](../examples).

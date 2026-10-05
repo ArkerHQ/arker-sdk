@@ -372,6 +372,14 @@ export type RunOptions = Partial<Omit<RunRequest, "command">> & {
    * HTTP header. It does not enable automatic network-failure retries.
    */
   idempotencyKey?: string;
+  /**
+   * Receives each stdout and stderr byte once, as soon as it is known: while
+   * run() waits on a backgrounded run, or when the run completes. If the server
+   * replaces a captured stream because its retention limit was exceeded,
+   * `replaced` names that stream; its remaining bytes arrive at completion as
+   * the final retained snapshot, which can overlap bytes already delivered.
+   */
+  onOutput?: (chunk: { stdout: Uint8Array; stderr: Uint8Array; replaced?: ("stdout" | "stderr")[] }) => void;
 };
 export type RunResponse = ApiSchema<"RunResponse">;
 export type CompletedRunResponse = ApiSchema<"CompletedRunResponse">;
@@ -1098,7 +1106,7 @@ export class VM {
   async run(command: string, options: RunOptions): Promise<RunResult>;
   async run(command: string, options: RunOptions = {}): Promise<RunResult> {
     rejectUnsupportedRunNetworkInputs(options);
-    const { idempotencyKey, ...body } = options;
+    const { idempotencyKey, onOutput, ...body } = options;
     const headers = idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined;
     const request: RunRequest = { ...body, command };
     const response = await this._client._request<unknown>(
@@ -1115,7 +1123,10 @@ export class VM {
     // and hand back the completed run so the synchronous call is transparent.
     // Explicit zero is a pure pass-through — return the ack immediately.
     if (result.type === "background" && options.time_to_background !== 0) {
-      return this._awaitRun(result.runId, options.timeout);
+      return this._awaitRun(result.runId, options.timeout, onOutput);
+    }
+    if (result.type === "completed" && (result.stdoutBytes.length || result.stderrBytes.length)) {
+      onOutput?.({ stdout: result.stdoutBytes, stderr: result.stderrBytes });
     }
     return result;
   }
@@ -1189,14 +1200,19 @@ export class VM {
    * at a client-side deadline the caller never asked for would abandon a run
    * that is still going.
    */
-  private async _awaitRun(runId: string, timeoutSecs?: number | null): Promise<CompletedRunResult> {
+  private async _awaitRun(
+    runId: string,
+    timeoutSecs?: number | null,
+    onOutput?: RunOptions["onOutput"],
+  ): Promise<CompletedRunResult> {
     const budgetMs = runPollBudgetMs(timeoutSecs);
+    const stdoutCursor: RunOutputCursor = { emitted: new Uint8Array(0), replaced: false };
+    const stderrCursor: RunOutputCursor = { emitted: new Uint8Array(0), replaced: false };
     const deadline = budgetMs === null ? null : Date.now() + budgetMs;
     // budgetMs and deadline are null together, so the throw below can read
     // budgetMs without a non-null assertion.
-    let delay = RUN_POLL_INITIAL_MS;
     let consecutiveFailures = 0;
-    for (;;) {
+    for (let delay = 0; ; delay = delay ? Math.min(RUN_POLL_MAX_MS, Math.ceil(delay * RUN_POLL_BACKOFF)) : RUN_POLL_INITIAL_MS) {
       await sleep(delay);
       let run: RunRecord;
       try {
@@ -1213,11 +1229,23 @@ export class VM {
             0,
           );
         }
-        delay = Math.min(RUN_POLL_MAX_MS, Math.ceil(delay * RUN_POLL_BACKOFF));
         continue;
       }
       consecutiveFailures = 0;
-      if (TERMINAL_RUN_STATES.has(run.state)) return runToCompletedResult(run);
+      const terminal = TERMINAL_RUN_STATES.has(run.state);
+      if (onOutput) {
+        const replaced: ("stdout" | "stderr")[] = [];
+        const wasStdoutReplaced = stdoutCursor.replaced;
+        const wasStderrReplaced = stderrCursor.replaced;
+        const stdout = runOutputDelta(stdoutCursor, run.stdoutBytes, terminal, run.state === "completed");
+        const stderr = runOutputDelta(stderrCursor, run.stderrBytes, terminal, run.state === "completed");
+        if (!wasStdoutReplaced && stdoutCursor.replaced) replaced.push("stdout");
+        if (!wasStderrReplaced && stderrCursor.replaced) replaced.push("stderr");
+        if (stdout.length || stderr.length || replaced.length) {
+          onOutput({ stdout, stderr, ...(replaced.length ? { replaced } : {}) });
+        }
+      }
+      if (terminal) return runToCompletedResult(run);
       if (budgetMs !== null && deadline !== null && Date.now() >= deadline) {
         throw new ArkerError(
           "timeout",
@@ -1226,7 +1254,6 @@ export class VM {
           0,
         );
       }
-      delay = Math.min(RUN_POLL_MAX_MS, Math.ceil(delay * RUN_POLL_BACKOFF));
     }
   }
 
@@ -2169,6 +2196,29 @@ function decodeWireRun(wire: Run): RunRecord {
     stdoutBytes,
     stderrBytes,
   };
+}
+
+interface RunOutputCursor {
+  emitted: Uint8Array;
+  replaced: boolean;
+}
+
+function runOutputDelta(
+  cursor: RunOutputCursor,
+  current: Uint8Array,
+  terminal: boolean,
+  completed: boolean,
+): Uint8Array {
+  const { emitted } = cursor;
+  const sharedLength = Math.min(emitted.length, current.length);
+  if ((terminal && completed && current.length < emitted.length)
+      || !emitted.subarray(0, sharedLength).every((byte, index) => byte === current[index])) {
+    cursor.replaced = true;
+  }
+  if (cursor.replaced) return terminal ? current : new Uint8Array(0);
+  if (current.length <= emitted.length) return new Uint8Array(0);
+  cursor.emitted = current;
+  return current.subarray(emitted.length);
 }
 
 /** Project a terminal run-status (`Run`) into the `CompletedRunResult` shape
