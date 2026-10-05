@@ -90,15 +90,9 @@ Run `arker --help` for the available commands and flags.
 
 ## JSON output
 
-Use `--json` to keep results machine-readable. File reads return `path`,
-`content`, and `encoding: "base64"`, including for empty or binary files.
-File writes return `path`, `written`, and the number of `bytes` written.
-Delete and cancel commands return their API result object and exit nonzero
-when `deleted` or `cancelled` is false.
-
-Run results use `run_id` in pending, running, and terminal states. Completed
-results retain `runId` as a compatibility alias. Run stdout and stderr in JSON
-are base64 strings with explicit encoding fields. Human output remains raw bytes.
+`--json` prints one JSON object on stdout for every command, including `sync`
+and the delete and cancel commands. Run results use `run_id` in every state;
+completed results also keep `runId`.
 
 ## Documentation and examples
 
