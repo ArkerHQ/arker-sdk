@@ -161,6 +161,32 @@ function stdoutText(result: CliResult): string {
   return result.stdout.toString("utf8");
 }
 
+async function testRunSendsStdinOnlyWithFlag(): Promise<void> {
+  for (const stdin of [Buffer.alloc(0), Buffer.from([0, 255, 10, 128])]) {
+    await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
+      const result = await runCli(baseUrl, ["run", "--stdin", "vm_1", "cat"], { stdin });
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal((requests[0]!.body as { stdin_base64?: string }).stdin_base64, stdin.toString("base64"));
+    });
+  }
+  await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["run", "vm_1", "cat"], { stdin: "not sent" });
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal("stdin_base64" in (requests[0]!.body as object), false);
+  });
+  for (const { args, stdin, message } of [
+    { args: ["run", "--stdin", "vm_1", "cat"], stdin: Buffer.alloc(1024 * 1024 + 1), message: /1 MiB/ },
+    { args: ["run", "--stdin", "--end-symbol", "done", "vm_1", "cat"], stdin: "", message: /--stdin.*--end-symbol/ },
+  ]) {
+    await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
+      const result = await runCli(baseUrl, args, { stdin });
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, message);
+      assert.equal(requests.length, 0);
+    });
+  }
+}
+
 async function testRunOptionsStopAtRemoteCommand(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
     const result = await runCli(baseUrl, [
@@ -1431,6 +1457,7 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
 
 await testForkAndUpdateSelectPools();
 await testConfigCommandsAreLocalAndPreserveExistingSettings();
+await testRunSendsStdinOnlyWithFlag();
 await testSyncAndMutationJsonResults();
 await testRunJsonKeepsRunIdAcrossStates();
 await testExtraOperandsFailBeforeRequest();

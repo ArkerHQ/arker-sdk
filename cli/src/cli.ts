@@ -54,6 +54,8 @@ import type {
  *  a longer one is backgrounded and its output is polled while it runs. */
 const RUN_STREAM_AFTER_SECS = 1;
 
+const RUN_STDIN_MAX_BYTES = 2 ** 20;
+
 /** Signals the service accepts, per RunRequest.signal in the OpenAPI contract. */
 const RUN_SIGNALS = ["SIGINT", "SIGTERM", "SIGKILL", "SIGHUP"] as const;
 
@@ -154,6 +156,7 @@ const RUN_OPTIONS: OptionSpecs = {
   "queueing-timeout": { type: "integer", min: 0 },
   "session-id": { type: "string" },
   "session-idx": { type: "integer", min: 0 },
+  stdin: { type: "boolean" },
   timeout: { type: "integer", min: 0 },
   "time-to-background": { type: "integer", min: 0 },
 };
@@ -1053,15 +1056,21 @@ async function cmdRun(args: ParsedArgs, client: Arker): Promise<void> {
     ? undefined
     : readJsonObject(policiesFile, "policy document") as PolicyDoc;
   const streamOutput = !args.flags.json && args.flags["time-to-background"] === undefined;
+  const endSymbol = args.flags["end-symbol"] as string | undefined;
+  if (args.flags.stdin && endSymbol !== undefined && endSymbol !== "auto") {
+    die("--stdin cannot be combined with an explicit --end-symbol");
+  }
+  const stdin = args.flags.stdin ? await readAllStdin(RUN_STDIN_MAX_BYTES) : undefined;
   const result: RunResult = await withSecretRedaction(
     policySecretValues(policies),
     () => client.vm(vmId).run(command, {
+      stdin,
       timeout: numFlag(args, "timeout"),
       time_to_background: streamOutput ? RUN_STREAM_AFTER_SECS : numFlag(args, "time-to-background"),
       queueing_timeout: numFlag(args, "queueing-timeout"),
       session_id: args.flags["session-id"] as string | undefined,
       ...(sessionIdx !== undefined ? { session_idx: sessionIdx } : {}),
-      end_symbol: args.flags["end-symbol"] as string | undefined,
+      end_symbol: endSymbol,
       ...(policies !== undefined ? { policies } : {}),
       idempotencyKey: args.flags["idempotency-key"] as string | undefined,
       ...(streamOutput ? { onOutput: writeRunOutput } : {}),
@@ -1832,9 +1841,14 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-async function readAllStdin(): Promise<Uint8Array> {
+async function readAllStdin(maxBytes = Infinity): Promise<Uint8Array> {
   const chunks: Buffer[] = [];
-  for await (const chunk of input) chunks.push(chunk as Buffer);
+  let size = 0;
+  for await (const chunk of input) {
+    size += (chunk as Buffer).length;
+    if (size > maxBytes) die(`stdin is larger than the ${maxBytes / 2 ** 20} MiB that --stdin can send`);
+    chunks.push(chunk as Buffer);
+  }
   return new Uint8Array(Buffer.concat(chunks));
 }
 
@@ -1960,6 +1974,7 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   "started-after": { placeholder: "<timestamp>", desc: "include per-VM runs started at or after this RFC 3339 time" },
   "started-before": { placeholder: "<timestamp>", desc: "include per-VM runs started at or before this RFC 3339 time" },
   state: { desc: "filter by lifecycle state" },
+  stdin: { desc: "send this command's stdin to the remote command (at most 1 MiB)" },
   status: { placeholder: "<status[,status...]>", desc: "filter organization-wide activity by status class" },
   "status-max": { placeholder: "<code>", desc: "maximum organization-wide activity status code" },
   "status-min": { placeholder: "<code>", desc: "minimum organization-wide activity status code" },
@@ -2068,6 +2083,8 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       "CLI options must appear before <command>; subsequent flags are passed to the",
       "remote command. Use -- before <command> when it itself begins with a dash.",
       "Output is printed while the command runs; --json prints one object when it finishes.",
+      "stdin is read only with --stdin: the command then runs in a child shell of the",
+      "session, so its cd and export do not persist.",
     ],
   },
   runs: {
@@ -2286,6 +2303,7 @@ function usage(command?: string, positional: string[] = []): void {
       "  --time-to-background <seconds>  sync window; 0 returns a run id immediately (default 120)",
       "  --queueing-timeout <seconds>    queue up to this long instead of failing fast (also a fork flag)",
       "  --end-symbol <text>        stop synchronous output after this marker",
+      "  --stdin                    send stdin (at most 1 MiB) to the command",
       "  --policies-file <path>     replace VM policy before the command",
       "  --idempotency-key <key>    deduplicate retries of the run request",
       "",

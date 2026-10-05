@@ -102,6 +102,15 @@ warns and prints what was kept when the command finishes. `--json` prints one
 object when the command finishes, and `--time-to-background 0` returns a run
 ID immediately.
 
+Pipe input with `--stdin` (up to 1 MiB):
+
+```bash
+printf 'hello\n' | arker run --stdin <vm-id> cat
+```
+
+The command then runs in a child shell, so its `cd` and `export` do not
+persist in the session.
+
 ## Documentation and examples
 
 Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [examples](../examples).
