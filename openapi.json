@@ -4519,6 +4519,18 @@
       "ForkRequest": {
         "type": "object",
         "additionalProperties": false,
+        "dependentRequired": {
+          "worker_provider": ["worker_region", "image"],
+          "worker_region": ["worker_provider", "image"]
+        },
+        "dependentSchemas": {
+          "worker_provider": {
+            "properties": {
+              "image": { "type": "string" },
+              "platforms": { "const": ["byoc"] }
+            }
+          }
+        },
         "oneOf": [
           {
             "required": [
@@ -4776,6 +4788,16 @@
             "items": {
               "type": "string"
             }
+          },
+          "worker_provider": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Explicit BLAST worker provider for a BYOC image fork. Requires worker_region; if platforms is specified, it must be [byoc]. Never inferred from the API region."
+          },
+          "worker_region": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Explicit BLAST worker region for a BYOC image fork. Requires worker_provider; if platforms is specified, it must be [byoc]."
           },
           "layers": {
             "description": "State to inherit from the source VM. Omit this field or pass `[\"disk\", \"memory\"]` for a warm fork that resumes the source's filesystem and running processes. Pass `[\"disk\"]` for a filesystem-only fork that cold-boots without the source's running processes. The list must include `disk`; supported values are `disk` and `memory`.",

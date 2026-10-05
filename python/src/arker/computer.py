@@ -372,6 +372,10 @@ class Arker:
     def fork(self, **options: Any) -> VM:
         """Create a VM from exactly one source accepted by POST /v1/fork.
 
+        For image forks, pass ``worker_provider`` and ``worker_region`` together
+        to select a BYOC worker explicitly. They are never inferred from the
+        client's Arker API provider/region placement.
+
         ``idempotency_key`` makes the fork replayable: a repeat of the same key
         returns the VM the first call created rather than building another one.
         You do not need it for this SDK's own retries -- a fresh key is
@@ -1480,15 +1484,21 @@ class VM:
 
         ticket: str | None = None
         headers: dict[str, str] | None = None
+        protocols: list[str] | None = None
         if use_ticket:
-            payload = self._client._request(
-                "POST",
-                f"{_vm_path(self.id)}/sessions/{_segment(sid)}/pty-ticket",
-                {},
-                base_url=self.base_url,
-            )
-            response = _decode_model(PtyTicketResponse, payload)
-            ticket = response.ticket
+            try:
+                payload = self._client._request(
+                    "POST",
+                    f"{_vm_path(self.id)}/sessions/{_segment(sid)}/pty-ticket",
+                    {},
+                    base_url=self.base_url,
+                )
+                response = _decode_model(PtyTicketResponse, payload)
+                ticket = response.ticket
+            except ArkerError as error:
+                if error.status != 403:
+                    raise
+                protocols = [f"arker-pty-key.{self._client._api_key}", "arker-pty"]
         else:
             # Header auth (server-side use): Bearer key on the WS upgrade.
             headers = {"authorization": f"Bearer {self._client._api_key}"}
@@ -1502,6 +1512,7 @@ class VM:
             session_id=sid,
             url=url,
             headers=headers,
+            protocols=protocols,
             on_data=on_data,
             on_close=on_close,
             on_error=on_error,
@@ -1531,6 +1542,7 @@ class Pty:
         session_id: str,
         url: str,
         headers: dict[str, str] | None = None,
+        protocols: list[str] | None = None,
         on_data: Callable[[bytes], None] | None = None,
         on_close: Callable[[Pty.CloseEvent], None] | None = None,
         on_error: Callable[[Exception], None] | None = None,
@@ -1564,6 +1576,7 @@ class Pty:
         self._ws = websocket.WebSocketApp(
             url,
             header=header_list,
+            subprotocols=protocols,
             on_open=self._handle_open,
             on_message=self._handle_message,
             on_error=self._handle_error,

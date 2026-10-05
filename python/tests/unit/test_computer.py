@@ -492,6 +492,30 @@ def test_fork_from_image_sends_only_the_image() -> None:
     assert body == {"image": "ubuntu:24.04", "name": "from-image"}
 
 
+def test_fork_from_image_forwards_explicit_worker_placement() -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "POST" and url == "https://provider-one-region-one.arker.ai/api/v1/fork",
+        200,
+        _fork_response("vm_byoc"),
+    )
+
+    with use_transport(t):
+        region_client().fork(
+            image="ubuntu:24.04",
+            worker_provider="worker-cloud",
+            worker_region="worker-zone",
+            platforms=["byoc"],
+        )
+
+    assert json.loads(t.calls[0]["body"]) == {
+        "image": "ubuntu:24.04",
+        "worker_provider": "worker-cloud",
+        "worker_region": "worker-zone",
+        "platforms": ["byoc"],
+    }
+
+
 def test_fork_rejects_positional_sources() -> None:
     with pytest.raises(TypeError):
         client().fork("base", image="ubuntu:24.04")
@@ -2114,6 +2138,27 @@ def test_connect_pty_defaults_to_plain_text_env() -> None:
     assert PLAIN_PTY_ENV["TERM"] == "dumb"
     assert PLAIN_PTY_ENV["NO_COLOR"] == "1"
     assert PLAIN_PTY_ENV["FORCE_COLOR"] == "0"
+
+
+def test_scoped_pty_key_falls_back_to_subprotocol_without_query_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "POST" and url.endswith("/vms/vm1/sessions/s1/pty-ticket"),
+        403,
+        {"error": {"code": "forbidden", "message": "Forbidden"}},
+    )
+    seen: dict[str, Any] = {}
+
+    def fake_pty(**kwargs: Any) -> object:
+        seen.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(sdk, "Pty", fake_pty)
+    with use_transport(t):
+        client().vm("vm1").connect_pty(session_id="s1")
+    assert seen["url"] == "wss://test.invalid/api/v1/vms/vm1/sessions/s1/pty"
+    assert seen["protocols"] == ["arker-pty-key.ark_live_test", "arker-pty"]
+    assert seen["headers"] is None
 
 
 def test_plain_pty_env_is_overridable() -> None:

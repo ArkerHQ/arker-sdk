@@ -7,14 +7,49 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/ArkerHQ/arker-sdk/go"
+	"github.com/coder/websocket"
 )
 
 const forkVM = `{"vm_id":"vm_child","owner_org_id":"org","state":"idle"}`
+
+func TestImageForkWorkerPlacementIsExplicit(t *testing.T) {
+	var bodies []map[string]any
+	c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode fork: %v", err)
+		}
+		bodies = append(bodies, body)
+		fmt.Fprint(w, forkVM)
+	})
+	defer done()
+
+	for _, req := range []arker.ForkRequest{
+		{Image: "ubuntu:24.04", WorkerProvider: "worker-cloud", WorkerRegion: "worker-zone", Platforms: []string{"byoc"}},
+		{Image: "ubuntu:24.04"},
+		{SourceVMName: "base"},
+	} {
+		if _, err := c.Fork(context.Background(), req); err != nil {
+			t.Fatalf("fork: %v", err)
+		}
+	}
+	for i, want := range []map[string]any{
+		{"image": "ubuntu:24.04", "platforms": []any{"byoc"}, "worker_provider": "worker-cloud", "worker_region": "worker-zone"},
+		{"image": "ubuntu:24.04"},
+		{"source_vm_name": "base"},
+	} {
+		if !reflect.DeepEqual(bodies[i], want) {
+			t.Errorf("fork %d: got %#v, want %#v", i, bodies[i], want)
+		}
+	}
+}
 
 func testClient(t *testing.T, h http.HandlerFunc) (*arker.Client, func()) {
 	t.Helper()
@@ -28,6 +63,44 @@ func testClient(t *testing.T, h http.HandlerFunc) (*arker.Client, func()) {
 		t.Fatalf("new client: %v", err)
 	}
 	return c, srv.Close
+}
+
+func TestScopedPTYFallsBackToSubprotocolWithoutQueryKey(t *testing.T) {
+	upgraded := make(chan string, 1)
+	c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/vms/vm1/sessions/s1/pty-ticket" {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `{"error":{"code":"forbidden","message":"Forbidden"}}`)
+			return
+		}
+		if r.URL.Path != "/v1/vms/vm1/sessions/s1/pty" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		protocols := strings.ReplaceAll(r.Header.Get("Sec-WebSocket-Protocol"), " ", "")
+		if r.URL.RawQuery != "" || r.Header.Get("Authorization") != "" ||
+			protocols != "arker-pty-key.ark_live_test,arker-pty" {
+			t.Errorf("unexpected scoped PTY handshake: protocols=%q", r.Header.Get("Sec-WebSocket-Protocol"))
+		}
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{"arker-pty"}})
+		if err != nil {
+			t.Errorf("accept: %v", err)
+			return
+		}
+		upgraded <- conn.Subprotocol()
+		readCtx, cancel := context.WithTimeout(r.Context(), time.Second)
+		defer cancel()
+		_, _, _ = conn.Read(readCtx)
+		conn.CloseNow()
+	})
+	defer done()
+	pty, err := c.VM("vm1").ConnectPTY(context.Background(), arker.PTYOptions{SessionID: "s1"})
+	if err != nil {
+		t.Fatalf("connect PTY: %v", err)
+	}
+	if got := <-upgraded; got != "arker-pty" {
+		t.Fatalf("selected subprotocol = %q, want arker-pty", got)
+	}
+	_ = pty.Close()
 }
 
 // ── Idempotency ─────────────────────────────────────────────────────────

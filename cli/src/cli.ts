@@ -139,6 +139,8 @@ const FORK_OPTIONS: OptionSpecs = {
   "source-vm-name": { type: "string" },
   "ssh-public-key": { type: "string", repeatable: true },
   "ssh-public-keys-file": { type: "string" },
+  "worker-provider": { type: "string" },
+  "worker-region": { type: "string" },
 };
 
 const RUN_OPTIONS: OptionSpecs = {
@@ -771,6 +773,14 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
   if (context && !dockerfile) die("--context requires --dockerfile");
   if (dockerfile) requirePathKind(dockerfile, "Dockerfile", "file");
   if (context) requirePathKind(context, "build context", "directory");
+  const workerProvider = args.flags["worker-provider"] as string | undefined;
+  const workerRegion = args.flags["worker-region"] as string | undefined;
+  if ((workerProvider === undefined) !== (workerRegion === undefined)) {
+    die("--worker-provider and --worker-region must be specified together");
+  }
+  if (workerProvider !== undefined && !image && !dockerfile) {
+    die("--worker-provider and --worker-region are only valid with --image or --dockerfile");
+  }
 
   // Hard platform pin: `--platform icelake` (or graviton2/x86_64/...) forces
   // the fork onto a worker of that compute platform and fails closed if none
@@ -859,6 +869,7 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
     description,
     public: publicFlag,
     ...(platforms && platforms.length > 0 ? { platforms } : {}),
+    ...(workerProvider !== undefined ? { worker_provider: workerProvider, worker_region: workerRegion } : {}),
     ...(resources ? { resources } : {}),
     ...(disk !== undefined ? { disk } : {}),
     ...(args.flags.durable !== undefined ? { durable: boolFlag(args, "durable") } : {}),
@@ -1852,6 +1863,8 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   "source-org-name": { placeholder: "<name>", desc: "organization name that owns the source VM" },
   "source-vm-id": { placeholder: "<id>", desc: "fork by global source VM id" },
   "source-vm-name": { placeholder: "<name>", desc: "fork by source VM name" },
+  "worker-provider": { placeholder: "<provider>", desc: "explicit BYOC worker provider for an image fork (requires --worker-region)" },
+  "worker-region": { placeholder: "<region>", desc: "explicit BYOC worker region for an image fork (requires --worker-provider)" },
   "ssh-public-key": { placeholder: "<key>", desc: "supply one authorized SSH key; repeatable (update replaces the set)" },
   "ssh-public-keys-file": { placeholder: "<path>", desc: "read SSH keys; an empty file clears them during update" },
   "started-after": { placeholder: "<timestamp>", desc: "include per-VM runs started at or after this RFC 3339 time" },
@@ -2147,6 +2160,7 @@ function usage(command?: string, positional: string[] = []): void {
       "  --dockerfile <path>        fork from a local Dockerfile",
       "  --context <directory>      local Dockerfile build context",
       "  --registry-auth-file <path>  JSON object with username and password",
+      "  --worker-provider <name> --worker-region <region>  explicit BYOC image worker placement",
       "  --ssh-public-key <key>     authorize one SSH key (repeatable)",
       "  --ssh-public-keys-file <path>  read SSH keys, one per line",
       "  --durable                  preserve recoverable state across interruptions",

@@ -1871,6 +1871,8 @@ class ForkRequest1:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
+    worker_provider: str | None = None
+    worker_region: str | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
@@ -1896,6 +1898,8 @@ class ForkRequest2:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
+    worker_provider: str | None = None
+    worker_region: str | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
@@ -1921,6 +1925,8 @@ class ForkRequest3:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
+    worker_provider: str | None = None
+    worker_region: str | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
@@ -1946,6 +1952,8 @@ class ForkRequest4:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
+    worker_provider: str | None = None
+    worker_region: str | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
@@ -1971,6 +1979,8 @@ class ForkRequest5:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
+    worker_provider: str | None = None
+    worker_region: str | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None
@@ -1996,6 +2006,8 @@ class ForkRequest6:
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
+    worker_provider: str | None = None
+    worker_region: str | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
     policies: PolicyWriteRequest | None = None

@@ -417,6 +417,11 @@ async function testForkForwardsImageOptionsAndRedactsSecrets(): Promise<void> {
         const result = await runCli(baseUrl, [
           "fork",
           "--image", "ghcr.io/example/private:v1",
+          "--provider", "arker-cloud",
+          "--region", "arker-zone",
+          "--worker-provider", "worker-cloud",
+          "--worker-region", "worker-zone",
+          "--platform", "byoc",
           "--registry-auth-file", registryAuthFile,
           "--ssh-public-key", "ssh-ed25519 AAAAone one@example",
           "--ssh-public-key", "ssh-rsa AAAAtwo two@example",
@@ -432,6 +437,9 @@ async function testForkForwardsImageOptionsAndRedactsSecrets(): Promise<void> {
           url: "/api/v1/fork",
           body: {
             image: "ghcr.io/example/private:v1",
+            worker_provider: "worker-cloud",
+            worker_region: "worker-zone",
+            platforms: ["byoc"],
             ssh_public_keys: [
               "ssh-ed25519 AAAAone one@example",
               "ssh-rsa AAAAtwo two@example",
@@ -490,6 +498,23 @@ async function testForkUsesDockerfileAndContext(): Promise<void> {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+async function testWorkerPlacementRequiresImageAndPair(): Promise<void> {
+  await withCapturedServer(
+    (_request, res) => jsonResponse(res, { vm_id: "vm_image" }),
+    async (baseUrl, requests) => {
+      for (const flags of [
+        ["fork", "--image", "ubuntu:24.04", "--worker-provider", "worker-cloud"],
+        ["fork", "--image", "ubuntu:24.04", "--worker-region", "worker-zone"],
+        ["fork", "base", "--worker-provider", "worker-cloud", "--worker-region", "worker-zone"],
+      ]) {
+        const result = await runCli(baseUrl, flags);
+        assert.equal(result.code, 1);
+      }
+      assert.deepEqual(requests, []);
+    },
+  );
 }
 
 async function testOrgRunListForwardsFilters(): Promise<void> {
@@ -1331,6 +1356,7 @@ await testForkOmitsRetiredGpuResourceKeys();
 await testForkForwardsVgpu();
 await testForkForwardsImageOptionsAndRedactsSecrets();
 await testForkUsesDockerfileAndContext();
+await testWorkerPlacementRequiresImageAndPair();
 await testOrgRunListForwardsFilters();
 await testGlobalOptionsBeforeCommand();
 await testHelpAndVersionAreLocalSuccesses();

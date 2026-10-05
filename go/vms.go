@@ -101,6 +101,10 @@ type ForkRequest struct {
 	SourceOrgID   string `json:"source_org_id,omitempty"`
 	SourceOrgName string `json:"source_org_name,omitempty"`
 	Image         string `json:"image,omitempty"`
+	// WorkerProvider and WorkerRegion explicitly select a BYOC worker for an
+	// image fork. Both must be supplied; neither defaults from client placement.
+	WorkerProvider string `json:"worker_provider,omitempty"`
+	WorkerRegion   string `json:"worker_region,omitempty"`
 
 	Name          string     `json:"name,omitempty"`
 	Description   string     `json:"description,omitempty"`

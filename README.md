@@ -26,6 +26,21 @@ Read the [Arker documentation](https://arker.ai/docs), or see the package-specif
 - TypeScript SDK: [TypeScript guide](./typescript/README.md)
 - Python SDK: [Python guide](./python/README.md)
 
+## VM-scoped PTY keys
+
+A key issued with `vm_id`, `pty:connect`, and `time_to_delete` can create a
+session on that VM and attach its PTY, but cannot list, patch, delete, or mint
+PTY tickets. The TypeScript, Python, and Go PTY clients try the ticket endpoint
+first; if it returns 403, they connect with the key in the WebSocket
+`Sec-WebSocket-Protocol: arker-pty-key.<key>` handshake. The router consumes
+that header and never forwards the raw key to the worker. Never put an API key
+in a WebSocket URL. Legacy clients using a separately minted, short-lived HMAC
+PTY ticket in `?ticket=` remain supported; that ticket is **not** the scoped
+API key and the two credentials are not interchangeable.
+
+If passing a scoped key to browser code, treat it as a secret: only hand it to
+trusted code, and limit its VM scope and expiry at issuance.
+
 ## Examples
 
 - [Browser](./examples/browser): Open two Wikipedia pages and fork a live checkpoint at each.

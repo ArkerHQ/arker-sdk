@@ -542,6 +542,7 @@ export interface PtyConnection {
 
 interface PtyWebSocketFactoryInit {
   headers?: Record<string, string>;
+  protocols?: string[];
 }
 
 export type PtyWebSocketFactory = (
@@ -677,8 +678,11 @@ export class Arker {
    *     fork({ source_vm_name: "base" })
    *     fork({ source_vm_id: "vm_abc", layers: ["disk"] })
    *     fork({ image: "ubuntu:24.04" })
+   *     fork({ image: "ubuntu:24.04", worker_provider: "my-provider", worker_region: "my-region" })
    *     fork({ dockerfile: "FROM ubuntu:24.04\nRUN echo ready" })
    *
+   * Worker placement is opt-in for image forks and is independent of the
+   * client's provider/region, which select the Arker API endpoint.
    * Use {@link VM.fork} when the source is already a VM handle.
    */
   async fork(options: ForkOptions): Promise<VM> {
@@ -1809,18 +1813,24 @@ export class VM {
           : undefined,
     };
     let ticket: string | undefined;
+    let scopedProtocol: string | undefined;
     if (useTicket) {
-      const response = await this._client._request<PtyTicketResponse>(
-        "POST",
-        `${vmPath(this.id)}/sessions/${pathSegment(sessionId)}/pty-ticket`,
-        {},
-        this.baseUrl,
-      );
-      ticket = response.ticket;
+      try {
+        const response = await this._client._request<PtyTicketResponse>(
+          "POST",
+          `${vmPath(this.id)}/sessions/${pathSegment(sessionId)}/pty-ticket`,
+          {},
+          this.baseUrl,
+        );
+        ticket = response.ticket;
+      } catch (error) {
+        if (!(error instanceof ArkerError) || error.status !== 403) throw error;
+        scopedProtocol = `arker-pty-key.${this._client._authHeaders().authorization.slice(7)}`;
+      }
     }
     const url = buildPtyWebSocketUrl(this.baseUrl, this.id, sessionId, { ...params, ticket });
     const factory = options.webSocketFactory ?? (useTicket ? browserPtyWebSocketFactory : nodePtyWebSocketFactory);
-    const socket = await factory(url, useTicket ? {} : { headers: this._client._authHeaders() });
+    const socket = await factory(url, scopedProtocol ? { protocols: [scopedProtocol, "arker-pty"] } : useTicket ? {} : { headers: this._client._authHeaders() });
     return new PtyConnectionImpl(sessionId, socket);
   }
 }
@@ -1864,14 +1874,14 @@ function isNodeRuntime(): boolean {
 
 async function nodePtyWebSocketFactory(url: string, init: PtyWebSocketFactoryInit): Promise<PtyWebSocketLike> {
   const ws = await import("ws");
-  return new ws.default(url, { headers: init.headers }) as unknown as PtyWebSocketLike;
+  return new ws.default(url, init.protocols, { headers: init.headers }) as unknown as PtyWebSocketLike;
 }
 
-function browserPtyWebSocketFactory(url: string): PtyWebSocketLike {
+function browserPtyWebSocketFactory(url: string, init: PtyWebSocketFactoryInit): PtyWebSocketLike {
   if (typeof globalThis.WebSocket !== "function") {
     throw new Error("WebSocket is not available in this runtime");
   }
-  return new globalThis.WebSocket(url);
+  return new globalThis.WebSocket(url, init.protocols) as unknown as PtyWebSocketLike;
 }
 
 class PtyConnectionImpl implements PtyConnection {

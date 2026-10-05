@@ -101,15 +101,20 @@ func (v *VM) ConnectPTY(ctx context.Context, opts PTYOptions) (*PTY, error) {
 	}
 
 	header := http.Header{}
+	var protocols []string
 	if opts.UseTicket == nil || *opts.UseTicket {
 		var ticket struct {
 			Ticket string `json:"ticket"`
 		}
 		if _, err := v.do(ctx, http.MethodPost,
 			v.path("/sessions/"+segment(sessionID)+"/pty-ticket"), map[string]any{}, &ticket); err != nil {
-			return nil, err
+			if !statusIs(err, http.StatusForbidden) {
+				return nil, err
+			}
+			protocols = []string{"arker-pty-key." + v.client.apiKey, "arker-pty"}
+		} else {
+			q.str("ticket", ticket.Ticket)
 		}
-		q.str("ticket", ticket.Ticket)
 	} else {
 		v.client.auth(header)
 	}
@@ -121,7 +126,7 @@ func (v *VM) ConnectPTY(ctx context.Context, opts PTYOptions) (*PTY, error) {
 
 	dialCtx, cancelDial := context.WithTimeout(ctx, ptyConnectTimeout)
 	defer cancelDial()
-	conn, _, err := websocket.Dial(dialCtx, wsURL, &websocket.DialOptions{HTTPHeader: header})
+	conn, _, err := websocket.Dial(dialCtx, wsURL, &websocket.DialOptions{HTTPHeader: header, Subprotocols: protocols})
 	if err != nil {
 		return nil, &Error{Code: "unavailable", Message: "PTY WebSocket failed to open: " + err.Error()}
 	}

@@ -242,6 +242,31 @@ async function testForkFromImageSendsOnlyTheImage(): Promise<void> {
   assert.equal(body.name, "from-image");
   assert.equal(body.source_vm_id, undefined, "no VM selector may accompany an image");
   assert.equal(body.source_vm_name, undefined, "no VM selector may accompany an image");
+  assert.equal(body.worker_provider, undefined, "hosted image forks must not default to BYOC");
+  assert.equal(body.worker_region, undefined, "hosted image forks must not default to BYOC");
+}
+
+async function testForkFromImageForwardsExplicitWorkerPlacement(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson(
+    (method, url) => method === "POST" && url === "https://provider-one-region-one.arker.ai/api/v1/fork",
+    200,
+    { vm_id: "vm_byoc", owner_org_id: "o", created_at: "now", public: false, state: "idle", sessions: [] },
+  );
+
+  await regionClient(fetch).fork({
+    image: "ubuntu:24.04",
+    worker_provider: "worker-cloud",
+    worker_region: "worker-zone",
+    platforms: ["byoc"],
+  });
+
+  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), {
+    image: "ubuntu:24.04",
+    worker_provider: "worker-cloud",
+    worker_region: "worker-zone",
+    platforms: ["byoc"],
+  });
 }
 
 async function testForkFromDockerfileBuildsFromItsBaseImage(): Promise<void> {
@@ -1299,9 +1324,33 @@ async function testConnectPtyUsesTicketForBrowserWebSocket(): Promise<void> {
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), {});
 }
 
+async function testScopedPtyKeyUsesBrowserSubprotocolWithoutQueryCredential(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson(
+    (method, url) => method === "POST" && url.endsWith("/vms/vm_1/sessions/sess_1/pty-ticket"),
+    403,
+    { error: { code: "forbidden", message: "Forbidden" } },
+  );
+  let url = "";
+  let init: { headers?: Record<string, string>; protocols?: string[] } = {};
+  await client(fetch).vm("vm_1").connectPty({
+    sessionId: "sess_1",
+    useTicket: true,
+    webSocketFactory: (wsUrl, options) => {
+      url = wsUrl;
+      init = options;
+      return new FakeWebSocket();
+    },
+  });
+  assert.equal(url, "wss://test.invalid/api/v1/vms/vm_1/sessions/sess_1/pty");
+  assert.deepEqual(init.protocols, ["arker-pty-key.ark_live_test", "arker-pty"]);
+  assert.equal(init.headers, undefined);
+}
+
 await testForkPostsDirectlyToSourceVm();
 await testForkPreservesTheCanonicalWireShape();
 await testForkFromImageSendsOnlyTheImage();
+await testForkFromImageForwardsExplicitWorkerPlacement();
 await testForkFromDockerfileBuildsFromItsBaseImage();
 await testForkOmitsSourceOrgWhenNotExplicit();
 await testForkOmitsUnconfiguredCapabilities();
@@ -1595,6 +1644,7 @@ async function testUtf8WireStillYieldsBothForms(): Promise<void> {
 
 await testConnectPtyCreatesSessionAndUsesBearerHeader();
 await testConnectPtyUsesTicketForBrowserWebSocket();
+await testScopedPtyKeyUsesBrowserSubprotocolWithoutQueryCredential();
 await testConnectPtyPassesCancelTtlSecs();
 await testConnectPtyDeliversDataAndCloseEvents();
 testSurfaceStubClassificationUsesStructuredErrorCodes();

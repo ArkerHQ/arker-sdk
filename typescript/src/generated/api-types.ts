@@ -803,6 +803,10 @@ export interface components {
             durable?: boolean | null;
             /** @description Preferred compute platforms for a public template, such as `["graviton3"]`. Supply multiple values to allow any listed platform. Omit or pass an empty list for automatic selection. A fork of an existing VM inherits its source platform. */
             platforms?: string[] | null;
+            /** @description Explicit BLAST worker provider for a BYOC image fork. Requires worker_region; if platforms is specified, it must be [byoc]. Never inferred from the API region. */
+            worker_provider?: string;
+            /** @description Explicit BLAST worker region for a BYOC image fork. Requires worker_provider; if platforms is specified, it must be [byoc]. */
+            worker_region?: string;
             /** @description State to inherit from the source VM. Omit this field or pass `["disk", "memory"]` for a warm fork that resumes the source's filesystem and running processes. Pass `["disk"]` for a filesystem-only fork that cold-boots without the source's running processes. The list must include `disk`; supported values are `disk` and `memory`. */
             layers?: ("disk" | "memory")[] | null;
             /** @description Maximum time in seconds this request may wait for capacity before failing with `capacity_unavailable`. Omit this field or pass `0` to fail immediately when capacity is unavailable. */
