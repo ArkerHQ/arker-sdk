@@ -111,6 +111,9 @@ printf 'hello\n' | arker run --stdin <vm-id> cat
 The command then runs in a child shell, so its `cd` and `export` do not
 persist in the session.
 
+Ctrl-C sends SIGINT to the command. A second Ctrl-C cancels it and the CLI
+exits 130; a third stops waiting and leaves the command running.
+
 ## Documentation and examples
 
 Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [examples](../examples).

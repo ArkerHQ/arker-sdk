@@ -2028,6 +2028,7 @@ class RunRequest:
     signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
     policies: PolicyWriteRequest | None = None
     stdin_base64: str | None = None
+    signal_run_id: str | None = None
 
 
 SyncWriteResult: TypeAlias = (

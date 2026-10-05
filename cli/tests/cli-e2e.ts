@@ -14,7 +14,7 @@
  * Not part of `bun run test`: CI has no credentials.
  */
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 
@@ -28,7 +28,7 @@ const REMOTE_PATH = "/home/user/cli-e2e.txt";
 
 type CliResult = { code: number | null; stdout: string; stderr: string; msFromFirstStdoutToExit?: number };
 
-async function runCli(args: string[], stdin?: string): Promise<CliResult> {
+async function runCli(args: string[], stdin?: string, onFirstStdout?: (child: ChildProcess) => void): Promise<CliResult> {
   const child = spawn(cliRuntime, [cliEntry, ...args], {
     cwd: packageRoot,
     env: { ...process.env, NODE_NO_WARNINGS: "1" },
@@ -38,7 +38,13 @@ async function runCli(args: string[], stdin?: string): Promise<CliResult> {
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
   let firstStdoutAt: number | undefined;
-  child.stdout!.on("data", (c: Buffer) => { firstStdoutAt ??= Date.now(); stdout.push(c); });
+  child.stdout!.on("data", (c: Buffer) => {
+    if (firstStdoutAt === undefined) {
+      firstStdoutAt = Date.now();
+      onFirstStdout?.(child);
+    }
+    stdout.push(c);
+  });
   child.stderr!.on("data", (c: Buffer) => { stderr.push(c); });
   const [code] = (await once(child, "close")) as [number | null];
   return {
@@ -77,6 +83,14 @@ async function testForkRunSyncAndRemove(): Promise<void> {
     assert.equal(live.stdout, "start\0done\n");
     assert.equal(live.stderr, "warning\n");
     assert.ok((live.msFromFirstStdoutToExit ?? 0) >= 1000, "run output was not printed before the command finished");
+
+    const interrupted = await runCli(
+      ["run", "--timeout", "60", vmId, `sh -c 'trap "echo INT; exit 23" INT; echo READY; while :; do sleep 1; done'`],
+      undefined,
+      (child) => child.kill("SIGINT"),
+    );
+    assert.equal(interrupted.code, 23, interrupted.stderr);
+    assert.equal(interrupted.stdout, "READY\nINT\n");
 
     const piped = await ok(["run", "--stdin", "--timeout", "30", vmId, "cat; wc -c"], "hello\n");
     assert.equal(piped.stdout, "hello\n6\n");

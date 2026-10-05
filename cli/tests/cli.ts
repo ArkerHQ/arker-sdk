@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { closeSync, constants, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
@@ -18,6 +18,7 @@ type CliResult = {
 };
 
 type CliOptions = {
+  onSpawn?: (child: ChildProcess) => void;
   onStdout?: (chunk: Buffer) => void;
   stdin?: string | Uint8Array;
   authenticated?: boolean;
@@ -113,6 +114,7 @@ async function runCli(baseUrl: string | undefined, args: string[], options: CliO
     env,
     stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
   });
+  options.onSpawn?.(child);
   if (options.stdin !== undefined) child.stdin!.end(options.stdin);
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
@@ -900,7 +902,7 @@ async function testRunJsonEncodesOutput(): Promise<void> {
     const result = await runCli(baseUrl, ["run", "--json", "vm_1", "echo", "hello"]);
     assert.equal(result.code, 0);
     assert.equal(result.stderr, "");
-    assert.deepEqual(body, { command: "echo hello" });
+    assert.deepEqual(body, { time_to_background: 1, command: "echo hello" });
     const payload = JSON.parse(stdoutText(result));
     assert.equal(payload.stdout, "aGVsbG8K");
     assert.equal(payload.stdoutEncoding, "base64");
@@ -1241,6 +1243,40 @@ async function testRunShowsPartialOutputBeforeCompletion(): Promise<void> {
   });
 }
 
+async function testCtrlCInterruptsThenCancelsTheRun(): Promise<void> {
+  let child: ChildProcess;
+  let cancelled = false;
+  await withCapturedServer((request, res) => {
+    if (request.method === "POST" && (request.body as { command?: string }).command) {
+      child.kill("SIGINT");
+      jsonResponse(res, { run_id: "run_1", state: "running" });
+    } else if (request.method === "POST") {
+      jsonResponse(res, completedRun());
+      child.kill("SIGINT");
+    } else if (request.method === "DELETE") {
+      cancelled = true;
+      jsonResponse(res, { cancelled: true });
+    } else {
+      jsonResponse(res, {
+        ...completedRun({ run_id: "run_1", started_at: "now", exit_code: null }),
+        state: cancelled ? "cancelled" : "running",
+      });
+    }
+  }, async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["run", "--json", "vm_1", "sleep", "30"], { onSpawn: (value) => { child = value; } });
+    assert.equal(result.code, 130, result.stderr);
+    assert.equal(JSON.parse(stdoutText(result)).state, "cancelled");
+    assert.deepEqual(
+      requests.filter((request) => request.method !== "GET").map(({ method, url, body }) => ({ method, url, body })),
+      [
+        { method: "POST", url: "/api/v1/vms/vm_1/runs", body: { time_to_background: 1, command: "sleep 30" } },
+        { method: "POST", url: "/api/v1/vms/vm_1/runs", body: { signal: "SIGINT", signal_run_id: "run_1" } },
+        { method: "DELETE", url: "/api/v1/vms/vm_1/runs/run_1", body: undefined },
+      ],
+    );
+  });
+}
+
 async function testStructuredErrorsDoNotRepeatCode(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, {
     error: {
@@ -1505,6 +1541,7 @@ await testNoPipeReadsFileBytes();
 await testShellSetupUsesPackagedCli();
 await testShellRequiresVmOrSourceBeforeRequest();
 await testRunShowsPartialOutputBeforeCompletion();
+await testCtrlCInterruptsThenCancelsTheRun();
 await testStructuredErrorsDoNotRepeatCode();
 await testFalseMutationResultsExitNonzero();
 await testRemainingHttpCommandSurface();
