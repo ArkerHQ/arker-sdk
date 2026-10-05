@@ -1147,6 +1147,39 @@ async function testRemoteShellCloseExitsWithOpenLocalStdin(): Promise<void> {
   }
 }
 
+async function testDirectoryPreviewAndExclusions(): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), "arker-cli-sync-preview-"));
+  mkdirSync(join(dir, "node_modules"));
+  writeFileSync(join(dir, ".env"), "dummy");
+  writeFileSync(join(dir, "node_modules", "dummy"), "dummy");
+  writeFileSync(join(dir, "main.ts"), "source");
+  try {
+    await withCapturedServer((request, res) => {
+      if (request.url?.endsWith("/sessions/session_1")) {
+        jsonResponse(res, { session_id: "session_1", cwd: "/work", state: "idle" });
+      } else jsonResponse(res, { entries: [] });
+    }, async (baseUrl, requests) => {
+      const args = ["sync-dir", "vm_1", dir, "project", "--dry-run", "--exclude", ".env", "--exclude", "node_modules", "--session-id", "session_1"];
+      const result = await runCli(baseUrl, [...args, "--json"]);
+      assert.equal(result.code, 0, result.stderr);
+      const preview = JSON.parse(stdoutText(result));
+      assert.equal(preview.dryRun, true);
+      assert.equal(preview.sent, 0);
+      assert.deepEqual(preview.planned.map((entry: { path: string }) => entry.path), ["main.ts"]);
+      assert.deepEqual(requestsWithoutKeys(requests), [
+        { method: "GET", url: "/api/v1/vms/vm_1/sessions/session_1", body: undefined },
+        { method: "POST", url: "/api/v1/vms/vm_1/sync", body: { op: "manifest", path: "/work/project" } },
+      ]);
+      const text = await runCli(baseUrl, args);
+      assert.equal(text.code, 0, text.stderr);
+      assert.match(stdoutText(text), /would upload 1 file.* to \/work\/project\n/);
+      assert.match(stdoutText(text), /upload\tmain.ts/);
+      const help = await runCli(baseUrl, ["sync-dir", "--help"]);
+      for (const flag of ["--dry-run", "--exclude", "--session-id"]) assert.ok(stdoutText(help).includes(flag));
+    });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
 async function testStructuredErrorsDoNotRepeatCode(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, {
     error: {
@@ -1407,6 +1440,7 @@ await testSessionsUpdateRequiresAField();
 await testNoPipeReadsFileBytes();
 await testShellSetupUsesPackagedCli();
 await testShellRequiresVmOrSourceBeforeRequest();
+await testDirectoryPreviewAndExclusions();
 await testStructuredErrorsDoNotRepeatCode();
 await testFalseMutationResultsExitNonzero();
 await testRemainingHttpCommandSurface();

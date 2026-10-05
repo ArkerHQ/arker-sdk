@@ -80,6 +80,16 @@ arker sync <vm-id> /tmp/hello.txt --read
 arker shell <vm-id>
 ```
 
+Sync a directory, skipping files that have not changed:
+
+```bash
+arker sync-dir <vm-id> ./project project --exclude .git --exclude node_modules
+```
+
+A relative remote path is resolved against the session's working directory.
+`--exclude` takes a glob and can be repeated; `--dry-run` lists what would be
+uploaded without writing anything.
+
 Delete the VM when you are finished:
 
 ```bash

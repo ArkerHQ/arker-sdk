@@ -283,6 +283,9 @@ const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
   "sync-dir": {
     ...GLOBAL_OPTIONS,
     "assume-empty": { type: "boolean" },
+    "dry-run": { type: "boolean" },
+    exclude: { type: "string", repeatable: true },
+    "session-id": { type: "string" },
   },
   mounts: {
     ...GLOBAL_OPTIONS,
@@ -1282,18 +1285,27 @@ async function cmdSignal(args: ParsedArgs, client: Arker): Promise<void> {
 }
 
 // Recursive local -> VM directory sync. `sync` moves one file; this moves a
-// tree, and only the files whose contents differ.
+// tree, and only the files whose contents or permissions differ.
 async function cmdSyncDir(args: ParsedArgs, client: Arker): Promise<void> {
-  const vm = args.positional[0] ?? die("usage: arker sync-dir <vm_id> <local_dir> <remote_dir> [--assume-empty]");
+  const vm = args.positional[0] ?? die("usage: arker sync-dir <vm_id> <local_dir> <remote_dir> [flags]");
   const localDir = args.positional[1] ?? die("missing local_dir");
   const remoteDir = args.positional[2] ?? die("missing remote_dir");
   requirePathKind(localDir, "local source", "directory");
   const result = await client.vm(vm).syncDir(localDir, remoteDir, {
-    ...(args.flags["assume-empty"] ? { assumeEmpty: true } : {}),
+    assumeEmpty: boolFlag(args, "assume-empty"),
+    dryRun: boolFlag(args, "dry-run"),
+    exclude: args.flags.exclude as string[] | undefined,
+    sessionId: args.flags["session-id"] as string | undefined,
   });
   if (args.flags.json) return out(result);
-  out(`synced ${result.sent} file(s), skipped ${result.skipped}, ${result.bytesSent} byte(s) to ${remoteDir}`);
-  if (result.manifestTruncated) err("warning: remote manifest was truncated; sync stayed correct but re-sent files beyond the cap");
+  if (result.manifestTruncated) err("warning: remote manifest was truncated; files beyond the cap are treated as changed");
+  if (result.dryRun) {
+    const planned = result.planned ?? [];
+    out(`would upload ${planned.length} file(s), skip ${result.skipped}, ${planned.reduce((sum, file) => sum + file.bytes, 0)} byte(s) to ${result.remoteDir}`);
+    for (const file of planned) out(`upload\t${file.path}`);
+    return;
+  }
+  out(`synced ${result.sent} file(s), skipped ${result.skipped}, ${result.bytesSent} byte(s) to ${result.remoteDir}`);
 }
 
 // Policies are a whole-document GET/PUT, so `set` replaces the document. It is
@@ -1872,6 +1884,8 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   dockerfile: { placeholder: "<path>", desc: "fork from a local Dockerfile" },
   durable: { desc: "preserve recoverable state across compute interruptions" },
   "disk-mib": { placeholder: "<n>", desc: "disk size in MiB" },
+  "dry-run": { desc: "list the files that would be uploaded without writing to the VM" },
+  exclude: { placeholder: "<glob>", desc: "skip matching files and directories; repeatable" },
   "end-symbol": { placeholder: "<text>", desc: "stop synchronous output collection after this marker" },
   endpoint: { placeholder: "<run|fork|sync>", desc: "filter organization-wide activity by endpoint" },
   env: { placeholder: "<name=value>", desc: "set a session environment variable; repeatable" },
@@ -2072,7 +2086,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   "sync-dir": {
     synopsis: ["arker sync-dir <vm_id> <local> <remote> [flags]"],
-    summary: "Sync a local directory into the VM.",
+    summary: "Sync a local directory into the VM. A relative <remote> resolves against the session's working directory.",
   },
   mounts: {
     synopsis: ["arker mounts <ls|create|rm> <vm_id> [args] [flags]"],
