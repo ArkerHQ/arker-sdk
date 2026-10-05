@@ -94,19 +94,13 @@ Run `arker --help` for the available commands and flags.
 and the delete and cancel commands. Run results use `run_id` in every state;
 completed results also keep `runId`.
 
-## Live command output
+## Running commands
 
-`arker run` prints stdout and stderr while the command runs and exits with the
-command's exit code. A command that finishes within a second is answered by one
-request. After that the CLI polls the run, starting at 500 ms and backing off to
-3 seconds, and writes each new byte once.
-
-The service retains the last 10 MiB of a run's output. If a stream outgrows
-that, the CLI warns, stops printing that stream, and prints what the service
-retained when the command finishes; those bytes can repeat or skip output.
-
-`--json` prints one JSON object when the command finishes, and
-`--time-to-background 0` returns a run ID immediately.
+`arker run` prints output as the command runs and exits with the command's
+exit code. The service keeps the last 10 MiB of output; past that the CLI
+warns and prints what was kept when the command finishes. `--json` prints one
+object when the command finishes, and `--time-to-background 0` returns a run
+ID immediately.
 
 ## Documentation and examples
 
