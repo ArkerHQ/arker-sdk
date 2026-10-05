@@ -83,7 +83,7 @@ async function testForkRunSyncAndRemove(): Promise<void> {
 }
 
 async function testUnauthenticatedRequestFails(): Promise<void> {
-  const child = { ...process.env };
+  const child: NodeJS.ProcessEnv = { ...process.env, HOME: "/nonexistent/arker-cli-e2e-home" };
   delete child.ARKER_API_KEY;
   const result = await new Promise<CliResult>((resolve) => {
     const proc = spawn(cliRuntime, [cliEntry, "whoami"], { cwd: packageRoot, env: child, stdio: ["ignore", "pipe", "pipe"] });

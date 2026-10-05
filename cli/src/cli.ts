@@ -23,10 +23,10 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { readFileSync, existsSync, fstatSync, statSync } from "node:fs";
+import { readFileSync, existsSync, fstatSync, statSync, mkdirSync, writeFileSync, renameSync, rmSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 import {
@@ -216,6 +216,7 @@ const UPDATE_OPTIONS: OptionSpecs = {
 };
 
 const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
+  config: { help: { type: "boolean" }, json: { type: "boolean" } },
   delete: GLOBAL_OPTIONS,
   filesystems: {
     ...GLOBAL_OPTIONS,
@@ -420,6 +421,7 @@ function invocationOptions(command: string, positional: string[]): { options: Op
 }
 
 const POSITIONAL_LIMITS: Record<string, number | Record<string, number>> = {
+  config: { set: 2, get: 1, list: 0, unset: 1 },
   delete: 1,
   filesystems: { ls: 0, list: 0, create: 1, get: 1, rm: 1, delete: 1 },
   fork: 1,
@@ -568,17 +570,84 @@ interface CliConfig {
   controlBaseUrl?: string;
 }
 
-function readFileConfig(): CliConfig {
-  for (const name of ["config.json", "config"]) {
-    const path = join(homedir(), ".arker", name);
-    if (!existsSync(path)) continue;
-    try {
-      return JSON.parse(readFileSync(path, "utf8")) as CliConfig;
-    } catch {
-      continue;
+function configPath(): string {
+  const paths = ["config.json", "config"].map((name) => join(homedir(), ".arker", name));
+  return paths.find((path) => existsSync(path)) ?? paths[0]!;
+}
+
+function readFileConfig(path = configPath()): CliConfig {
+  if (!existsSync(path)) return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    die(`cannot read configuration JSON: ${path}`);
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    die(`configuration must be a JSON object: ${path}`);
+  }
+  const config = value as Record<string, unknown>;
+  for (const key of ["apiKey", "baseUrl", "region", "provider", "controlBaseUrl"]) {
+    if (config[key] !== undefined && typeof config[key] !== "string") {
+      die(`configuration ${key} must be a string: ${path}`);
     }
   }
-  return {};
+  return config as CliConfig;
+}
+
+function writeFileConfig(path: string, config: CliConfig): void {
+  const target = existsSync(path) ? realpathSync(path) : path;
+  const temporary = join(dirname(target), `.config-${randomUUID()}.tmp`);
+  try {
+    mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+    writeFileSync(temporary, JSON.stringify(config, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+    renameSync(temporary, target);
+  } catch {
+    rmSync(temporary, { force: true });
+    die(`cannot write configuration: ${path}`);
+  }
+}
+
+const CONFIG_KEYS = ["provider", "region"] as const;
+
+async function cmdConfig(args: ParsedArgs): Promise<void> {
+  const [subcommand, name, value] = args.positional;
+  if (subcommand === undefined) die("usage: arker config <set|get|list|unset> ...");
+  const path = configPath();
+  const config = readFileConfig(path);
+  if (subcommand === "list") {
+    const stored = Object.fromEntries(CONFIG_KEYS.flatMap((key) => config[key] === undefined ? [] : [[key, config[key]]]));
+    if (args.flags.json) return out(stored);
+    for (const [key, value] of Object.entries(stored)) out(`${key}=${value}`);
+    return;
+  }
+  if (name === undefined) {
+    die(`usage: arker config ${subcommand} <provider|region>${subcommand === "set" ? " <value>" : ""}`);
+  }
+  const key = CONFIG_KEYS.find((candidate) => candidate === name) ??
+    die(`unknown config key: ${name} (expected provider or region)`);
+  switch (subcommand) {
+    case "get": {
+      const stored = config[key] ?? die(`${key} is not set`);
+      out(args.flags.json ? { [key]: stored } : stored);
+      return;
+    }
+    case "set":
+      if (value === undefined) die(`usage: arker config set ${key} <value>`);
+      if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(value)) {
+        die(`invalid ${key}: ${value} (expected lowercase letters, numbers, and hyphens)`);
+      }
+      writeFileConfig(path, { ...config, [key]: value });
+      out(args.flags.json ? { [key]: value } : `${key}=${value}`);
+      return;
+    case "unset":
+      if (config[key] !== undefined) {
+        delete config[key];
+        writeFileConfig(path, config);
+      }
+      out(args.flags.json ? { unset: key } : `unset ${key}`);
+      return;
+  }
 }
 
 function clientFromArgs(
@@ -603,7 +672,7 @@ function clientFromArgs(
   const configuredRegion = explicitRegion ?? file.region;
   if (requiresComputePlacement && !baseUrl && (!provider || !configuredRegion)) {
     die(
-      "Provider and region are required for compute commands. Set --provider and --region, or set ARKER_BASE_URL.",
+      "Provider and region are required for compute commands. Set --provider and --region, save defaults with 'arker config set', or set ARKER_BASE_URL.",
     );
   }
   if (!apiKey) {
@@ -1885,6 +1954,12 @@ interface CommandHelp {
 }
 
 const COMMAND_HELP: Record<string, CommandHelp> = {
+  config: {
+    synopsis: ["arker config set <provider|region> <value>", "arker config get <provider|region>", "arker config list", "arker config unset <provider|region>"],
+    summary: "Manage stored provider and region defaults in ~/.arker/config.json.",
+    subs: { set: "save a default", get: "show a stored default", list: "show stored defaults", unset: "remove a stored default" },
+    notes: ["Flags override environment variables, which override stored defaults.", "Commands show stored values; existing credentials are preserved and never printed."],
+  },
   filesystems: {
     synopsis: ["arker filesystems <ls|create|get|rm> [args] [flags]"],
     summary: "Manage filesystems. Alias: arker fs.",
@@ -2113,6 +2188,7 @@ function usage(command?: string, positional: string[] = []): void {
       "Resources:",
       "  arker regions                                  list available public placements",
       "  arker whoami                                   show the authenticated organization",
+      "  arker config <set|get|list|unset> ...          manage stored provider and region defaults",
       "  arker vms         <ls|get|rm|fork|run|update> ...",
       "  arker vms ls --source-org-id ArkerHQ --public  list the public VM catalog",
       "  arker runs ls [vm_id] [flags]              list organization or VM runs",
@@ -2215,6 +2291,7 @@ async function main(): Promise<void> {
 
   let client: Arker | undefined;
   try {
+    if (cmd === "config") return await cmdConfig(args);
     if (cmd === "regions") return await cmdRegions(args);
     client = clientFromArgs(args, {
       requiresComputePlacement: commandRequiresComputePlacement(cmd, args),
