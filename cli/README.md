@@ -88,6 +88,12 @@ arker rm <vm-id>
 
 Run `arker --help` for the available commands and flags.
 
+## JSON output
+
+`--json` prints one JSON object on stdout for every command, including `sync`
+and the delete and cancel commands. Run results use `run_id` in every state;
+completed results also keep `runId`.
+
 ## Documentation and examples
 
 Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [examples](../examples).
