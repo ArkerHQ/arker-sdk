@@ -4736,7 +4736,7 @@
               "string",
               "null"
             ],
-            "maxLength": 255,
+            "maxLength": 1024,
             "description": "Optional short description for the new VM. Blank strings normalize to null and forked VMs never inherit their source's description."
           },
           "public": {
@@ -4999,7 +4999,7 @@
               "string",
               "null"
             ],
-            "maxLength": 255,
+            "maxLength": 1024,
             "description": "Short optional description owned by this VM."
           },
           "hostname": {
@@ -6960,7 +6960,7 @@
               "string",
               "null"
             ],
-            "maxLength": 255,
+            "maxLength": 1024,
             "description": "Replace the VM description. Null or a blank string clears it; omit this field to leave it unchanged."
           },
           "resources": {
