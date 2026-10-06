@@ -1496,12 +1496,7 @@ async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
       ...(description !== undefined ? { description } : {}),
       ...(memoryMib !== undefined || vcpu !== undefined || diskMib !== undefined || vgpu !== undefined
         ? {
-            resources: {
-              vcpu: vcpu ?? null,
-              memory_mib: memoryMib ?? null,
-              disk_mib: diskMib ?? null,
-              ...(vgpu !== undefined ? { vgpu } : {}),
-            },
+            resources: { vcpu, memory_mib: memoryMib, disk_mib: diskMib, vgpu },
           }
         : {}),
       ...(sshPublicKeys.provided ? { ssh_public_keys: sshPublicKeys.values } : {}),
