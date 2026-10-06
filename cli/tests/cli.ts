@@ -1311,7 +1311,7 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
       url: "/api/v1/vms/vm_1",
       body: {
         description: "Release runner",
-        resources: { vcpu: null, memory_mib: 1024, disk_mib: null, vgpu: 0.25 },
+        resources: { memory_mib: 1024, vgpu: 0.25 },
         ssh_public_keys: ["ssh-ed25519 AAAAexample user@example"],
       },
     },

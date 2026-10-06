@@ -349,7 +349,7 @@ async function testUpdatePreservesPoolSelector(): Promise<void> {
       const fetch = new FakeFetch();
       fetch.addJson((method, url) => method === "PATCH" && url.endsWith("/v1/vms/vm_1"), 200, { vm_id: "vm_1" });
       await client(fetch).vm("vm_1").update({ ...selector, ...(resources ? { vcpu: 2 } : {}) });
-      assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { ...selector, ...(resources ? { resources: { vcpu: 2, memory_mib: null, disk_mib: null } } : {}) });
+      assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { ...selector, ...(resources ? { resources: { vcpu: 2 } } : {}) });
     }
   }
 }
@@ -410,7 +410,7 @@ async function testUpdateSendsPolicies(): Promise<void> {
   fetch.addJson(isPatch, 200, vm);
   await client(fetch).vm("vm_1").update({ vcpu: 2, policies: doc });
   assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), {
-    resources: { vcpu: 2, memory_mib: null, disk_mib: null },
+    resources: { vcpu: 2 },
     policies: doc,
   });
 
@@ -430,15 +430,14 @@ async function testUpdateSendsPolicies(): Promise<void> {
   fetch.addJson(isPatch, 200, vm);
   await client(fetch).vm("vm_1").update({ vgpu: 0.25 });
   assert.deepEqual(JSON.parse(fetch.calls[4]!.body!), {
-    resources: { vcpu: null, memory_mib: null, disk_mib: null, vgpu: 0.25 },
+    resources: { vgpu: 0.25 },
   });
 
-  // A CPU-only resize must not carry `vgpu` at all — it is mutually exclusive
-  // with the hardware GPU fields, so a null is not a safe stand-in.
+  // Only the resource fields the caller set are sent.
   fetch.addJson(isPatch, 200, vm);
   await client(fetch).vm("vm_1").update({ memory_mib: 2048 });
   assert.deepEqual(JSON.parse(fetch.calls[5]!.body!), {
-    resources: { vcpu: null, memory_mib: 2048, disk_mib: null },
+    resources: { memory_mib: 2048 },
   });
 }
 

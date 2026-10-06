@@ -1678,13 +1678,7 @@ export class VM {
       r.resources !== undefined ||
       (r.vcpu === undefined && r.memory_mib === undefined && r.disk_mib === undefined && r.vgpu === undefined)
         ? r.resources
-        : {
-            vcpu: r.vcpu ?? null,
-            memory_mib: r.memory_mib ?? null,
-            disk_mib: r.disk_mib ?? null,
-            // Null conflicts with hardware GPU fields; omit vGPU when unset.
-            vgpu: r.vgpu,
-          };
+        : { vcpu: r.vcpu, memory_mib: r.memory_mib, disk_mib: r.disk_mib, vgpu: r.vgpu };
     const body: PatchVmRequest = {
       description: r.description,
       pool_id: r.pool_id,
