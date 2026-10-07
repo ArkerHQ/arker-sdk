@@ -1351,6 +1351,7 @@
         "summary": "Update a session (resize PTY / set timeout)",
         "description": "Resize the session's PTY (cols/rows) and/or update its idle timeout. A resize applies at once to the session's open terminal, attached or detached, and is the size the next attach opens at. REST equivalent of the WebSocket {\"type\":\"resize\"} control frame \u2014 usable from any client, attached or not.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -4828,7 +4829,6 @@
                 "$ref": "#/components/schemas/RegistryAuth"
               }
             ],
-            "nullable": true,
             "description": "Optional credentials for `image`. Ignored when forking from a source VM, which has no registry to authenticate against."
           },
           "pool_id": {
@@ -5280,12 +5280,14 @@
             "minimum": 0
           },
           "time_to_background": {
-            "description": "Sync window in seconds. `0` returns a pollable command run immediately after successful dispatch without polling for completion. A positive value bounds the synchronous wait. Omission uses the 300-second default. Control requests do not accept this field. This does not bound command execution; use `timeout` for the execution and kill bound. Values above approximately 350 seconds can exceed the load balancer idle limit.",
+            "description": "Sync window in seconds. `0` returns a pollable command run immediately after successful dispatch without polling for completion. A positive value bounds the synchronous wait. Omission uses the 300-second default. Control requests do not accept this field. This does not bound command execution; use `timeout` for the execution and kill bound.",
             "type": [
               "integer",
               "null"
             ],
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 300,
+            "format": "uint16"
           },
           "background": {
             "description": "Alias for `time_to_background`. `true` is exactly `time_to_background: 0` (return a pollable run immediately); `false` leaves the default sync window. Send only one of the two \u2014 supplying both is rejected, because they can disagree. Prefer `time_to_background`, which can also bound the wait instead of only switching it off.",
@@ -6100,7 +6102,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SyncWriteEntry"
-            }
+            },
+            "minItems": 1
           }
         }
       },
@@ -6798,7 +6801,8 @@
         "properties": {
           "name": {
             "description": "Customer-defined resource name.",
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         }
       },
@@ -6886,8 +6890,9 @@
               "integer",
               "null"
             ],
-            "minimum": 0,
-            "maximum": 255
+            "minimum": 1,
+            "maximum": 255,
+            "format": "uint8"
           },
           "memory_mib": {
             "description": "Memory allocation in mebibytes.",

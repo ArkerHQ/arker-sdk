@@ -735,9 +735,6 @@ class VM:
     public: bool | None
     region: str | None
     provider: str | None
-    vcpu_count: int | None
-    memory_mib: int | None
-    disk_mib: int | None
     network: VmNetwork | None
     resources: VmResources | None
     max_vcpus: int | None
@@ -758,10 +755,6 @@ class VM:
         self.base_url = base_url or client.base_url
         for f in dataclasses.fields(Vm):
             setattr(self, f.name, getattr(data, f.name) if data is not None else None)
-        resources = data.resources if data is not None else None
-        self.vcpu_count = resources.vcpu if resources is not None else None
-        self.memory_mib = resources.memory_mib if resources is not None else None
-        self.disk_mib = resources.disk_mib if resources is not None else None
 
     def __repr__(self) -> str:
         return f"VM(id={self.id!r}, name={self.name!r}, state={self.state!r})"
@@ -935,7 +928,7 @@ class VM:
     def update(
         self,
         *,
-        vcpu_count: int | None = None,
+        vcpu: int | None = None,
         memory_mib: int | None = None,
         disk_mib: int | None = None,
         vgpu: float | None = None,
@@ -960,9 +953,9 @@ class VM:
 
         Returns the updated :class:`Vm`."""
         resources: ResourcesInput | None = None
-        if vcpu_count is not None or memory_mib is not None or disk_mib is not None or vgpu is not None:
+        if vcpu is not None or memory_mib is not None or disk_mib is not None or vgpu is not None:
             resources = ResourcesInput(
-                vcpu=vcpu_count,
+                vcpu=vcpu,
                 memory_mib=memory_mib,
                 disk_mib=disk_mib,
                 vgpu=vgpu,
