@@ -1177,7 +1177,7 @@ def test_update_accepts_a_policy_doc_instance() -> None:
     t.add_json(_is_patch_vm, 200, _patched_vm())
 
     with use_transport(t):
-        client().vm("vm_1").update(vcpu_count=2, policies=doc)
+        client().vm("vm_1").update(vcpu=2, policies=doc)
 
     assert json.loads(t.calls[0]["body"]) == {
         "resources": {"vcpu": 2},
@@ -1226,7 +1226,7 @@ def test_update_omits_policies_unless_given() -> None:
     t.add_json(_is_patch_vm, 200, _patched_vm())
 
     with use_transport(t):
-        client().vm("vm_1").update(vcpu_count=4)
+        client().vm("vm_1").update(vcpu=4)
 
     assert "policies" not in json.loads(t.calls[0]["body"])
 

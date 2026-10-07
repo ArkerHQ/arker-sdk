@@ -812,7 +812,7 @@ export interface components {
             /** @description Resource shape for the new VM. */
             resources?: components["schemas"]["ResourcesInput"] | null;
             /** @description Optional credentials for `image`. Ignored when forking from a source VM, which has no registry to authenticate against. */
-            registry_auth?: components["schemas"]["RegistryAuth"] | null;
+            registry_auth?: components["schemas"]["RegistryAuth"];
             /**
              * Format: uuid
              * @description Optionally join an active pool in the same organization and provider/region. Membership can be changed with VM PATCH and is never inherited from the source VM.
@@ -990,7 +990,10 @@ export interface components {
             command?: string;
             /** @description Maximum command runtime in seconds. Omitted means no limit; the run is killed only if you set a `timeout`. `0` is an explicit spelling of the same thing. This is separate from `time_to_background`, which controls how long the request waits for completion. A run is not complete until everything it spawned has exited, so this is also the bound on a run that leaves a daemon behind; when it fires, the run's processes are killed. */
             timeout?: number | null;
-            /** @description Sync window in seconds. `0` returns a pollable command run immediately after successful dispatch without polling for completion. A positive value bounds the synchronous wait. Omission uses the 300-second default. Control requests do not accept this field. This does not bound command execution; use `timeout` for the execution and kill bound. Values above approximately 350 seconds can exceed the load balancer idle limit. */
+            /**
+             * Format: uint16
+             * @description Sync window in seconds. `0` returns a pollable command run immediately after successful dispatch without polling for completion. A positive value bounds the synchronous wait. Omission uses the 300-second default. Control requests do not accept this field. This does not bound command execution; use `timeout` for the execution and kill bound.
+             */
             time_to_background?: number | null;
             /**
              * @deprecated
@@ -1510,7 +1513,10 @@ export interface components {
         Vgpu: 0 | 0.125 | 0.25 | 0.375 | 0.5 | 0.625 | 0.75 | 0.875 | 1 | 2 | 4 | 8;
         /** @description Resource shape a caller asks for. GPU size is set with `vgpu`, in eighths of one card; the resolved per-GPU `gpu_sms`/`gpu_vram_mib` are reported back on the machine. */
         ResourcesInput: {
-            /** @description Virtual CPU allocation. */
+            /**
+             * Format: uint8
+             * @description Virtual CPU allocation.
+             */
             vcpu?: number | null;
             /** @description Memory allocation in mebibytes. */
             memory_mib?: number | null;
@@ -3908,7 +3914,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: {
+        requestBody: {
             content: {
                 "application/json": components["schemas"]["PatchSessionRequest"];
             };

@@ -1039,9 +1039,6 @@ export class VM {
   readonly public?: Vm["public"];
   readonly region?: Vm["region"];
   readonly provider?: Vm["provider"];
-  readonly vcpu_count?: number | null;
-  readonly memory_mib?: number | null;
-  readonly disk_mib?: number | null;
   readonly network?: Vm["network"];
   readonly resources?: Vm["resources"];
   readonly max_vcpus?: Vm["max_vcpus"];
