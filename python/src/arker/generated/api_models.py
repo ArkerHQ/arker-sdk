@@ -425,8 +425,11 @@ class ResourcesInput:
 
 @dataclass(frozen=True)
 class SshPublicKeyInfo:
+    id: str
     public_key: str
     fingerprint: str
+    name: str | None = None
+    expires_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1426,6 +1429,34 @@ class ConflictOrIdempotencyConflictOrInvalidStateErrorResponse:
 
 
 @dataclass(frozen=True)
+class Auth:
+    token: str
+
+
+@dataclass(frozen=True)
+class SshKeyInput:
+    public_key: str
+    name: str | None = None
+    expires_at: str | None = None
+
+
+SshKeysUpdate: TypeAlias = dict[str, SshKeyInput | None]
+
+
+@dataclass(frozen=True)
+class When:
+    at: str | None = None
+    after: int | None = None
+
+
+@dataclass(frozen=True)
+class LifecycleRule:
+    type: Literal['lifecycle']
+    when: When
+    action: Literal['delete']
+
+
+@dataclass(frozen=True)
 class ListVmsParameters:
     cursor: str | None = None
     limit: int | None = None
@@ -1747,47 +1778,24 @@ HealthUnavailableResponse: TypeAlias = (
 
 
 @dataclass(frozen=True)
+class PolicyRule:
+    type: Literal['outbound', 'inbound']
+    priority: int
+    action: PolicyAction
+    match: PolicyMatch | None = None
+    auth: Literal['open', 'arker'] | Auth | None = None
+    expires_at: str | None = None
+
+
+PolicyRules: TypeAlias = dict[str, PolicyRule | LifecycleRule]
+
+
+@dataclass(frozen=True)
 class PolicyEntry:
     type: Literal['outbound', 'inbound']
     action: PolicyAction
     match: PolicyMatch | None = None
     auth: Literal['open', 'arker'] | None = None
-
-
-@dataclass(frozen=True)
-class Vm:
-    vm_id: str
-    owner_org_id: str
-    created_at: str
-    description: str | None
-    public: bool
-    state: VmState
-    network: VmNetwork
-    sessions: list[Session]
-    resources: VmResources
-    name: str | None = None
-    hostname: str | None = None
-    root_source_vm_id: str | None = None
-    root_source_vm_name: str | None = None
-    region: str | None = None
-    provider: Provider | None = None
-    last_active_at: str | None = None
-    max_vcpus: int | None = None
-    min_vcpus: int | None = None
-    max_memory_mib: int | None = None
-    min_memory_mib: int | None = None
-    gpu_platforms: list[GpuPlatformLimits] | None = None
-    min_disk_mib: int | None = None
-    max_disk_mib: int | None = None
-    platform: str | None = None
-    compatible_platforms: list[CompatiblePlatform] | None = None
-    pool_id: str | None = None
-
-
-@dataclass(frozen=True)
-class ListVmsResponse:
-    vms: list[Vm]
-    next_cursor: str | None = None
 
 
 RunResponse: TypeAlias = CompletedRunResponse | BackgroundRunResponse
@@ -1838,6 +1846,21 @@ class SyncCommitWriteResult:
 
 
 @dataclass(frozen=True)
+class PolicyUpdate:
+    rules: dict[str, PolicyRule | LifecycleRule | None] | None = None
+    secrets: dict[str, str | None] | None = None
+    policies: list[PolicyEntry] | None = None
+
+
+@dataclass(frozen=True)
+class VmPolicies:
+    rules: PolicyRules | None = None
+    secrets: dict[str, str] | None = None
+    mitm_domains: list[str] | None = None
+    warnings: list[str] | None = None
+
+
+@dataclass(frozen=True)
 class PolicyWriteRequest:
     policies: list[PolicyEntry] | None = None
     secrets: dict[str, str] | None = None
@@ -1867,13 +1890,13 @@ class ForkRequest1:
     name: str | None = None
     description: str | None = None
     public: bool | None = None
-    ssh_public_keys: list[str] | None = None
+    ssh_public_keys: SshKeysUpdate | list[str] | None = None
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
-    policies: PolicyWriteRequest | None = None
+    policies: PolicyUpdate | None = None
     resources: ResourcesInput | None = None
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
@@ -1892,13 +1915,13 @@ class ForkRequest2:
     name: str | None = None
     description: str | None = None
     public: bool | None = None
-    ssh_public_keys: list[str] | None = None
+    ssh_public_keys: SshKeysUpdate | list[str] | None = None
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
-    policies: PolicyWriteRequest | None = None
+    policies: PolicyUpdate | None = None
     resources: ResourcesInput | None = None
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
@@ -1917,13 +1940,13 @@ class ForkRequest3:
     name: str | None = None
     description: str | None = None
     public: bool | None = None
-    ssh_public_keys: list[str] | None = None
+    ssh_public_keys: SshKeysUpdate | list[str] | None = None
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
-    policies: PolicyWriteRequest | None = None
+    policies: PolicyUpdate | None = None
     resources: ResourcesInput | None = None
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
@@ -1942,13 +1965,13 @@ class ForkRequest4:
     name: str | None = None
     description: str | None = None
     public: bool | None = None
-    ssh_public_keys: list[str] | None = None
+    ssh_public_keys: SshKeysUpdate | list[str] | None = None
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
-    policies: PolicyWriteRequest | None = None
+    policies: PolicyUpdate | None = None
     resources: ResourcesInput | None = None
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
@@ -1967,13 +1990,13 @@ class ForkRequest5:
     name: str | None = None
     description: str | None = None
     public: bool | None = None
-    ssh_public_keys: list[str] | None = None
+    ssh_public_keys: SshKeysUpdate | list[str] | None = None
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
-    policies: PolicyWriteRequest | None = None
+    policies: PolicyUpdate | None = None
     resources: ResourcesInput | None = None
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
@@ -1992,13 +2015,13 @@ class ForkRequest6:
     name: str | None = None
     description: str | None = None
     public: bool | None = None
-    ssh_public_keys: list[str] | None = None
+    ssh_public_keys: SshKeysUpdate | list[str] | None = None
     disk: bool | None = None
     durable: bool | None = None
     platforms: list[str] | None = None
     layers: list[Literal['disk', 'memory']] | None = None
     queueing_timeout: int | None = None
-    policies: PolicyWriteRequest | None = None
+    policies: PolicyUpdate | None = None
     resources: ResourcesInput | None = None
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
@@ -2016,6 +2039,43 @@ ForkRequest: TypeAlias = (
 
 
 @dataclass(frozen=True)
+class Vm:
+    vm_id: str
+    owner_org_id: str
+    created_at: str
+    description: str | None
+    public: bool
+    state: VmState
+    network: VmNetwork
+    sessions: list[Session]
+    resources: VmResources
+    name: str | None = None
+    hostname: str | None = None
+    root_source_vm_id: str | None = None
+    root_source_vm_name: str | None = None
+    region: str | None = None
+    provider: Provider | None = None
+    last_active_at: str | None = None
+    policies: VmPolicies | None = None
+    max_vcpus: int | None = None
+    min_vcpus: int | None = None
+    max_memory_mib: int | None = None
+    min_memory_mib: int | None = None
+    gpu_platforms: list[GpuPlatformLimits] | None = None
+    min_disk_mib: int | None = None
+    max_disk_mib: int | None = None
+    platform: str | None = None
+    compatible_platforms: list[CompatiblePlatform] | None = None
+    pool_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ListVmsResponse:
+    vms: list[Vm]
+    next_cursor: str | None = None
+
+
+@dataclass(frozen=True)
 class RunRequest:
     session_id: str | None = None
     session_idx: int | None = None
@@ -2026,7 +2086,7 @@ class RunRequest:
     queueing_timeout: int | None = None
     end_symbol: str | None = 'auto'
     signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
-    policies: PolicyWriteRequest | None = None
+    policies: PolicyUpdate | None = None
 
 
 SyncWriteResult: TypeAlias = (
@@ -2038,8 +2098,8 @@ SyncWriteResult: TypeAlias = (
 class PatchVmRequest:
     description: str | None = None
     resources: ResourcesInput | None = None
-    ssh_public_keys: list[str] | None = None
-    policies: PolicyWriteRequest | None = None
+    ssh_public_keys: SshKeysUpdate | list[str] | None = None
+    policies: PolicyUpdate | None = None
     pool_id: str | None = None
     pool_name: str | None = None
 

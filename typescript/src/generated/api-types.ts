@@ -167,12 +167,14 @@ export interface paths {
         };
         /**
          * Get a VM network policy
-         * @description Return the VM's network policy together with its derived inbound exposure and enforcement metadata. The base application hostname is nullable; non-default ports use `<vm>-<port>.<provider>-<region>.arker.app`.
+         * @deprecated
+         * @description Deprecated: read `policies` on `GET /v1/vms/{id}`. Returns the VM's network policy together with its derived inbound exposure and enforcement metadata. The base application hostname is nullable; non-default ports use `<vm>-<port>.<provider>-<region>.arker.app`.
          */
         get: operations["getVmPolicies"];
         /**
          * Replace a VM network policy
-         * @description Replace the complete network policy of a mutable VM owned by the authenticated caller and apply it to the running VM. Public base VMs are immutable.
+         * @deprecated
+         * @description Deprecated: use `policies` on `PATCH /v1/vms/{id}`, which changes rules by id without resending the others. Replaces the complete network policy of a mutable VM owned by the authenticated caller and applies it to the running VM. Rules in the ordered list get ids `rule-0`, `rule-1`, ... and priorities that keep their order. Public base VMs are immutable.
          */
         put: operations["putVmPolicies"];
         post?: never;
@@ -795,8 +797,8 @@ export interface components {
             description?: string | null;
             /** @description Make the new VM publicly forkable from other orgs. */
             public?: boolean | null;
-            /** @description SSH public keys to authorize on the new VM as raw `authorized_keys` entries, such as `ssh-ed25519 AAAA... you@host`. The list becomes the VM's authorized-key set. Omit it or pass an empty list to create the VM with no keys; add keys later with `PATCH /v1/vms/{id}`. Configure inbound reachability through the VM's policy. */
-            ssh_public_keys?: string[];
+            /** @description SSH keys to authorize on the new VM, by key id. They are its whole set: the source VM's keys are not inherited. Omit it to create the VM with no keys. Configure inbound reachability through the VM's policy. */
+            ssh_public_keys?: components["schemas"]["SshKeysUpdate"] | string[];
             /** @description Whether the new VM should include persistent disk storage. */
             disk?: boolean | null;
             /** @description Whether the VM should preserve recoverable state across compute interruptions. */
@@ -807,8 +809,8 @@ export interface components {
             layers?: ("disk" | "memory")[] | null;
             /** @description Maximum time in seconds this request may wait for capacity before failing with `capacity_unavailable`. Omit this field or pass `0` to fail immediately when capacity is unavailable. */
             queueing_timeout?: number | null;
-            /** @description Network policy stored and enforced before the new VM first runs. Omit it to inherit the source VM's policy. Providing a policy replaces the inherited policy; an empty document selects the default posture of allow-all outbound traffic and authenticated inbound traffic. A non-empty document denies unmatched outbound traffic, so include outbound rules needed during setup. Network topology is inherited from the source. Set SSH keys through `ssh_public_keys`. */
-            policies?: components["schemas"]["PolicyWriteRequest"] | null;
+            /** @description Network policy for the new VM, stored and enforced before it first runs. The new VM inherits the source VM's policy with this change applied: rules and secrets named here are written or removed, the rest are inherited. Omit it to inherit the policy unchanged. A policy with rules denies unmatched outbound traffic, so include outbound rules needed during setup. Network topology is inherited from the source. Set SSH keys through `ssh_public_keys`. */
+            policies?: components["schemas"]["PolicyUpdate"] | null;
             /** @description Resource shape for the new VM. */
             resources?: components["schemas"]["ResourcesInput"] | null;
             /** @description Optional credentials for `image`. Ignored when forking from a source VM, which has no registry to authenticate against. */
@@ -872,7 +874,7 @@ export interface components {
              */
             session_idx?: number;
             state: components["schemas"]["SessionState"];
-            /** @description Working directory inside the VM. */
+            /** @description The session shell's working directory, as the guest last reported it. Empty until its first run when the session was created without one. */
             cwd: string;
             /** @description Optional environment-variable overrides for this session. */
             env?: {
@@ -925,6 +927,8 @@ export interface components {
             last_active_at?: string | null;
             /** @description The VM's network object — SSH keys only. Inbound reachability and per-port exposure are derived from `policies`, not from this object. */
             network: components["schemas"]["VmNetwork"];
+            /** @description The VM's network policy. Returned by `GET /v1/vms/{id}`, `PATCH /v1/vms/{id}`, and `POST /v1/fork`; omitted from list responses. */
+            policies?: components["schemas"]["VmPolicies"] | null;
             /** @description Hard vCPU ceiling for a fork of this VM. Requesting more fails the run. */
             max_vcpus?: number | null;
             /** @description Smallest vCPU count accepted for this VM. */
@@ -1012,8 +1016,11 @@ export interface components {
              * @enum {string|null}
              */
             signal?: "SIGINT" | "SIGTERM" | "SIGKILL" | "SIGHUP" | null;
-            /** @description Complete network policy replacement applied to the VM before this run and retained afterward. A non-empty document replaces the persisted policy; an empty document selects the default posture of allow-all outbound traffic and authenticated inbound traffic. Omit it to use the current policy unchanged. If the policy cannot be stored and applied, the command does not run. */
-            policies?: components["schemas"]["PolicyWriteRequest"] | null;
+            /**
+             * @deprecated
+             * @description Deprecated: use `policies` on `PATCH /v1/vms/{id}`. A change to the VM's network policy, applied as that endpoint applies it before this run and retained afterward. If the policy cannot be stored and applied, the command does not run.
+             */
+            policies?: components["schemas"]["PolicyUpdate"] | null;
         };
         RunResponse: components["schemas"]["CompletedRunResponse"] | components["schemas"]["BackgroundRunResponse"];
         CompletedRunResponse: {
@@ -1198,7 +1205,7 @@ export interface components {
             env?: {
                 [key: string]: string;
             } | null;
-            /** @description Working directory inside the VM. */
+            /** @description Directory the session's shell starts in, unless the image declares a WORKDIR. Omitted, it starts in the image's WORKDIR, else the run user's home (`/root`). */
             cwd?: string | null;
             /** @description Mark this session for an interactive PTY. The PTY stream is attached separately through the session WebSocket endpoint. */
             pty?: boolean | null;
@@ -1526,10 +1533,16 @@ export interface components {
             vgpu?: components["schemas"]["Vgpu"] | null;
         };
         SshPublicKeyInfo: {
+            /** @description The key's id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Keys written as a list get an id derived from the key. */
+            id: string;
             /** @description SSH public key in authorized_keys format. */
             public_key: string;
             /** @description Stable fingerprint of the SSH public key. */
             fingerprint: string;
+            /** @description Display name, when one was set. */
+            name?: string;
+            /** @description RFC 3339 timestamp from which the key no longer authorizes logins. Absent when it never expires. */
+            expires_at?: string;
         };
         /** @description SSH access configuration for a VM. Configure inbound application access through the VM's network policy. */
         VmNetwork: {
@@ -1541,10 +1554,10 @@ export interface components {
             description?: string | null;
             /** @description CPU, memory, and disk configuration. */
             resources?: components["schemas"]["ResourcesInput"] | null;
-            /** @description Complete replacement for the VM's authorized SSH keys. Omit this field to leave the keys unchanged. Pass an empty array to remove all keys. */
-            ssh_public_keys?: string[];
-            /** @description Complete network policy replacement for the VM. A non-empty document replaces the persisted policy and applies it to the running VM. An empty document selects the default posture of allow-all outbound traffic and authenticated inbound traffic. Omit it to leave the current policy unchanged. If the policy cannot be stored and applied, the request fails. */
-            policies?: components["schemas"]["PolicyWriteRequest"] | null;
+            /** @description A change to the VM's authorized SSH keys, by key id. Omit it to leave the keys unchanged. The deprecated list form replaces every key; an empty list removes them all. */
+            ssh_public_keys?: components["schemas"]["SshKeysUpdate"] | string[];
+            /** @description A change to the VM's network policy. Rules and secrets named are written or removed; the rest are kept, so concurrent changes to different rules do not overwrite each other. Omit it to leave the policy unchanged. If the policy cannot be stored and applied, the request fails. Changing only `policies` is allowed while the organization's billing is restricted. */
+            policies?: components["schemas"]["PolicyUpdate"] | null;
             /**
              * Format: uuid
              * @description Move the VM to an active pool in the same organization and provider/region. Mutually exclusive with pool_name. Omit both fields to keep its current pool.
@@ -2748,6 +2761,97 @@ export interface components {
         ConflictOrIdempotencyConflictOrInvalidStateErrorResponse: {
             /** @description The error category and its details, request metadata, and recovery context. */
             error: components["schemas"]["Conflict"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["InvalidState"];
+        };
+        /** @description One network policy rule, keyed by its id in a policy's `rules`. `match` ANDs its present fields (absent ⇒ catch-all). Rules are evaluated highest `priority` first, and the first rule that matches decides. */
+        PolicyRule: {
+            /**
+             * @description Traffic direction: `outbound` controls connections initiated by the VM; `inbound` exposes a guest port. Unknown values are rejected.
+             * @enum {string}
+             */
+            type: "outbound" | "inbound";
+            /** @description Evaluation rank from 0 to 1000000: higher priorities are evaluated first. No two rules of a policy may share a priority. Leave gaps between priorities so a rule can later be ranked between two others. */
+            priority: number;
+            match?: components["schemas"]["PolicyMatch"];
+            action: components["schemas"]["PolicyAction"];
+            /** @description For inbound `allow` rules. `arker` requires an API key for the VM's organization, `open` requires none, and `{"token": ...}` accepts the token or an API key. A token is at least 32 letters, digits, `-`, `_`, `.` or `~`. Defaults to `arker`. */
+            auth?: ("open" | "arker") | {
+                /** @description The token, usually `${secret:NAME}`. */
+                token: string;
+            };
+            /**
+             * Format: date-time
+             * @description Inbound rules only. An RFC 3339 time in the future. After it, the rule's ports refuse every request, including requests with an API key.
+             */
+            expires_at?: string;
+        };
+        /** @description A change to a VM's network policy: only the rules and secrets named are written or removed, and everything else is kept, so `{}` changes nothing. The deprecated `policies` list instead replaces the whole policy. */
+        PolicyUpdate: {
+            /** @description Rules to write, keyed by rule id. A rule replaces any rule with the same id; `null` removes the rule with that id. Rules not named here are kept. The resulting policy must not give two rules the same priority. */
+            rules?: {
+                [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["LifecycleRule"] | null;
+            };
+            /** @description Secrets to write, referenced by `${secret:NAME}` in rewrite actions. A value replaces the secret with that name; `null` removes it. Secrets not named here are kept. Values are encrypted at rest and masked as `***` in responses; `***` is not accepted as a value. */
+            secrets?: {
+                [key: string]: string | null;
+            };
+            /**
+             * @deprecated
+             * @description Deprecated: an ordered rule list that replaces the whole policy, first match wins. An empty list clears it. Use `rules`. Cannot be combined with `rules`.
+             */
+            policies?: components["schemas"]["PolicyEntry"][] | null;
+        };
+        /** @description The VM's network policy. Change it with `policies` on `PATCH /v1/vms/{id}`. */
+        VmPolicies: {
+            /** @description The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With rules, unmatched outbound traffic is denied. If no inbound rules are present, inbound access keeps the authenticated default; explicit inbound allow rules restrict exposure to their listed ports. */
+            rules?: components["schemas"]["PolicyRules"];
+            /** @description Names of the secrets referenced by `${secret:NAME}` in rewrite actions. Values are masked as `***`. */
+            secrets?: {
+                [key: string]: string;
+            };
+            /** @description Domains whose matching traffic is evaluated by the request-level policy engine. */
+            readonly mitm_domains?: string[];
+            /** @description Non-fatal policy application notices. */
+            readonly warnings?: string[];
+        };
+        /** @description The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With rules, unmatched outbound traffic is denied. If no inbound rules are present, inbound access keeps the authenticated default; explicit inbound allow rules restrict exposure to their listed ports. */
+        PolicyRules: {
+            [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["LifecycleRule"];
+        };
+        /** @description An SSH key to authorize. */
+        SshKeyInput: {
+            /** @description SSH public key in `authorized_keys` format, such as `ssh-ed25519 AAAA... you@host`. */
+            public_key: string;
+            /** @description Display name. */
+            name?: string;
+            /** @description RFC 3339 timestamp from which the key no longer authorizes logins; must be in the future when written. Omit it for a key that never expires. */
+            expires_at?: string;
+        };
+        /** @description SSH keys to write, keyed by key id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). A key replaces any key with the same id; `null` removes the key with that id. Keys not named here are kept, so `{}` changes nothing. The resulting set must not hold one public key under two ids. */
+        SshKeysUpdate: {
+            [key: string]: components["schemas"]["SshKeyInput"] | null;
+        };
+        /** @description A rule that deletes the VM at a set time, or a set number of seconds after it was created. It has no `priority` and does not affect traffic. A fork inherits it, and an `after` deadline counts from the fork's own creation. */
+        LifecycleRule: {
+            /**
+             * @description `lifecycle`.
+             * @enum {string}
+             */
+            type: "lifecycle";
+            /** @description `{ "at": <time> }` or `{ "after": <seconds> }`. */
+            when: {
+                /**
+                 * Format: date-time
+                 * @description An RFC 3339 time in the future.
+                 */
+                at?: string;
+                /** @description Seconds after the VM's creation, up to 2592000 (30 days). */
+                after?: number;
+            };
+            /**
+             * @description `delete`: deletes the VM, as `DELETE /v1/vms/{id}` does.
+             * @enum {string}
+             */
+            action: "delete";
         };
     };
     responses: {
