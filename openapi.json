@@ -756,7 +756,7 @@
           "Policies"
         ],
         "summary": "Get a VM network policy",
-        "description": "Return the VM's network policy together with its derived inbound exposure and enforcement metadata. The base application hostname is nullable; non-default ports use `<vm>-<port>.<provider>-<region>.arker.app`.",
+        "description": "Deprecated: read `policies` on `GET /v1/vms/{id}`. Returns the VM's network policy together with its derived inbound exposure and enforcement metadata. The base application hostname is nullable; non-default ports use `<vm>-<port>.<provider>-<region>.arker.app`.",
         "responses": {
           "200": {
             "description": "The VM's policy document (empty when none is set), plus its derived inbound exposure metadata.",
@@ -798,7 +798,8 @@
           "504": {
             "$ref": "#/components/responses/GatewayTimeoutError"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "operationId": "putVmPolicies",
@@ -806,7 +807,7 @@
           "Policies"
         ],
         "summary": "Replace a VM network policy",
-        "description": "Replace the complete network policy of a mutable VM owned by the authenticated caller and apply it to the running VM. Public base VMs are immutable.",
+        "description": "Deprecated: use `policies` on `PATCH /v1/vms/{id}`, which changes rules by id without resending the others. Replaces the complete network policy of a mutable VM owned by the authenticated caller and applies it to the running VM. Rules in the ordered list get ids `rule-0`, `rule-1`, ... and priorities that keep their order. Public base VMs are immutable.",
         "requestBody": {
           "required": true,
           "content": {
@@ -861,7 +862,8 @@
           "504": {
             "$ref": "#/components/responses/GatewayTimeoutError"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/v1/vms/{id}/runs": {
@@ -4748,11 +4750,20 @@
             "description": "Make the new VM publicly forkable from other orgs."
           },
           "ssh_public_keys": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "SSH public keys to authorize on the new VM as raw `authorized_keys` entries, such as `ssh-ed25519 AAAA... you@host`. The list becomes the VM's authorized-key set. Omit it or pass an empty list to create the VM with no keys; add keys later with `PATCH /v1/vms/{id}`. Configure inbound reachability through the VM's policy."
+            "description": "SSH keys to authorize on the new VM, by key id. They are its whole set: the source VM's keys are not inherited. Omit it to create the VM with no keys. Configure inbound reachability through the VM's policy.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SshKeysUpdate"
+              },
+              {
+                "type": "array",
+                "deprecated": true,
+                "items": {
+                  "type": "string"
+                },
+                "description": "Deprecated: SSH public keys in `authorized_keys` format that replace every key. Use the object form."
+              }
+            ]
           },
           "disk": {
             "description": "Whether the new VM should include persistent disk storage.",
@@ -4802,10 +4813,10 @@
             "minimum": 0
           },
           "policies": {
-            "description": "Network policy stored and enforced before the new VM first runs. Omit it to inherit the source VM's policy. Providing a policy replaces the inherited policy; an empty document selects the default posture of allow-all outbound traffic and authenticated inbound traffic. A non-empty document denies unmatched outbound traffic, so include outbound rules needed during setup. Network topology is inherited from the source. Set SSH keys through `ssh_public_keys`.",
+            "description": "Network policy for the new VM, stored and enforced before it first runs. The new VM inherits the source VM's policy with this change applied: rules and secrets named here are written or removed, the rest are inherited. Omit it to inherit the policy unchanged. A policy with rules denies unmatched outbound traffic, so include outbound rules needed during setup. Network topology is inherited from the source. Set SSH keys through `ssh_public_keys`.",
             "anyOf": [
               {
-                "$ref": "#/components/schemas/PolicyWriteRequest"
+                "$ref": "#/components/schemas/PolicyUpdate"
               },
               {
                 "type": "null"
@@ -4872,7 +4883,7 @@
             "$ref": "#/components/schemas/SessionState"
           },
           "cwd": {
-            "description": "Working directory inside the VM.",
+            "description": "The session shell's working directory, as the guest last reported it. Empty until its first run when the session was created without one.",
             "type": "string"
           },
           "env": {
@@ -5059,6 +5070,17 @@
           "network": {
             "$ref": "#/components/schemas/VmNetwork",
             "description": "The VM's network object \u2014 SSH keys only. Inbound reachability and per-port exposure are derived from `policies`, not from this object."
+          },
+          "policies": {
+            "description": "The VM's network policy. Returned by `GET /v1/vms/{id}`, `PATCH /v1/vms/{id}`, and `POST /v1/fork`; omitted from list responses.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VmPolicies"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "max_vcpus": {
             "type": [
@@ -5328,10 +5350,11 @@
             "description": "Deliver a signal to the selected persistent session's foreground process group: the run holding the session or, with no run in flight, an interpreter waiting between turns or an attached terminal's foreground job. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. When nothing is running in the session, the request fails with 404 and nothing is signalled. A run made only of shell builtins starts no process of its own, so it may have nothing to signal; the request then fails with 404 as well. Use `session_id` or `session_idx` to select the session."
           },
           "policies": {
-            "description": "Complete network policy replacement applied to the VM before this run and retained afterward. A non-empty document replaces the persisted policy; an empty document selects the default posture of allow-all outbound traffic and authenticated inbound traffic. Omit it to use the current policy unchanged. If the policy cannot be stored and applied, the command does not run.",
+            "description": "Deprecated: use `policies` on `PATCH /v1/vms/{id}`. A change to the VM's network policy, applied as that endpoint applies it before this run and retained afterward. If the policy cannot be stored and applied, the command does not run.",
+            "deprecated": true,
             "anyOf": [
               {
-                "$ref": "#/components/schemas/PolicyWriteRequest"
+                "$ref": "#/components/schemas/PolicyUpdate"
               },
               {
                 "type": "null"
@@ -5898,7 +5921,7 @@
             ]
           },
           "cwd": {
-            "description": "Working directory inside the VM.",
+            "description": "Directory the session's shell starts in, unless the image declares a WORKDIR. Omitted, it starts in the image's WORKDIR, else the run user's home (`/root`).",
             "type": [
               "string",
               "null"
@@ -6927,17 +6950,30 @@
       "SshPublicKeyInfo": {
         "type": "object",
         "required": [
+          "id",
           "public_key",
           "fingerprint"
         ],
         "additionalProperties": false,
         "properties": {
+          "id": {
+            "description": "The key's id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Keys written as a list get an id derived from the key.",
+            "type": "string"
+          },
           "public_key": {
             "description": "SSH public key in authorized_keys format.",
             "type": "string"
           },
           "fingerprint": {
             "description": "Stable fingerprint of the SSH public key.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name, when one was set.",
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "RFC 3339 timestamp from which the key no longer authorizes logins. Absent when it never expires.",
             "type": "string"
           }
         }
@@ -6980,17 +7016,26 @@
             ]
           },
           "ssh_public_keys": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Complete replacement for the VM's authorized SSH keys. Omit this field to leave the keys unchanged. Pass an empty array to remove all keys."
+            "description": "A change to the VM's authorized SSH keys, by key id. Omit it to leave the keys unchanged. The deprecated list form replaces every key; an empty list removes them all.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SshKeysUpdate"
+              },
+              {
+                "type": "array",
+                "deprecated": true,
+                "items": {
+                  "type": "string"
+                },
+                "description": "Deprecated: SSH public keys in `authorized_keys` format that replace every key. Use the object form."
+              }
+            ]
           },
           "policies": {
-            "description": "Complete network policy replacement for the VM. A non-empty document replaces the persisted policy and applies it to the running VM. An empty document selects the default posture of allow-all outbound traffic and authenticated inbound traffic. Omit it to leave the current policy unchanged. If the policy cannot be stored and applied, the request fails.",
+            "description": "A change to the VM's network policy. Rules and secrets named are written or removed; the rest are kept, so concurrent changes to different rules do not overwrite each other. Omit it to leave the policy unchanged. If the policy cannot be stored and applied, the request fails. Changing only `policies` is allowed while the organization's billing is restricted.",
             "anyOf": [
               {
-                "$ref": "#/components/schemas/PolicyWriteRequest"
+                "$ref": "#/components/schemas/PolicyUpdate"
               },
               {
                 "type": "null"
@@ -10628,6 +10673,253 @@
               }
             },
             "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
+      },
+      "PolicyRule": {
+        "type": "object",
+        "required": [
+          "type",
+          "priority",
+          "action"
+        ],
+        "additionalProperties": false,
+        "description": "One network policy rule, keyed by its id in a policy's `rules`. `match` ANDs its present fields (absent \u21d2 catch-all). Rules are evaluated highest `priority` first, and the first rule that matches decides.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "outbound",
+              "inbound"
+            ],
+            "description": "Traffic direction: `outbound` controls connections initiated by the VM; `inbound` exposes a guest port. Unknown values are rejected."
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "Evaluation rank from 0 to 1000000: higher priorities are evaluated first. No two rules of a policy may share a priority. Leave gaps between priorities so a rule can later be ranked between two others."
+          },
+          "match": {
+            "$ref": "#/components/schemas/PolicyMatch"
+          },
+          "action": {
+            "$ref": "#/components/schemas/PolicyAction"
+          },
+          "auth": {
+            "description": "For inbound `allow` rules. `arker` requires an API key for the VM's organization, `open` requires none, and `{\"token\": ...}` accepts the token or an API key. A token is at least 32 letters, digits, `-`, `_`, `.` or `~`. Defaults to `arker`.",
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "open",
+                  "arker"
+                ]
+              },
+              {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "The token, usually `${secret:NAME}`."
+                  }
+                }
+              }
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Inbound rules only. An RFC 3339 time in the future. After it, the rule's ports refuse every request, including requests with an API key."
+          }
+        }
+      },
+      "PolicyUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A change to a VM's network policy: only the rules and secrets named are written or removed, and everything else is kept, so `{}` changes nothing. The deprecated `policies` list instead replaces the whole policy.",
+        "properties": {
+          "rules": {
+            "type": "object",
+            "propertyNames": {
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+            },
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/PolicyRule"
+                },
+                {
+                  "$ref": "#/components/schemas/LifecycleRule"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "description": "Rules to write, keyed by rule id. A rule replaces any rule with the same id; `null` removes the rule with that id. Rules not named here are kept. The resulting policy must not give two rules the same priority."
+          },
+          "secrets": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": "Secrets to write, referenced by `${secret:NAME}` in rewrite actions. A value replaces the secret with that name; `null` removes it. Secrets not named here are kept. Values are encrypted at rest and masked as `***` in responses; `***` is not accepted as a value."
+          },
+          "policies": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "deprecated": true,
+            "items": {
+              "$ref": "#/components/schemas/PolicyEntry"
+            },
+            "description": "Deprecated: an ordered rule list that replaces the whole policy, first match wins. An empty list clears it. Use `rules`. Cannot be combined with `rules`."
+          }
+        }
+      },
+      "VmPolicies": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "The VM's network policy. Change it with `policies` on `PATCH /v1/vms/{id}`.",
+        "properties": {
+          "rules": {
+            "$ref": "#/components/schemas/PolicyRules",
+            "description": "The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With rules, unmatched outbound traffic is denied. If no inbound rules are present, inbound access keeps the authenticated default; explicit inbound allow rules restrict exposure to their listed ports."
+          },
+          "secrets": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Names of the secrets referenced by `${secret:NAME}` in rewrite actions. Values are masked as `***`."
+          },
+          "mitm_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "readOnly": true,
+            "description": "Domains whose matching traffic is evaluated by the request-level policy engine."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "readOnly": true,
+            "description": "Non-fatal policy application notices."
+          }
+        }
+      },
+      "PolicyRules": {
+        "type": "object",
+        "propertyNames": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        },
+        "additionalProperties": {
+          "oneOf": [
+            {
+              "$ref": "#/components/schemas/PolicyRule"
+            },
+            {
+              "$ref": "#/components/schemas/LifecycleRule"
+            }
+          ]
+        },
+        "description": "The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With rules, unmatched outbound traffic is denied. If no inbound rules are present, inbound access keeps the authenticated default; explicit inbound allow rules restrict exposure to their listed ports."
+      },
+      "SshKeyInput": {
+        "type": "object",
+        "required": [
+          "public_key"
+        ],
+        "additionalProperties": false,
+        "description": "An SSH key to authorize.",
+        "properties": {
+          "public_key": {
+            "type": "string",
+            "description": "SSH public key in `authorized_keys` format, such as `ssh-ed25519 AAAA... you@host`."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "Display name."
+          },
+          "expires_at": {
+            "type": "string",
+            "description": "RFC 3339 timestamp from which the key no longer authorizes logins; must be in the future when written. Omit it for a key that never expires."
+          }
+        }
+      },
+      "SshKeysUpdate": {
+        "type": "object",
+        "propertyNames": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        },
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/SshKeyInput"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": "SSH keys to write, keyed by key id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). A key replaces any key with the same id; `null` removes the key with that id. Keys not named here are kept, so `{}` changes nothing. The resulting set must not hold one public key under two ids."
+      },
+      "LifecycleRule": {
+        "type": "object",
+        "required": [
+          "type",
+          "when",
+          "action"
+        ],
+        "additionalProperties": false,
+        "description": "A rule that deletes the VM at a set time, or a set number of seconds after it was created. It has no `priority` and does not affect traffic. A fork inherits it, and an `after` deadline counts from the fork's own creation.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "lifecycle"
+            ],
+            "description": "`lifecycle`."
+          },
+          "when": {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "maxProperties": 1,
+            "description": "`{ \"at\": <time> }` or `{ \"after\": <seconds> }`.",
+            "properties": {
+              "at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "An RFC 3339 time in the future."
+              },
+              "after": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2592000,
+                "description": "Seconds after the VM's creation, up to 2592000 (30 days)."
+              }
+            }
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "delete"
+            ],
+            "description": "`delete`: deletes the VM, as `DELETE /v1/vms/{id}` does."
           }
         }
       }
