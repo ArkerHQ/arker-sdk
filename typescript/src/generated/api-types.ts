@@ -698,7 +698,7 @@ export interface components {
         };
         /** @description Match criteria: present fields are combined with AND; list items are combined with OR. `ips` and `hosts` are mutually exclusive, and inbound rules cannot use `hosts`. Port, IP, and host rules operate at the connection layer. Method, path, header, and body rules operate at the request layer. */
         PolicyMatch: {
-            /** @description Single ports and/or inclusive [start, end] ranges, e.g. [80, 443, [1000, 2000]]. Empty/absent = any port. Inbound allow rules require one or more individual ports and reject ranges. */
+            /** @description Single ports and/or inclusive [start, end] ranges, e.g. [80, 443, [1000, 2000]]. Absent = any port; an empty list is refused. Inbound allow rules require one or more individual ports and reject ranges. */
             ports?: (number | number[])[];
             /** @description IPs or CIDRs. Outbound rules match destination IPs; inbound rules match the caller source IP. */
             ips?: string[];
@@ -770,7 +770,10 @@ export interface components {
              * @default true
              */
             deny_on_timeout?: boolean;
-            /** @description Max wall-clock for the gate call before it is abandoned (then deny_on_timeout applies). Default ~30000. */
+            /**
+             * Format: uint64
+             * @description Max wall-clock for the gate call before it is abandoned (then deny_on_timeout applies). Default ~30000.
+             */
             timeout_ms?: number;
         };
         ForkRequest: {
@@ -972,9 +975,15 @@ export interface components {
             deleted: boolean;
         };
         PatchSessionRequest: {
-            /** @description New terminal width in columns. Provide together with rows. */
+            /**
+             * Format: uint16
+             * @description New terminal width in columns. Provide together with rows.
+             */
             cols?: number;
-            /** @description New terminal height in rows. Provide together with cols. */
+            /**
+             * Format: uint16
+             * @description New terminal height in rows. Provide together with cols.
+             */
             rows?: number;
             /** @description Idle auto-cancel window for the PTY; applies on the next attach. */
             timeout_secs?: number;
@@ -988,7 +997,10 @@ export interface components {
         RunRequest: {
             /** @description The session to run in. Arker's run interface works like a terminal: sessions are tabs, each keeps its own state — working directory, environment, shell history — and each handles one run at a time. Create a session with `POST /v1/vms/{id}/sessions`, which also sets its starting directory and environment, then pass its id here. Run sequential commands in one session; for a long-running task, use `time_to_background: 0` in a session of its own so later work does not interrupt it. Distinct sessions run concurrently. A session that no longer exists is a 404. Omitted, the run uses the VM's default session, which every caller that omits it shares. */
             session_id?: string | null;
-            /** @description Numeric session selector. `session_id` takes precedence when both selectors are sent. A session at this index that is being deleted refuses the run with 503; retry once the delete completes, which frees the index for a new session. */
+            /**
+             * Format: uint32
+             * @description Numeric session selector. `session_id` takes precedence when both selectors are sent. A session at this index that is being deleted refuses the run with 503; retry once the delete completes, which frees the index for a new session.
+             */
             session_idx?: number | null;
             /** @description Command submitted for execution. Omit it only for a signal request. */
             command?: string;
@@ -1209,9 +1221,15 @@ export interface components {
             cwd?: string | null;
             /** @description Mark this session for an interactive PTY. The PTY stream is attached separately through the session WebSocket endpoint. */
             pty?: boolean | null;
-            /** @description Advisory initial terminal width in columns. The WebSocket attach query may override it. */
+            /**
+             * Format: uint16
+             * @description Advisory initial terminal width in columns. The WebSocket attach query may override it.
+             */
             cols?: number | null;
-            /** @description Advisory initial terminal height in rows. The WebSocket attach query may override it. */
+            /**
+             * Format: uint16
+             * @description Advisory initial terminal height in rows. The WebSocket attach query may override it.
+             */
             rows?: number | null;
             /** @description Advisory command for an interactive PTY session. */
             command?: string | null;
@@ -2769,7 +2787,10 @@ export interface components {
              * @enum {string}
              */
             type: "outbound" | "inbound";
-            /** @description Evaluation rank from 0 to 1000000: higher priorities are evaluated first. No two rules of a policy may share a priority. Leave gaps between priorities so a rule can later be ranked between two others. */
+            /**
+             * Format: uint32
+             * @description Evaluation rank from 0 to 1000000: higher priorities are evaluated first. No two rules of a policy may share a priority. Leave gaps between priorities so a rule can later be ranked between two others.
+             */
             priority: number;
             match?: components["schemas"]["PolicyMatch"];
             action: components["schemas"]["PolicyAction"];

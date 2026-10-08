@@ -4323,13 +4323,15 @@
         "properties": {
           "ports": {
             "type": "array",
-            "description": "Single ports and/or inclusive [start, end] ranges, e.g. [80, 443, [1000, 2000]]. Empty/absent = any port. Inbound allow rules require one or more individual ports and reject ranges.",
+            "minItems": 1,
+            "description": "Single ports and/or inclusive [start, end] ranges, e.g. [80, 443, [1000, 2000]]. Absent = any port; an empty list is refused. Inbound allow rules require one or more individual ports and reject ranges.",
             "items": {
               "oneOf": [
                 {
                   "type": "integer",
                   "minimum": 1,
-                  "maximum": 65535
+                  "maximum": 65535,
+                  "format": "uint16"
                 },
                 {
                   "type": "array",
@@ -4337,7 +4339,8 @@
                   "items": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 65535
+                    "maximum": 65535,
+                    "format": "uint16"
                   },
                   "minItems": 2,
                   "maxItems": 2
@@ -4347,6 +4350,7 @@
           },
           "ips": {
             "type": "array",
+            "minItems": 1,
             "items": {
               "type": "string"
             },
@@ -4354,6 +4358,7 @@
           },
           "hosts": {
             "type": "array",
+            "minItems": 1,
             "items": {
               "type": "string"
             },
@@ -4362,12 +4367,14 @@
           "methods": {
             "description": "HTTP methods matched by this rule.",
             "type": "array",
+            "minItems": 1,
             "items": {
               "type": "string"
             }
           },
           "paths": {
             "type": "array",
+            "minItems": 1,
             "items": {
               "type": "string"
             },
@@ -4386,6 +4393,7 @@
           "body_contains": {
             "description": "Substrings that must appear in the request body.",
             "type": "array",
+            "minItems": 1,
             "items": {
               "type": "string"
             }
@@ -4504,7 +4512,10 @@
           "allow_on_status": {
             "type": "array",
             "items": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535,
+              "format": "uint16"
             },
             "description": "HTTP status codes that mean ALLOW. Any other status denies. Must be non-empty."
           },
@@ -4515,6 +4526,8 @@
           },
           "timeout_ms": {
             "type": "integer",
+            "minimum": 0,
+            "format": "uint64",
             "description": "Max wall-clock for the gate call before it is abandoned (then deny_on_timeout applies). Default ~30000."
           }
         }
@@ -5237,12 +5250,14 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 1000,
+            "format": "uint16",
             "description": "New terminal width in columns. Provide together with rows."
           },
           "rows": {
             "type": "integer",
             "minimum": 1,
             "maximum": 1000,
+            "format": "uint16",
             "description": "New terminal height in rows. Provide together with cols."
           },
           "timeout_secs": {
@@ -5287,7 +5302,8 @@
               "integer",
               "null"
             ],
-            "minimum": 0
+            "minimum": 0,
+            "format": "uint32"
           },
           "command": {
             "description": "Command submitted for execution. Omit it only for a signal request.",
@@ -5941,6 +5957,7 @@
             ],
             "minimum": 1,
             "maximum": 1000,
+            "format": "uint16",
             "description": "Advisory initial terminal width in columns. The WebSocket attach query may override it."
           },
           "rows": {
@@ -5950,6 +5967,7 @@
             ],
             "minimum": 1,
             "maximum": 1000,
+            "format": "uint16",
             "description": "Advisory initial terminal height in rows. The WebSocket attach query may override it."
           },
           "command": {
@@ -10698,6 +10716,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 1000000,
+            "format": "uint32",
             "description": "Evaluation rank from 0 to 1000000: higher priorities are evaluated first. No two rules of a policy may share a priority. Leave gaps between priorities so a rule can later be ranked between two others."
           },
           "match": {
