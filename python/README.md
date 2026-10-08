@@ -35,7 +35,7 @@ arker = Arker()
 vm = arker.fork(source_vm_name="ubuntu-coding")
 
 result = vm.run("python3 -c 'print(2 + 2)'")
-print(result.stdout.decode())
+print(result.stdout)
 
 vm.sync("/tmp/hello.txt", "hello from Arker")
 print(vm.sync("/tmp/hello.txt").decode())
