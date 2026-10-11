@@ -645,7 +645,7 @@ export interface components {
          */
         SessionState: "idle" | "running";
         /**
-         * @description Lifecycle state for a run. `pending` means the run was accepted but has not started yet because an earlier run on the same session is still in flight; it is not terminal, and a client should keep polling. `running` means the command is in progress. `completed` means the command finished; `exit_code` reports its result. `failed` means the service could not start or finish the command, with a client-safe explanation in `fail_reason`. `cancelled` means the client cancelled the run.
+         * @description Lifecycle state for a run. `pending` means the run was accepted but is not running: it has not started yet because an earlier run on the same session is still in flight, or its VM is suspended and it continues when the VM wakes. It is not terminal, and a client should keep polling. `running` means the command is in progress. `completed` means the command finished; `exit_code` reports its result. `failed` means the service could not start or finish the command, with a client-safe explanation in `fail_reason`. `cancelled` means the client cancelled the run.
          * @enum {string}
          */
         RunState: "pending" | "running" | "completed" | "failed" | "cancelled";
@@ -691,12 +691,12 @@ export interface components {
             match?: components["schemas"]["PolicyMatch"];
             action: components["schemas"]["PolicyAction"];
             /**
-             * @description Authentication for an inbound rule that exposes a port — `allow`, or a scaling-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges.
+             * @description Authentication for an inbound rule that exposes a port — `allow`, or a `scale`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges.
              * @enum {string}
              */
             auth?: "open" | "arker";
         };
-        /** @description Match criteria: present fields are combined with AND; list items are combined with OR. `ips` and `hosts` are mutually exclusive, and inbound rules cannot use `hosts`. Port, IP, and host rules operate at the connection layer. Method, path, header, and body rules operate at the request layer. */
+        /** @description Match criteria: present fields are combined with AND; list items are combined with OR. `ips` and `hosts` are mutually exclusive, and inbound rules cannot use `hosts`. Port, IP, and host rules operate at the connection layer. Method, path, header, query parameter, and body rules operate at the request layer. */
         PolicyMatch: {
             /** @description Single ports and/or inclusive [start, end] ranges, e.g. [80, 443, [1000, 2000]]. Absent = any port; an empty list is refused. Inbound allow rules require one or more individual ports and reject ranges. */
             ports?: (number | number[])[];
@@ -708,21 +708,31 @@ export interface components {
             methods?: string[];
             /** @description Full-segment path prefixes. */
             paths?: string[];
-            /** @description Header name → any-of values (names AND'd, a name's values OR'd). */
+            /** @description Header name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, `"authorization": ["Bearer $arker_api_key"]` or `"x-api-key": ["$arker_api_key"]` matches an API key of the VM's organization. */
             headers?: {
+                [key: string]: string[];
+            };
+            /** @description Query parameter name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, parameters named `arker_*` are removed from a `GET` request's URL by a redirect that keeps them in a cookie, so the rest of a browsing session carries them without the URL showing them. */
+            query_params?: {
                 [key: string]: string[];
             };
             /** @description Substrings that must appear in the request body. */
             body_contains?: string[];
         };
-        /** @description allow / deny, or an object with any combination of `rewrite`, `gate`, and `scaling` (at least one). */
-        PolicyAction: ("allow" | "deny") | {
+        /** @description allow / deny, `delete` (schedule rules), or an object with any combination of `rewrite`, `gate`, and `scale` (at least one). */
+        PolicyAction: ("allow" | "deny" | "delete") | {
             rewrite?: components["schemas"]["Rewrite"];
             gate?: components["schemas"]["Gate"];
-            scaling?: components["schemas"]["ScalingAction"];
+            scale?: components["schemas"]["ScaleAction"];
+            /**
+             * @deprecated
+             * @description Deprecated spelling of `scale`.
+             */
+            scaling?: components["schemas"]["ScaleAction"];
+            webhook?: components["schemas"]["Webhook"];
         };
-        /** @description Auto-scaling behavior for matched traffic. On an `outbound` rule it brackets the time the VM is blocked awaiting an upstream response; on an `inbound` rule it brackets the time the VM is idle between requests (scale to zero). Outbound rules may be narrowed by L7 criteria (`methods`/`paths`/`headers`/`body_contains`), for example to suspend only on `POST /v1/messages`, and compose with `rewrite` / `gate` siblings. For outbound, prefer a `match.hosts` scope: a host-less scaling rule matches every flow it can see, which breaks certificate-pinning clients. Where each is enforced differs and explains the asymmetry: an `outbound` rule runs on the MITM (TLS-terminating) data path, which is why it can match L7 fields and carry `rewrite`/`gate` siblings; an `inbound` rule is enforced host-side on the plaintext request the worker already holds, so no MITM is involved and no TLS is terminated. */
-        ScalingAction: {
+        /** @description Scales the VM when the rule matches or fires. On an `outbound` rule `suspend` brackets the time the VM is blocked awaiting an upstream response; on an `inbound` rule it suspends the VM once a matched request has been answered, and `wake` decides whether a matched request wakes a suspended VM. Outbound rules may be narrowed by request fields (`methods`/`paths`/`headers`/`body_contains`), for example to suspend only on `POST /v1/messages`, and compose with `rewrite` / `gate` siblings. For outbound, prefer a `match.hosts` scope: a host-less rule matches every flow it can see, which breaks certificate-pinning clients. */
+        ScaleAction: {
             /**
              * @description Suspend the VM (snapshot and free CPU/RAM). On an `outbound` rule: while a matched upstream request is blocked, resuming when the response arrives. On an `inbound` rule: once a matched request's response has been fully delivered and nothing else is in flight, so the next matched request wakes it again. The suspended window remains part of the VM's Running interval until the VM is paused or stopped. On an `outbound` rule, matched responses are delivered only once the upstream response is COMPLETE: a suspended VM has no running guest to receive bytes, so the proxy holds the whole body and hands it over at the end. Total latency is unchanged, but a response whose fragments are individually usable — an SSE token stream, for example — stops arriving incrementally, so a client rendering tokens as they arrive will see nothing until the response finishes. Enabling this is a deliberate trade of incremental delivery for the memory saving.
              * @default false
@@ -730,6 +740,26 @@ export interface components {
             suspend?: boolean;
             /** @description Whether a matched inbound request may wake a suspended VM. Omit this field to allow waking. Set it to `false` so a request that would need to start the VM fails with `503 vm_suspended`; requests received while the VM is running are served normally. This field is not valid on outbound rules. */
             wake?: boolean;
+            /** @description `resources` rules only. Multiplies each resource it names by its factor, within the VM's supported range: `{ "vcpu": 2 }` doubles the vCPUs. */
+            resource_factors?: components["schemas"]["ResourceFactors"];
+        };
+        /** @description A number for each resource it names: `vcpu`, `memory_mib`, `disk_mib`. */
+        ResourceFactors: {
+            /**
+             * Format: double
+             * @description For vCPUs.
+             */
+            vcpu?: number;
+            /**
+             * Format: double
+             * @description For memory.
+             */
+            memory_mib?: number;
+            /**
+             * Format: double
+             * @description For disk. A disk only grows, so a factor for it is at least 1.
+             */
+            disk_mib?: number;
         };
         /** @description Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${…}`-braced), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged. */
         Rewrite: {
@@ -743,6 +773,8 @@ export interface components {
             };
             /** @description Request header names to remove before forwarding. */
             remove_headers?: string[];
+            /** @description Query parameter names to remove from the URL before forwarding. */
+            remove_query_params?: string[];
             /** @description Replace the request body entirely with this (interpolated) value; `$body` re-injects the original body. Absent = body forwarded unchanged. */
             body?: string;
         };
@@ -773,6 +805,26 @@ export interface components {
             /**
              * Format: uint64
              * @description Max wall-clock for the gate call before it is abandoned (then deny_on_timeout applies). Default ~30000.
+             */
+            timeout_ms?: number;
+        };
+        /** @description An HTTP request Arker sends, from outside the VM, when a `resources` rule starts firing. It does not wait on or act on the response. `path`, header values and string leaves of `body` take `$vm_id` and `${secret:NAME}`, and `$$` for a literal `$`. `host` is not interpolated, and private, link-local and internal destinations are refused. */
+        Webhook: {
+            /** @description Target endpoint including scheme, e.g. `https://aws-us-west-2.arker.ai`. */
+            host: string;
+            /** @description Request path. Default `/`. */
+            path?: string;
+            /** @description HTTP method. Default `POST`. */
+            method?: string;
+            /** @description Request headers. Stored credentials are encrypted at rest and masked in policy responses. */
+            headers?: {
+                [key: string]: string;
+            };
+            /** @description JSON request body. Absent = no body. */
+            body?: unknown;
+            /**
+             * Format: uint64
+             * @description Max wall-clock for the request before it is abandoned. Default ~30000.
              */
             timeout_ms?: number;
         };
@@ -825,6 +877,8 @@ export interface components {
             pool_id?: string;
             /** @description Optionally join an active pool by its unique name in the caller organization. Names are normalized and case-insensitive. Mutually exclusive with pool_id. Membership uses the resolved pool ID, can be changed with VM PATCH, and is never inherited from the source VM. */
             pool_name?: string;
+            /** @description A command to start on the new VM once it is forked, as a background run on its default session: the response is the VM, and the run is listed with `GET /v1/vms/{id}/runs`. */
+            command?: string;
         } & ({
             source_vm_id: string;
             source_vm_name?: null;
@@ -1002,7 +1056,7 @@ export interface components {
              * @description Numeric session selector. `session_id` takes precedence when both selectors are sent. A session at this index that is being deleted refuses the run with 503; retry once the delete completes, which frees the index for a new session.
              */
             session_idx?: number | null;
-            /** @description Command submitted for execution. Omit it only for a signal request. */
+            /** @description Command submitted for execution. Omit it only for a signal request, or in a request naming nothing at all, which wakes the VM: it returns once the VM is running, and every run it was suspended or forked with is `running` again. */
             command?: string;
             /** @description Maximum command runtime in seconds. Omitted means no limit; the run is killed only if you set a `timeout`. `0` is an explicit spelling of the same thing. This is separate from `time_to_background`, which controls how long the request waits for completion. A run is not complete until everything it spawned has exited, so this is also the bound on a run that leaves a daemon behind; when it fires, the run's processes are killed. */
             timeout?: number | null;
@@ -2794,7 +2848,10 @@ export interface components {
             priority: number;
             match?: components["schemas"]["PolicyMatch"];
             action: components["schemas"]["PolicyAction"];
-            /** @description For inbound `allow` rules. `arker` requires an API key for the VM's organization, `open` requires none, and `{"token": ...}` accepts the token or an API key. A token is at least 32 letters, digits, `-`, `_`, `.` or `~`. Defaults to `arker`. */
+            /**
+             * @deprecated
+             * @description Deprecated: put the credential a request must carry in `match`. For inbound `allow` rules. `arker` requires an API key for the VM's organization, `open` requires none, and `{"token": ...}` accepts the token in the `arker_token` query parameter or cookie, or an API key. Omitted, the rule's `match` alone decides.
+             */
             auth?: ("open" | "arker") | {
                 /** @description The token, usually `${secret:NAME}`. */
                 token: string;
@@ -2809,7 +2866,7 @@ export interface components {
         PolicyUpdate: {
             /** @description Rules to write, keyed by rule id. A rule replaces any rule with the same id; `null` removes the rule with that id. Rules not named here are kept. The resulting policy must not give two rules the same priority. */
             rules?: {
-                [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["LifecycleRule"] | null;
+                [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["ScheduleRule"] | components["schemas"]["ResourcesRule"] | components["schemas"]["LifecycleRule"] | null;
             };
             /** @description Secrets to write, referenced by `${secret:NAME}` in rewrite actions. A value replaces the secret with that name; `null` removes it. Secrets not named here are kept. Values are encrypted at rest and masked as `***` in responses; `***` is not accepted as a value. */
             secrets?: {
@@ -2836,7 +2893,7 @@ export interface components {
         };
         /** @description The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With rules, unmatched outbound traffic is denied. If no inbound rules are present, inbound access keeps the authenticated default; explicit inbound allow rules restrict exposure to their listed ports. */
         PolicyRules: {
-            [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["LifecycleRule"];
+            [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["ScheduleRule"] | components["schemas"]["ResourcesRule"] | components["schemas"]["LifecycleRule"];
         };
         /** @description An SSH key to authorize. */
         SshKeyInput: {
@@ -2851,7 +2908,44 @@ export interface components {
         SshKeysUpdate: {
             [key: string]: components["schemas"]["SshKeyInput"] | null;
         };
-        /** @description A rule that deletes the VM at a set time, or a set number of seconds after it was created. It has no `priority` and does not affect traffic. A fork inherits it, and an `after` deadline counts from the fork's own creation. */
+        /** @description A rule that acts on the VM itself when its trigger fires: `delete` it `at` a time, or suspend it with `scale` or `delete` it `after_wake` seconds after it last started or woke. It has no `priority` and does not affect traffic. It names exactly one of `at` and `after_wake`. */
+        ScheduleRule: {
+            /**
+             * @description `schedule`.
+             * @enum {string}
+             */
+            type: "schedule";
+            /**
+             * Format: date-time
+             * @description When the rule fires: an RFC 3339 time in the future. For `delete`.
+             */
+            at?: string;
+            /**
+             * Format: uint64
+             * @description Fires this many seconds, up to 2592000 (30 days), after the VM last started or woke from a suspend, whatever it did since; a VM that never started counts from its creation. A suspend waits while an inbound request is in flight or a caller is waiting on a run. For `{ "scale": { "suspend": true } }`, or `delete`, which also fires while the VM is suspended.
+             */
+            after_wake?: number;
+            /** @description `delete` deletes the VM, as `DELETE /v1/vms/{id}` does; `{ "scale": { "suspend": true } }` suspends it, its runs `pending` until it wakes. */
+            action: components["schemas"]["PolicyAction"];
+        };
+        /** @description A rule that acts on the VM by how much of its resources it uses. Every `above` and `below` it names must hold for it to fire, and it fires at most once per measurement, each time the host reads its VMs' CPU (every 10 seconds at most), and never on the measurement after a resize. `vcpu` is CPU time over that span, `memory_mib` the memory the guest has in use (`MemTotal - MemAvailable`), and `disk_mib` how full its root filesystem is, as `df` reports it. It has no `priority` and does not affect traffic. */
+        ResourcesRule: {
+            /**
+             * @description `resources`.
+             * @enum {string}
+             */
+            type: "resources";
+            /** @description Fires while each resource it names is used above this fraction of what the VM has. */
+            above?: components["schemas"]["ResourceFactors"];
+            /** @description Fires while each resource it names is used below this fraction of what the VM has. */
+            below?: components["schemas"]["ResourceFactors"];
+            /** @description `{ "scale": { "resource_factors": <factors> } }`, or `{ "webhook": <request> }`, which is sent when the rule starts firing: when its bounds start to hold, and again only after they have stopped holding. */
+            action: components["schemas"]["PolicyAction"];
+        };
+        /**
+         * @deprecated
+         * @description Deprecated: use a `schedule` rule. Deletes the VM at a set time, or a set number of seconds after it was created.
+         */
         LifecycleRule: {
             /**
              * @description `lifecycle`.

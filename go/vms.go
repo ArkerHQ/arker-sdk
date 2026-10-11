@@ -117,6 +117,8 @@ type ForkRequest struct {
 	QueueingTimeout *int          `json:"queueing_timeout,omitempty"`
 	Policies        *PolicyDoc    `json:"policies,omitempty"`
 	RegistryAuth    *RegistryAuth `json:"registry_auth,omitempty"`
+	// Command starts on the new VM as a background run once it is forked.
+	Command string `json:"command,omitempty"`
 
 	// Dockerfile is rejected by the API by design -- the SDKs build it
 	// client-side. Go does not implement that build yet; see Client.Fork.

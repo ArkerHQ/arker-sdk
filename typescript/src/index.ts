@@ -1658,10 +1658,11 @@ export class VM {
    * Accepts either a `PatchVmRequest` or flat resource fields
    * (`{ vcpu, memory_mib, disk_mib, vgpu }`), which are folded into
    * `resources`.
-   * `policies` is a complete replacement for the VM's network policy, the
-   * same document `setPolicies` accepts; an empty doc (`{}` or
-   * `{ policies: [] }`) clears it to allow-all. Omit it to leave the current
-   * policy unchanged.
+   * `policies` changes the VM's policies: `{ rules: { [id]: rule | null },
+   * secrets: { [name]: value | null } }` writes the rules and secrets it
+   * names and removes those set to `null`; the rest are kept. An ordered
+   * `{ policies: [...] }` list replaces them all instead. Omit it to leave the
+   * policies unchanged.
    */
   async update(
     request:

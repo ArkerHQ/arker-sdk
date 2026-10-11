@@ -2950,3 +2950,24 @@ def test_update_preserves_pool_selector(selector, description) -> None:
     with use_transport(t):
         client().vm("vm_1").update(**selector, **description)
     assert json.loads(t.calls[0]["body"]) == {**selector, **description}
+
+
+def test_a_run_without_a_command_sends_nothing_else() -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "POST" and url.endswith("/v1/vms/vm_1/runs"),
+        200,
+        {
+            "state": "completed",
+            "stdout": "",
+            "stdout_encoding": "utf-8",
+            "stderr": "",
+            "stderr_encoding": "utf-8",
+            "exit_code": 0,
+        },
+    )
+
+    with use_transport(t):
+        client().vm("vm_1").run("")
+
+    assert [json.loads(call["body"]) for call in t.calls] == [{"command": ""}]

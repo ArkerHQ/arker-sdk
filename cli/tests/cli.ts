@@ -214,6 +214,14 @@ async function testRunOptionSeparator(): Promise<void> {
   });
 }
 
+async function testRunWithoutACommandSendsNothingElse(): Promise<void> {
+  await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["run", "vm_1"]);
+    assert.equal(result.code, 0);
+    assert.deepEqual(requests[0]?.body, { command: "" });
+  });
+}
+
 async function testRunPreservesArgumentBoundaries(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, completedRun()), async (baseUrl, requests) => {
     const result = await runCli(baseUrl, ["run", "vm_1", "printf", "%s", "hello world"]);
@@ -320,6 +328,18 @@ async function testForkAndUpdateSelectPools(): Promise<void> {
 /// `--vgpu` is the only fractional resource flag, so it exercises the number
 /// option type as well as the fork wiring — an integer-only parser would have
 /// refused `0.25` outright.
+async function testForkForwardsCommand(): Promise<void> {
+  await withCapturedServer(
+    (_request, res) => jsonResponse(res, { vm_id: "vm_1" }),
+    async (baseUrl, requests) => {
+      const result = await runCli(baseUrl, ["fork", "--command", "make test", "source-vm"]);
+
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal((requests[0]!.body as { command: string }).command, "make test");
+    },
+  );
+}
+
 async function testForkForwardsVgpu(): Promise<void> {
   await withCapturedServer(
     (_request, res) => jsonResponse(res, { vm_id: "vm_gpu" }),
@@ -1439,6 +1459,7 @@ await testRunOptionsStopAtRemoteCommand();
 await testKnownFlagAfterRemoteCommandPassesThrough();
 await testRunOptionAfterVmBeforeCommand();
 await testRunOptionSeparator();
+await testRunWithoutACommandSendsNothingElse();
 await testRunPreservesArgumentBoundaries();
 await testUnknownRunOptionBeforeCommandFails();
 await testRemovedBackgroundOptionFailsBeforeRequest();
@@ -1447,6 +1468,7 @@ await testKnownButIrrelevantNestedOptionsFail();
 await testInvalidNumbersFailBeforeRequest();
 await testForkOmitsRetiredGpuResourceKeys();
 await testForkForwardsVgpu();
+await testForkForwardsCommand();
 await testForkForwardsImageOptionsAndRedactsSecrets();
 await testForkUsesDockerfileAndContext();
 await testOrgRunListForwardsFilters();
