@@ -1346,71 +1346,6 @@ class PoolResources:
     disk_mib: int | None = None
 
 
-PoolStatus: TypeAlias = Literal['active', 'expired']
-
-
-@dataclass(frozen=True)
-class PoolQuoteRequest:
-    provider: Provider
-    region: str
-    resources: PoolResources
-    duration_seconds: int
-    name: str | None = None
-
-
-@dataclass(frozen=True)
-class CreatePoolRequest:
-    provider: Provider
-    region: str
-    resources: PoolResources
-    duration_seconds: int
-    amount_cents: int
-    name: str | None = None
-
-
-@dataclass(frozen=True)
-class UpdatePoolRequest:
-    name: str | None
-
-
-@dataclass(frozen=True)
-class PoolQuote:
-    name: str | None
-    catalog_version: str
-    baseline_cents: int
-    discount_percent: float
-    provider: Provider
-    region: str
-    resources: PoolResources
-    duration_seconds: int
-    currency: Literal['usd']
-    amount_cents: int
-
-
-@dataclass(frozen=True)
-class Pool:
-    pool_id: str
-    name: str | None
-    provider: Provider
-    region: str
-    resources: PoolResources
-    duration_seconds: int
-    status: PoolStatus
-    created_at: str
-    starts_at: str
-    ends_at: str
-    currency: Literal['usd']
-    amount_cents: int
-    invoice_id: str | None
-
-
-@dataclass(frozen=True)
-class ListPoolsResponse:
-    pools: list[Pool]
-    purchases_enabled: bool
-    next_cursor: str | None
-
-
 @dataclass(frozen=True)
 class PoolUsage:
     pool_id: str
@@ -1454,6 +1389,148 @@ class LifecycleRule:
     type: Literal['lifecycle']
     when: When
     action: Literal['delete']
+
+
+@dataclass(frozen=True)
+class PoolCapacity:
+    vcpu: int
+    memory_mib: int
+    disk_mib: int
+    forks: int | None
+
+
+PoolState: TypeAlias = Literal['provisioning', 'idle', 'running']
+
+
+@dataclass(frozen=True)
+class PoolCommitment:
+    starts_at: str
+    ends_at: str
+
+
+@dataclass(frozen=True)
+class PoolComputeManaged:
+    type: Literal['managed']
+
+
+@dataclass(frozen=True)
+class PoolComputeAws:
+    type: Literal['aws']
+    account_id: str
+    role_arn: str
+    subnet_ids: list[str]
+    external_id: str | None = None
+    region: str | None = None
+    security_group_ids: list[str] | None = None
+    instance_types: list[str] | None = None
+
+
+PoolCompute: TypeAlias = PoolComputeManaged | PoolComputeAws
+
+
+PoolDedicatedStorage: TypeAlias = Literal['object_storage', 'database', 'logs']
+
+
+@dataclass(frozen=True)
+class WorkerResources:
+    vcpu: int
+    memory_mib: int
+    disk_mib: int
+    gpu_count: int | None = None
+
+
+WorkerKind: TypeAlias = Literal['arkerd', 'blast']
+
+
+WorkerState: TypeAlias = Literal['active', 'draining', 'left']
+
+
+@dataclass(frozen=True)
+class WorkerVm:
+    vm_id: str
+    resources: WorkerResources
+    image: str | None = None
+
+
+Platform: TypeAlias = str
+
+
+@dataclass(frozen=True)
+class WorkerHeartbeat:
+    pool_id: str
+    kind: WorkerKind
+    version: str
+    platforms: list[Platform]
+    state: WorkerState
+    resources: WorkerResources
+    free: WorkerResources
+    capabilities: list[str] | None = None
+    vms: list[WorkerVm] | None = None
+
+
+@dataclass(frozen=True)
+class ObjectStorage:
+    bucket: str
+    region: str
+
+
+@dataclass(frozen=True)
+class WorkerHeartbeatResponse:
+    worker_id: str
+    heartbeat_interval_ms: int
+    desired_state: WorkerState
+    tunnel_url: str
+    object_storage: ObjectStorage | None = None
+
+
+@dataclass(frozen=True)
+class Worker:
+    worker_id: str
+    pool_id: str
+    kind: WorkerKind
+    version: str
+    platforms: list[str]
+    state: WorkerState
+    resources: WorkerResources
+    free: WorkerResources
+    last_heartbeat_at: str
+
+
+@dataclass(frozen=True)
+class ListWorkersResponse:
+    workers: list[Worker]
+
+
+@dataclass(frozen=True)
+class ApiKey:
+    api_key_id: str
+    name: str | None
+    role: Literal['viewer', 'member', 'developer', 'admin']
+    scopes: list[str]
+    created_at: str
+    expires_at: str | None
+
+
+Scope: TypeAlias = str
+
+
+@dataclass(frozen=True)
+class CreateApiKeyRequest:
+    name: str | None = None
+    role: Literal['viewer', 'member', 'developer', 'admin'] | None = None
+    scopes: list[Scope] | None = None
+    expires_at: str | None = None
+
+
+@dataclass(frozen=True)
+class CreatedApiKey:
+    api_key: ApiKey
+    key: str
+
+
+@dataclass(frozen=True)
+class ListApiKeysResponse:
+    api_keys: list[ApiKey]
 
 
 @dataclass(frozen=True)
@@ -1654,8 +1731,33 @@ class UpdatePoolParameters:
 
 
 @dataclass(frozen=True)
+class DeletePoolParameters:
+    pool_id: str
+
+
+@dataclass(frozen=True)
 class GetPoolUsageParameters:
     pool_id: str
+
+
+@dataclass(frozen=True)
+class ListPoolWorkersParameters:
+    pool_id: str
+
+
+@dataclass(frozen=True)
+class HeartbeatWorkerParameters:
+    worker_id: str
+
+
+@dataclass(frozen=True)
+class OpenWorkerTunnelParameters:
+    worker_id: str
+
+
+@dataclass(frozen=True)
+class RevokeApiKeyParameters:
+    api_key_id: str
 
 
 ErrorBody: TypeAlias = (
@@ -1775,6 +1877,52 @@ class CompatiblePlatform:
 HealthUnavailableResponse: TypeAlias = (
     NotReadyHealthResponse | HealthUnavailableErrorResponse
 )
+
+
+@dataclass(frozen=True)
+class CreatePoolRequest:
+    name: str | None = None
+    resources: PoolResources | None = None
+    commitments: list[PoolCommitment] | None = None
+    compute: PoolCompute | None = None
+    joinable: bool | None = None
+    dedicated_storage: list[PoolDedicatedStorage] | None = None
+    source_vm_id: str | None = None
+    num_forks: int | None = None
+
+
+@dataclass(frozen=True)
+class UpdatePoolRequest:
+    name: str | None = None
+    resources: PoolResources | None = None
+    commitments: list[PoolCommitment] | None = None
+    joinable: bool | None = None
+    num_forks: int | None = None
+
+
+@dataclass(frozen=True)
+class Pool:
+    pool_id: str
+    name: str | None
+    provider: Provider
+    region: str
+    state: PoolState
+    state_detail: str | None
+    resources: PoolResources
+    capacity: PoolCapacity
+    commitments: list[PoolCommitment]
+    compute: PoolCompute
+    joinable: bool
+    dedicated_storage: list[PoolDedicatedStorage]
+    source_vm_id: str | None
+    num_forks: int | None
+    created_at: str
+
+
+@dataclass(frozen=True)
+class ListPoolsResponse:
+    pools: list[Pool]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True)

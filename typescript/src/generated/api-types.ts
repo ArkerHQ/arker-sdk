@@ -502,35 +502,15 @@ export interface paths {
         };
         /**
          * List pools
-         * @description List the organization's pools, newest first. Any API key in the organization can read pools. Returns 404 when pools are not enabled for the organization.
+         * @description List the organization's pools in this region, newest first.
          */
         get: operations["listPools"];
         put?: never;
         /**
-         * Buy a pool
-         * @description Buy prepaid capacity in one provider and region for a fixed term. The pool is billed on the organization's next invoice. `amount_cents` must match the current price for the same request; get it from the quote operation. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.
+         * Create a pool
+         * @description Create a pool in the provider and region of the endpoint you call. Requires an API key with every scope.
          */
         post: operations["createPool"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/pools/quote": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Quote a pool
-         * @description Price a pool without buying it. Any API key in the organization can request a quote. Returns 404 when pools are not enabled for the organization.
-         */
-        post: operations["quotePool"];
         delete?: never;
         options?: never;
         head?: never;
@@ -542,24 +522,28 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description Pool identifier returned as `pool_id`. */
-                pool_id: components["parameters"]["PoolId"];
+                /** @description Pool identifier. */
+                pool_id: string;
             };
             cookie?: never;
         };
         /**
          * Get a pool
-         * @description Return one pool owned by the organization. Returns 404 when pools are not enabled for the organization.
+         * @description Get one pool.
          */
         get: operations["getPool"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete a pool
+         * @description Delete the pool and every VM in it. Refused while a commitment is active. To stop paying for a pool you mean to keep, resize it to zero instead. Requires an API key with every scope.
+         */
+        delete: operations["deletePool"];
         options?: never;
         head?: never;
         /**
-         * Rename a pool
-         * @description Set or remove a pool's name. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.
+         * Update a pool
+         * @description Rename, resize, change commitments or join settings. Resources cannot shrink while a commitment is active. Requires an API key with every scope.
          */
         patch: operations["updatePool"];
         trace?: never;
@@ -582,6 +566,121 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{pool_id}/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier. */
+                pool_id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a pool's workers
+         * @description Workers that joined the pool and heartbeated within the last day.
+         */
+        get: operations["listPoolWorkers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workers/{worker_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Join a pool or heartbeat
+         * @description Join the pool named in the body, or keep the worker in it. Requires an API key whose scopes are exactly `pool:<pool_id>:join`.
+         */
+        put: operations["heartbeatWorker"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workers/{worker_id}/tunnel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Open the worker tunnel
+         * @description Upgrade to a WebSocket that carries HTTP/2 from Arker to the worker's API. Requires the same join key as the heartbeat, after the worker has joined.
+         */
+        get: operations["openWorkerTunnel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List API keys
+         * @description List the organization's unrevoked API keys.
+         */
+        get: operations["listApiKeys"];
+        put?: never;
+        /**
+         * Create an API key
+         * @description Create a key no broader than the calling key: same or lower role, and scopes inside the caller's.
+         */
+        post: operations["createApiKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/api-keys/{api_key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                api_key_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke an API key
+         * @description Revoke a key. A key can revoke itself or any key no broader than it.
+         */
+        delete: operations["revokeApiKey"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2647,68 +2746,41 @@ export interface components {
          * @enum {string}
          */
         OutputEncoding: "utf-8" | "base64";
-        /** @description Reserved capacity. At least one quantity must be positive. */
+        /** @description Capacity in the same units as VM resources. */
         PoolResources: {
-            /** @description Reserved vCPUs. */
+            /** @description vCPUs. */
             vcpu?: number;
-            /** @description Reserved memory in MiB. */
+            /** @description Memory in MiB. */
             memory_mib?: number;
-            /** @description Reserved disk in MiB. */
+            /** @description Disk in MiB. */
             disk_mib?: number;
         };
-        /**
-         * @description `expired` once `ends_at` has passed. Usage by member VMs after that bills at normal rates.
-         * @enum {string}
-         */
-        PoolStatus: "active" | "expired";
-        PoolQuoteRequest: {
-            provider: components["schemas"]["Provider"];
-            /** @description Customer-facing service region, for example `us-west`. */
-            region: string;
-            resources: components["schemas"]["PoolResources"];
-            /** @description Term length in seconds. The minimum is 30 days (2592000). */
-            duration_seconds: number;
-            /** @description Optional name, unique within the organization and case-insensitive. VMs can join the pool by this name. */
-            name?: string | null;
-        };
         CreatePoolRequest: {
-            provider: components["schemas"]["Provider"];
-            /** @description Customer-facing service region, for example `us-west`. */
-            region: string;
-            resources: components["schemas"]["PoolResources"];
-            /** @description Term length in seconds. The minimum is 30 days (2592000). */
-            duration_seconds: number;
-            /** @description Optional name, unique within the organization and case-insensitive. VMs can join the pool by this name. */
+            /** @description Optional name, unique within the organization and case-insensitive. */
             name?: string | null;
-            /** @description The price you agree to pay, from a quote for the same request. The purchase fails with a pool_quote conflict if the current price differs. */
-            amount_cents: number;
+            resources?: components["schemas"]["PoolResources"];
+            /** @description Committed periods. Defaults to none. */
+            commitments?: components["schemas"]["PoolCommitment"][];
+            compute?: components["schemas"]["PoolCompute"];
+            /** @description Let workers holding a join key add capacity. Defaults to false. */
+            joinable?: boolean;
+            /** @description Classes of state kept in storage owned by the pool. Defaults to none. */
+            dedicated_storage?: components["schemas"]["PoolDedicatedStorage"][];
+            /** @description Make this a fork-reserve pool for this VM. Requires `num_forks`. */
+            source_vm_id?: string;
+            /** @description How many forks of `source_vm_id` to keep room for. */
+            num_forks?: number;
         };
         UpdatePoolRequest: {
             /** @description New pool name, or null to remove it. */
-            name: string | null;
-        };
-        PoolQuote: {
-            /** @description Normalized pool name, if one was given. */
-            name: string | null;
-            /** @description Price catalog used for this quote. */
-            catalog_version: string;
-            /** @description Price of the same resources and term at on-demand rates, in cents. */
-            baseline_cents: number;
-            /** @description Discount applied to the baseline, as a percentage. */
-            discount_percent: number;
-            provider: components["schemas"]["Provider"];
-            /** @description Customer-facing service region. */
-            region: string;
-            resources: components["schemas"]["PoolResources"];
-            /** @description Term length in seconds. */
-            duration_seconds: number;
-            /**
-             * @description Price currency.
-             * @enum {string}
-             */
-            currency: "usd";
-            /** @description Price to pay, in cents. Send this as `amount_cents` to buy. */
-            amount_cents: number;
+            name?: string | null;
+            resources?: components["schemas"]["PoolResources"];
+            /** @description The full list of commitments. Commitments that have started must be kept unchanged. */
+            commitments?: components["schemas"]["PoolCommitment"][];
+            /** @description Whether workers holding a join key may join. */
+            joinable?: boolean;
+            /** @description For a fork-reserve pool, how many forks to keep room for. */
+            num_forks?: number;
         };
         Pool: {
             /**
@@ -2719,42 +2791,33 @@ export interface components {
             /** @description Pool name, if set. */
             name: string | null;
             provider: components["schemas"]["Provider"];
-            /** @description Customer-facing service region. Only VMs in this provider and region can join. */
+            /** @description Service region the pool lives in. */
             region: string;
+            state: components["schemas"]["PoolState"];
+            /** @description Why the pool is still provisioning, when something is wrong. */
+            state_detail: string | null;
             resources: components["schemas"]["PoolResources"];
-            /** @description Term length in seconds. */
-            duration_seconds: number;
-            status: components["schemas"]["PoolStatus"];
+            capacity: components["schemas"]["PoolCapacity"];
+            /** @description Committed periods, oldest first. */
+            commitments: components["schemas"]["PoolCommitment"][];
+            compute: components["schemas"]["PoolCompute"];
+            /** @description Whether workers holding a join key for this pool may join it. */
+            joinable: boolean;
+            /** @description Classes of state kept in storage owned by the pool. */
+            dedicated_storage: components["schemas"]["PoolDedicatedStorage"][];
+            /** @description For a fork-reserve pool, the VM whose forks it keeps room for. */
+            source_vm_id: string | null;
+            /** @description For a fork-reserve pool, how many forks to keep room for. A hint: Arker keeps the VM's snapshot on enough hosts for this many forks while capacity allows. */
+            num_forks: number | null;
             /**
              * Format: date-time
-             * @description When the pool was bought.
+             * @description When the pool was created.
              */
             created_at: string;
-            /**
-             * Format: date-time
-             * @description Start of the term.
-             */
-            starts_at: string;
-            /**
-             * Format: date-time
-             * @description End of the term.
-             */
-            ends_at: string;
-            /**
-             * @description Price currency.
-             * @enum {string}
-             */
-            currency: "usd";
-            /** @description Price paid, in cents. */
-            amount_cents: number;
-            /** @description Invoice that bills this pool, once one exists. */
-            invoice_id: string | null;
         };
         ListPoolsResponse: {
             /** @description Pools owned by the organization, newest first. */
             pools: components["schemas"]["Pool"][];
-            /** @description Whether the organization can buy new pools. */
-            purchases_enabled: boolean;
             /** @description Cursor for the next page, or null when no further page is available. */
             next_cursor: string | null;
         };
@@ -2873,6 +2936,176 @@ export interface components {
              * @enum {string}
              */
             action: "delete";
+        };
+        /** @description What the pool can hold right now. */
+        PoolCapacity: {
+            /** @description vCPUs contributed by the pool's live workers. Zero for a managed pool, whose capacity is the shared fleet. */
+            vcpu: number;
+            /** @description Memory in MiB contributed by the pool's live workers. */
+            memory_mib: number;
+            /** @description Disk in MiB contributed by the pool's live workers. */
+            disk_mib: number;
+            /** @description For a fork-reserve pool, how many forks of `source_vm_id` fit on hosts that hold its snapshot right now. Null for other pools. */
+            forks: number | null;
+        };
+        /**
+         * @description `provisioning` while the pool's own compute is below what it asked for; then `idle` when no member VM is executing a command and `running` when one is.
+         * @enum {string}
+         */
+        PoolState: "provisioning" | "idle" | "running";
+        /** @description A period the pool is committed to. Both ends are inclusive and the period lasts at least 24 hours. While a commitment is active the pool cannot shrink or be deleted. */
+        PoolCommitment: {
+            /**
+             * Format: date-time
+             * @description Start of the period.
+             */
+            starts_at: string;
+            /**
+             * Format: date-time
+             * @description End of the period.
+             */
+            ends_at: string;
+        };
+        PoolComputeManaged: {
+            /**
+             * @description Arker fleet hosts in the pool's provider and region. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            type: "PoolComputeManaged";
+        };
+        PoolComputeAws: {
+            /**
+             * @description Arker provisions hosts in your AWS account. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            type: "PoolComputeAws";
+            /** @description Your AWS account id. */
+            account_id: string;
+            /** @description Role Arker assumes to launch and terminate hosts. It must trust Arker's account with `external_id`. */
+            role_arn: string;
+            /** @description External id Arker presents when assuming `role_arn`. Set by Arker. */
+            readonly external_id?: string;
+            /** @description AWS region to launch in. Defaults to the pool's region. */
+            region?: string;
+            /** @description Subnets hosts launch into. Hosts need outbound internet access only. */
+            subnet_ids: string[];
+            /** @description Security groups for the hosts. No inbound rules are needed. */
+            security_group_ids?: string[];
+            /** @description Instance types to launch, in order of preference. They must support hardware virtualization. */
+            instance_types?: string[];
+        };
+        /** @description Whose compute runs the pool's VMs. */
+        PoolCompute: components["schemas"]["PoolComputeManaged"] | components["schemas"]["PoolComputeAws"];
+        /**
+         * @description A class of state kept in storage owned by the pool instead of Arker's shared regional stores: `object_storage` holds snapshots and files, `database` holds VM and run records, `logs` holds run output and events. Only `object_storage` is supported today.
+         * @enum {string}
+         */
+        PoolDedicatedStorage: "object_storage" | "database" | "logs";
+        WorkerResources: {
+            vcpu: number;
+            memory_mib: number;
+            disk_mib: number;
+            gpu_count?: number;
+        };
+        /**
+         * @description The software the worker runs.
+         * @enum {string}
+         */
+        WorkerKind: "arkerd" | "blast";
+        /**
+         * @description `active` takes new VMs; `draining` keeps its VMs but takes no new ones; `left` has handed back everything and is leaving the pool.
+         * @enum {string}
+         */
+        WorkerState: "active" | "draining" | "left";
+        /** @description A VM the worker holds. */
+        WorkerVm: {
+            vm_id: string;
+            resources: components["schemas"]["WorkerResources"];
+            image?: string | null;
+        };
+        /** @description A worker joins its pool with its first heartbeat and stays in it while heartbeats arrive. */
+        WorkerHeartbeat: {
+            /**
+             * Format: uuid
+             * @description Pool the worker joins. Must match the API key's join scope.
+             */
+            pool_id: string;
+            kind: components["schemas"]["WorkerKind"];
+            /** @description Worker software version. */
+            version: string;
+            /** @description Platforms the worker serves. A VM's snapshot only restores on a worker serving its platform. */
+            platforms: string[];
+            /** @description Optional operations the worker supports, such as `sessions` or `pty`. */
+            capabilities?: string[];
+            state: components["schemas"]["WorkerState"];
+            resources: components["schemas"]["WorkerResources"];
+            free: components["schemas"]["WorkerResources"];
+            /** @description VMs on the worker. Workers that keep their own records may omit this. */
+            vms?: components["schemas"]["WorkerVm"][];
+        };
+        WorkerHeartbeatResponse: {
+            worker_id: string;
+            /** @description Send the next heartbeat after this long. */
+            heartbeat_interval_ms: number;
+            desired_state: components["schemas"]["WorkerState"];
+            /** @description WebSocket URL the worker keeps open so Arker can reach it. */
+            tunnel_url: string;
+            /** @description The pool's own bucket when the pool keeps object storage, else null. */
+            object_storage?: {
+                bucket: string;
+                region: string;
+            } | null;
+        };
+        Worker: {
+            worker_id: string;
+            /** Format: uuid */
+            pool_id: string;
+            kind: components["schemas"]["WorkerKind"];
+            version: string;
+            platforms: string[];
+            state: components["schemas"]["WorkerState"];
+            resources: components["schemas"]["WorkerResources"];
+            free: components["schemas"]["WorkerResources"];
+            /** Format: date-time */
+            last_heartbeat_at: string;
+        };
+        ListWorkersResponse: {
+            workers: components["schemas"]["Worker"][];
+        };
+        ApiKey: {
+            api_key_id: string;
+            name: string | null;
+            /** @enum {string} */
+            role: "viewer" | "member" | "developer" | "admin";
+            /** @description `*` for everything; `vmid:<id>` limits the key to those VMs; `op:sync`, `op:pty` and `op:run` limit it to those operations; `pool:<id>:join` makes it a worker join key for that pool. */
+            scopes: string[];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at: string | null;
+        };
+        CreateApiKeyRequest: {
+            name?: string | null;
+            /**
+             * @description Defaults to the caller's role. Cannot exceed it.
+             * @enum {string}
+             */
+            role?: "viewer" | "member" | "developer" | "admin";
+            /** @description Defaults to `["*"]`. The new key cannot reach anything the calling key cannot. */
+            scopes?: string[];
+            /**
+             * Format: date-time
+             * @description When the key stops working. Defaults to never.
+             */
+            expires_at?: string | null;
+        };
+        CreatedApiKey: {
+            api_key: components["schemas"]["ApiKey"];
+            /** @description The secret. Shown only once. */
+            key: string;
+        };
+        ListApiKeysResponse: {
+            api_keys: components["schemas"]["ApiKey"][];
         };
     };
     responses: {
@@ -4461,7 +4694,6 @@ export interface operations {
             400: components["responses"]["BadRequestError"];
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
-            404: components["responses"]["NotFoundError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4470,10 +4702,7 @@ export interface operations {
     createPool: {
         parameters: {
             query?: never;
-            header: {
-                /** @description Required. Makes the purchase safely retryable. Reusing a key with the same request returns the original pool instead of buying another; reusing it with a different request returns idempotency_conflict. */
-                "Idempotency-Key": components["parameters"]["RequiredIdempotencyKey"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -4483,8 +4712,8 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The purchased pool, or the original pool when the idempotency key is replayed. */
-            200: {
+            /** @description The new pool. */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4494,41 +4723,10 @@ export interface operations {
             };
             400: components["responses"]["BadRequestError"];
             401: components["responses"]["UnauthorizedError"];
-            403: components["responses"]["ActionRequiredOrForbiddenError"];
-            404: components["responses"]["NotFoundError"];
-            409: components["responses"]["ConflictOrIdempotencyConflictOrInvalidStateError"];
-            429: components["responses"]["RateLimitedError"];
-            500: components["responses"]["InternalError"];
-            503: components["responses"]["CapacityUnavailableOrUnavailableError"];
-        };
-    };
-    quotePool: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PoolQuoteRequest"];
-            };
-        };
-        responses: {
-            /** @description The current price for the requested pool. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PoolQuote"];
-                };
-            };
-            400: components["responses"]["BadRequestError"];
-            401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
-            409: components["responses"]["InvalidStateError"];
+            409: components["responses"]["ConflictOrInvalidStateError"];
+            422: components["responses"]["UnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4539,14 +4737,14 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Pool identifier returned as `pool_id`. */
-                pool_id: components["parameters"]["PoolId"];
+                /** @description Pool identifier. */
+                pool_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Pool details. */
+            /** @description The pool. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4555,10 +4753,37 @@ export interface operations {
                     "application/json": components["schemas"]["Pool"];
                 };
             };
-            400: components["responses"]["BadRequestError"];
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    deletePool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier. */
+                pool_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pool and its VMs are deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["ConflictOrInvalidStateError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4569,8 +4794,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Pool identifier returned as `pool_id`. */
-                pool_id: components["parameters"]["PoolId"];
+                /** @description Pool identifier. */
+                pool_id: string;
             };
             cookie?: never;
         };
@@ -4593,7 +4818,8 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
-            409: components["responses"]["ConflictError"];
+            409: components["responses"]["ConflictOrInvalidStateError"];
+            422: components["responses"]["UnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4621,6 +4847,179 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    listPoolWorkers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier. */
+                pool_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pool's workers. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListWorkersResponse"];
+                };
+            };
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    heartbeatWorker: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkerHeartbeat"];
+            };
+        };
+        responses: {
+            /** @description The worker is in the pool. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerHeartbeatResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["ConflictOrInvalidStateError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    openWorkerTunnel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Switching to the tunnel. */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    listApiKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The keys. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListApiKeysResponse"];
+                };
+            };
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    createApiKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateApiKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description The new key. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedApiKey"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    revokeApiKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                api_key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];

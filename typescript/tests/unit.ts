@@ -9,6 +9,7 @@ import {
   ArkerError,
   VM,
   discoverRegions,
+  scopes,
   type CompletedRunResult,
   type PtyWebSocketFactory,
 } from "../src/index.js";
@@ -660,80 +661,141 @@ async function testWhoamiUsesControlPlane(): Promise<void> {
 
 // ── Pools ──────────────────────────────────────────────────────────────
 
-const POOL_TERMS = { resources: { vcpu: 8, memory_mib: 32768 }, duration_seconds: 2_592_000 };
+const CONTROL = "https://control.invalid/api";
+const REGIONAL = "https://regional.invalid/api";
+const POOL_ID = "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61";
 const POOL = {
-  pool_id: "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61",
-  name: null,
+  pool_id: POOL_ID,
+  name: "ci",
   provider: "aws",
   region: "us-west-2",
-  ...POOL_TERMS,
-  status: "active",
+  state: "idle",
+  state_detail: null,
+  resources: { vcpu: 8, memory_mib: 32768 },
+  capacity: { vcpu: 0, memory_mib: 0, disk_mib: 0, forks: null },
+  commitments: [],
+  compute: { type: "managed" },
+  joinable: false,
+  dedicated_storage: [],
+  source_vm_id: null,
+  num_forks: null,
   created_at: "2026-09-25T00:00:00Z",
-  starts_at: "2026-09-25T00:00:00Z",
-  ends_at: "2026-10-25T00:00:00Z",
-  currency: "usd",
-  amount_cents: 12_345,
-  invoice_id: null,
-};
-const POOL_QUOTE = {
-  name: null,
-  catalog_version: "v1",
-  baseline_cents: 15_000,
-  discount_percent: 17.7,
-  provider: "aws",
-  region: "us-west-2",
-  ...POOL_TERMS,
-  currency: "usd",
-  amount_cents: 12_345,
 };
 
-function poolClient(fetch: FakeFetch, attempts = 1): Arker {
+function poolClient(fetch: FakeFetch): Arker {
   return new Arker({
     apiKey: "ark_live_test",
-    provider: "aws",
-    region: "us-west-2",
-    controlBaseUrl: "https://control.invalid/api",
+    baseUrl: REGIONAL,
+    controlBaseUrl: CONTROL,
     fetch: fetch.fetch,
-    retry: attempts > 1 ? { attempts, baseDelayMs: 1, maxDelayMs: 1, jitterMs: 0 } : false,
+    retry: false,
   });
 }
 
-const isQuote = (method: string, url: string) =>
-  method === "POST" && url === "https://control.invalid/api/v1/pools/quote";
-const isBuy = (method: string, url: string) =>
-  method === "POST" && url === "https://control.invalid/api/v1/pools";
+const route = (method: string, url: string) => (m: string, u: string) => m === method && u === url;
 
-async function testCreatePoolBuysAtTheQuotedPrice(): Promise<void> {
+async function testListAndGetPoolUseTheControlPlane(): Promise<void> {
   const fetch = new FakeFetch();
-  fetch.addJson(isQuote, 200, POOL_QUOTE);
-  fetch.addJson(isBuy, 200, POOL);
+  fetch.addJson(route("GET", `${CONTROL}/v1/pools?limit=5`), 200, { pools: [POOL], next_cursor: null });
+  fetch.addJson(route("GET", `${CONTROL}/v1/pools/${POOL_ID}`), 200, POOL);
 
-  const pool = await poolClient(fetch).createPool({ ...POOL_TERMS, name: "ci" });
-
-  assert.equal(pool.pool_id, POOL.pool_id);
-  const [quote, buy] = fetch.calls;
-  // Placement comes from the client when the caller does not give one.
-  const terms = { ...POOL_TERMS, name: "ci", provider: "aws", region: "us-west-2" };
-  assert.deepEqual(JSON.parse(quote!.body!), terms);
-  assert.deepEqual(JSON.parse(buy!.body!), { ...terms, amount_cents: 12_345 });
-  assert.match(buy!.headers["idempotency-key"] ?? "", /^sdk-pool-/);
-  assert.equal(quote!.headers["idempotency-key"], undefined);
+  const client = poolClient(fetch);
+  assert.equal((await client.listPools({ limit: 5 })).pools[0]!.pool_id, POOL_ID);
+  assert.equal((await client.getPool(POOL_ID)).state, "idle");
 }
 
-async function testCreatePoolRetryReplaysTheSamePurchase(): Promise<void> {
-  // A purchase whose response was lost must be retried with the same key and
-  // price, so the service returns the original pool instead of a second one.
+async function testCreatePoolPostsToTheRegionalBaseUrl(): Promise<void> {
   const fetch = new FakeFetch();
-  fetch.addJson(isQuote, 200, POOL_QUOTE);
-  fetch.addNetworkError(isBuy);
-  fetch.addJson(isBuy, 200, POOL);
+  fetch.addJson(route("POST", `${REGIONAL}/v1/pools`), 201, POOL);
+  fetch.addJson(route("POST", `${REGIONAL}/v1/pools`), 201, POOL);
 
-  await poolClient(fetch, 2).createPool({ ...POOL_TERMS, idempotencyKey: "buy-1" });
+  const client = poolClient(fetch);
+  const request = {
+    name: "ci",
+    resources: { vcpu: 8, memory_mib: 32768 },
+    commitments: [{ starts_at: "2026-10-01T00:00:00Z", ends_at: "2026-10-31T00:00:00Z" }],
+    compute: {
+      type: "aws" as const,
+      account_id: "123456789012",
+      role_arn: "arn:aws:iam::123456789012:role/arker",
+      subnet_ids: ["subnet-1"],
+    },
+    joinable: true,
+    dedicated_storage: ["object_storage" as const],
+  };
+  await client.createPool(request);
+  await client.createPool({ source_vm_id: "vm_1", num_forks: 50 });
 
-  const buys = fetch.calls.filter((call) => isBuy(call.method, call.url));
-  assert.equal(buys.length, 2);
-  assert.deepEqual(buys.map((call) => call.headers["idempotency-key"]), ["buy-1", "buy-1"]);
-  assert.equal(buys[0]!.body, buys[1]!.body);
+  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), request);
+  assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), { source_vm_id: "vm_1", num_forks: 50 });
+}
+
+async function testCreatePoolWithoutARegionFailsBeforeAnyRequest(): Promise<void> {
+  const fetch = new FakeFetch();
+  const client = new Arker({ apiKey: "k", controlBaseUrl: CONTROL, fetch: fetch.fetch, retry: false });
+  await assert.rejects(() => client.createPool({ name: "x" }), /provider and region or baseUrl are required/i);
+  assert.equal(fetch.calls.length, 0);
+}
+
+async function testUpdateDeleteAndWorkersUseTheRegionalBaseUrl(): Promise<void> {
+  const fetch = new FakeFetch();
+  const url = `${REGIONAL}/v1/pools/${POOL_ID}`;
+  fetch.addJson(route("PATCH", url), 200, POOL);
+  fetch.addJson(route("PATCH", url), 200, POOL);
+  fetch.addJson(route("DELETE", url), 204, null);
+  fetch.addJson(route("GET", `${url}/workers`), 200, { workers: [] });
+
+  const client = poolClient(fetch);
+  await client.updatePool(POOL_ID, { joinable: true, resources: { vcpu: 16 } });
+  await client.updatePool(POOL_ID, { name: null });
+  assert.equal(await client.deletePool(POOL_ID), undefined);
+  assert.deepEqual((await client.listPoolWorkers(POOL_ID)).workers, []);
+
+  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { joinable: true, resources: { vcpu: 16 } });
+  assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), { name: null });
+}
+
+async function testApiKeysUseTheControlPlane(): Promise<void> {
+  const apiKey = {
+    api_key_id: "key_1",
+    name: "worker",
+    role: "member",
+    scopes: [`pool:${POOL_ID}:join`],
+    created_at: "2026-10-12T00:00:00Z",
+    expires_at: "2026-12-01T00:00:00Z",
+  };
+  const fetch = new FakeFetch();
+  fetch.addJson(route("GET", `${CONTROL}/v1/api-keys`), 200, { api_keys: [apiKey] });
+  fetch.addJson(route("POST", `${CONTROL}/v1/api-keys`), 201, { api_key: apiKey, key: "ark_live_secret" });
+  fetch.addJson(route("DELETE", `${CONTROL}/v1/api-keys/key_1`), 204, null);
+
+  const client = poolClient(fetch);
+  assert.equal((await client.listApiKeys()).api_keys[0]!.api_key_id, "key_1");
+  const created = await client.createApiKey({
+    name: "worker",
+    role: "member",
+    scopes: [scopes.poolJoin(POOL_ID)],
+    expires_at: "2026-12-01T00:00:00Z",
+  });
+  assert.equal(created.key, "ark_live_secret");
+  assert.equal(await client.revokeApiKey("key_1"), undefined);
+
+  assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), {
+    name: "worker",
+    role: "member",
+    scopes: [`pool:${POOL_ID}:join`],
+    expires_at: "2026-12-01T00:00:00Z",
+  });
+}
+
+function testScopeBuilders(): void {
+  assert.equal(scopes.all, "*");
+  assert.equal(scopes.vm("vm_abc-1"), "vmid:vm_abc-1");
+  assert.equal(scopes.op("sync"), "op:sync");
+  assert.equal(scopes.poolJoin(POOL_ID), `pool:${POOL_ID}:join`);
+  assert.throws(() => scopes.vm("a b"));
+  assert.throws(() => scopes.op("fork" as "run"));
+  assert.throws(() => scopes.poolJoin("nope"));
 }
 
 async function testDiscoverRegionsRequiresNoConfiguredClient(): Promise<void> {
@@ -1319,8 +1381,12 @@ testPlacementRequiresSeparateProviderAndRegion();
 testInvalidProviderSyntaxFailsClosed();
 await testListRegionsUsesPublicControlPlaneCatalog();
 await testWhoamiUsesControlPlane();
-await testCreatePoolBuysAtTheQuotedPrice();
-await testCreatePoolRetryReplaysTheSamePurchase();
+await testListAndGetPoolUseTheControlPlane();
+await testCreatePoolPostsToTheRegionalBaseUrl();
+await testCreatePoolWithoutARegionFailsBeforeAnyRequest();
+await testUpdateDeleteAndWorkersUseTheRegionalBaseUrl();
+await testApiKeysUseTheControlPlane();
+testScopeBuilders();
 await testDiscoverRegionsRequiresNoConfiguredClient();
 await testListedVmUsesItsPlacementEndpoint();
 testExplicitVmHandleUsesPlacementEndpoint();

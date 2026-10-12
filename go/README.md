@@ -32,9 +32,9 @@ fmt.Print(out.Stdout)
 Placement works exactly as in the other SDKs. `BaseURL` fully determines
 routing, so `Provider` and `Region` are ignored when it is set; supply either
 `BaseURL` or *both* `Provider` and `Region`. Org-wide calls — `ListVMs`,
-`ListRuns`, `ListRegions`, `Whoami` and the pool calls — reach the control plane
-and work with no placement at all (`CreatePool` needs a provider and region,
-from the request or the client); everything else needs one.
+`ListRuns`, `ListRegions`, `Whoami`, `ListPools`, `GetPool` and the API-key calls — reach the control plane
+and work with no placement at all (`CreatePool`, `UpdatePool`, `DeletePool` and
+`ListPoolWorkers` go to the region and need one); everything else needs one.
 
 ## Surface
 
@@ -45,7 +45,9 @@ from the request or the client); everything else needs one.
 | `ListFilesystems` `CreateFilesystem` | `ListSessions` `CreateSession` `GetSession` |
 | `GetFilesystem` `DeleteFilesystem` | `UpdateSession` `DeleteSession` |
 | `ListPools` `GetPool` `GetPoolUsage` | |
-| `RenamePool` `CreatePool` | |
+| `CreatePool` `UpdatePool` `DeletePool` | |
+| `ListPoolWorkers` | |
+| `ListAPIKeys` `CreateAPIKey` `RevokeAPIKey` | |
 | `BaseURL` `ControlBaseURL` `Provider` `Region` | `GetPolicies` `SetPolicies` |
 | package-level `DiscoverRegions` | `ReadFile` `WriteFile` `SyncDir` |
 | | `ListMounts` `CreateMount` `DeleteMount` `ConnectPTY` |

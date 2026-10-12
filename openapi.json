@@ -2142,7 +2142,7 @@
           "Pools"
         ],
         "summary": "List pools",
-        "description": "List the organization's pools, newest first. Any API key in the organization can read pools. Returns 404 when pools are not enabled for the organization.",
+        "description": "List the organization's pools in this region, newest first.",
         "parameters": [
           {
             "$ref": "#/components/parameters/Cursor"
@@ -2179,9 +2179,6 @@
           "403": {
             "$ref": "#/components/responses/ForbiddenError"
           },
-          "404": {
-            "$ref": "#/components/responses/NotFoundError"
-          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -2198,13 +2195,8 @@
         "tags": [
           "Pools"
         ],
-        "summary": "Buy a pool",
-        "description": "Buy prepaid capacity in one provider and region for a fixed term. The pool is billed on the organization's next invoice. `amount_cents` must match the current price for the same request; get it from the quote operation. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/RequiredIdempotencyKey"
-          }
-        ],
+        "summary": "Create a pool",
+        "description": "Create a pool in the provider and region of the endpoint you call. Requires an API key with every scope.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2216,68 +2208,12 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "The purchased pool, or the original pool when the idempotency key is replayed.",
+          "201": {
+            "description": "The new pool.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Pool"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequestError"
-          },
-          "401": {
-            "$ref": "#/components/responses/UnauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/ActionRequiredOrForbiddenError"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFoundError"
-          },
-          "409": {
-            "$ref": "#/components/responses/ConflictOrIdempotencyConflictOrInvalidStateError"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimitedError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "503": {
-            "$ref": "#/components/responses/CapacityUnavailableOrUnavailableError"
-          }
-        }
-      }
-    },
-    "/v1/pools/quote": {
-      "post": {
-        "operationId": "quotePool",
-        "tags": [
-          "Pools"
-        ],
-        "summary": "Quote a pool",
-        "description": "Price a pool without buying it. Any API key in the organization can request a quote. Returns 404 when pools are not enabled for the organization.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PoolQuoteRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The current price for the requested pool.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PoolQuote"
                 }
               }
             }
@@ -2295,7 +2231,10 @@
             "$ref": "#/components/responses/NotFoundError"
           },
           "409": {
-            "$ref": "#/components/responses/InvalidStateError"
+            "$ref": "#/components/responses/ConflictOrInvalidStateError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -2312,7 +2251,14 @@
     "/v1/pools/{pool_id}": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/PoolId"
+          "name": "pool_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "Pool identifier."
         }
       ],
       "get": {
@@ -2321,10 +2267,10 @@
           "Pools"
         ],
         "summary": "Get a pool",
-        "description": "Return one pool owned by the organization. Returns 404 when pools are not enabled for the organization.",
+        "description": "Get one pool.",
         "responses": {
           "200": {
-            "description": "Pool details.",
+            "description": "The pool.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2332,9 +2278,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequestError"
           },
           "401": {
             "$ref": "#/components/responses/UnauthorizedError"
@@ -2361,8 +2304,8 @@
         "tags": [
           "Pools"
         ],
-        "summary": "Rename a pool",
-        "description": "Set or remove a pool's name. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.",
+        "summary": "Update a pool",
+        "description": "Rename, resize, change commitments or join settings. Resources cannot shrink while a commitment is active. Requires an API key with every scope.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2397,7 +2340,44 @@
             "$ref": "#/components/responses/NotFoundError"
           },
           "409": {
-            "$ref": "#/components/responses/ConflictError"
+            "$ref": "#/components/responses/ConflictOrInvalidStateError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deletePool",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Delete a pool",
+        "description": "Delete the pool and every VM in it. Refused while a commitment is active. To stop paying for a pool you mean to keep, resize it to zero instead. Requires an API key with every scope.",
+        "responses": {
+          "204": {
+            "description": "The pool and its VMs are deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ConflictOrInvalidStateError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -2437,6 +2417,302 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/pools/{pool_id}/workers": {
+      "parameters": [
+        {
+          "name": "pool_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "Pool identifier."
+        }
+      ],
+      "get": {
+        "operationId": "listPoolWorkers",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "List a pool's workers",
+        "description": "Workers that joined the pool and heartbeated within the last day.",
+        "responses": {
+          "200": {
+            "description": "The pool's workers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListWorkersResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/workers/{worker_id}": {
+      "parameters": [
+        {
+          "name": "worker_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "description": "Worker identifier: a ULID the worker generates once and keeps."
+        }
+      ],
+      "put": {
+        "operationId": "heartbeatWorker",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Join a pool or heartbeat",
+        "description": "Join the pool named in the body, or keep the worker in it. Requires an API key whose scopes are exactly `pool:<pool_id>:join`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerHeartbeat"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The worker is in the pool.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerHeartbeatResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ConflictOrInvalidStateError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/workers/{worker_id}/tunnel": {
+      "parameters": [
+        {
+          "name": "worker_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "description": "Worker identifier: a ULID the worker generates once and keeps."
+        }
+      ],
+      "get": {
+        "operationId": "openWorkerTunnel",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Open the worker tunnel",
+        "description": "Upgrade to a WebSocket that carries HTTP/2 from Arker to the worker's API. Requires the same join key as the heartbeat, after the worker has joined.",
+        "responses": {
+          "101": {
+            "description": "Switching to the tunnel."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/api-keys": {
+      "get": {
+        "operationId": "listApiKeys",
+        "tags": [
+          "API keys"
+        ],
+        "summary": "List API keys",
+        "description": "List the organization's unrevoked API keys.",
+        "responses": {
+          "200": {
+            "description": "The keys.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListApiKeysResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createApiKey",
+        "tags": [
+          "API keys"
+        ],
+        "summary": "Create an API key",
+        "description": "Create a key no broader than the calling key: same or lower role, and scopes inside the caller's.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApiKeyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The new key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedApiKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/api-keys/{api_key_id}": {
+      "parameters": [
+        {
+          "name": "api_key_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "delete": {
+        "operationId": "revokeApiKey",
+        "tags": [
+          "API keys"
+        ],
+        "summary": "Revoke an API key",
+        "description": "Revoke a key. A key can revoke itself or any key no broader than it.",
+        "responses": {
+          "204": {
+            "description": "Revoked."
           },
           "401": {
             "$ref": "#/components/responses/UnauthorizedError"
@@ -10305,120 +10581,77 @@
       "PoolResources": {
         "type": "object",
         "additionalProperties": false,
-        "minProperties": 1,
-        "description": "Reserved capacity. At least one quantity must be positive.",
+        "description": "Capacity in the same units as VM resources.",
         "properties": {
           "vcpu": {
             "type": "integer",
             "minimum": 0,
-            "description": "Reserved vCPUs."
+            "description": "vCPUs."
           },
           "memory_mib": {
             "type": "integer",
             "minimum": 0,
-            "description": "Reserved memory in MiB."
+            "description": "Memory in MiB."
           },
           "disk_mib": {
             "type": "integer",
             "minimum": 0,
-            "description": "Reserved disk in MiB."
-          }
-        }
-      },
-      "PoolStatus": {
-        "type": "string",
-        "enum": [
-          "active",
-          "expired"
-        ],
-        "description": "`expired` once `ends_at` has passed. Usage by member VMs after that bills at normal rates."
-      },
-      "PoolQuoteRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "provider",
-          "region",
-          "resources",
-          "duration_seconds"
-        ],
-        "properties": {
-          "provider": {
-            "$ref": "#/components/schemas/Provider"
-          },
-          "region": {
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
-            "description": "Customer-facing service region, for example `us-west`."
-          },
-          "resources": {
-            "$ref": "#/components/schemas/PoolResources"
-          },
-          "duration_seconds": {
-            "type": "integer",
-            "minimum": 2592000,
-            "maximum": 3153600000,
-            "description": "Term length in seconds. The minimum is 30 days (2592000)."
-          },
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "maxLength": 64,
-            "description": "Optional name, unique within the organization and case-insensitive. VMs can join the pool by this name."
+            "description": "Disk in MiB."
           }
         }
       },
       "CreatePoolRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "provider",
-          "region",
-          "resources",
-          "duration_seconds",
-          "amount_cents"
-        ],
         "properties": {
-          "provider": {
-            "$ref": "#/components/schemas/Provider"
-          },
-          "region": {
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
-            "description": "Customer-facing service region, for example `us-west`."
-          },
-          "resources": {
-            "$ref": "#/components/schemas/PoolResources"
-          },
-          "duration_seconds": {
-            "type": "integer",
-            "minimum": 2592000,
-            "maximum": 3153600000,
-            "description": "Term length in seconds. The minimum is 30 days (2592000)."
-          },
           "name": {
             "type": [
               "string",
               "null"
             ],
             "maxLength": 64,
-            "description": "Optional name, unique within the organization and case-insensitive. VMs can join the pool by this name."
+            "description": "Optional name, unique within the organization and case-insensitive."
           },
-          "amount_cents": {
+          "resources": {
+            "$ref": "#/components/schemas/PoolResources"
+          },
+          "commitments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PoolCommitment"
+            },
+            "description": "Committed periods. Defaults to none."
+          },
+          "compute": {
+            "$ref": "#/components/schemas/PoolCompute"
+          },
+          "joinable": {
+            "type": "boolean",
+            "description": "Let workers holding a join key add capacity. Defaults to false."
+          },
+          "dedicated_storage": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PoolDedicatedStorage"
+            },
+            "description": "Classes of state kept in storage owned by the pool. Defaults to none."
+          },
+          "source_vm_id": {
+            "type": "string",
+            "description": "Make this a fork-reserve pool for this VM. Requires `num_forks`."
+          },
+          "num_forks": {
             "type": "integer",
             "minimum": 1,
-            "description": "The price you agree to pay, from a quote for the same request. The purchase fails with a pool_quote conflict if the current price differs."
+            "maximum": 100000,
+            "description": "How many forks of `source_vm_id` to keep room for."
           }
         }
       },
       "UpdatePoolRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "name"
-        ],
+        "minProperties": 1,
         "properties": {
           "name": {
             "type": [
@@ -10427,71 +10660,26 @@
             ],
             "maxLength": 64,
             "description": "New pool name, or null to remove it."
-          }
-        }
-      },
-      "PoolQuote": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "name",
-          "catalog_version",
-          "baseline_cents",
-          "discount_percent",
-          "provider",
-          "region",
-          "resources",
-          "duration_seconds",
-          "currency",
-          "amount_cents"
-        ],
-        "properties": {
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Normalized pool name, if one was given."
-          },
-          "catalog_version": {
-            "type": "string",
-            "description": "Price catalog used for this quote."
-          },
-          "baseline_cents": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "Price of the same resources and term at on-demand rates, in cents."
-          },
-          "discount_percent": {
-            "type": "number",
-            "minimum": 0,
-            "description": "Discount applied to the baseline, as a percentage."
-          },
-          "provider": {
-            "$ref": "#/components/schemas/Provider"
-          },
-          "region": {
-            "type": "string",
-            "description": "Customer-facing service region."
           },
           "resources": {
             "$ref": "#/components/schemas/PoolResources"
           },
-          "duration_seconds": {
-            "type": "integer",
-            "description": "Term length in seconds."
+          "commitments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PoolCommitment"
+            },
+            "description": "The full list of commitments. Commitments that have started must be kept unchanged."
           },
-          "currency": {
-            "type": "string",
-            "enum": [
-              "usd"
-            ],
-            "description": "Price currency."
+          "joinable": {
+            "type": "boolean",
+            "description": "Whether workers holding a join key may join."
           },
-          "amount_cents": {
+          "num_forks": {
             "type": "integer",
             "minimum": 1,
-            "description": "Price to pay, in cents. Send this as `amount_cents` to buy."
+            "maximum": 100000,
+            "description": "For a fork-reserve pool, how many forks to keep room for."
           }
         }
       },
@@ -10503,15 +10691,17 @@
           "name",
           "provider",
           "region",
+          "state",
+          "state_detail",
           "resources",
-          "duration_seconds",
-          "status",
-          "created_at",
-          "starts_at",
-          "ends_at",
-          "currency",
-          "amount_cents",
-          "invoice_id"
+          "capacity",
+          "commitments",
+          "compute",
+          "joinable",
+          "dedicated_storage",
+          "source_vm_id",
+          "num_forks",
+          "created_at"
         ],
         "properties": {
           "pool_id": {
@@ -10531,51 +10721,64 @@
           },
           "region": {
             "type": "string",
-            "description": "Customer-facing service region. Only VMs in this provider and region can join."
+            "description": "Service region the pool lives in."
           },
-          "resources": {
-            "$ref": "#/components/schemas/PoolResources"
+          "state": {
+            "$ref": "#/components/schemas/PoolState"
           },
-          "duration_seconds": {
-            "type": "integer",
-            "description": "Term length in seconds."
-          },
-          "status": {
-            "$ref": "#/components/schemas/PoolStatus"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When the pool was bought."
-          },
-          "starts_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Start of the term."
-          },
-          "ends_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "End of the term."
-          },
-          "currency": {
-            "type": "string",
-            "enum": [
-              "usd"
-            ],
-            "description": "Price currency."
-          },
-          "amount_cents": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Price paid, in cents."
-          },
-          "invoice_id": {
+          "state_detail": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Invoice that bills this pool, once one exists."
+            "description": "Why the pool is still provisioning, when something is wrong."
+          },
+          "resources": {
+            "$ref": "#/components/schemas/PoolResources"
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/PoolCapacity"
+          },
+          "commitments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PoolCommitment"
+            },
+            "description": "Committed periods, oldest first."
+          },
+          "compute": {
+            "$ref": "#/components/schemas/PoolCompute"
+          },
+          "joinable": {
+            "type": "boolean",
+            "description": "Whether workers holding a join key for this pool may join it."
+          },
+          "dedicated_storage": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PoolDedicatedStorage"
+            },
+            "description": "Classes of state kept in storage owned by the pool."
+          },
+          "source_vm_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For a fork-reserve pool, the VM whose forks it keeps room for."
+          },
+          "num_forks": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "For a fork-reserve pool, how many forks to keep room for. A hint: Arker keeps the VM's snapshot on enough hosts for this many forks while capacity allows."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the pool was created."
           }
         }
       },
@@ -10584,7 +10787,6 @@
         "additionalProperties": false,
         "required": [
           "pools",
-          "purchases_enabled",
           "next_cursor"
         ],
         "properties": {
@@ -10594,10 +10796,6 @@
               "$ref": "#/components/schemas/Pool"
             },
             "description": "Pools owned by the organization, newest first."
-          },
-          "purchases_enabled": {
-            "type": "boolean",
-            "description": "Whether the organization can buy new pools."
           },
           "next_cursor": {
             "type": [
@@ -10939,6 +11137,533 @@
               "delete"
             ],
             "description": "`delete`: deletes the VM, as `DELETE /v1/vms/{id}` does."
+          }
+        }
+      },
+      "PoolCapacity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "vcpu",
+          "memory_mib",
+          "disk_mib",
+          "forks"
+        ],
+        "description": "What the pool can hold right now.",
+        "properties": {
+          "vcpu": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "vCPUs contributed by the pool's live workers. Zero for a managed pool, whose capacity is the shared fleet."
+          },
+          "memory_mib": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Memory in MiB contributed by the pool's live workers."
+          },
+          "disk_mib": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Disk in MiB contributed by the pool's live workers."
+          },
+          "forks": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "For a fork-reserve pool, how many forks of `source_vm_id` fit on hosts that hold its snapshot right now. Null for other pools."
+          }
+        }
+      },
+      "PoolState": {
+        "type": "string",
+        "enum": [
+          "provisioning",
+          "idle",
+          "running"
+        ],
+        "description": "`provisioning` while the pool's own compute is below what it asked for; then `idle` when no member VM is executing a command and `running` when one is."
+      },
+      "PoolCommitment": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "starts_at",
+          "ends_at"
+        ],
+        "description": "A period the pool is committed to. Both ends are inclusive and the period lasts at least 24 hours. While a commitment is active the pool cannot shrink or be deleted.",
+        "properties": {
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Start of the period."
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "End of the period."
+          }
+        }
+      },
+      "PoolComputeManaged": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "managed"
+            ],
+            "description": "Arker fleet hosts in the pool's provider and region."
+          }
+        }
+      },
+      "PoolComputeAws": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "account_id",
+          "role_arn",
+          "subnet_ids"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "aws"
+            ],
+            "description": "Arker provisions hosts in your AWS account."
+          },
+          "account_id": {
+            "type": "string",
+            "pattern": "^[0-9]{12}$",
+            "description": "Your AWS account id."
+          },
+          "role_arn": {
+            "type": "string",
+            "pattern": "^arn:aws:iam::[0-9]{12}:role/.+$",
+            "description": "Role Arker assumes to launch and terminate hosts. It must trust Arker's account with `external_id`."
+          },
+          "external_id": {
+            "type": "string",
+            "readOnly": true,
+            "description": "External id Arker presents when assuming `role_arn`. Set by Arker."
+          },
+          "region": {
+            "type": "string",
+            "description": "AWS region to launch in. Defaults to the pool's region."
+          },
+          "subnet_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "Subnets hosts launch into. Hosts need outbound internet access only."
+          },
+          "security_group_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Security groups for the hosts. No inbound rules are needed."
+          },
+          "instance_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Instance types to launch, in order of preference. They must support hardware virtualization."
+          }
+        }
+      },
+      "PoolCompute": {
+        "description": "Whose compute runs the pool's VMs.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/PoolComputeManaged"
+          },
+          {
+            "$ref": "#/components/schemas/PoolComputeAws"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type"
+        }
+      },
+      "PoolDedicatedStorage": {
+        "type": "string",
+        "enum": [
+          "object_storage",
+          "database",
+          "logs"
+        ],
+        "description": "A class of state kept in storage owned by the pool instead of Arker's shared regional stores: `object_storage` holds snapshots and files, `database` holds VM and run records, `logs` holds run output and events. Only `object_storage` is supported today."
+      },
+      "WorkerResources": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "vcpu",
+          "memory_mib",
+          "disk_mib"
+        ],
+        "properties": {
+          "vcpu": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "memory_mib": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "disk_mib": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "gpu_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "WorkerKind": {
+        "type": "string",
+        "enum": [
+          "arkerd",
+          "blast"
+        ],
+        "description": "The software the worker runs."
+      },
+      "WorkerState": {
+        "type": "string",
+        "enum": [
+          "active",
+          "draining",
+          "left"
+        ],
+        "description": "`active` takes new VMs; `draining` keeps its VMs but takes no new ones; `left` has handed back everything and is leaving the pool."
+      },
+      "WorkerVm": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "vm_id",
+          "resources"
+        ],
+        "description": "A VM the worker holds.",
+        "properties": {
+          "vm_id": {
+            "type": "string"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/WorkerResources"
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "WorkerHeartbeat": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pool_id",
+          "kind",
+          "version",
+          "platforms",
+          "state",
+          "resources",
+          "free"
+        ],
+        "description": "A worker joins its pool with its first heartbeat and stays in it while heartbeats arrive.",
+        "properties": {
+          "pool_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pool the worker joins. Must match the API key's join scope."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorkerKind"
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Worker software version."
+          },
+          "platforms": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+            },
+            "description": "Platforms the worker serves. A VM's snapshot only restores on a worker serving its platform."
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,64}$"
+            },
+            "description": "Optional operations the worker supports, such as `sessions` or `pty`."
+          },
+          "state": {
+            "$ref": "#/components/schemas/WorkerState"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/WorkerResources"
+          },
+          "free": {
+            "$ref": "#/components/schemas/WorkerResources"
+          },
+          "vms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkerVm"
+            },
+            "description": "VMs on the worker. Workers that keep their own records may omit this."
+          }
+        }
+      },
+      "WorkerHeartbeatResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "worker_id",
+          "heartbeat_interval_ms",
+          "desired_state",
+          "tunnel_url"
+        ],
+        "properties": {
+          "worker_id": {
+            "type": "string"
+          },
+          "heartbeat_interval_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "description": "Send the next heartbeat after this long."
+          },
+          "desired_state": {
+            "$ref": "#/components/schemas/WorkerState"
+          },
+          "tunnel_url": {
+            "type": "string",
+            "description": "WebSocket URL the worker keeps open so Arker can reach it."
+          },
+          "object_storage": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "required": [
+              "bucket",
+              "region"
+            ],
+            "properties": {
+              "bucket": {
+                "type": "string"
+              },
+              "region": {
+                "type": "string"
+              }
+            },
+            "description": "The pool's own bucket when the pool keeps object storage, else null."
+          }
+        }
+      },
+      "Worker": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "worker_id",
+          "pool_id",
+          "kind",
+          "version",
+          "platforms",
+          "state",
+          "resources",
+          "free",
+          "last_heartbeat_at"
+        ],
+        "properties": {
+          "worker_id": {
+            "type": "string"
+          },
+          "pool_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorkerKind"
+          },
+          "version": {
+            "type": "string"
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "state": {
+            "$ref": "#/components/schemas/WorkerState"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/WorkerResources"
+          },
+          "free": {
+            "$ref": "#/components/schemas/WorkerResources"
+          },
+          "last_heartbeat_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ListWorkersResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workers"
+        ],
+        "properties": {
+          "workers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Worker"
+            }
+          }
+        }
+      },
+      "ApiKey": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "api_key_id",
+          "name",
+          "role",
+          "scopes",
+          "created_at",
+          "expires_at"
+        ],
+        "properties": {
+          "api_key_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "viewer",
+              "member",
+              "developer",
+              "admin"
+            ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`*` for everything; `vmid:<id>` limits the key to those VMs; `op:sync`, `op:pty` and `op:run` limit it to those operations; `pool:<id>:join` makes it a worker join key for that pool."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateApiKeyRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "viewer",
+              "member",
+              "developer",
+              "admin"
+            ],
+            "description": "Defaults to the caller's role. Cannot exceed it."
+          },
+          "scopes": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "string",
+              "pattern": "^(\\*|vmid:[A-Za-z0-9_-]{1,96}|op:(sync|pty|run)|pool:[0-9a-f-]{36}:join)$"
+            },
+            "description": "Defaults to `[\"*\"]`. The new key cannot reach anything the calling key cannot."
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the key stops working. Defaults to never."
+          }
+        }
+      },
+      "CreatedApiKey": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "api_key",
+          "key"
+        ],
+        "properties": {
+          "api_key": {
+            "$ref": "#/components/schemas/ApiKey"
+          },
+          "key": {
+            "type": "string",
+            "description": "The secret. Shown only once."
+          }
+        }
+      },
+      "ListApiKeysResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "api_keys"
+        ],
+        "properties": {
+          "api_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiKey"
+            }
           }
         }
       }

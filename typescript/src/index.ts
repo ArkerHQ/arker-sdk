@@ -320,19 +320,56 @@ export type FilesystemCreateRequest = ApiSchema<"FilesystemCreateRequest">;
 // ── Pools ──────────────────────────────────────────────────────────
 export type Pool = ApiSchema<"Pool">;
 export type PoolResources = ApiSchema<"PoolResources">;
-export type PoolStatus = ApiSchema<"PoolStatus">;
 export type PoolUsage = ApiSchema<"PoolUsage">;
-export type PoolQuote = ApiSchema<"PoolQuote">;
-export type PoolQuoteRequest = ApiSchema<"PoolQuoteRequest">;
+export type PoolState = ApiSchema<"PoolState">;
+export type PoolCapacity = ApiSchema<"PoolCapacity">;
+export type PoolCommitment = ApiSchema<"PoolCommitment">;
+export type PoolDedicatedStorage = ApiSchema<"PoolDedicatedStorage">;
 export type ListPoolsResponse = ApiSchema<"ListPoolsResponse">;
-/** What to buy. `provider` and `region` default to the client's placement. */
-export type CreatePoolOptions = Omit<PoolQuoteRequest, "provider" | "region"> &
-  Partial<Pick<PoolQuoteRequest, "provider" | "region">> & {
-    /** Use this key verbatim, to make a purchase replayable across calls and
-     * processes. Without one, each `createPool()` call buys a new pool; only
-     * the SDK's own retries within that call are deduplicated. */
-    idempotencyKey?: string;
-  };
+/**
+ * `compute` as sent on the wire. The generated `PoolCompute` tags its variants
+ * with schema names because the contract's discriminator has no mapping, so
+ * writes use this type instead.
+ */
+export type PoolComputeInput =
+  | { type: "managed" }
+  | (Omit<ApiSchema<"PoolComputeAws">, "type" | "external_id"> & { type: "aws" });
+export type CreatePoolOptions = Omit<ApiSchema<"CreatePoolRequest">, "compute"> & { compute?: PoolComputeInput };
+export type UpdatePoolOptions = ApiSchema<"UpdatePoolRequest">;
+export type Worker = ApiSchema<"Worker">;
+export type ListWorkersResponse = ApiSchema<"ListWorkersResponse">;
+
+// ── API keys ───────────────────────────────────────────────────────
+export type ApiKey = ApiSchema<"ApiKey">;
+export type CreatedApiKey = ApiSchema<"CreatedApiKey">;
+export type ListApiKeysResponse = ApiSchema<"ListApiKeysResponse">;
+export type CreateApiKeyOptions = ApiSchema<"CreateApiKeyRequest">;
+
+/**
+ * Builders for the `scopes` of {@link Arker.createApiKey}. A key with no
+ * scopes reaches everything its role allows (`scopes.all`); scopes narrow it
+ * to certain VMs, certain operations, or joining one pool as a worker.
+ */
+export const scopes = {
+  all: "*",
+  /** Limit the key to one VM. */
+  vm(vmId: string): `vmid:${string}` {
+    if (!/^[A-Za-z0-9_-]{1,96}$/.test(vmId)) throw new Error(`invalid vm id for a scope: ${vmId}`);
+    return `vmid:${vmId}`;
+  },
+  /** Limit the key to one operation. */
+  op(operation: "sync" | "pty" | "run"): `op:${"sync" | "pty" | "run"}` {
+    if (operation !== "sync" && operation !== "pty" && operation !== "run") {
+      throw new Error(`invalid operation for a scope: ${String(operation)}`);
+    }
+    return `op:${operation}`;
+  },
+  /** Make the key a worker join key for one pool. It must be the key's only scope. */
+  poolJoin(poolId: string): `pool:${string}:join` {
+    if (!/^[0-9a-f-]{36}$/.test(poolId)) throw new Error(`invalid pool id for a scope: ${poolId}`);
+    return `pool:${poolId}:join`;
+  },
+} as const;
 
 // ── Mounts ──────────────────────────────────────────────────────────
 export type Mount = ApiSchema<"Mount">;
@@ -857,8 +894,10 @@ export class Arker {
     return this._request("DELETE", `/v1/filesystems/${pathSegment(filesystemId)}`, undefined, this.baseUrl);
   }
 
-  // ── Pools (org-scoped, control-plane) ──────────────────────────────
-  // Available to organizations with pools enabled; others get `not_found`.
+  // ── Pools ──────────────────────────────────────────────────────────
+  // Pools are regional: create, update, delete and the worker list go to the
+  // client's regional base URL (provider and region, or baseUrl). Listing and
+  // fetching go to the control plane, which finds the pool's region.
 
   /** List the organization's pools, newest first. */
   async listPools(opts: ListOpts = {}): Promise<ListPoolsResponse> {
@@ -875,58 +914,52 @@ export class Arker {
     return this._request("GET", `/v1/pools/${pathSegment(poolId)}/usage`, undefined, this.controlBaseUrl);
   }
 
-  /** Set a pool's name, or pass `null` to remove it. Requires an admin key. */
-  async renamePool(poolId: string, name: string | null): Promise<Pool> {
-    return this._request("PATCH", `/v1/pools/${pathSegment(poolId)}`, { name }, this.controlBaseUrl);
-  }
-
   /**
-   * Buy a pool at the current price, billed on the organization's next
-   * invoice. Requires an admin key.
+   * Create a pool in the client's region. Requires an admin key.
    *
-   *     createPool({ resources: { vcpu: 8, memory_mib: 32768 }, duration_seconds: 30 * 86400 })
-   *
-   * Prices the pool, then buys it at exactly that price: if the price changes
-   * in between, this throws a `conflict` rather than paying a different amount.
-   * Member VMs' usage beyond the pool's resources bills at normal rates.
+   *     createPool({ name: "ci", resources: { vcpu: 8, memory_mib: 32768 }, joinable: true })
+   *     createPool({ source_vm_id: "vm_abc", num_forks: 50 })
    */
   async createPool(options: CreatePoolOptions): Promise<Pool> {
-    const { idempotencyKey, ...terms } = options;
-    const request = this._poolRequest(terms);
-    const quote = await this._quotePool(request);
-    return this._buyPool(request, quote.amount_cents, idempotencyKey ?? `sdk-pool-${ulid()}`);
-  }
-
-  /** Fill in the client's placement. @internal */
-  _poolRequest(terms: Omit<CreatePoolOptions, "idempotencyKey">): PoolQuoteRequest {
-    const provider = terms.provider ?? this.provider;
-    const region = terms.region ?? this.region;
-    if (!provider || !region) {
-      throw new Error("provider and region are required for a pool; pass them or configure the client's placement");
-    }
-    return { ...terms, provider, region };
-  }
-
-  /** Price a pool without buying it. @internal */
-  async _quotePool(request: PoolQuoteRequest): Promise<PoolQuote> {
-    return this._request("POST", "/v1/pools/quote", request, this.controlBaseUrl);
+    return this._request("POST", "/v1/pools", options, this.baseUrl);
   }
 
   /**
-   * Buy at a quoted price. The key is bound once, so every retry replays the
-   * same purchase rather than buying another -- which is what makes it safe
-   * to retry a purchase whose response was lost. @internal
+   * Change a pool. Pass only what changes; `name: null` removes the name.
+   * `commitments` is the full list: ones that have started must be kept
+   * unchanged. Requires an admin key.
    */
-  async _buyPool(request: PoolQuoteRequest, amountCents: number, idempotencyKey: string): Promise<Pool> {
-    return this._request(
-      "POST",
-      "/v1/pools",
-      { ...request, amount_cents: amountCents },
-      this.controlBaseUrl,
-      { "Idempotency-Key": idempotencyKey },
-      undefined,
-      true,
-    );
+  async updatePool(poolId: string, options: UpdatePoolOptions): Promise<Pool> {
+    return this._request("PATCH", `/v1/pools/${pathSegment(poolId)}`, options, this.baseUrl);
+  }
+
+  /** Delete a pool and every VM in it. Refused while a commitment is active. Requires an admin key. */
+  async deletePool(poolId: string): Promise<void> {
+    await this._request("DELETE", `/v1/pools/${pathSegment(poolId)}`, undefined, this.baseUrl);
+  }
+
+  /** Workers that have joined the pool. */
+  async listPoolWorkers(poolId: string): Promise<ListWorkersResponse> {
+    return this._request("GET", `/v1/pools/${pathSegment(poolId)}/workers`, undefined, this.baseUrl);
+  }
+
+  // ── API keys (org-scoped, control-plane) ───────────────────────────
+
+  async listApiKeys(): Promise<ListApiKeysResponse> {
+    return this._request("GET", "/v1/api-keys", undefined, this.controlBaseUrl);
+  }
+
+  /**
+   * Mint a key. The secret is in the result's `key` and is shown only once.
+   * The new key's role cannot exceed the caller's and its reach is limited to
+   * the caller's. Build `scopes` with {@link scopes}.
+   */
+  async createApiKey(options: CreateApiKeyOptions = {}): Promise<CreatedApiKey> {
+    return this._request("POST", "/v1/api-keys", options, this.controlBaseUrl);
+  }
+
+  async revokeApiKey(apiKeyId: string): Promise<void> {
+    await this._request("DELETE", `/v1/api-keys/${pathSegment(apiKeyId)}`, undefined, this.controlBaseUrl);
   }
 
   /** @internal */

@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import secrets
 import shlex
 import tarfile
@@ -28,6 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 from importlib.resources import files as package_files
 from typing import (
     Any,
+    Literal,
     TypeVar,
     get_args,
     get_origin,
@@ -43,6 +45,8 @@ from .generated.api_models import (
     BackgroundRunResponse,
     CancelRunResponse,
     CompletedRunResponse,
+    CreateApiKeyRequest,
+    CreatedApiKey,
     CreatePoolRequest,
     CreateSessionRequest,
     DeleteFilesystemResponse,
@@ -52,6 +56,7 @@ from .generated.api_models import (
     ErrorBody,
     Filesystem,
     FilesystemCreateRequest,
+    ListApiKeysResponse,
     ListFilesystemsParameters,
     ListFilesystemsResponse,
     ListMountsParameters,
@@ -66,6 +71,7 @@ from .generated.api_models import (
     ListSessionsParameters,
     ListSessionsResponse,
     ListVmsParameters,
+    ListWorkersResponse,
     Mount,
     MountCreateRequest,
     PatchSessionRequest,
@@ -73,8 +79,9 @@ from .generated.api_models import (
     PatchVmRequest,
     PolicyDoc,
     Pool,
-    PoolQuote,
-    PoolQuoteRequest,
+    PoolCommitment,
+    PoolCompute,
+    PoolDedicatedStorage,
     PoolResources,
     PoolUsage,
     PtyTicketResponse,
@@ -95,6 +102,7 @@ from .generated.api_models import (
     SyncWriteOperationRequest,
     SyncWriteResponse,
     SyncWriteResult,
+    UpdatePoolRequest,
     Vm,
     VmNetwork,
     VmResources,
@@ -102,6 +110,42 @@ from .generated.api_models import (
 )
 
 Model = TypeVar("Model")
+
+
+_VM_SCOPE_ID = re.compile(r"[A-Za-z0-9_-]{1,96}")
+_POOL_SCOPE_ID = re.compile(r"[0-9a-f-]{36}")
+
+
+class Scopes:
+    """Builders for the ``scopes`` of :meth:`Arker.create_api_key`.
+
+    A key with no scopes reaches everything its role allows (``Scopes.ALL``).
+    Scopes narrow it: to certain VMs, to certain operations, or to joining one
+    pool as a worker.
+    """
+
+    ALL = "*"
+
+    @staticmethod
+    def vm(vm_id: str) -> str:
+        """Limit the key to one VM."""
+        if not _VM_SCOPE_ID.fullmatch(vm_id):
+            raise ValueError(f"invalid vm id for a scope: {vm_id!r}")
+        return f"vmid:{vm_id}"
+
+    @staticmethod
+    def op(operation: Literal["sync", "pty", "run"]) -> str:
+        """Limit the key to one operation."""
+        if operation not in ("sync", "pty", "run"):
+            raise ValueError(f"invalid operation for a scope: {operation!r}")
+        return f"op:{operation}"
+
+    @staticmethod
+    def pool_join(pool_id: str) -> str:
+        """Make the key a worker join key for one pool. It must be the key's only scope."""
+        if not _POOL_SCOPE_ID.fullmatch(pool_id):
+            raise ValueError(f"invalid pool id for a scope: {pool_id!r}")
+        return f"pool:{pool_id}:join"
 
 
 class _UnsetType:
@@ -590,8 +634,10 @@ class Arker:
         )
         return _decode_model(DeleteFilesystemResponse, payload)
 
-    # ── Pools (org-scoped, control-plane) ───────────────────────────────
-    # Available to organizations with pools enabled; others get `not_found`.
+    # ── Pools ───────────────────────────────────────────────────────────
+    # Pools are regional: create, update, delete and the worker list go to the
+    # client's regional base URL (provider and region, or base_url). Listing and
+    # fetching go to the control plane, which finds the pool's region.
     def list_pools(self, *, cursor: str | None = None, limit: int | None = None) -> ListPoolsResponse:
         """List the organization's pools, newest first."""
         path = _build_query("/v1/pools", ListPoolsParameters(cursor=cursor, limit=limit))
@@ -606,91 +652,95 @@ class Arker:
         payload = self._request("GET", f"/v1/pools/{_segment(pool_id)}/usage", base_url=self._control_base_url)
         return _decode_model(PoolUsage, payload)
 
-    def rename_pool(self, pool_id: str, name: str | None) -> Pool:
-        """Set a pool's name, or pass ``None`` to remove it. Requires an admin key."""
-        payload = self._request(
-            "PATCH",
-            f"/v1/pools/{_segment(pool_id)}",
-            {"name": name},
-            base_url=self._control_base_url,
-            preserve_nulls=True,
-        )
-        return _decode_model(Pool, payload)
-
     def create_pool(
         self,
         *,
-        resources: PoolResources | dict[str, int],
-        duration_seconds: int,
         name: str | None = None,
-        provider: str | None = None,
-        region: str | None = None,
-        idempotency_key: str | None = None,
+        resources: PoolResources | dict[str, int] | None = None,
+        commitments: list[PoolCommitment | dict[str, str]] | None = None,
+        compute: PoolCompute | dict[str, Any] | None = None,
+        joinable: bool | None = None,
+        dedicated_storage: list[PoolDedicatedStorage] | None = None,
+        source_vm_id: str | None = None,
+        num_forks: int | None = None,
     ) -> Pool:
-        """Buy a pool at the current price, billed on the next invoice. Requires an admin key.
+        """Create a pool in the client's region. Requires an admin key.
 
-        Prices the pool, then buys it at exactly that price: if the price
-        changes in between, this raises a ``conflict`` rather than paying a
-        different amount. Member VMs' usage beyond the pool's resources bills at
-        normal rates. ``provider`` and ``region`` default to the client's
-        placement. Without ``idempotency_key`` each call buys a new pool; only
-        this SDK's own retries within that call are deduplicated.
-        """
-        request = self._pool_request(resources, duration_seconds, name, provider, region)
-        quote = self._quote_pool(request)
-        return self._buy_pool(request, quote.amount_cents, idempotency_key or f"sdk-pool-{_ulid()}")
-
-    def _pool_request(
-        self,
-        resources: PoolResources | dict[str, int],
-        duration_seconds: int,
-        name: str | None,
-        provider: str | None,
-        region: str | None,
-    ) -> PoolQuoteRequest:
-        provider = provider or self._provider
-        region = region or self._region
-        if not provider or not region:
-            raise ValueError(
-                "provider and region are required for a pool; pass them or configure the client's placement"
-            )
-        return PoolQuoteRequest(
-            provider=provider,
-            region=region,
-            resources=resources if isinstance(resources, PoolResources) else PoolResources(**resources),
-            duration_seconds=duration_seconds,
-            name=name,
-        )
-
-    def _quote_pool(self, request: PoolQuoteRequest) -> PoolQuote:
-        """Price a pool without buying it."""
-        payload = self._request("POST", "/v1/pools/quote", request, base_url=self._control_base_url)
-        return _decode_model(PoolQuote, payload)
-
-    def _buy_pool(self, request: PoolQuoteRequest, amount_cents: int, idempotency_key: str) -> Pool:
-        """Buy at a quoted price.
-
-        The key is bound once, so every retry replays the same purchase rather
-        than buying another -- which is what makes it safe to retry a purchase
-        whose response was lost.
+        ``compute`` is managed (the default) or an AWS account Arker launches
+        hosts in. Pass ``source_vm_id`` with ``num_forks`` for a fork-reserve
+        pool. Without ``provider`` and ``region`` (or ``base_url``) on the
+        client there is no region to create it in.
         """
         body = CreatePoolRequest(
-            provider=request.provider,
-            region=request.region,
-            resources=request.resources,
-            duration_seconds=request.duration_seconds,
-            amount_cents=amount_cents,
-            name=request.name,
+            name=name,
+            resources=resources,  # type: ignore[arg-type]
+            commitments=commitments,  # type: ignore[arg-type]
+            compute=compute,  # type: ignore[arg-type]
+            joinable=joinable,
+            dedicated_storage=dedicated_storage,
+            source_vm_id=source_vm_id,
+            num_forks=num_forks,
         )
-        payload = self._request(
-            "POST",
-            "/v1/pools",
-            body,
-            base_url=self._control_base_url,
-            extra_headers={"Idempotency-Key": idempotency_key},
-            retry_network_failures=True,
-        )
+        payload = self._request("POST", "/v1/pools", body, base_url=self.base_url)
         return _decode_model(Pool, payload)
+
+    def update_pool(
+        self,
+        pool_id: str,
+        *,
+        name: str | _UnsetType | None = _UNSET,
+        resources: PoolResources | dict[str, int] | None = None,
+        commitments: list[PoolCommitment | dict[str, str]] | None = None,
+        joinable: bool | None = None,
+        num_forks: int | None = None,
+    ) -> Pool:
+        """Change a pool. Requires an admin key.
+
+        Pass only what changes. ``name=None`` removes the name. ``commitments``
+        is the full list: ones that have started must be kept unchanged.
+        """
+        body = UpdatePoolRequest(
+            name=_EXPLICIT_NULL if name is None else (None if name is _UNSET else name),  # type: ignore[arg-type]
+            resources=resources,  # type: ignore[arg-type]
+            commitments=commitments,  # type: ignore[arg-type]
+            joinable=joinable,
+            num_forks=num_forks,
+        )
+        payload = self._request("PATCH", f"/v1/pools/{_segment(pool_id)}", body, base_url=self.base_url)
+        return _decode_model(Pool, payload)
+
+    def delete_pool(self, pool_id: str) -> None:
+        """Delete a pool and every VM in it. Refused while a commitment is active. Requires an admin key."""
+        self._request("DELETE", f"/v1/pools/{_segment(pool_id)}", base_url=self.base_url)
+
+    def list_pool_workers(self, pool_id: str) -> ListWorkersResponse:
+        """Workers that have joined the pool."""
+        payload = self._request("GET", f"/v1/pools/{_segment(pool_id)}/workers", base_url=self.base_url)
+        return _decode_model(ListWorkersResponse, payload)
+
+    # ── API keys (org-scoped, control-plane) ────────────────────────────
+    def list_api_keys(self) -> ListApiKeysResponse:
+        return _decode_model(ListApiKeysResponse, self._request("GET", "/v1/api-keys", base_url=self._control_base_url))
+
+    def create_api_key(
+        self,
+        *,
+        name: str | None = None,
+        role: Literal["viewer", "member", "developer", "admin"] | None = None,
+        scopes: list[str] | None = None,
+        expires_at: str | None = None,
+    ) -> CreatedApiKey:
+        """Mint a key. The secret is in the result's ``key`` and is shown only once.
+
+        The new key's role cannot exceed the caller's and its reach is limited
+        to the caller's. Build ``scopes`` with :class:`Scopes`.
+        """
+        body = CreateApiKeyRequest(name=name, role=role, scopes=scopes, expires_at=expires_at)
+        payload = self._request("POST", "/v1/api-keys", body, base_url=self._control_base_url)
+        return _decode_model(CreatedApiKey, payload)
+
+    def revoke_api_key(self, api_key_id: str) -> None:
+        self._request("DELETE", f"/v1/api-keys/{_segment(api_key_id)}", base_url=self._control_base_url)
 
     def _request(
         self,
