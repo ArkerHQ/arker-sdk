@@ -1463,7 +1463,6 @@ Platform: TypeAlias = str
 
 @dataclass(frozen=True)
 class WorkerHeartbeat:
-    pool_id: str
     kind: WorkerKind
     version: str
     platforms: list[Platform]
@@ -1753,11 +1752,13 @@ class ListPoolWorkersParameters:
 
 @dataclass(frozen=True)
 class HeartbeatWorkerParameters:
+    pool_id: str
     worker_id: str
 
 
 @dataclass(frozen=True)
 class OpenWorkerTunnelParameters:
+    pool_id: str
     worker_id: str
 
 

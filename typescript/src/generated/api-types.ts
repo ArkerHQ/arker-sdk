@@ -594,11 +594,13 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/workers/{worker_id}": {
+    "/v1/pools/{pool_id}/workers/{worker_id}": {
         parameters: {
             query?: never;
             header?: never;
             path: {
+                /** @description Pool identifier. */
+                pool_id: string;
                 /** @description Worker identifier: a ULID the worker generates once and keeps. */
                 worker_id: string;
             };
@@ -607,7 +609,7 @@ export interface paths {
         get?: never;
         /**
          * Join a pool or heartbeat
-         * @description Join the pool named in the body, or keep the worker in it. Requires an API key whose scopes are exactly `pool:<pool_id>:join`.
+         * @description Join the pool, or keep the worker in it. Requires an API key whose scopes are exactly `pool:<pool_id>:join` for this pool.
          */
         put: operations["heartbeatWorker"];
         post?: never;
@@ -617,11 +619,13 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/workers/{worker_id}/tunnel": {
+    "/v1/pools/{pool_id}/workers/{worker_id}/tunnel": {
         parameters: {
             query?: never;
             header?: never;
             path: {
+                /** @description Pool identifier. */
+                pool_id: string;
                 /** @description Worker identifier: a ULID the worker generates once and keeps. */
                 worker_id: string;
             };
@@ -3031,24 +3035,19 @@ export interface components {
             /** @description Image the VM was created from, if known. */
             image?: string | null;
         };
-        /** @description A worker joins its pool with its first heartbeat and stays in it while heartbeats arrive. */
+        /** @description A worker joins the pool in the path with its first heartbeat and stays in it while heartbeats arrive. */
         WorkerHeartbeat: {
-            /**
-             * Format: uuid
-             * @description Pool the worker joins. Must match the API key's join scope.
-             */
-            pool_id: string;
             kind: components["schemas"]["WorkerKind"];
             /** @description Worker software version. */
             version: string;
             /** @description Platforms the worker serves. A VM's snapshot only restores on a worker serving its platform. */
             platforms: string[];
-            /** @description Optional operations the worker supports, such as `sessions` or `pty`. */
+            /** @description What the worker offers beyond the operations every worker serves (`fork`, `getVm`, `deleteVm`, `createRun`, `getRun`, `listRuns`, `sync`): `records` (it writes its own VM records), `sessions`, `pty`, `policies`, `mounts`, `patch`, `cancel`. */
             capabilities?: string[];
             state: components["schemas"]["WorkerState"];
             resources: components["schemas"]["WorkerResources"];
             free: components["schemas"]["WorkerResources"];
-            /** @description VMs on the worker. Workers that keep their own records may omit this. */
+            /** @description VMs on the worker. A worker without `records` reports every VM it holds; one with `records` may omit this. */
             vms?: components["schemas"]["WorkerVm"][];
         };
         WorkerHeartbeatResponse: {
@@ -4926,6 +4925,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description Pool identifier. */
+                pool_id: string;
                 /** @description Worker identifier: a ULID the worker generates once and keeps. */
                 worker_id: string;
             };
@@ -4961,6 +4962,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description Pool identifier. */
+                pool_id: string;
                 /** @description Worker identifier: a ULID the worker generates once and keeps. */
                 worker_id: string;
             };

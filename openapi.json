@@ -54,10 +54,6 @@
       "description": "Create and manage regional pools of capacity."
     },
     {
-      "name": "Workers",
-      "description": "Join workers to pools and keep them connected."
-    },
-    {
       "name": "API keys",
       "description": "Create, list and revoke API keys."
     }
@@ -2499,8 +2495,18 @@
         }
       }
     },
-    "/v1/workers/{worker_id}": {
+    "/v1/pools/{pool_id}/workers/{worker_id}": {
       "parameters": [
+        {
+          "name": "pool_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "Pool identifier."
+        },
         {
           "name": "worker_id",
           "in": "path",
@@ -2515,10 +2521,10 @@
       "put": {
         "operationId": "heartbeatWorker",
         "tags": [
-          "Workers"
+          "Pools"
         ],
         "summary": "Join a pool or heartbeat",
-        "description": "Join the pool named in the body, or keep the worker in it. Requires an API key whose scopes are exactly `pool:<pool_id>:join`.",
+        "description": "Join the pool, or keep the worker in it. Requires an API key whose scopes are exactly `pool:<pool_id>:join` for this pool.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2567,8 +2573,18 @@
         }
       }
     },
-    "/v1/workers/{worker_id}/tunnel": {
+    "/v1/pools/{pool_id}/workers/{worker_id}/tunnel": {
       "parameters": [
+        {
+          "name": "pool_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "Pool identifier."
+        },
         {
           "name": "worker_id",
           "in": "path",
@@ -2583,7 +2599,7 @@
       "get": {
         "operationId": "openWorkerTunnel",
         "tags": [
-          "Workers"
+          "Pools"
         ],
         "summary": "Open the worker tunnel",
         "description": "Upgrade to a WebSocket with subprotocol `arker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API. Requires the same join key as the heartbeat, after the worker has joined.",
@@ -11402,7 +11418,6 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "pool_id",
           "kind",
           "version",
           "platforms",
@@ -11410,13 +11425,8 @@
           "resources",
           "free"
         ],
-        "description": "A worker joins its pool with its first heartbeat and stays in it while heartbeats arrive.",
+        "description": "A worker joins the pool in the path with its first heartbeat and stays in it while heartbeats arrive.",
         "properties": {
-          "pool_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Pool the worker joins. Must match the API key's join scope."
-          },
           "kind": {
             "$ref": "#/components/schemas/WorkerKind"
           },
@@ -11440,7 +11450,7 @@
               "type": "string",
               "pattern": "^[a-z0-9_]{1,64}$"
             },
-            "description": "Optional operations the worker supports, such as `sessions` or `pty`."
+            "description": "What the worker offers beyond the operations every worker serves (`fork`, `getVm`, `deleteVm`, `createRun`, `getRun`, `listRuns`, `sync`): `records` (it writes its own VM records), `sessions`, `pty`, `policies`, `mounts`, `patch`, `cancel`."
           },
           "state": {
             "$ref": "#/components/schemas/WorkerState"
@@ -11456,7 +11466,7 @@
             "items": {
               "$ref": "#/components/schemas/WorkerVm"
             },
-            "description": "VMs on the worker. Workers that keep their own records may omit this."
+            "description": "VMs on the worker. A worker without `records` reports every VM it holds; one with `records` may omit this."
           }
         }
       },
