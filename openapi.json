@@ -51,7 +51,11 @@
     },
     {
       "name": "Pools",
-      "description": "Buy and manage prepaid regional resource pools."
+      "description": "Create and manage regional pools of capacity."
+    },
+    {
+      "name": "API keys",
+      "description": "Create, list and revoke API keys."
     }
   ],
   "paths": {
@@ -2491,8 +2495,18 @@
         }
       }
     },
-    "/v1/workers/{worker_id}": {
+    "/v1/pools/{pool_id}/workers/{worker_id}": {
       "parameters": [
+        {
+          "name": "pool_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "Pool identifier."
+        },
         {
           "name": "worker_id",
           "in": "path",
@@ -2507,10 +2521,10 @@
       "put": {
         "operationId": "heartbeatWorker",
         "tags": [
-          "Workers"
+          "Pools"
         ],
         "summary": "Join a pool or heartbeat",
-        "description": "Join the pool named in the body, or keep the worker in it. Requires an API key whose scopes are exactly `pool:<pool_id>:join`.",
+        "description": "Join the pool, or keep the worker in it. Requires an API key whose scopes are exactly `pool:<pool_id>:join` for this pool.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2559,8 +2573,18 @@
         }
       }
     },
-    "/v1/workers/{worker_id}/tunnel": {
+    "/v1/pools/{pool_id}/workers/{worker_id}/tunnel": {
       "parameters": [
+        {
+          "name": "pool_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "Pool identifier."
+        },
         {
           "name": "worker_id",
           "in": "path",
@@ -2575,10 +2599,10 @@
       "get": {
         "operationId": "openWorkerTunnel",
         "tags": [
-          "Workers"
+          "Pools"
         ],
         "summary": "Open the worker tunnel",
-        "description": "Upgrade to a WebSocket that carries HTTP/2 from Arker to the worker's API. Requires the same join key as the heartbeat, after the worker has joined.",
+        "description": "Upgrade to a WebSocket with subprotocol `arker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API. Requires the same join key as the heartbeat, after the worker has joined.",
         "responses": {
           "101": {
             "description": "Switching to the tunnel."
@@ -2700,7 +2724,8 @@
           "required": true,
           "schema": {
             "type": "string"
-          }
+          },
+          "description": "API key identifier."
         }
       ],
       "delete": {
@@ -7560,10 +7585,16 @@
           "deleteFilesystem",
           "listPools",
           "createPool",
-          "quotePool",
           "getPool",
           "updatePool",
-          "getPoolUsage"
+          "deletePool",
+          "getPoolUsage",
+          "listPoolWorkers",
+          "heartbeatWorker",
+          "openWorkerTunnel",
+          "listApiKeys",
+          "createApiKey",
+          "revokeApiKey"
         ],
         "description": "Exact operationId values declared by this API. Refresh this enum when operations are added or removed."
       },
@@ -10638,13 +10669,13 @@
           },
           "source_vm_id": {
             "type": "string",
-            "description": "Make this a fork-reserve pool for this VM. Requires `num_forks`."
+            "description": "Make this a fork-reserve pool for this VM. Requires `max_forks`."
           },
-          "num_forks": {
+          "max_forks": {
             "type": "integer",
             "minimum": 1,
             "maximum": 100000,
-            "description": "How many forks of `source_vm_id` to keep room for."
+            "description": "The most forks of `source_vm_id` to keep room for."
           }
         }
       },
@@ -10675,11 +10706,11 @@
             "type": "boolean",
             "description": "Whether workers holding a join key may join."
           },
-          "num_forks": {
+          "max_forks": {
             "type": "integer",
             "minimum": 1,
             "maximum": 100000,
-            "description": "For a fork-reserve pool, how many forks to keep room for."
+            "description": "The most forks of `source_vm_id` to keep room for."
           }
         }
       },
@@ -10700,7 +10731,7 @@
           "joinable",
           "dedicated_storage",
           "source_vm_id",
-          "num_forks",
+          "max_forks",
           "created_at"
         ],
         "properties": {
@@ -10767,13 +10798,13 @@
             ],
             "description": "For a fork-reserve pool, the VM whose forks it keeps room for."
           },
-          "num_forks": {
+          "max_forks": {
             "type": [
               "integer",
               "null"
             ],
             "minimum": 1,
-            "description": "For a fork-reserve pool, how many forks to keep room for. A hint: Arker keeps the VM's snapshot on enough hosts for this many forks while capacity allows."
+            "description": "For a fork-reserve pool, the most forks of `source_vm_id` to keep room for. A hint: Arker keeps the VM's snapshot on enough hosts for this many forks while capacity allows."
           },
           "created_at": {
             "type": "string",
@@ -11172,7 +11203,7 @@
               "null"
             ],
             "minimum": 0,
-            "description": "For a fork-reserve pool, how many forks of `source_vm_id` fit on hosts that hold its snapshot right now. Null for other pools."
+            "description": "For a fork-reserve pool, how many forks of `source_vm_id` fit on hosts that hold its snapshot right now (at most the room actually there, which can exceed `max_forks`). Null for other pools."
           }
         }
       },
@@ -11293,7 +11324,11 @@
           }
         ],
         "discriminator": {
-          "propertyName": "type"
+          "propertyName": "type",
+          "mapping": {
+            "managed": "#/components/schemas/PoolComputeManaged",
+            "aws": "#/components/schemas/PoolComputeAws"
+          }
         }
       },
       "PoolDedicatedStorage": {
@@ -11316,19 +11351,23 @@
         "properties": {
           "vcpu": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "vCPUs."
           },
           "memory_mib": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "Memory in MiB."
           },
           "disk_mib": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "Disk in MiB."
           },
           "gpu_count": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "Whole GPUs."
           }
         }
       },
@@ -11359,16 +11398,19 @@
         "description": "A VM the worker holds.",
         "properties": {
           "vm_id": {
-            "type": "string"
+            "type": "string",
+            "description": "VM identifier."
           },
           "resources": {
-            "$ref": "#/components/schemas/WorkerResources"
+            "$ref": "#/components/schemas/WorkerResources",
+            "description": "Resources the VM holds."
           },
           "image": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Image the VM was created from, if known."
           }
         }
       },
@@ -11376,7 +11418,6 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "pool_id",
           "kind",
           "version",
           "platforms",
@@ -11384,13 +11425,8 @@
           "resources",
           "free"
         ],
-        "description": "A worker joins its pool with its first heartbeat and stays in it while heartbeats arrive.",
+        "description": "A worker joins the pool in the path with its first heartbeat and stays in it while heartbeats arrive.",
         "properties": {
-          "pool_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Pool the worker joins. Must match the API key's join scope."
-          },
           "kind": {
             "$ref": "#/components/schemas/WorkerKind"
           },
@@ -11414,7 +11450,7 @@
               "type": "string",
               "pattern": "^[a-z0-9_]{1,64}$"
             },
-            "description": "Optional operations the worker supports, such as `sessions` or `pty`."
+            "description": "What the worker offers beyond the operations every worker serves (`fork`, `getVm`, `deleteVm`, `createRun`, `getRun`, `listRuns`, `sync`): `records` (it writes its own VM records), `sessions`, `pty`, `policies`, `mounts`, `patch`, `cancel`."
           },
           "state": {
             "$ref": "#/components/schemas/WorkerState"
@@ -11430,7 +11466,7 @@
             "items": {
               "$ref": "#/components/schemas/WorkerVm"
             },
-            "description": "VMs on the worker. Workers that keep their own records may omit this."
+            "description": "VMs on the worker. A worker without `records` reports every VM it holds; one with `records` may omit this."
           }
         }
       },
@@ -11445,7 +11481,8 @@
         ],
         "properties": {
           "worker_id": {
-            "type": "string"
+            "type": "string",
+            "description": "The worker identifier from the path."
           },
           "heartbeat_interval_ms": {
             "type": "integer",
@@ -11497,36 +11534,45 @@
         ],
         "properties": {
           "worker_id": {
-            "type": "string"
+            "type": "string",
+            "description": "Worker identifier."
           },
           "pool_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Pool the worker joined."
           },
           "kind": {
-            "$ref": "#/components/schemas/WorkerKind"
+            "$ref": "#/components/schemas/WorkerKind",
+            "description": "Software the worker runs."
           },
           "version": {
-            "type": "string"
+            "type": "string",
+            "description": "Worker software version."
           },
           "platforms": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Platforms the worker serves."
           },
           "state": {
-            "$ref": "#/components/schemas/WorkerState"
+            "$ref": "#/components/schemas/WorkerState",
+            "description": "Whether the worker takes new VMs."
           },
           "resources": {
-            "$ref": "#/components/schemas/WorkerResources"
+            "$ref": "#/components/schemas/WorkerResources",
+            "description": "Capacity the worker contributes."
           },
           "free": {
-            "$ref": "#/components/schemas/WorkerResources"
+            "$ref": "#/components/schemas/WorkerResources",
+            "description": "Capacity the worker has free."
           },
           "last_heartbeat_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "When the last heartbeat arrived."
           }
         }
       },
@@ -11541,7 +11587,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Worker"
-            }
+            },
+            "description": "Workers in the pool."
           }
         }
       },
@@ -11558,13 +11605,15 @@
         ],
         "properties": {
           "api_key_id": {
-            "type": "string"
+            "type": "string",
+            "description": "API key identifier."
           },
           "name": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Key name, if set."
           },
           "role": {
             "type": "string",
@@ -11573,7 +11622,8 @@
               "member",
               "developer",
               "admin"
-            ]
+            ],
+            "description": "Role the key acts with."
           },
           "scopes": {
             "type": "array",
@@ -11584,14 +11634,16 @@
           },
           "created_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "When the key was created."
           },
           "expires_at": {
             "type": [
               "string",
               "null"
             ],
-            "format": "date-time"
+            "format": "date-time",
+            "description": "When the key stops working, or null for never."
           }
         }
       },
@@ -11604,7 +11656,8 @@
               "string",
               "null"
             ],
-            "maxLength": 128
+            "maxLength": 128,
+            "description": "Optional name to recognize the key by."
           },
           "role": {
             "type": "string",
@@ -11644,7 +11697,8 @@
         ],
         "properties": {
           "api_key": {
-            "$ref": "#/components/schemas/ApiKey"
+            "$ref": "#/components/schemas/ApiKey",
+            "description": "The new key."
           },
           "key": {
             "type": "string",
@@ -11663,7 +11717,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ApiKey"
-            }
+            },
+            "description": "Unrevoked keys in the organization."
           }
         }
       }

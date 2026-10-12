@@ -594,11 +594,13 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/workers/{worker_id}": {
+    "/v1/pools/{pool_id}/workers/{worker_id}": {
         parameters: {
             query?: never;
             header?: never;
             path: {
+                /** @description Pool identifier. */
+                pool_id: string;
                 /** @description Worker identifier: a ULID the worker generates once and keeps. */
                 worker_id: string;
             };
@@ -607,7 +609,7 @@ export interface paths {
         get?: never;
         /**
          * Join a pool or heartbeat
-         * @description Join the pool named in the body, or keep the worker in it. Requires an API key whose scopes are exactly `pool:<pool_id>:join`.
+         * @description Join the pool, or keep the worker in it. Requires an API key whose scopes are exactly `pool:<pool_id>:join` for this pool.
          */
         put: operations["heartbeatWorker"];
         post?: never;
@@ -617,11 +619,13 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/workers/{worker_id}/tunnel": {
+    "/v1/pools/{pool_id}/workers/{worker_id}/tunnel": {
         parameters: {
             query?: never;
             header?: never;
             path: {
+                /** @description Pool identifier. */
+                pool_id: string;
                 /** @description Worker identifier: a ULID the worker generates once and keeps. */
                 worker_id: string;
             };
@@ -629,7 +633,7 @@ export interface paths {
         };
         /**
          * Open the worker tunnel
-         * @description Upgrade to a WebSocket that carries HTTP/2 from Arker to the worker's API. Requires the same join key as the heartbeat, after the worker has joined.
+         * @description Upgrade to a WebSocket with subprotocol `arker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API. Requires the same join key as the heartbeat, after the worker has joined.
          */
         get: operations["openWorkerTunnel"];
         put?: never;
@@ -669,6 +673,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
+                /** @description API key identifier. */
                 api_key_id: string;
             };
             cookie?: never;
@@ -1754,7 +1759,7 @@ export interface components {
          * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
          * @enum {string}
          */
-        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "quotePool" | "getPool" | "updatePool" | "getPoolUsage";
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "getPoolUsage" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "listApiKeys" | "createApiKey" | "revokeApiKey";
         /** @enum {string} */
         HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
         /**
@@ -2766,10 +2771,10 @@ export interface components {
             joinable?: boolean;
             /** @description Classes of state kept in storage owned by the pool. Defaults to none. */
             dedicated_storage?: components["schemas"]["PoolDedicatedStorage"][];
-            /** @description Make this a fork-reserve pool for this VM. Requires `num_forks`. */
+            /** @description Make this a fork-reserve pool for this VM. Requires `max_forks`. */
             source_vm_id?: string;
-            /** @description How many forks of `source_vm_id` to keep room for. */
-            num_forks?: number;
+            /** @description The most forks of `source_vm_id` to keep room for. */
+            max_forks?: number;
         };
         UpdatePoolRequest: {
             /** @description New pool name, or null to remove it. */
@@ -2779,8 +2784,8 @@ export interface components {
             commitments?: components["schemas"]["PoolCommitment"][];
             /** @description Whether workers holding a join key may join. */
             joinable?: boolean;
-            /** @description For a fork-reserve pool, how many forks to keep room for. */
-            num_forks?: number;
+            /** @description The most forks of `source_vm_id` to keep room for. */
+            max_forks?: number;
         };
         Pool: {
             /**
@@ -2807,8 +2812,8 @@ export interface components {
             dedicated_storage: components["schemas"]["PoolDedicatedStorage"][];
             /** @description For a fork-reserve pool, the VM whose forks it keeps room for. */
             source_vm_id: string | null;
-            /** @description For a fork-reserve pool, how many forks to keep room for. A hint: Arker keeps the VM's snapshot on enough hosts for this many forks while capacity allows. */
-            num_forks: number | null;
+            /** @description For a fork-reserve pool, the most forks of `source_vm_id` to keep room for. A hint: Arker keeps the VM's snapshot on enough hosts for this many forks while capacity allows. */
+            max_forks: number | null;
             /**
              * Format: date-time
              * @description When the pool was created.
@@ -2945,7 +2950,7 @@ export interface components {
             memory_mib: number;
             /** @description Disk in MiB contributed by the pool's live workers. */
             disk_mib: number;
-            /** @description For a fork-reserve pool, how many forks of `source_vm_id` fit on hosts that hold its snapshot right now. Null for other pools. */
+            /** @description For a fork-reserve pool, how many forks of `source_vm_id` fit on hosts that hold its snapshot right now (at most the room actually there, which can exceed `max_forks`). Null for other pools. */
             forks: number | null;
         };
         /**
@@ -2971,14 +2976,14 @@ export interface components {
              * @description Arker fleet hosts in the pool's provider and region. (enum property replaced by openapi-typescript)
              * @enum {string}
              */
-            type: "PoolComputeManaged";
+            type: "managed";
         };
         PoolComputeAws: {
             /**
              * @description Arker provisions hosts in your AWS account. (enum property replaced by openapi-typescript)
              * @enum {string}
              */
-            type: "PoolComputeAws";
+            type: "aws";
             /** @description Your AWS account id. */
             account_id: string;
             /** @description Role Arker assumes to launch and terminate hosts. It must trust Arker's account with `external_id`. */
@@ -3002,9 +3007,13 @@ export interface components {
          */
         PoolDedicatedStorage: "object_storage" | "database" | "logs";
         WorkerResources: {
+            /** @description vCPUs. */
             vcpu: number;
+            /** @description Memory in MiB. */
             memory_mib: number;
+            /** @description Disk in MiB. */
             disk_mib: number;
+            /** @description Whole GPUs. */
             gpu_count?: number;
         };
         /**
@@ -3019,31 +3028,30 @@ export interface components {
         WorkerState: "active" | "draining" | "left";
         /** @description A VM the worker holds. */
         WorkerVm: {
+            /** @description VM identifier. */
             vm_id: string;
+            /** @description Resources the VM holds. */
             resources: components["schemas"]["WorkerResources"];
+            /** @description Image the VM was created from, if known. */
             image?: string | null;
         };
-        /** @description A worker joins its pool with its first heartbeat and stays in it while heartbeats arrive. */
+        /** @description A worker joins the pool in the path with its first heartbeat and stays in it while heartbeats arrive. */
         WorkerHeartbeat: {
-            /**
-             * Format: uuid
-             * @description Pool the worker joins. Must match the API key's join scope.
-             */
-            pool_id: string;
             kind: components["schemas"]["WorkerKind"];
             /** @description Worker software version. */
             version: string;
             /** @description Platforms the worker serves. A VM's snapshot only restores on a worker serving its platform. */
             platforms: string[];
-            /** @description Optional operations the worker supports, such as `sessions` or `pty`. */
+            /** @description What the worker offers beyond the operations every worker serves (`fork`, `getVm`, `deleteVm`, `createRun`, `getRun`, `listRuns`, `sync`): `records` (it writes its own VM records), `sessions`, `pty`, `policies`, `mounts`, `patch`, `cancel`. */
             capabilities?: string[];
             state: components["schemas"]["WorkerState"];
             resources: components["schemas"]["WorkerResources"];
             free: components["schemas"]["WorkerResources"];
-            /** @description VMs on the worker. Workers that keep their own records may omit this. */
+            /** @description VMs on the worker. A worker without `records` reports every VM it holds; one with `records` may omit this. */
             vms?: components["schemas"]["WorkerVm"][];
         };
         WorkerHeartbeatResponse: {
+            /** @description The worker identifier from the path. */
             worker_id: string;
             /** @description Send the next heartbeat after this long. */
             heartbeat_interval_ms: number;
@@ -3057,34 +3065,60 @@ export interface components {
             } | null;
         };
         Worker: {
+            /** @description Worker identifier. */
             worker_id: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Pool the worker joined.
+             */
             pool_id: string;
+            /** @description Software the worker runs. */
             kind: components["schemas"]["WorkerKind"];
+            /** @description Worker software version. */
             version: string;
+            /** @description Platforms the worker serves. */
             platforms: string[];
+            /** @description Whether the worker takes new VMs. */
             state: components["schemas"]["WorkerState"];
+            /** @description Capacity the worker contributes. */
             resources: components["schemas"]["WorkerResources"];
+            /** @description Capacity the worker has free. */
             free: components["schemas"]["WorkerResources"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the last heartbeat arrived.
+             */
             last_heartbeat_at: string;
         };
         ListWorkersResponse: {
+            /** @description Workers in the pool. */
             workers: components["schemas"]["Worker"][];
         };
         ApiKey: {
+            /** @description API key identifier. */
             api_key_id: string;
+            /** @description Key name, if set. */
             name: string | null;
-            /** @enum {string} */
+            /**
+             * @description Role the key acts with.
+             * @enum {string}
+             */
             role: "viewer" | "member" | "developer" | "admin";
             /** @description `*` for everything; `vmid:<id>` limits the key to those VMs; `op:sync`, `op:pty` and `op:run` limit it to those operations; `pool:<id>:join` makes it a worker join key for that pool. */
             scopes: string[];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the key was created.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the key stops working, or null for never.
+             */
             expires_at: string | null;
         };
         CreateApiKeyRequest: {
+            /** @description Optional name to recognize the key by. */
             name?: string | null;
             /**
              * @description Defaults to the caller's role. Cannot exceed it.
@@ -3100,11 +3134,13 @@ export interface components {
             expires_at?: string | null;
         };
         CreatedApiKey: {
+            /** @description The new key. */
             api_key: components["schemas"]["ApiKey"];
             /** @description The secret. Shown only once. */
             key: string;
         };
         ListApiKeysResponse: {
+            /** @description Unrevoked keys in the organization. */
             api_keys: components["schemas"]["ApiKey"][];
         };
     };
@@ -4889,6 +4925,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description Pool identifier. */
+                pool_id: string;
                 /** @description Worker identifier: a ULID the worker generates once and keeps. */
                 worker_id: string;
             };
@@ -4924,6 +4962,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description Pool identifier. */
+                pool_id: string;
                 /** @description Worker identifier: a ULID the worker generates once and keeps. */
                 worker_id: string;
             };
@@ -5007,6 +5047,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description API key identifier. */
                 api_key_id: string;
             };
             cookie?: never;

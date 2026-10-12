@@ -678,7 +678,7 @@ const POOL = {
   joinable: false,
   dedicated_storage: [],
   source_vm_id: null,
-  num_forks: null,
+  max_forks: null,
   created_at: "2026-09-25T00:00:00Z",
 };
 
@@ -724,10 +724,10 @@ async function testCreatePoolPostsToTheRegionalBaseUrl(): Promise<void> {
     dedicated_storage: ["object_storage" as const],
   };
   await client.createPool(request);
-  await client.createPool({ source_vm_id: "vm_1", num_forks: 50 });
+  await client.createPool({ source_vm_id: "vm_1", max_forks: 50 });
 
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), request);
-  assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), { source_vm_id: "vm_1", num_forks: 50 });
+  assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), { source_vm_id: "vm_1", max_forks: 50 });
 }
 
 async function testCreatePoolWithoutARegionFailsBeforeAnyRequest(): Promise<void> {

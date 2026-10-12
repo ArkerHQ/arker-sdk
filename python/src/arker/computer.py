@@ -662,12 +662,12 @@ class Arker:
         joinable: bool | None = None,
         dedicated_storage: list[PoolDedicatedStorage] | None = None,
         source_vm_id: str | None = None,
-        num_forks: int | None = None,
+        max_forks: int | None = None,
     ) -> Pool:
         """Create a pool in the client's region. Requires an admin key.
 
         ``compute`` is managed (the default) or an AWS account Arker launches
-        hosts in. Pass ``source_vm_id`` with ``num_forks`` for a fork-reserve
+        hosts in. Pass ``source_vm_id`` with ``max_forks`` for a fork-reserve
         pool. Without ``provider`` and ``region`` (or ``base_url``) on the
         client there is no region to create it in.
         """
@@ -679,7 +679,7 @@ class Arker:
             joinable=joinable,
             dedicated_storage=dedicated_storage,
             source_vm_id=source_vm_id,
-            num_forks=num_forks,
+            max_forks=max_forks,
         )
         payload = self._request("POST", "/v1/pools", body, base_url=self.base_url)
         return _decode_model(Pool, payload)
@@ -692,7 +692,7 @@ class Arker:
         resources: PoolResources | dict[str, int] | None = None,
         commitments: list[PoolCommitment | dict[str, str]] | None = None,
         joinable: bool | None = None,
-        num_forks: int | None = None,
+        max_forks: int | None = None,
     ) -> Pool:
         """Change a pool. Requires an admin key.
 
@@ -704,7 +704,7 @@ class Arker:
             resources=resources,  # type: ignore[arg-type]
             commitments=commitments,  # type: ignore[arg-type]
             joinable=joinable,
-            num_forks=num_forks,
+            max_forks=max_forks,
         )
         payload = self._request("PATCH", f"/v1/pools/{_segment(pool_id)}", body, base_url=self.base_url)
         return _decode_model(Pool, payload)

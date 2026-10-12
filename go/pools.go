@@ -70,7 +70,7 @@ type Pool struct {
 	Joinable         bool             `json:"joinable"`
 	DedicatedStorage []string         `json:"dedicated_storage"`
 	SourceVMID       *string          `json:"source_vm_id"`
-	NumForks         *int64           `json:"num_forks"`
+	MaxForks         *int64           `json:"max_forks"`
 	CreatedAt        string           `json:"created_at"`
 }
 
@@ -115,7 +115,7 @@ type ListPoolsOptions struct {
 }
 
 // CreatePoolRequest describes a pool. Everything is optional: a pool with no
-// compute is managed. Set SourceVMID and NumForks together for a fork-reserve
+// compute is managed. Set SourceVMID and MaxForks together for a fork-reserve
 // pool.
 type CreatePoolRequest struct {
 	Name        string           `json:"name,omitempty"`
@@ -128,7 +128,7 @@ type CreatePoolRequest struct {
 	// only "object_storage" is supported today.
 	DedicatedStorage []string `json:"dedicated_storage,omitempty"`
 	SourceVMID       string   `json:"source_vm_id,omitempty"`
-	NumForks         int64    `json:"num_forks,omitempty"`
+	MaxForks         int64    `json:"max_forks,omitempty"`
 }
 
 // UpdatePoolRequest changes a pool. Only set fields are sent.
@@ -141,7 +141,7 @@ type UpdatePoolRequest struct {
 	// unchanged. Nil leaves them alone; an empty non-nil slice sends none.
 	Commitments []PoolCommitment
 	Joinable    *bool
-	NumForks    *int64
+	MaxForks    *int64
 }
 
 // MarshalJSON sends only the fields that were set, which a plain struct tag
@@ -164,8 +164,8 @@ func (r UpdatePoolRequest) MarshalJSON() ([]byte, error) {
 	if r.Joinable != nil {
 		m["joinable"] = *r.Joinable
 	}
-	if r.NumForks != nil {
-		m["num_forks"] = *r.NumForks
+	if r.MaxForks != nil {
+		m["max_forks"] = *r.MaxForks
 	}
 	return json.Marshal(m)
 }

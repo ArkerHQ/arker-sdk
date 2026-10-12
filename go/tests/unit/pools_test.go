@@ -20,7 +20,7 @@ const poolBody = `{"pool_id":"` + poolID + `","name":"ci","provider":"aws","regi
 	`"capacity":{"vcpu":0,"memory_mib":0,"disk_mib":0,"forks":null},` +
 	`"commitments":[{"starts_at":"2026-10-01T00:00:00Z","ends_at":"2026-10-31T00:00:00Z"}],` +
 	`"compute":{"type":"managed"},"joinable":false,"dedicated_storage":[],` +
-	`"source_vm_id":null,"num_forks":null,"created_at":"2026-09-25T00:00:00Z"}`
+	`"source_vm_id":null,"max_forks":null,"created_at":"2026-09-25T00:00:00Z"}`
 
 const workerBody = `{"workers":[{"worker_id":"01J","pool_id":"` + poolID + `","kind":"blast","version":"1",` +
 	`"platforms":["blast-docker-x86_64"],"state":"active",` +
@@ -119,7 +119,7 @@ func TestCreatePoolPostsToTheRegionalBaseURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	_, err = c.CreatePool(ctx, arker.CreatePoolRequest{SourceVMID: "vm_1", NumForks: 50})
+	_, err = c.CreatePool(ctx, arker.CreatePoolRequest{SourceVMID: "vm_1", MaxForks: 50})
 	if err != nil {
 		t.Fatalf("create reserve: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestCreatePoolPostsToTheRegionalBaseURL(t *testing.T) {
 	if !reflect.DeepEqual((*requests)[0].body, want) {
 		t.Fatalf("body %v", (*requests)[0].body)
 	}
-	if !reflect.DeepEqual((*requests)[1].body, map[string]any{"source_vm_id": "vm_1", "num_forks": 50.0}) {
+	if !reflect.DeepEqual((*requests)[1].body, map[string]any{"source_vm_id": "vm_1", "max_forks": 50.0}) {
 		t.Fatalf("reserve body %v", (*requests)[1].body)
 	}
 }

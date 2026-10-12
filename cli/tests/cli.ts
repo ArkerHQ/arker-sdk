@@ -667,7 +667,7 @@ const CLI_POOL = {
   joinable: false,
   dedicated_storage: [],
   source_vm_id: null,
-  num_forks: null,
+  max_forks: null,
   created_at: "2026-09-25T00:00:00Z",
 };
 const CLI_API_KEY = {
@@ -741,9 +741,9 @@ async function testPoolsCreateAwsGoesToTheRegionalServer(): Promise<void> {
 
 async function testPoolsCreateForkReserve(): Promise<void> {
   await withRegionalAndControl(async (run, regional) => {
-    const result = await run(["pools", "create", "--source-vm-id", "vm_1", "--num-forks", "50"]);
+    const result = await run(["pools", "create", "--source-vm-id", "vm_1", "--max-forks", "50"]);
     assert.equal(result.code, 0, result.stderr);
-    assert.deepEqual(regional[0]!.body, { source_vm_id: "vm_1", num_forks: 50 });
+    assert.deepEqual(regional[0]!.body, { source_vm_id: "vm_1", max_forks: 50 });
   });
 }
 

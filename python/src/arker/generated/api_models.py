@@ -498,10 +498,16 @@ OpenApiOperationId: TypeAlias = Literal[
     'deleteFilesystem',
     'listPools',
     'createPool',
-    'quotePool',
     'getPool',
     'updatePool',
+    'deletePool',
     'getPoolUsage',
+    'listPoolWorkers',
+    'heartbeatWorker',
+    'openWorkerTunnel',
+    'listApiKeys',
+    'createApiKey',
+    'revokeApiKey',
 ]
 
 
@@ -1457,7 +1463,6 @@ Platform: TypeAlias = str
 
 @dataclass(frozen=True)
 class WorkerHeartbeat:
-    pool_id: str
     kind: WorkerKind
     version: str
     platforms: list[Platform]
@@ -1747,11 +1752,13 @@ class ListPoolWorkersParameters:
 
 @dataclass(frozen=True)
 class HeartbeatWorkerParameters:
+    pool_id: str
     worker_id: str
 
 
 @dataclass(frozen=True)
 class OpenWorkerTunnelParameters:
+    pool_id: str
     worker_id: str
 
 
@@ -1888,7 +1895,7 @@ class CreatePoolRequest:
     joinable: bool | None = None
     dedicated_storage: list[PoolDedicatedStorage] | None = None
     source_vm_id: str | None = None
-    num_forks: int | None = None
+    max_forks: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1897,7 +1904,7 @@ class UpdatePoolRequest:
     resources: PoolResources | None = None
     commitments: list[PoolCommitment] | None = None
     joinable: bool | None = None
-    num_forks: int | None = None
+    max_forks: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1915,7 +1922,7 @@ class Pool:
     joinable: bool
     dedicated_storage: list[PoolDedicatedStorage]
     source_vm_id: str | None
-    num_forks: int | None
+    max_forks: int | None
     created_at: str
 
 
