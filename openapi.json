@@ -10653,13 +10653,13 @@
           },
           "source_vm_id": {
             "type": "string",
-            "description": "Make this a fork-reserve pool for this VM. Requires `num_forks`."
+            "description": "Make this a fork-reserve pool for this VM. Requires `max_forks`."
           },
-          "num_forks": {
+          "max_forks": {
             "type": "integer",
             "minimum": 1,
             "maximum": 100000,
-            "description": "How many forks of `source_vm_id` to keep room for."
+            "description": "The most forks of `source_vm_id` to keep room for."
           }
         }
       },
@@ -10690,11 +10690,11 @@
             "type": "boolean",
             "description": "Whether workers holding a join key may join."
           },
-          "num_forks": {
+          "max_forks": {
             "type": "integer",
             "minimum": 1,
             "maximum": 100000,
-            "description": "For a fork-reserve pool, how many forks to keep room for."
+            "description": "The most forks of `source_vm_id` to keep room for."
           }
         }
       },
@@ -10715,7 +10715,7 @@
           "joinable",
           "dedicated_storage",
           "source_vm_id",
-          "num_forks",
+          "max_forks",
           "created_at"
         ],
         "properties": {
@@ -10782,13 +10782,13 @@
             ],
             "description": "For a fork-reserve pool, the VM whose forks it keeps room for."
           },
-          "num_forks": {
+          "max_forks": {
             "type": [
               "integer",
               "null"
             ],
             "minimum": 1,
-            "description": "For a fork-reserve pool, how many forks to keep room for. A hint: Arker keeps the VM's snapshot on enough hosts for this many forks while capacity allows."
+            "description": "For a fork-reserve pool, the most forks of `source_vm_id` to keep room for. A hint: Arker keeps the VM's snapshot on enough hosts for this many forks while capacity allows."
           },
           "created_at": {
             "type": "string",
@@ -11187,7 +11187,7 @@
               "null"
             ],
             "minimum": 0,
-            "description": "For a fork-reserve pool, how many forks of `source_vm_id` fit on hosts that hold its snapshot right now. Null for other pools."
+            "description": "For a fork-reserve pool, how many forks of `source_vm_id` fit on hosts that hold its snapshot right now (at most the room actually there, which can exceed `max_forks`). Null for other pools."
           }
         }
       },

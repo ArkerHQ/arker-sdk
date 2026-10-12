@@ -1894,7 +1894,7 @@ class CreatePoolRequest:
     joinable: bool | None = None
     dedicated_storage: list[PoolDedicatedStorage] | None = None
     source_vm_id: str | None = None
-    num_forks: int | None = None
+    max_forks: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1903,7 +1903,7 @@ class UpdatePoolRequest:
     resources: PoolResources | None = None
     commitments: list[PoolCommitment] | None = None
     joinable: bool | None = None
-    num_forks: int | None = None
+    max_forks: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1921,7 +1921,7 @@ class Pool:
     joinable: bool
     dedicated_storage: list[PoolDedicatedStorage]
     source_vm_id: str | None
-    num_forks: int | None
+    max_forks: int | None
     created_at: str
 
 

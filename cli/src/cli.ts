@@ -203,7 +203,7 @@ const POOL_SHAPE_OPTIONS: OptionSpecs = {
   ...RESOURCE_OPTIONS,
   commitment: { type: "string" },
   name: { type: "string" },
-  "num-forks": { type: "integer", min: 1, max: 100_000 },
+  "max-forks": { type: "integer", min: 1, max: 100_000 },
 };
 
 const POOL_OPTIONS: Record<string, OptionSpecs> = {
@@ -1698,7 +1698,7 @@ function poolCreateFromArgs(args: ParsedArgs): CreatePoolOptions {
     joinable: args.flags.joinable === true ? true : undefined,
     dedicated_storage: listFlag(args, "dedicated-storage") as PoolDedicatedStorage[] | undefined,
     source_vm_id: args.flags["source-vm-id"] as string | undefined,
-    num_forks: numFlag(args, "num-forks"),
+    max_forks: numFlag(args, "max-forks"),
   };
 }
 
@@ -1710,7 +1710,7 @@ function poolUpdateFromArgs(args: ParsedArgs): UpdatePoolOptions {
     resources: poolResourcesFromArgs(args),
     commitments: poolCommitmentsFromArgs(args),
     joinable: args.flags.joinable === true ? true : args.flags["no-joinable"] === true ? false : undefined,
-    num_forks: numFlag(args, "num-forks"),
+    max_forks: numFlag(args, "max-forks"),
   };
   if (Object.values(update).every((value) => value === undefined)) die("update: pass at least one field to change");
   return update;
@@ -1989,7 +1989,7 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   joinable: { desc: "let workers holding a join key add capacity" },
   "join-pool": { placeholder: "<pool_id>", desc: "make the key a worker join key for this pool" },
   "no-joinable": { desc: "stop workers from joining the pool" },
-  "num-forks": { placeholder: "<n>", desc: "forks of the source VM to keep room for" },
+  "max-forks": { placeholder: "<n>", desc: "forks of the source VM to keep room for" },
   role: { desc: "role of the new key; cannot exceed yours", placeholder: "<role>" },
   scope: { placeholder: "<scope>", desc: "limit the key: *, vmid:<id>, op:<sync|pty|run>, pool:<id>:join; repeatable" },
   "security-group-ids": { placeholder: "<id[,...]>", desc: "security groups for the hosts" },
@@ -2115,14 +2115,14 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       usage: "show resources allocated to the pool's VMs",
       workers: "list the workers that joined the pool",
       create: "create a pool in --provider/--region",
-      update: "change a pool's name, resources, commitments, joinable or num-forks",
+      update: "change a pool's name, resources, commitments, joinable or max-forks",
       rm: "delete a pool and every VM in it",
     },
     notes: [
       "create, update, rm and workers go to --provider and --region (or ARKER_PROVIDER and ARKER_REGION).",
       "Creating, changing and deleting need an admin API key. A pool cannot shrink or be deleted",
       "while a commitment is active. For compute you own: --compute aws --aws-account-id <id>",
-      "--aws-role-arn <arn> --subnet-ids <id,...>. For a fork reserve: --source-vm-id <id> --num-forks <n>.",
+      "--aws-role-arn <arn> --subnet-ids <id,...>. For a fork reserve: --source-vm-id <id> --max-forks <n>.",
     ],
   },
   "api-keys": {

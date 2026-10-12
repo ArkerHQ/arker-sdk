@@ -2767,10 +2767,10 @@ export interface components {
             joinable?: boolean;
             /** @description Classes of state kept in storage owned by the pool. Defaults to none. */
             dedicated_storage?: components["schemas"]["PoolDedicatedStorage"][];
-            /** @description Make this a fork-reserve pool for this VM. Requires `num_forks`. */
+            /** @description Make this a fork-reserve pool for this VM. Requires `max_forks`. */
             source_vm_id?: string;
-            /** @description How many forks of `source_vm_id` to keep room for. */
-            num_forks?: number;
+            /** @description The most forks of `source_vm_id` to keep room for. */
+            max_forks?: number;
         };
         UpdatePoolRequest: {
             /** @description New pool name, or null to remove it. */
@@ -2780,8 +2780,8 @@ export interface components {
             commitments?: components["schemas"]["PoolCommitment"][];
             /** @description Whether workers holding a join key may join. */
             joinable?: boolean;
-            /** @description For a fork-reserve pool, how many forks to keep room for. */
-            num_forks?: number;
+            /** @description The most forks of `source_vm_id` to keep room for. */
+            max_forks?: number;
         };
         Pool: {
             /**
@@ -2808,8 +2808,8 @@ export interface components {
             dedicated_storage: components["schemas"]["PoolDedicatedStorage"][];
             /** @description For a fork-reserve pool, the VM whose forks it keeps room for. */
             source_vm_id: string | null;
-            /** @description For a fork-reserve pool, how many forks to keep room for. A hint: Arker keeps the VM's snapshot on enough hosts for this many forks while capacity allows. */
-            num_forks: number | null;
+            /** @description For a fork-reserve pool, the most forks of `source_vm_id` to keep room for. A hint: Arker keeps the VM's snapshot on enough hosts for this many forks while capacity allows. */
+            max_forks: number | null;
             /**
              * Format: date-time
              * @description When the pool was created.
@@ -2946,7 +2946,7 @@ export interface components {
             memory_mib: number;
             /** @description Disk in MiB contributed by the pool's live workers. */
             disk_mib: number;
-            /** @description For a fork-reserve pool, how many forks of `source_vm_id` fit on hosts that hold its snapshot right now. Null for other pools. */
+            /** @description For a fork-reserve pool, how many forks of `source_vm_id` fit on hosts that hold its snapshot right now (at most the room actually there, which can exceed `max_forks`). Null for other pools. */
             forks: number | null;
         };
         /**

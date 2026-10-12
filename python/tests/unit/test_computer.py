@@ -272,7 +272,7 @@ POOL = {
     "joinable": False,
     "dedicated_storage": [],
     "source_vm_id": None,
-    "num_forks": None,
+    "max_forks": None,
     "created_at": "2026-09-25T00:00:00Z",
 }
 CONTROL = "https://control.invalid/api"
@@ -338,9 +338,9 @@ def test_create_fork_reserve_pool_sends_only_source_and_count() -> None:
     t.add_json(route("POST", f"{REGIONAL}/v1/pools"), 201, POOL)
 
     with use_transport(t):
-        pool_client().create_pool(source_vm_id="vm_1", num_forks=50)
+        pool_client().create_pool(source_vm_id="vm_1", max_forks=50)
 
-    assert json.loads(t.calls[0]["body"]) == {"source_vm_id": "vm_1", "num_forks": 50}
+    assert json.loads(t.calls[0]["body"]) == {"source_vm_id": "vm_1", "max_forks": 50}
 
 
 def test_create_pool_without_a_region_fails_before_any_request() -> None:

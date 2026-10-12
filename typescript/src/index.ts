@@ -918,7 +918,7 @@ export class Arker {
    * Create a pool in the client's region. Requires an admin key.
    *
    *     createPool({ name: "ci", resources: { vcpu: 8, memory_mib: 32768 }, joinable: true })
-   *     createPool({ source_vm_id: "vm_abc", num_forks: 50 })
+   *     createPool({ source_vm_id: "vm_abc", max_forks: 50 })
    */
   async createPool(options: CreatePoolOptions): Promise<Pool> {
     return this._request("POST", "/v1/pools", options, this.baseUrl);
