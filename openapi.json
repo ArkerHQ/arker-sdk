@@ -51,7 +51,15 @@
     },
     {
       "name": "Pools",
-      "description": "Buy and manage prepaid regional resource pools."
+      "description": "Create and manage regional pools of capacity."
+    },
+    {
+      "name": "Workers",
+      "description": "Join workers to pools and keep them connected."
+    },
+    {
+      "name": "API keys",
+      "description": "Create, list and revoke API keys."
     }
   ],
   "paths": {
@@ -2578,7 +2586,7 @@
           "Workers"
         ],
         "summary": "Open the worker tunnel",
-        "description": "Upgrade to a WebSocket that carries HTTP/2 from Arker to the worker's API. Requires the same join key as the heartbeat, after the worker has joined.",
+        "description": "Upgrade to a WebSocket with subprotocol `arker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API. Requires the same join key as the heartbeat, after the worker has joined.",
         "responses": {
           "101": {
             "description": "Switching to the tunnel."
@@ -2700,7 +2708,8 @@
           "required": true,
           "schema": {
             "type": "string"
-          }
+          },
+          "description": "API key identifier."
         }
       ],
       "delete": {
@@ -7560,10 +7569,16 @@
           "deleteFilesystem",
           "listPools",
           "createPool",
-          "quotePool",
           "getPool",
           "updatePool",
-          "getPoolUsage"
+          "deletePool",
+          "getPoolUsage",
+          "listPoolWorkers",
+          "heartbeatWorker",
+          "openWorkerTunnel",
+          "listApiKeys",
+          "createApiKey",
+          "revokeApiKey"
         ],
         "description": "Exact operationId values declared by this API. Refresh this enum when operations are added or removed."
       },
@@ -11293,7 +11308,11 @@
           }
         ],
         "discriminator": {
-          "propertyName": "type"
+          "propertyName": "type",
+          "mapping": {
+            "managed": "#/components/schemas/PoolComputeManaged",
+            "aws": "#/components/schemas/PoolComputeAws"
+          }
         }
       },
       "PoolDedicatedStorage": {
@@ -11316,19 +11335,23 @@
         "properties": {
           "vcpu": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "vCPUs."
           },
           "memory_mib": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "Memory in MiB."
           },
           "disk_mib": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "Disk in MiB."
           },
           "gpu_count": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "Whole GPUs."
           }
         }
       },
@@ -11359,16 +11382,19 @@
         "description": "A VM the worker holds.",
         "properties": {
           "vm_id": {
-            "type": "string"
+            "type": "string",
+            "description": "VM identifier."
           },
           "resources": {
-            "$ref": "#/components/schemas/WorkerResources"
+            "$ref": "#/components/schemas/WorkerResources",
+            "description": "Resources the VM holds."
           },
           "image": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Image the VM was created from, if known."
           }
         }
       },
@@ -11445,7 +11471,8 @@
         ],
         "properties": {
           "worker_id": {
-            "type": "string"
+            "type": "string",
+            "description": "The worker identifier from the path."
           },
           "heartbeat_interval_ms": {
             "type": "integer",
@@ -11497,36 +11524,45 @@
         ],
         "properties": {
           "worker_id": {
-            "type": "string"
+            "type": "string",
+            "description": "Worker identifier."
           },
           "pool_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Pool the worker joined."
           },
           "kind": {
-            "$ref": "#/components/schemas/WorkerKind"
+            "$ref": "#/components/schemas/WorkerKind",
+            "description": "Software the worker runs."
           },
           "version": {
-            "type": "string"
+            "type": "string",
+            "description": "Worker software version."
           },
           "platforms": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Platforms the worker serves."
           },
           "state": {
-            "$ref": "#/components/schemas/WorkerState"
+            "$ref": "#/components/schemas/WorkerState",
+            "description": "Whether the worker takes new VMs."
           },
           "resources": {
-            "$ref": "#/components/schemas/WorkerResources"
+            "$ref": "#/components/schemas/WorkerResources",
+            "description": "Capacity the worker contributes."
           },
           "free": {
-            "$ref": "#/components/schemas/WorkerResources"
+            "$ref": "#/components/schemas/WorkerResources",
+            "description": "Capacity the worker has free."
           },
           "last_heartbeat_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "When the last heartbeat arrived."
           }
         }
       },
@@ -11541,7 +11577,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Worker"
-            }
+            },
+            "description": "Workers in the pool."
           }
         }
       },
@@ -11558,13 +11595,15 @@
         ],
         "properties": {
           "api_key_id": {
-            "type": "string"
+            "type": "string",
+            "description": "API key identifier."
           },
           "name": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Key name, if set."
           },
           "role": {
             "type": "string",
@@ -11573,7 +11612,8 @@
               "member",
               "developer",
               "admin"
-            ]
+            ],
+            "description": "Role the key acts with."
           },
           "scopes": {
             "type": "array",
@@ -11584,14 +11624,16 @@
           },
           "created_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "When the key was created."
           },
           "expires_at": {
             "type": [
               "string",
               "null"
             ],
-            "format": "date-time"
+            "format": "date-time",
+            "description": "When the key stops working, or null for never."
           }
         }
       },
@@ -11604,7 +11646,8 @@
               "string",
               "null"
             ],
-            "maxLength": 128
+            "maxLength": 128,
+            "description": "Optional name to recognize the key by."
           },
           "role": {
             "type": "string",
@@ -11644,7 +11687,8 @@
         ],
         "properties": {
           "api_key": {
-            "$ref": "#/components/schemas/ApiKey"
+            "$ref": "#/components/schemas/ApiKey",
+            "description": "The new key."
           },
           "key": {
             "type": "string",
@@ -11663,7 +11707,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ApiKey"
-            }
+            },
+            "description": "Unrevoked keys in the organization."
           }
         }
       }

@@ -498,10 +498,16 @@ OpenApiOperationId: TypeAlias = Literal[
     'deleteFilesystem',
     'listPools',
     'createPool',
-    'quotePool',
     'getPool',
     'updatePool',
+    'deletePool',
     'getPoolUsage',
+    'listPoolWorkers',
+    'heartbeatWorker',
+    'openWorkerTunnel',
+    'listApiKeys',
+    'createApiKey',
+    'revokeApiKey',
 ]
 
 

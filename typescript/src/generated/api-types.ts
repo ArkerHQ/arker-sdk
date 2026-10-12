@@ -629,7 +629,7 @@ export interface paths {
         };
         /**
          * Open the worker tunnel
-         * @description Upgrade to a WebSocket that carries HTTP/2 from Arker to the worker's API. Requires the same join key as the heartbeat, after the worker has joined.
+         * @description Upgrade to a WebSocket with subprotocol `arker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API. Requires the same join key as the heartbeat, after the worker has joined.
          */
         get: operations["openWorkerTunnel"];
         put?: never;
@@ -669,6 +669,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
+                /** @description API key identifier. */
                 api_key_id: string;
             };
             cookie?: never;
@@ -1754,7 +1755,7 @@ export interface components {
          * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
          * @enum {string}
          */
-        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "quotePool" | "getPool" | "updatePool" | "getPoolUsage";
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "getPoolUsage" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "listApiKeys" | "createApiKey" | "revokeApiKey";
         /** @enum {string} */
         HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
         /**
@@ -2971,14 +2972,14 @@ export interface components {
              * @description Arker fleet hosts in the pool's provider and region. (enum property replaced by openapi-typescript)
              * @enum {string}
              */
-            type: "PoolComputeManaged";
+            type: "managed";
         };
         PoolComputeAws: {
             /**
              * @description Arker provisions hosts in your AWS account. (enum property replaced by openapi-typescript)
              * @enum {string}
              */
-            type: "PoolComputeAws";
+            type: "aws";
             /** @description Your AWS account id. */
             account_id: string;
             /** @description Role Arker assumes to launch and terminate hosts. It must trust Arker's account with `external_id`. */
@@ -3002,9 +3003,13 @@ export interface components {
          */
         PoolDedicatedStorage: "object_storage" | "database" | "logs";
         WorkerResources: {
+            /** @description vCPUs. */
             vcpu: number;
+            /** @description Memory in MiB. */
             memory_mib: number;
+            /** @description Disk in MiB. */
             disk_mib: number;
+            /** @description Whole GPUs. */
             gpu_count?: number;
         };
         /**
@@ -3019,8 +3024,11 @@ export interface components {
         WorkerState: "active" | "draining" | "left";
         /** @description A VM the worker holds. */
         WorkerVm: {
+            /** @description VM identifier. */
             vm_id: string;
+            /** @description Resources the VM holds. */
             resources: components["schemas"]["WorkerResources"];
+            /** @description Image the VM was created from, if known. */
             image?: string | null;
         };
         /** @description A worker joins its pool with its first heartbeat and stays in it while heartbeats arrive. */
@@ -3044,6 +3052,7 @@ export interface components {
             vms?: components["schemas"]["WorkerVm"][];
         };
         WorkerHeartbeatResponse: {
+            /** @description The worker identifier from the path. */
             worker_id: string;
             /** @description Send the next heartbeat after this long. */
             heartbeat_interval_ms: number;
@@ -3057,34 +3066,60 @@ export interface components {
             } | null;
         };
         Worker: {
+            /** @description Worker identifier. */
             worker_id: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Pool the worker joined.
+             */
             pool_id: string;
+            /** @description Software the worker runs. */
             kind: components["schemas"]["WorkerKind"];
+            /** @description Worker software version. */
             version: string;
+            /** @description Platforms the worker serves. */
             platforms: string[];
+            /** @description Whether the worker takes new VMs. */
             state: components["schemas"]["WorkerState"];
+            /** @description Capacity the worker contributes. */
             resources: components["schemas"]["WorkerResources"];
+            /** @description Capacity the worker has free. */
             free: components["schemas"]["WorkerResources"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the last heartbeat arrived.
+             */
             last_heartbeat_at: string;
         };
         ListWorkersResponse: {
+            /** @description Workers in the pool. */
             workers: components["schemas"]["Worker"][];
         };
         ApiKey: {
+            /** @description API key identifier. */
             api_key_id: string;
+            /** @description Key name, if set. */
             name: string | null;
-            /** @enum {string} */
+            /**
+             * @description Role the key acts with.
+             * @enum {string}
+             */
             role: "viewer" | "member" | "developer" | "admin";
             /** @description `*` for everything; `vmid:<id>` limits the key to those VMs; `op:sync`, `op:pty` and `op:run` limit it to those operations; `pool:<id>:join` makes it a worker join key for that pool. */
             scopes: string[];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the key was created.
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the key stops working, or null for never.
+             */
             expires_at: string | null;
         };
         CreateApiKeyRequest: {
+            /** @description Optional name to recognize the key by. */
             name?: string | null;
             /**
              * @description Defaults to the caller's role. Cannot exceed it.
@@ -3100,11 +3135,13 @@ export interface components {
             expires_at?: string | null;
         };
         CreatedApiKey: {
+            /** @description The new key. */
             api_key: components["schemas"]["ApiKey"];
             /** @description The secret. Shown only once. */
             key: string;
         };
         ListApiKeysResponse: {
+            /** @description Unrevoked keys in the organization. */
             api_keys: components["schemas"]["ApiKey"][];
         };
     };
@@ -5007,6 +5044,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description API key identifier. */
                 api_key_id: string;
             };
             cookie?: never;
