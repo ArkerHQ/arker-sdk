@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Literal, TypeAlias
 
+from typing_extensions import deprecated
+
 
 @dataclass(frozen=True)
 class HealthResponse:
@@ -84,13 +86,15 @@ class PolicyMatch:
     methods: list[str] | None = None
     paths: list[str] | None = None
     headers: dict[str, list[str]] | None = None
+    query_params: dict[str, list[str]] | None = None
     body_contains: list[str] | None = None
 
 
 @dataclass(frozen=True)
-class ScalingAction:
-    suspend: bool | None = False
-    wake: bool | None = None
+class ResourceFactors:
+    vcpu: float | None = None
+    memory_mib: float | None = None
+    disk_mib: float | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +103,7 @@ class Rewrite:
     path: str | None = None
     headers: dict[str, str] | None = None
     remove_headers: list[str] | None = None
+    remove_query_params: list[str] | None = None
     body: str | None = None
 
 
@@ -111,6 +116,16 @@ class Gate:
     headers: dict[str, str] | None = None
     body: Any | None = None
     deny_on_timeout: bool | None = True
+    timeout_ms: int | None = None
+
+
+@dataclass(frozen=True)
+class Webhook:
+    host: str
+    path: str | None = None
+    method: str | None = None
+    headers: dict[str, str] | None = None
+    body: Any | None = None
     timeout_ms: int | None = None
 
 
@@ -1428,6 +1443,7 @@ class ConflictOrIdempotencyConflictOrInvalidStateErrorResponse:
     error: Conflict | IdempotencyConflict | InvalidState
 
 
+@deprecated('Auth is deprecated.')
 @dataclass(frozen=True)
 class Auth:
     token: str
@@ -1449,6 +1465,7 @@ class When:
     after: int | None = None
 
 
+@deprecated('LifecycleRule is deprecated.')
 @dataclass(frozen=True)
 class LifecycleRule:
     type: Literal['lifecycle']
@@ -1692,13 +1709,10 @@ class ErrorResponse:
 
 
 @dataclass(frozen=True)
-class PolicyAction1:
-    rewrite: Rewrite | None = None
-    gate: Gate | None = None
-    scaling: ScalingAction | None = None
-
-
-PolicyAction: TypeAlias = Literal['allow', 'deny'] | PolicyAction1
+class ScaleAction:
+    suspend: bool | None = False
+    wake: bool | None = None
+    resource_factors: ResourceFactors | None = None
 
 
 @dataclass(frozen=True)
@@ -1778,24 +1792,15 @@ HealthUnavailableResponse: TypeAlias = (
 
 
 @dataclass(frozen=True)
-class PolicyRule:
-    type: Literal['outbound', 'inbound']
-    priority: int
-    action: PolicyAction
-    match: PolicyMatch | None = None
-    auth: Literal['open', 'arker'] | Auth | None = None
-    expires_at: str | None = None
+class PolicyAction1:
+    rewrite: Rewrite | None = None
+    gate: Gate | None = None
+    scale: ScaleAction | None = None
+    scaling: ScaleAction | None = None
+    webhook: Webhook | None = None
 
 
-PolicyRules: TypeAlias = dict[str, PolicyRule | LifecycleRule]
-
-
-@dataclass(frozen=True)
-class PolicyEntry:
-    type: Literal['outbound', 'inbound']
-    action: PolicyAction
-    match: PolicyMatch | None = None
-    auth: Literal['open', 'arker'] | None = None
+PolicyAction: TypeAlias = Literal['allow', 'deny', 'delete'] | PolicyAction1
 
 
 RunResponse: TypeAlias = CompletedRunResponse | BackgroundRunResponse
@@ -1846,18 +1851,57 @@ class SyncCommitWriteResult:
 
 
 @dataclass(frozen=True)
+class PolicyRule:
+    type: Literal['outbound', 'inbound']
+    priority: int
+    action: PolicyAction
+    match: PolicyMatch | None = None
+    auth: Literal['open', 'arker'] | Auth | None = None
+    expires_at: str | None = None
+
+
+@dataclass(frozen=True)
+class ScheduleRule:
+    type: Literal['schedule']
+    action: PolicyAction
+    at: str | None = None
+    after_wake: int | None = None
+
+
+@dataclass(frozen=True)
+class ResourcesRule:
+    type: Literal['resources']
+    action: PolicyAction
+    above: ResourceFactors | None = None
+    below: ResourceFactors | None = None
+
+
+@dataclass(frozen=True)
+class PolicyEntry:
+    type: Literal['outbound', 'inbound']
+    action: PolicyAction
+    match: PolicyMatch | None = None
+    auth: Literal['open', 'arker'] | None = None
+
+
+SyncWriteResult: TypeAlias = (
+    SyncChunkWriteResult | SyncPresignedWriteRequestResult | SyncCommitWriteResult
+)
+
+
+@dataclass(frozen=True)
 class PolicyUpdate:
-    rules: dict[str, PolicyRule | LifecycleRule | None] | None = None
+    rules: (
+        dict[str, PolicyRule | ScheduleRule | ResourcesRule | LifecycleRule | None]
+        | None
+    ) = None
     secrets: dict[str, str | None] | None = None
     policies: list[PolicyEntry] | None = None
 
 
-@dataclass(frozen=True)
-class VmPolicies:
-    rules: PolicyRules | None = None
-    secrets: dict[str, str] | None = None
-    mitm_domains: list[str] | None = None
-    warnings: list[str] | None = None
+PolicyRules: TypeAlias = dict[
+    str, PolicyRule | ScheduleRule | ResourcesRule | LifecycleRule
+]
 
 
 @dataclass(frozen=True)
@@ -1901,6 +1945,7 @@ class ForkRequest1:
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
     pool_name: str | None = None
+    command: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1926,6 +1971,7 @@ class ForkRequest2:
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
     pool_name: str | None = None
+    command: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1951,6 +1997,7 @@ class ForkRequest3:
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
     pool_name: str | None = None
+    command: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1976,6 +2023,7 @@ class ForkRequest4:
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
     pool_name: str | None = None
+    command: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2001,6 +2049,7 @@ class ForkRequest5:
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
     pool_name: str | None = None
+    command: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2026,6 +2075,7 @@ class ForkRequest6:
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
     pool_name: str | None = None
+    command: str | None = None
 
 
 ForkRequest: TypeAlias = (
@@ -2036,6 +2086,45 @@ ForkRequest: TypeAlias = (
     | ForkRequest5
     | ForkRequest6
 )
+
+
+@dataclass(frozen=True)
+class RunRequest:
+    session_id: str | None = None
+    session_idx: int | None = None
+    command: str | None = None
+    timeout: int | None = None
+    time_to_background: int | None = None
+    background: bool | None = None
+    queueing_timeout: int | None = None
+    end_symbol: str | None = 'auto'
+    signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
+    policies: PolicyUpdate | None = None
+
+
+@dataclass(frozen=True)
+class SyncWriteResponse:
+    ok: bool
+    op: Literal['write']
+    results: list[SyncWriteResult]
+
+
+@dataclass(frozen=True)
+class PatchVmRequest:
+    description: str | None = None
+    resources: ResourcesInput | None = None
+    ssh_public_keys: SshKeysUpdate | list[str] | None = None
+    policies: PolicyUpdate | None = None
+    pool_id: str | None = None
+    pool_name: str | None = None
+
+
+@dataclass(frozen=True)
+class VmPolicies:
+    rules: PolicyRules | None = None
+    secrets: dict[str, str] | None = None
+    mitm_domains: list[str] | None = None
+    warnings: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -2073,42 +2162,6 @@ class Vm:
 class ListVmsResponse:
     vms: list[Vm]
     next_cursor: str | None = None
-
-
-@dataclass(frozen=True)
-class RunRequest:
-    session_id: str | None = None
-    session_idx: int | None = None
-    command: str | None = None
-    timeout: int | None = None
-    time_to_background: int | None = None
-    background: bool | None = None
-    queueing_timeout: int | None = None
-    end_symbol: str | None = 'auto'
-    signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
-    policies: PolicyUpdate | None = None
-
-
-SyncWriteResult: TypeAlias = (
-    SyncChunkWriteResult | SyncPresignedWriteRequestResult | SyncCommitWriteResult
-)
-
-
-@dataclass(frozen=True)
-class PatchVmRequest:
-    description: str | None = None
-    resources: ResourcesInput | None = None
-    ssh_public_keys: SshKeysUpdate | list[str] | None = None
-    policies: PolicyUpdate | None = None
-    pool_id: str | None = None
-    pool_name: str | None = None
-
-
-@dataclass(frozen=True)
-class SyncWriteResponse:
-    ok: bool
-    op: Literal['write']
-    results: list[SyncWriteResult]
 
 
 SyncResponse: TypeAlias = SyncReadResponse | SyncWriteResponse | SyncManifestResponse

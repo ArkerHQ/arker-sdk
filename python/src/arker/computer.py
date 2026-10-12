@@ -946,10 +946,11 @@ class VM:
         Pass ``None`` or an empty description to clear it. Omit
         ``description`` to leave it unchanged.
 
-        ``policies`` is a complete replacement for the VM's network policy:
-        the same document :meth:`set_policies` accepts. An empty doc (``{}``
-        or ``{"policies": []}``) clears it to allow-all. Omit it to leave the
-        current policy unchanged.
+        ``policies`` changes the VM's policies: ``{"rules": {id: rule | None},
+        "secrets": {name: value | None}}`` writes the rules and secrets it
+        names and removes those set to ``None``; the rest are kept. An ordered
+        ``{"policies": [...]}`` list replaces them all instead.
+        Omit it to leave the policies unchanged.
 
         Returns the updated :class:`Vm`."""
         resources: ResourcesInput | None = None

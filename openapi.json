@@ -4187,7 +4187,7 @@
           "failed",
           "cancelled"
         ],
-        "description": "Lifecycle state for a run. `pending` means the run was accepted but has not started yet because an earlier run on the same session is still in flight; it is not terminal, and a client should keep polling. `running` means the command is in progress. `completed` means the command finished; `exit_code` reports its result. `failed` means the service could not start or finish the command, with a client-safe explanation in `fail_reason`. `cancelled` means the client cancelled the run."
+        "description": "Lifecycle state for a run. `pending` means the run was accepted but is not running: it has not started yet because an earlier run on the same session is still in flight, or its VM is suspended and it continues when the VM wakes. It is not terminal, and a client should keep polling. `running` means the command is in progress. `completed` means the command finished; `exit_code` reports its result. `failed` means the service could not start or finish the command, with a client-safe explanation in `fail_reason`. `cancelled` means the client cancelled the run."
       },
       "Provider": {
         "type": "string",
@@ -4312,14 +4312,14 @@
               "open",
               "arker"
             ],
-            "description": "Authentication for an inbound rule that exposes a port \u2014 `allow`, or a scaling-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges."
+            "description": "Authentication for an inbound rule that exposes a port \u2014 `allow`, or a `scale`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges."
           }
         }
       },
       "PolicyMatch": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Match criteria: present fields are combined with AND; list items are combined with OR. `ips` and `hosts` are mutually exclusive, and inbound rules cannot use `hosts`. Port, IP, and host rules operate at the connection layer. Method, path, header, and body rules operate at the request layer.",
+        "description": "Match criteria: present fields are combined with AND; list items are combined with OR. `ips` and `hosts` are mutually exclusive, and inbound rules cannot use `hosts`. Port, IP, and host rules operate at the connection layer. Method, path, header, query parameter, and body rules operate at the request layer.",
         "properties": {
           "ports": {
             "type": "array",
@@ -4388,7 +4388,17 @@
                 "type": "string"
               }
             },
-            "description": "Header name \u2192 any-of values (names AND'd, a name's values OR'd)."
+            "description": "Header name \u2192 any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, `\"authorization\": [\"Bearer $arker_api_key\"]` or `\"x-api-key\": [\"$arker_api_key\"]` matches an API key of the VM's organization."
+          },
+          "query_params": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Query parameter name \u2192 any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, parameters named `arker_*` are removed from a `GET` request's URL by a redirect that keeps them in a cookie, so the rest of a browsing session carries them without the URL showing them."
           },
           "body_contains": {
             "description": "Substrings that must appear in the request body.",
@@ -4406,13 +4416,14 @@
             "type": "string",
             "enum": [
               "allow",
-              "deny"
+              "deny",
+              "delete"
             ]
           },
           {
             "type": "object",
             "additionalProperties": false,
-            "description": "The object action: at least one of `rewrite` / `gate` / `scaling` must be present. The request is forwarded upstream (applying `rewrite` if present); a `gate` blocks it until an outbound HTTP check allows it; a `scaling` key lets the platform suspend the machine while it waits on the response. The three compose freely on one action.",
+            "description": "The object action: at least one of `rewrite` / `gate` / `scale` / `webhook` must be present. The request is forwarded upstream (applying `rewrite` if present); a `gate` blocks it until an outbound HTTP check allows it; `scale` suspends or wakes the VM around it. The three compose freely on one action. `webhook` is for `resources` rules.",
             "properties": {
               "rewrite": {
                 "$ref": "#/components/schemas/Rewrite"
@@ -4420,18 +4431,26 @@
               "gate": {
                 "$ref": "#/components/schemas/Gate"
               },
+              "scale": {
+                "$ref": "#/components/schemas/ScaleAction"
+              },
               "scaling": {
-                "$ref": "#/components/schemas/ScalingAction"
+                "$ref": "#/components/schemas/ScaleAction",
+                "deprecated": true,
+                "description": "Deprecated spelling of `scale`."
+              },
+              "webhook": {
+                "$ref": "#/components/schemas/Webhook"
               }
             }
           }
         ],
-        "description": "allow / deny, or an object with any combination of `rewrite`, `gate`, and `scaling` (at least one)."
+        "description": "allow / deny, `delete` (schedule rules), or an object with any combination of `rewrite`, `gate`, and `scale` (at least one)."
       },
-      "ScalingAction": {
+      "ScaleAction": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Auto-scaling behavior for matched traffic. On an `outbound` rule it brackets the time the VM is blocked awaiting an upstream response; on an `inbound` rule it brackets the time the VM is idle between requests (scale to zero). Outbound rules may be narrowed by L7 criteria (`methods`/`paths`/`headers`/`body_contains`), for example to suspend only on `POST /v1/messages`, and compose with `rewrite` / `gate` siblings. For outbound, prefer a `match.hosts` scope: a host-less scaling rule matches every flow it can see, which breaks certificate-pinning clients. Where each is enforced differs and explains the asymmetry: an `outbound` rule runs on the MITM (TLS-terminating) data path, which is why it can match L7 fields and carry `rewrite`/`gate` siblings; an `inbound` rule is enforced host-side on the plaintext request the worker already holds, so no MITM is involved and no TLS is terminated.",
+        "description": "Scales the VM when the rule matches or fires. On an `outbound` rule `suspend` brackets the time the VM is blocked awaiting an upstream response; on an `inbound` rule it suspends the VM once a matched request has been answered, and `wake` decides whether a matched request wakes a suspended VM. Outbound rules may be narrowed by request fields (`methods`/`paths`/`headers`/`body_contains`), for example to suspend only on `POST /v1/messages`, and compose with `rewrite` / `gate` siblings. For outbound, prefer a `match.hosts` scope: a host-less rule matches every flow it can see, which breaks certificate-pinning clients.",
         "properties": {
           "suspend": {
             "type": "boolean",
@@ -4441,6 +4460,36 @@
           "wake": {
             "type": "boolean",
             "description": "Whether a matched inbound request may wake a suspended VM. Omit this field to allow waking. Set it to `false` so a request that would need to start the VM fails with `503 vm_suspended`; requests received while the VM is running are served normally. This field is not valid on outbound rules."
+          },
+          "resource_factors": {
+            "$ref": "#/components/schemas/ResourceFactors",
+            "description": "`resources` rules only. Multiplies each resource it names by its factor, within the VM's supported range: `{ \"vcpu\": 2 }` doubles the vCPUs."
+          }
+        }
+      },
+      "ResourceFactors": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "description": "A number for each resource it names: `vcpu`, `memory_mib`, `disk_mib`.",
+        "properties": {
+          "vcpu": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "format": "double",
+            "description": "For vCPUs."
+          },
+          "memory_mib": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "format": "double",
+            "description": "For memory."
+          },
+          "disk_mib": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "format": "double",
+            "description": "For disk. A disk only grows, so a factor for it is at least 1."
           }
         }
       },
@@ -4466,6 +4515,13 @@
           },
           "remove_headers": {
             "description": "Request header names to remove before forwarding.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "remove_query_params": {
+            "description": "Query parameter names to remove from the URL before forwarding.",
             "type": "array",
             "items": {
               "type": "string"
@@ -4529,6 +4585,44 @@
             "minimum": 0,
             "format": "uint64",
             "description": "Max wall-clock for the gate call before it is abandoned (then deny_on_timeout applies). Default ~30000."
+          }
+        }
+      },
+      "Webhook": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "host"
+        ],
+        "description": "An HTTP request Arker sends, from outside the VM, when a `resources` rule starts firing. It does not wait on or act on the response. `path`, header values and string leaves of `body` take `$vm_id` and `${secret:NAME}`, and `$$` for a literal `$`. `host` is not interpolated, and private, link-local and internal destinations are refused.",
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "Target endpoint including scheme, e.g. `https://aws-us-west-2.arker.ai`."
+          },
+          "path": {
+            "type": "string",
+            "description": "Request path. Default `/`."
+          },
+          "method": {
+            "type": "string",
+            "description": "HTTP method. Default `POST`."
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Request headers. Stored credentials are encrypted at rest and masked in policy responses."
+          },
+          "body": {
+            "description": "JSON request body. Absent = no body."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "uint64",
+            "description": "Max wall-clock for the request before it is abandoned. Default ~30000."
           }
         }
       },
@@ -4864,6 +4958,11 @@
             "type": "string",
             "minLength": 1,
             "description": "Optionally join an active pool by its unique name in the caller organization. Names are normalized and case-insensitive. Mutually exclusive with pool_id. Membership uses the resolved pool ID, can be changed with VM PATCH, and is never inherited from the source VM."
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A command to start on the new VM once it is forked, as a background run on its default session: the response is the VM, and the run is listed with `GET /v1/vms/{id}/runs`."
           }
         },
         "not": {
@@ -5306,7 +5405,7 @@
             "format": "uint32"
           },
           "command": {
-            "description": "Command submitted for execution. Omit it only for a signal request.",
+            "description": "Command submitted for execution. Omit it only for a signal request, or in a request naming nothing at all, which wakes the VM: it returns once the VM is running, and every run it was suspended or forked with is `running` again.",
             "type": "string"
           },
           "timeout": {
@@ -10726,7 +10825,7 @@
             "$ref": "#/components/schemas/PolicyAction"
           },
           "auth": {
-            "description": "For inbound `allow` rules. `arker` requires an API key for the VM's organization, `open` requires none, and `{\"token\": ...}` accepts the token or an API key. A token is at least 32 letters, digits, `-`, `_`, `.` or `~`. Defaults to `arker`.",
+            "description": "Deprecated: put the credential a request must carry in `match`. For inbound `allow` rules. `arker` requires an API key for the VM's organization, `open` requires none, and `{\"token\": ...}` accepts the token in the `arker_token` query parameter or cookie, or an API key. Omitted, the rule's `match` alone decides.",
             "oneOf": [
               {
                 "type": "string",
@@ -10748,7 +10847,8 @@
                   }
                 }
               }
-            ]
+            ],
+            "deprecated": true
           },
           "expires_at": {
             "type": "string",
@@ -10771,6 +10871,12 @@
               "oneOf": [
                 {
                   "$ref": "#/components/schemas/PolicyRule"
+                },
+                {
+                  "$ref": "#/components/schemas/ScheduleRule"
+                },
+                {
+                  "$ref": "#/components/schemas/ResourcesRule"
                 },
                 {
                   "$ref": "#/components/schemas/LifecycleRule"
@@ -10850,6 +10956,12 @@
               "$ref": "#/components/schemas/PolicyRule"
             },
             {
+              "$ref": "#/components/schemas/ScheduleRule"
+            },
+            {
+              "$ref": "#/components/schemas/ResourcesRule"
+            },
+            {
               "$ref": "#/components/schemas/LifecycleRule"
             }
           ]
@@ -10896,6 +11008,70 @@
         },
         "description": "SSH keys to write, keyed by key id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). A key replaces any key with the same id; `null` removes the key with that id. Keys not named here are kept, so `{}` changes nothing. The resulting set must not hold one public key under two ids."
       },
+      "ScheduleRule": {
+        "type": "object",
+        "required": [
+          "type",
+          "action"
+        ],
+        "additionalProperties": false,
+        "description": "A rule that acts on the VM itself when its trigger fires: `delete` it `at` a time, or suspend it with `scale` or `delete` it `after_wake` seconds after it last started or woke. It has no `priority` and does not affect traffic. It names exactly one of `at` and `after_wake`.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "schedule"
+            ],
+            "description": "`schedule`."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the rule fires: an RFC 3339 time in the future. For `delete`."
+          },
+          "after_wake": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2592000,
+            "format": "uint64",
+            "description": "Fires this many seconds, up to 2592000 (30 days), after the VM last started or woke from a suspend, whatever it did since; a VM that never started counts from its creation. A suspend waits while an inbound request is in flight or a caller is waiting on a run. For `{ \"scale\": { \"suspend\": true } }`, or `delete`, which also fires while the VM is suspended."
+          },
+          "action": {
+            "$ref": "#/components/schemas/PolicyAction",
+            "description": "`delete` deletes the VM, as `DELETE /v1/vms/{id}` does; `{ \"scale\": { \"suspend\": true } }` suspends it, its runs `pending` until it wakes."
+          }
+        }
+      },
+      "ResourcesRule": {
+        "type": "object",
+        "required": [
+          "type",
+          "action"
+        ],
+        "additionalProperties": false,
+        "description": "A rule that acts on the VM by how much of its resources it uses. Every `above` and `below` it names must hold for it to fire, and it fires at most once per measurement, each time the host reads its VMs' CPU (every 10 seconds at most), and never on the measurement after a resize. `vcpu` is CPU time over that span, `memory_mib` the memory the guest has in use (`MemTotal - MemAvailable`), and `disk_mib` how full its root filesystem is, as `df` reports it. It has no `priority` and does not affect traffic.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "resources"
+            ],
+            "description": "`resources`."
+          },
+          "above": {
+            "$ref": "#/components/schemas/ResourceFactors",
+            "description": "Fires while each resource it names is used above this fraction of what the VM has."
+          },
+          "below": {
+            "$ref": "#/components/schemas/ResourceFactors",
+            "description": "Fires while each resource it names is used below this fraction of what the VM has."
+          },
+          "action": {
+            "$ref": "#/components/schemas/PolicyAction",
+            "description": "`{ \"scale\": { \"resource_factors\": <factors> } }`, or `{ \"webhook\": <request> }`, which is sent when the rule starts firing: when its bounds start to hold, and again only after they have stopped holding."
+          }
+        }
+      },
       "LifecycleRule": {
         "type": "object",
         "required": [
@@ -10904,7 +11080,7 @@
           "action"
         ],
         "additionalProperties": false,
-        "description": "A rule that deletes the VM at a set time, or a set number of seconds after it was created. It has no `priority` and does not affect traffic. A fork inherits it, and an `after` deadline counts from the fork's own creation.",
+        "description": "Deprecated: use a `schedule` rule. Deletes the VM at a set time, or a set number of seconds after it was created.",
         "properties": {
           "type": {
             "type": "string",
@@ -10940,7 +11116,8 @@
             ],
             "description": "`delete`: deletes the VM, as `DELETE /v1/vms/{id}` does."
           }
-        }
+        },
+        "deprecated": true
       }
     }
   }

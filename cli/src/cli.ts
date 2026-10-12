@@ -121,6 +121,7 @@ const FORK_RESOURCE_OPTIONS: OptionSpecs = {
 const FORK_OPTIONS: OptionSpecs = {
   ...GLOBAL_OPTIONS,
   ...FORK_RESOURCE_OPTIONS,
+  command: { type: "string" },
   context: { type: "string" },
   description: { type: "string", allowEmpty: true },
   disk: { type: "boolean" },
@@ -957,6 +958,7 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
     ...(policies !== undefined ? { policies } : {}),
     ...(registryAuth !== undefined ? { registry_auth: registryAuth as { username: string; password: string } } : {}),
     ...(queueingTimeout !== undefined ? { queueing_timeout: queueingTimeout } : {}),
+    ...(args.flags.command !== undefined ? { command: args.flags.command as string } : {}),
   } as ForkOptions;
   const sensitiveValues = [
     ...(registryAuth
@@ -1044,9 +1046,12 @@ async function withSecretRedaction<T>(values: string[], action: () => Promise<T>
 }
 
 async function cmdRun(args: ParsedArgs, client: Arker): Promise<void> {
-  const vmId = args.positional[0] ?? die("usage: arker run <vm_id> <command...>");
+  const vmId = args.positional[0] ?? die("usage: arker run <vm_id> [command...]");
   const command = joinRemoteCommand(args.positional.slice(1));
-  if (!command) die("missing command to run");
+  if (!command) {
+    // A run naming nothing wakes the VM, and the runs it was suspended with go on.
+    return printRunResult(await client.vm(vmId).run(""), Boolean(args.flags.json), false);
+  }
   const sessionIdx = numFlag(args, "session-idx");
   const policiesFile = args.flags["policies-file"] as string | undefined;
   const policies = policiesFile === undefined
@@ -2008,7 +2013,10 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       "arker fork --dockerfile <path> [--context <directory>] [flags]",
     ],
     summary: "Fork a source VM into a new VM.",
-    notes: ["Resource flags are capped by the source VM's max_vcpus / max_memory_mib / max_disk_mib."],
+    notes: [
+      "Resource flags are capped by the source VM's max_vcpus / max_memory_mib / max_disk_mib.",
+      "--command starts a command on the new VM as a background run.",
+    ],
   },
   list: {
     synopsis: ["arker ls [flags]"],
