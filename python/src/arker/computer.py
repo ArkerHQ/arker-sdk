@@ -10,6 +10,7 @@ import atexit
 import base64
 import contextlib
 import dataclasses
+import datetime
 import gzip
 import hashlib
 import json
@@ -81,10 +82,9 @@ from .generated.api_models import (
     Pool,
     PoolCommitment,
     PoolCompute,
-    PoolDedicatedStorage,
+    PoolIsolation,
     PoolResources,
     PoolUsage,
-    PtyTicketResponse,
     ResourcesInput,
     Run,
     RunRequest,
@@ -119,9 +119,16 @@ _POOL_SCOPE_ID = re.compile(r"[0-9a-f-]{36}")
 class Scopes:
     """Builders for the ``scopes`` of :meth:`Arker.create_api_key`.
 
-    A key with no scopes reaches everything its role allows (``Scopes.ALL``).
-    Scopes narrow it: to certain VMs, to certain operations, or to joining one
-    pool as a worker.
+    A key reaches what its resource scopes and its operation scopes both allow.
+
+    - Resource scopes: ``*`` (everything; the default, and only valid alone),
+      ``vmid:<id>`` (those VMs), ``pool:<id>`` (that pool's workers).
+    - Operation scopes: ``op:sync``, ``op:pty``, ``op:run``, ``op:heartbeat``
+      limit the key to those operations.
+
+    A worker key is exactly ``["pool:<id>", "op:heartbeat"]`` (:meth:`worker`);
+    neither scope is valid in any other set. A browser PTY key is
+    ``["vmid:<id>", "op:pty"]`` (:meth:`pty`).
     """
 
     ALL = "*"
@@ -135,17 +142,26 @@ class Scopes:
 
     @staticmethod
     def op(operation: Literal["sync", "pty", "run"]) -> str:
-        """Limit the key to one operation."""
+        """Limit the key to one operation. ``op:heartbeat`` is only part of :meth:`worker`."""
         if operation not in ("sync", "pty", "run"):
             raise ValueError(f"invalid operation for a scope: {operation!r}")
         return f"op:{operation}"
 
     @staticmethod
-    def pool_join(pool_id: str) -> str:
-        """Make the key a worker join key for one pool. It must be the key's only scope."""
+    def pty(vm_id: str) -> list[str]:
+        """The scopes of a key that only opens terminals on one VM, as a browser passes in ``api_key``."""
+        return [Scopes.vm(vm_id), "op:pty"]
+
+    @staticmethod
+    def worker(pool_id: str) -> list[str]:
+        """The scopes of a worker key for one pool: exactly these two. Needs an admin caller."""
         if not _POOL_SCOPE_ID.fullmatch(pool_id):
             raise ValueError(f"invalid pool id for a scope: {pool_id!r}")
-        return f"pool:{pool_id}:join"
+        return [f"pool:{pool_id}", "op:heartbeat"]
+
+
+# How long create_pty_key keys live by default: long enough to open a WebSocket.
+_PTY_KEY_TTL_SECS = 300
 
 
 class _UnsetType:
@@ -660,16 +676,21 @@ class Arker:
         commitments: list[PoolCommitment | dict[str, str]] | None = None,
         compute: PoolCompute | dict[str, Any] | None = None,
         joinable: bool | None = None,
-        dedicated_storage: list[PoolDedicatedStorage] | None = None,
+        isolation: list[PoolIsolation] | None = None,
         source_vm_id: str | None = None,
         max_forks: int | None = None,
     ) -> Pool:
         """Create a pool in the client's region. Requires an admin key.
 
         ``compute`` is managed (the default) or an AWS account Arker launches
-        hosts in. Pass ``source_vm_id`` with ``max_forks`` for a fork-reserve
-        pool. Without ``provider`` and ``region`` (or ``base_url``) on the
-        client there is no region to create it in.
+        hosts in. An ``aws`` pool stays ``provisioning`` until the role Arker
+        assumes exists: open the returned ``compute.setup_url`` while signed in
+        to the account to create it (``role_arn`` defaults to that role), and
+        read ``state_detail`` for what is still missing. ``isolation`` keeps
+        ``vms``, ``logs`` or ``metadata`` in the pool's own account instead of
+        Arker's shared stores. Pass ``source_vm_id`` with ``max_forks`` for a
+        fork-reserve pool. Without ``provider`` and ``region`` (or
+        ``base_url``) on the client there is no region to create it in.
         """
         body = CreatePoolRequest(
             name=name,
@@ -677,7 +698,7 @@ class Arker:
             commitments=commitments,  # type: ignore[arg-type]
             compute=compute,  # type: ignore[arg-type]
             joinable=joinable,
-            dedicated_storage=dedicated_storage,
+            isolation=isolation,
             source_vm_id=source_vm_id,
             max_forks=max_forks,
         )
@@ -714,7 +735,7 @@ class Arker:
         self._request("DELETE", f"/v1/pools/{_segment(pool_id)}", base_url=self.base_url)
 
     def list_pool_workers(self, pool_id: str) -> ListWorkersResponse:
-        """Workers that have joined the pool."""
+        """Workers that heartbeated into the pool within the last day."""
         payload = self._request("GET", f"/v1/pools/{_segment(pool_id)}/workers", base_url=self.base_url)
         return _decode_model(ListWorkersResponse, payload)
 
@@ -738,6 +759,27 @@ class Arker:
         body = CreateApiKeyRequest(name=name, role=role, scopes=scopes, expires_at=expires_at)
         payload = self._request("POST", "/v1/api-keys", body, base_url=self._control_base_url)
         return _decode_model(CreatedApiKey, payload)
+
+    def create_pty_key(
+        self,
+        vm_id: str,
+        *,
+        ttl_secs: int = _PTY_KEY_TTL_SECS,
+        name: str = "pty",
+    ) -> CreatedApiKey:
+        """Mint a short-lived key that only opens terminals on one VM.
+
+        Its scopes are ``["vmid:<vm_id>", "op:pty"]``: a browser passes it as
+        ``api_key`` (see :meth:`VM.pty_url`), because a browser WebSocket
+        cannot set an ``Authorization`` header. It expires after ``ttl_secs``,
+        or with the calling key if that is sooner.
+        """
+        expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=ttl_secs)
+        return self.create_api_key(
+            name=name,
+            scopes=Scopes.pty(vm_id),
+            expires_at=expires_at.isoformat().replace("+00:00", "Z"),
+        )
 
     def revoke_api_key(self, api_key_id: str) -> None:
         self._request("DELETE", f"/v1/api-keys/{_segment(api_key_id)}", base_url=self._control_base_url)
@@ -1476,17 +1518,17 @@ class VM:
         cancel_ttl_secs: int | None = None,
         on_close: Callable[[Pty.CloseEvent], None] | None = None,
         on_error: Callable[[Exception], None] | None = None,
-        use_ticket: bool = True,
         env: dict[str, str] | None = None,
         plain: bool = True,
     ) -> Pty:
         """Open an interactive pseudo-terminal in this VM over a WebSocket.
 
         Mirrors the TypeScript ``connectPty``. Creates a session if
-        ``session_id`` is omitted, mints a browser PTY ticket
-        (``POST .../pty-ticket``), then opens the PTY WebSocket against this
-        VM's *regional* base url. Server→client binary frames are delivered to
-        ``on_data`` from a background reader thread.
+        ``session_id`` is omitted, then opens the PTY WebSocket against this
+        VM's *regional* base url with the API key in the ``Authorization``
+        header. Server→client binary frames are delivered to ``on_data`` from a
+        background reader thread. To hand a terminal to a browser instead, see
+        :meth:`pty_url`.
 
         Reconnect/persist: pass an existing ``session_id`` with
         ``persist=True`` (the default backend behavior) to reattach to a
@@ -1513,33 +1555,13 @@ class VM:
         else:
             sid = self.create_session(env=session_env or None).session_id
 
-        params: dict[str, Any] = {
-            "cols": _clamp_pty_dimension(cols) if cols is not None else None,
-            "rows": _clamp_pty_dimension(rows) if rows is not None else None,
-            "command": command,
-            "persist": persist,
-            "cancel_ttl_secs": int(cancel_ttl_secs) if cancel_ttl_secs and cancel_ttl_secs > 0 else None,
-        }
-
-        ticket: str | None = None
-        headers: dict[str, str] | None = None
-        if use_ticket:
-            payload = self._client._request(
-                "POST",
-                f"{_vm_path(self.id)}/sessions/{_segment(sid)}/pty-ticket",
-                {},
-                base_url=self.base_url,
-            )
-            response = _decode_model(PtyTicketResponse, payload)
-            ticket = response.ticket
-        else:
-            # Header auth (server-side use): Bearer key on the WS upgrade.
-            headers = {"authorization": f"Bearer {self._client._api_key}"}
-
-        ws_params = dict(params)
-        if ticket is not None:
-            ws_params["ticket"] = ticket
-        url = _build_pty_ws_url(self.base_url, self.id, sid, ws_params)
+        url = _build_pty_ws_url(
+            self.base_url,
+            self.id,
+            sid,
+            _pty_query_params(cols=cols, rows=rows, command=command, persist=persist, cancel_ttl_secs=cancel_ttl_secs),
+        )
+        headers = {"authorization": f"Bearer {self._client._api_key}"}
 
         return Pty(
             session_id=sid,
@@ -1549,6 +1571,30 @@ class VM:
             on_close=on_close,
             on_error=on_error,
         )
+
+    def pty_url(
+        self,
+        session_id: str,
+        api_key: str,
+        *,
+        cols: int | None = None,
+        rows: int | None = None,
+        command: str | None = None,
+        persist: bool | None = None,
+        cancel_ttl_secs: int | None = None,
+    ) -> str:
+        """The WebSocket URL of a PTY on this VM that carries ``api_key``, for a browser to open.
+
+        Mint the key with :meth:`Arker.create_pty_key`; Arker refuses any key
+        broader than one VM and ``op:pty`` there. Create the session first::
+
+            key = arker.create_pty_key(vm.id).key
+            url = vm.pty_url(vm.create_session().session_id, key)
+        """
+        params = _pty_query_params(
+            cols=cols, rows=rows, command=command, persist=persist, cancel_ttl_secs=cancel_ttl_secs
+        )
+        return _build_pty_ws_url(self.base_url, self.id, session_id, {**params, "api_key": api_key})
 
 
 class Pty:
@@ -1951,6 +1997,23 @@ PLAIN_PTY_ENV: dict[str, str] = {
     "FORCE_COLOR": "0",
     "CLICOLOR": "0",
 }
+
+
+def _pty_query_params(
+    *,
+    cols: int | None,
+    rows: int | None,
+    command: str | None,
+    persist: bool | None,
+    cancel_ttl_secs: int | None,
+) -> dict[str, Any]:
+    return {
+        "cols": _clamp_pty_dimension(cols) if cols is not None else None,
+        "rows": _clamp_pty_dimension(rows) if rows is not None else None,
+        "command": command,
+        "persist": persist,
+        "cancel_ttl_secs": int(cancel_ttl_secs) if cancel_ttl_secs and cancel_ttl_secs > 0 else None,
+    }
 
 
 def _build_pty_ws_url(base_url: str, vm_id: str, session_id: str, params: dict[str, Any]) -> str:

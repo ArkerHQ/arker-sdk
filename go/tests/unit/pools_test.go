@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/ArkerHQ/arker-sdk/go"
 )
@@ -19,7 +20,7 @@ const poolBody = `{"pool_id":"` + poolID + `","name":"ci","provider":"aws","regi
 	`"state":"idle","state_detail":null,"resources":{"vcpu":8,"memory_mib":32768},` +
 	`"capacity":{"vcpu":0,"memory_mib":0,"disk_mib":0,"forks":null},` +
 	`"commitments":[{"starts_at":"2026-10-01T00:00:00Z","ends_at":"2026-10-31T00:00:00Z"}],` +
-	`"compute":{"type":"managed"},"joinable":false,"dedicated_storage":[],` +
+	`"compute":{"type":"managed"},"joinable":false,"isolation":[],` +
 	`"source_vm_id":null,"max_forks":null,"created_at":"2026-09-25T00:00:00Z"}`
 
 const workerBody = `{"workers":[{"worker_id":"01J","pool_id":"` + poolID + `","kind":"blast","version":"1",` +
@@ -27,7 +28,7 @@ const workerBody = `{"workers":[{"worker_id":"01J","pool_id":"` + poolID + `","k
 	`"resources":{"vcpu":4,"memory_mib":8192,"disk_mib":1024},"free":{"vcpu":2,"memory_mib":4096,"disk_mib":512},` +
 	`"last_heartbeat_at":"2026-10-12T00:00:00Z"}]}`
 
-const apiKeyBody = `{"api_key_id":"key_1","name":"worker","role":"member","scopes":["pool:` + poolID + `:join"],` +
+const apiKeyBody = `{"api_key_id":"key_1","name":"worker","role":"member","scopes":["pool:` + poolID + `","op:heartbeat"],` +
 	`"created_at":"2026-10-12T00:00:00Z","expires_at":"2026-12-01T00:00:00Z"}`
 
 type recorded struct {
@@ -111,10 +112,10 @@ func TestCreatePoolPostsToTheRegionalBaseURL(t *testing.T) {
 		Commitments: []arker.PoolCommitment{{StartsAt: "2026-10-01T00:00:00Z", EndsAt: "2026-10-31T00:00:00Z"}},
 		Compute: &arker.PoolCompute{
 			Type: arker.PoolComputeAWS, AccountID: "123456789012",
-			RoleARN: "arn:aws:iam::123456789012:role/arker", SubnetIDs: []string{"subnet-1"},
+			SubnetIDs: []string{"subnet-1"},
 		},
-		Joinable:         true,
-		DedicatedStorage: []string{"object_storage"},
+		Joinable:  true,
+		Isolation: []string{arker.PoolIsolationVMs, arker.PoolIsolationLogs, arker.PoolIsolationMetadata},
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -131,16 +132,35 @@ func TestCreatePoolPostsToTheRegionalBaseURL(t *testing.T) {
 		"commitments": []any{map[string]any{"starts_at": "2026-10-01T00:00:00Z", "ends_at": "2026-10-31T00:00:00Z"}},
 		"compute": map[string]any{
 			"type": "aws", "account_id": "123456789012",
-			"role_arn": "arn:aws:iam::123456789012:role/arker", "subnet_ids": []any{"subnet-1"},
+			"subnet_ids": []any{"subnet-1"},
 		},
-		"joinable":          true,
-		"dedicated_storage": []any{"object_storage"},
+		"joinable":  true,
+		"isolation": []any{"vms", "logs", "metadata"},
 	}
 	if !reflect.DeepEqual((*requests)[0].body, want) {
 		t.Fatalf("body %v", (*requests)[0].body)
 	}
 	if !reflect.DeepEqual((*requests)[1].body, map[string]any{"source_vm_id": "vm_1", "max_forks": 50.0}) {
 		t.Fatalf("reserve body %v", (*requests)[1].body)
+	}
+}
+
+func TestPoolDecodesSetupURLAndForkCapacity(t *testing.T) {
+	body := `{"pool_id":"` + poolID + `","name":null,"provider":"aws","region":"us-west-2",` +
+		`"state":"provisioning","state_detail":"waiting for role","resources":{},` +
+		`"capacity":{"vcpu":0,"memory_mib":0,"disk_mib":0,"forks":12},"commitments":[],` +
+		`"compute":{"type":"aws","account_id":"123456789012","role_arn":"arn:aws:iam::123456789012:role/ArkerPool-abcd1234",` +
+		`"external_id":"ext-abcd1234","subnet_ids":["subnet-1"],"setup_url":"https://example.invalid/setup"},` +
+		`"joinable":false,"isolation":["vms","metadata"],"source_vm_id":"vm_1","max_forks":50,"created_at":"2026-09-25T00:00:00Z"}`
+	var pool arker.Pool
+	if err := json.Unmarshal([]byte(body), &pool); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if pool.Compute.SetupURL == nil || *pool.Compute.SetupURL != "https://example.invalid/setup" ||
+		pool.Compute.ExternalID != "ext-abcd1234" || *pool.StateDetail != "waiting for role" ||
+		*pool.Capacity.Forks != 12 || *pool.MaxForks != 50 ||
+		!reflect.DeepEqual(pool.Isolation, []string{"vms", "metadata"}) {
+		t.Fatalf("pool %+v", pool)
 	}
 }
 
@@ -191,11 +211,11 @@ func TestAPIKeysUseTheControlPlane(t *testing.T) {
 	ctx := context.Background()
 
 	keys, err := c.ListAPIKeys(ctx)
-	if err != nil || len(keys) != 1 || keys[0].APIKeyID != "key_1" || keys[0].Scopes[0] != arker.ScopePoolJoin(poolID) {
+	if err != nil || len(keys) != 1 || keys[0].APIKeyID != "key_1" || !reflect.DeepEqual(keys[0].Scopes, arker.WorkerKeyScopes(poolID)) {
 		t.Fatalf("list %+v %v", keys, err)
 	}
 	created, err := c.CreateAPIKey(ctx, arker.CreateAPIKeyRequest{
-		Name: "worker", Role: "member", Scopes: []arker.Scope{arker.ScopePoolJoin(poolID)}, ExpiresAt: "2026-12-01T00:00:00Z",
+		Name: "worker", Role: "member", Scopes: arker.WorkerKeyScopes(poolID), ExpiresAt: "2026-12-01T00:00:00Z",
 	})
 	if err != nil || created.Key != "ark_live_secret" {
 		t.Fatalf("create %+v %v", created, err)
@@ -207,7 +227,7 @@ func TestAPIKeysUseTheControlPlane(t *testing.T) {
 	expect(t, (*requests)[0], "control", "GET", "/v1/api-keys")
 	expect(t, (*requests)[1], "control", "POST", "/v1/api-keys")
 	want := map[string]any{
-		"name": "worker", "role": "member", "scopes": []any{"pool:" + poolID + ":join"}, "expires_at": "2026-12-01T00:00:00Z",
+		"name": "worker", "role": "member", "scopes": []any{"pool:" + poolID, "op:heartbeat"}, "expires_at": "2026-12-01T00:00:00Z",
 	}
 	if !reflect.DeepEqual((*requests)[1].body, want) {
 		t.Fatalf("create body %v", (*requests)[1].body)
@@ -216,8 +236,44 @@ func TestAPIKeysUseTheControlPlane(t *testing.T) {
 }
 
 func TestScopeBuilders(t *testing.T) {
-	if arker.ScopeAll != "*" || arker.ScopeVM("vm_1") != "vmid:vm_1" ||
-		arker.ScopeOp(arker.OpSync) != "op:sync" || arker.ScopePoolJoin(poolID) != arker.Scope("pool:"+poolID+":join") {
+	if arker.ScopeAll != "*" || arker.ScopeVM("vm_1") != "vmid:vm_1" || arker.ScopeOp(arker.OpSync) != "op:sync" ||
+		!reflect.DeepEqual(arker.WorkerKeyScopes(poolID), []arker.Scope{arker.Scope("pool:" + poolID), "op:heartbeat"}) ||
+		!reflect.DeepEqual(arker.PTYKeyScopes("vm_1"), []arker.Scope{"vmid:vm_1", "op:pty"}) {
 		t.Fatal("unexpected scope strings")
+	}
+}
+
+func TestCreatePTYKeyMintsAShortLivedKeyForOneVM(t *testing.T) {
+	c, requests := twoServers(t)
+	before := time.Now()
+	if _, err := c.CreatePTYKey(context.Background(), "vm_1", time.Minute); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got := (*requests)[0]
+	expect(t, got, "control", "POST", "/v1/api-keys")
+	if got.body["name"] != "pty" || !reflect.DeepEqual(got.body["scopes"], []any{"vmid:vm_1", "op:pty"}) {
+		t.Fatalf("body %v", got.body)
+	}
+	expiresAt, err := time.Parse(time.RFC3339, got.body["expires_at"].(string))
+	if err != nil {
+		t.Fatalf("expires_at: %v", err)
+	}
+	if in := expiresAt.Sub(before); in < 59*time.Second || in > 61*time.Second {
+		t.Fatalf("expires in %v, want about a minute", in)
+	}
+}
+
+func TestPTYURLCarriesTheAPIKey(t *testing.T) {
+	c, err := arker.New(arker.Options{APIKey: "k", BaseURL: "https://regional.invalid/api", Retry: fastRetry})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	got, err := c.VM("vm_1").PTYURL("sess_1", "ark_live_pty", arker.PTYOptions{Cols: arker.Ptr(80), Persist: arker.Ptr(false)})
+	if err != nil {
+		t.Fatalf("url: %v", err)
+	}
+	want := "wss://regional.invalid/api/v1/vms/vm_1/sessions/sess_1/pty?api_key=ark_live_pty&cols=80&persist=false"
+	if got != want {
+		t.Fatalf("got %s, want %s", got, want)
 	}
 }

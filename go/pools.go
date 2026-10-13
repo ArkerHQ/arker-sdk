@@ -33,17 +33,34 @@ const (
 
 // PoolCompute says whose compute runs the pool's VMs: Arker's fleet
 // (Type "managed", the default) or hosts Arker launches in your AWS account
-// (Type "aws", which needs AccountID, RoleARN and SubnetIDs).
+// (Type "aws", which needs AccountID and SubnetIDs).
+//
+// An "aws" pool stays "provisioning" until the role Arker assumes exists: open
+// SetupURL while signed in to the account to create it. RoleARN defaults to
+// that role.
 type PoolCompute struct {
-	Type             string   `json:"type"`
-	AccountID        string   `json:"account_id,omitempty"`
+	Type      string `json:"type"`
+	AccountID string `json:"account_id,omitempty"`
+	// RoleARN must name an ArkerPool* role in AccountID. Empty means the role
+	// SetupURL creates for this pool.
 	RoleARN          string   `json:"role_arn,omitempty"`
-	ExternalID       string   `json:"external_id,omitempty"` // set by Arker; ignored on create
 	Region           string   `json:"region,omitempty"`
 	SubnetIDs        []string `json:"subnet_ids,omitempty"`
 	SecurityGroupIDs []string `json:"security_group_ids,omitempty"`
 	InstanceTypes    []string `json:"instance_types,omitempty"`
+	// ExternalID and SetupURL are set by Arker and ignored on create.
+	ExternalID string  `json:"external_id,omitempty"`
+	SetupURL   *string `json:"setup_url,omitempty"`
 }
+
+// Pool isolation classes: state a pool keeps for itself instead of in Arker's
+// shared regional stores. Metadata and logs need "aws" compute; VMs need "aws"
+// compute or a joinable pool, whose workers then keep VM storage themselves.
+const (
+	PoolIsolationVMs      = "vms"
+	PoolIsolationLogs     = "logs"
+	PoolIsolationMetadata = "metadata"
+)
 
 // PoolCapacity is what the pool can hold right now.
 type PoolCapacity struct {
@@ -61,17 +78,20 @@ type Pool struct {
 	Provider string  `json:"provider"`
 	Region   string  `json:"region"`
 	// State is "provisioning", "idle" or "running".
-	State            string           `json:"state"`
-	StateDetail      *string          `json:"state_detail"`
-	Resources        PoolResources    `json:"resources"`
-	Capacity         PoolCapacity     `json:"capacity"`
-	Commitments      []PoolCommitment `json:"commitments"`
-	Compute          PoolCompute      `json:"compute"`
-	Joinable         bool             `json:"joinable"`
-	DedicatedStorage []string         `json:"dedicated_storage"`
-	SourceVMID       *string          `json:"source_vm_id"`
-	MaxForks         *int64           `json:"max_forks"`
-	CreatedAt        string           `json:"created_at"`
+	State string `json:"state"`
+	// StateDetail says why the pool is still provisioning, when something is
+	// wrong.
+	StateDetail *string          `json:"state_detail"`
+	Resources   PoolResources    `json:"resources"`
+	Capacity    PoolCapacity     `json:"capacity"`
+	Commitments []PoolCommitment `json:"commitments"`
+	Compute     PoolCompute      `json:"compute"`
+	Joinable    bool             `json:"joinable"`
+	// Isolation holds PoolIsolation* classes.
+	Isolation  []string `json:"isolation"`
+	SourceVMID *string  `json:"source_vm_id"`
+	MaxForks   *int64   `json:"max_forks"`
+	CreatedAt  string   `json:"created_at"`
 }
 
 // PoolList is one page of pools, newest first.
@@ -95,11 +115,11 @@ type WorkerResources struct {
 	GPUCount  int64 `json:"gpu_count,omitempty"`
 }
 
-// Worker is a host that has joined a pool.
+// Worker is a host heartbeating into a pool.
 type Worker struct {
 	WorkerID        string          `json:"worker_id"`
 	PoolID          string          `json:"pool_id"`
-	Kind            string          `json:"kind"` // "arkerd" or "blast"
+	Kind            string          `json:"kind"` // the worker's software, such as "arkerd"
 	Version         string          `json:"version"`
 	Platforms       []string        `json:"platforms"`
 	State           string          `json:"state"` // "active", "draining" or "left"
@@ -122,13 +142,13 @@ type CreatePoolRequest struct {
 	Resources   *PoolResources   `json:"resources,omitempty"`
 	Commitments []PoolCommitment `json:"commitments,omitempty"`
 	Compute     *PoolCompute     `json:"compute,omitempty"`
-	// Joinable lets workers holding a join key add capacity.
+	// Joinable lets workers holding a worker key for this pool add capacity.
 	Joinable bool `json:"joinable,omitempty"`
-	// DedicatedStorage lists classes of state kept in storage the pool owns;
-	// only "object_storage" is supported today.
-	DedicatedStorage []string `json:"dedicated_storage,omitempty"`
-	SourceVMID       string   `json:"source_vm_id,omitempty"`
-	MaxForks         int64    `json:"max_forks,omitempty"`
+	// Isolation lists PoolIsolation* classes the pool keeps for itself. It
+	// cannot change after creation.
+	Isolation  []string `json:"isolation,omitempty"`
+	SourceVMID string   `json:"source_vm_id,omitempty"`
+	MaxForks   int64    `json:"max_forks,omitempty"`
 }
 
 // UpdatePoolRequest changes a pool. Only set fields are sent.
@@ -215,7 +235,8 @@ func (c *Client) DeletePool(ctx context.Context, poolID string) error {
 	return err
 }
 
-// ListPoolWorkers lists the workers that have joined the pool.
+// ListPoolWorkers lists the workers that heartbeated into the pool within the
+// last day.
 func (c *Client) ListPoolWorkers(ctx context.Context, poolID string) ([]Worker, error) {
 	var out struct {
 		Workers []Worker `json:"workers"`

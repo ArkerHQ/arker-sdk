@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import datetime
 import json
 import time
 from contextlib import contextmanager
@@ -270,7 +271,7 @@ POOL = {
     "commitments": [{"starts_at": "2026-10-01T00:00:00Z", "ends_at": "2026-10-31T00:00:00Z"}],
     "compute": {"type": "managed"},
     "joinable": False,
-    "dedicated_storage": [],
+    "isolation": [],
     "source_vm_id": None,
     "max_forks": None,
     "created_at": "2026-09-25T00:00:00Z",
@@ -305,11 +306,26 @@ def test_create_pool_posts_to_the_regional_base_url() -> None:
     aws = {
         "type": "aws",
         "account_id": "123456789012",
-        "role_arn": "arn:aws:iam::123456789012:role/arker",
         "subnet_ids": ["subnet-1"],
     }
+    setup_url = "https://console.aws.amazon.com/cloudformation/home#/stacks/quickcreate"
     t = FakeTransport()
-    t.add_json(route("POST", f"{REGIONAL}/v1/pools"), 201, {**POOL, "compute": {**aws, "external_id": "ext-1"}})
+    t.add_json(
+        route("POST", f"{REGIONAL}/v1/pools"),
+        201,
+        {
+            **POOL,
+            "state": "provisioning",
+            "state_detail": "waiting for role",
+            "isolation": ["vms", "logs", "metadata"],
+            "compute": {
+                **aws,
+                "role_arn": "arn:aws:iam::123456789012:role/ArkerPool-abcd1234",
+                "external_id": "ext-abcd1234",
+                "setup_url": setup_url,
+            },
+        },
+    )
 
     with use_transport(t):
         pool = pool_client().create_pool(
@@ -318,7 +334,7 @@ def test_create_pool_posts_to_the_regional_base_url() -> None:
             commitments=[sdk.PoolCommitment(starts_at="2026-10-01T00:00:00Z", ends_at="2026-10-31T00:00:00Z")],
             compute=aws,
             joinable=True,
-            dedicated_storage=["object_storage"],
+            isolation=["vms", "logs", "metadata"],
         )
 
     assert json.loads(t.calls[0]["body"]) == {
@@ -327,20 +343,28 @@ def test_create_pool_posts_to_the_regional_base_url() -> None:
         "commitments": [{"starts_at": "2026-10-01T00:00:00Z", "ends_at": "2026-10-31T00:00:00Z"}],
         "compute": aws,
         "joinable": True,
-        "dedicated_storage": ["object_storage"],
+        "isolation": ["vms", "logs", "metadata"],
     }
     assert isinstance(pool.compute, PoolComputeAws)
-    assert pool.compute.external_id == "ext-1"
+    assert pool.compute.external_id == "ext-abcd1234"
+    assert pool.compute.setup_url == setup_url
+    assert pool.state_detail == "waiting for role"
+    assert pool.isolation == ["vms", "logs", "metadata"]
 
 
 def test_create_fork_reserve_pool_sends_only_source_and_count() -> None:
     t = FakeTransport()
-    t.add_json(route("POST", f"{REGIONAL}/v1/pools"), 201, POOL)
+    t.add_json(
+        route("POST", f"{REGIONAL}/v1/pools"),
+        201,
+        {**POOL, "source_vm_id": "vm_1", "max_forks": 50, "capacity": {**POOL["capacity"], "forks": 12}},
+    )
 
     with use_transport(t):
-        pool_client().create_pool(source_vm_id="vm_1", max_forks=50)
+        pool = pool_client().create_pool(source_vm_id="vm_1", max_forks=50)
 
     assert json.loads(t.calls[0]["body"]) == {"source_vm_id": "vm_1", "max_forks": 50}
+    assert pool.capacity.forks == 12
 
 
 def test_create_pool_without_a_region_fails_before_any_request() -> None:
@@ -390,7 +414,7 @@ API_KEY = {
     "api_key_id": "key_1",
     "name": "worker",
     "role": "member",
-    "scopes": [f"pool:{POOL_ID}:join"],
+    "scopes": [f"pool:{POOL_ID}", "op:heartbeat"],
     "created_at": "2026-10-12T00:00:00Z",
     "expires_at": "2026-12-01T00:00:00Z",
 }
@@ -408,7 +432,7 @@ def test_api_keys_use_the_control_plane() -> None:
         created = c.create_api_key(
             name="worker",
             role="member",
-            scopes=[sdk.Scopes.pool_join(POOL_ID)],
+            scopes=sdk.Scopes.worker(POOL_ID),
             expires_at="2026-12-01T00:00:00Z",
         )
         assert c.revoke_api_key("key_1") is None
@@ -417,7 +441,7 @@ def test_api_keys_use_the_control_plane() -> None:
     assert json.loads(t.calls[1]["body"]) == {
         "name": "worker",
         "role": "member",
-        "scopes": [f"pool:{POOL_ID}:join"],
+        "scopes": [f"pool:{POOL_ID}", "op:heartbeat"],
         "expires_at": "2026-12-01T00:00:00Z",
     }
 
@@ -426,10 +450,58 @@ def test_scope_builders() -> None:
     assert sdk.Scopes.ALL == "*"
     assert sdk.Scopes.vm("vm_abc-1") == "vmid:vm_abc-1"
     assert sdk.Scopes.op("sync") == "op:sync"
-    assert sdk.Scopes.pool_join(POOL_ID) == f"pool:{POOL_ID}:join"
-    for bad in (lambda: sdk.Scopes.vm("a b"), lambda: sdk.Scopes.op("fork"), lambda: sdk.Scopes.pool_join("nope")):  # type: ignore[arg-type]
+    assert sdk.Scopes.worker(POOL_ID) == [f"pool:{POOL_ID}", "op:heartbeat"]
+    assert sdk.Scopes.pty("vm_1") == ["vmid:vm_1", "op:pty"]
+    for bad in (
+        lambda: sdk.Scopes.vm("a b"),
+        lambda: sdk.Scopes.op("heartbeat"),  # type: ignore[arg-type]
+        lambda: sdk.Scopes.worker("nope"),
+        lambda: sdk.Scopes.pty("a b"),
+    ):
         with pytest.raises(ValueError):
             bad()
+
+
+def test_create_pty_key_mints_a_short_lived_key_for_one_vm() -> None:
+    t = FakeTransport()
+    t.add_json(
+        route("POST", f"{CONTROL}/v1/api-keys"),
+        201,
+        {
+            "api_key": {**API_KEY, "name": "pty", "scopes": ["vmid:vm_1", "op:pty"]},
+            "key": "ark_live_pty",
+        },
+    )
+
+    before = time.time()
+    with use_transport(t):
+        created = pool_client().create_pty_key("vm_1", ttl_secs=60)
+
+    assert created.key == "ark_live_pty"
+    body = json.loads(t.calls[0]["body"])
+    assert body["name"] == "pty"
+    assert body["scopes"] == ["vmid:vm_1", "op:pty"]
+    expires_in = datetime.datetime.fromisoformat(body["expires_at"].replace("Z", "+00:00")).timestamp() - before
+    assert 59 <= expires_in <= 61
+
+
+def test_pty_url_carries_the_api_key() -> None:
+    vm = pool_client().vm("vm_1")
+    assert (
+        vm.pty_url("sess_1", "ark_live_pty", cols=80, persist=False, cancel_ttl_secs=30)
+        == "wss://regional.invalid/api/v1/vms/vm_1/sessions/sess_1/pty"
+        "?cols=80&persist=false&cancel_ttl_secs=30&api_key=ark_live_pty"
+    )
+
+
+def test_connect_pty_authenticates_with_the_bearer_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    opened: dict[str, Any] = {}
+    monkeypatch.setattr("arker.computer.Pty", lambda **kwargs: opened.update(kwargs))
+
+    pool_client().vm("vm_1").connect_pty(session_id="sess_1", cols=100)
+
+    assert opened["url"] == "wss://regional.invalid/api/v1/vms/vm_1/sessions/sess_1/pty?cols=100"
+    assert opened["headers"] == {"authorization": "Bearer ark_live_test"}
 
 
 def test_fork_posts_directly_to_source_vm() -> None:

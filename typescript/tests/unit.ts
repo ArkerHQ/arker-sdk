@@ -676,7 +676,7 @@ const POOL = {
   commitments: [],
   compute: { type: "managed" },
   joinable: false,
-  dedicated_storage: [],
+  isolation: [],
   source_vm_id: null,
   max_forks: null,
   created_at: "2026-09-25T00:00:00Z",
@@ -706,8 +706,27 @@ async function testListAndGetPoolUseTheControlPlane(): Promise<void> {
 
 async function testCreatePoolPostsToTheRegionalBaseUrl(): Promise<void> {
   const fetch = new FakeFetch();
-  fetch.addJson(route("POST", `${REGIONAL}/v1/pools`), 201, POOL);
-  fetch.addJson(route("POST", `${REGIONAL}/v1/pools`), 201, POOL);
+  const setupUrl = "https://console.aws.amazon.com/cloudformation/home#/stacks/quickcreate";
+  fetch.addJson(route("POST", `${REGIONAL}/v1/pools`), 201, {
+    ...POOL,
+    state: "provisioning",
+    state_detail: "waiting for role",
+    compute: {
+      type: "aws",
+      account_id: "123456789012",
+      role_arn: "arn:aws:iam::123456789012:role/ArkerPool-abcd1234",
+      external_id: "ext-abcd1234",
+      subnet_ids: ["subnet-1"],
+      setup_url: setupUrl,
+    },
+    isolation: ["vms", "logs", "metadata"],
+  });
+  fetch.addJson(route("POST", `${REGIONAL}/v1/pools`), 201, {
+    ...POOL,
+    source_vm_id: "vm_1",
+    max_forks: 50,
+    capacity: { ...POOL.capacity, forks: 12 },
+  });
 
   const client = poolClient(fetch);
   const request = {
@@ -717,16 +736,19 @@ async function testCreatePoolPostsToTheRegionalBaseUrl(): Promise<void> {
     compute: {
       type: "aws" as const,
       account_id: "123456789012",
-      role_arn: "arn:aws:iam::123456789012:role/arker",
       subnet_ids: ["subnet-1"],
     },
     joinable: true,
-    dedicated_storage: ["object_storage" as const],
+    isolation: ["vms" as const, "logs" as const, "metadata" as const],
   };
-  await client.createPool(request);
-  await client.createPool({ source_vm_id: "vm_1", max_forks: 50 });
+  const created = await client.createPool(request);
+  const reserve = await client.createPool({ source_vm_id: "vm_1", max_forks: 50 });
 
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), request);
+  assert.equal(created.state_detail, "waiting for role");
+  assert.ok(created.compute.type === "aws" && created.compute.setup_url === setupUrl);
+  assert.deepEqual(created.isolation, ["vms", "logs", "metadata"]);
+  assert.equal(reserve.capacity.forks, 12);
   assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), { source_vm_id: "vm_1", max_forks: 50 });
 }
 
@@ -760,7 +782,7 @@ async function testApiKeysUseTheControlPlane(): Promise<void> {
     api_key_id: "key_1",
     name: "worker",
     role: "member",
-    scopes: [`pool:${POOL_ID}:join`],
+    scopes: [`pool:${POOL_ID}`, "op:heartbeat"],
     created_at: "2026-10-12T00:00:00Z",
     expires_at: "2026-12-01T00:00:00Z",
   };
@@ -774,7 +796,7 @@ async function testApiKeysUseTheControlPlane(): Promise<void> {
   const created = await client.createApiKey({
     name: "worker",
     role: "member",
-    scopes: [scopes.poolJoin(POOL_ID)],
+    scopes: scopes.worker(POOL_ID),
     expires_at: "2026-12-01T00:00:00Z",
   });
   assert.equal(created.key, "ark_live_secret");
@@ -783,7 +805,7 @@ async function testApiKeysUseTheControlPlane(): Promise<void> {
   assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), {
     name: "worker",
     role: "member",
-    scopes: [`pool:${POOL_ID}:join`],
+    scopes: [`pool:${POOL_ID}`, "op:heartbeat"],
     expires_at: "2026-12-01T00:00:00Z",
   });
 }
@@ -792,10 +814,45 @@ function testScopeBuilders(): void {
   assert.equal(scopes.all, "*");
   assert.equal(scopes.vm("vm_abc-1"), "vmid:vm_abc-1");
   assert.equal(scopes.op("sync"), "op:sync");
-  assert.equal(scopes.poolJoin(POOL_ID), `pool:${POOL_ID}:join`);
+  assert.deepEqual(scopes.worker(POOL_ID), [`pool:${POOL_ID}`, "op:heartbeat"]);
+  assert.deepEqual(scopes.pty("vm_1"), ["vmid:vm_1", "op:pty"]);
   assert.throws(() => scopes.vm("a b"));
-  assert.throws(() => scopes.op("fork" as "run"));
-  assert.throws(() => scopes.poolJoin("nope"));
+  assert.throws(() => scopes.op("heartbeat" as "run"));
+  assert.throws(() => scopes.worker("nope"));
+  assert.throws(() => scopes.pty("a b"));
+}
+
+async function testCreatePtyKeyMintsAShortLivedKeyForOneVm(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson(route("POST", `${CONTROL}/v1/api-keys`), 201, {
+    api_key: {
+      api_key_id: "key_pty",
+      name: "pty",
+      role: "member",
+      scopes: ["vmid:vm_1", "op:pty"],
+      created_at: "2026-10-12T00:00:00Z",
+      expires_at: "2026-10-12T00:01:00Z",
+    },
+    key: "ark_live_pty",
+  });
+
+  const before = Date.now();
+  const created = await poolClient(fetch).createPtyKey("vm_1", { ttlSecs: 60 });
+  assert.equal(created.key, "ark_live_pty");
+
+  const body = JSON.parse(fetch.calls[0]!.body!) as { name: string; scopes: string[]; expires_at: string };
+  assert.equal(body.name, "pty");
+  assert.deepEqual(body.scopes, ["vmid:vm_1", "op:pty"]);
+  const expiresIn = Date.parse(body.expires_at) - before;
+  assert.ok(expiresIn >= 59_000 && expiresIn <= 61_000, `expires_at ${body.expires_at} is not about 60s out`);
+}
+
+function testPtyUrlCarriesTheApiKey(): void {
+  const vm = poolClient(new FakeFetch()).vm("vm_1");
+  assert.equal(
+    vm.ptyUrl({ sessionId: "sess_1", apiKey: "ark_live_pty", cols: 80, cancelTtlSecs: 30.7 }),
+    "wss://regional.invalid/api/v1/vms/vm_1/sessions/sess_1/pty?cols=80&cancel_ttl_secs=30&api_key=ark_live_pty",
+  );
 }
 
 async function testDiscoverRegionsRequiresNoConfiguredClient(): Promise<void> {
@@ -1308,7 +1365,7 @@ async function testConnectPtyCreatesSessionAndUsesBearerHeader(): Promise<void> 
     rows: 40,
     command: "/bin/sh",
     persist: false,
-    useTicket: false,
+    useQueryKey: false,
     webSocketFactory: factory,
   });
 
@@ -1328,12 +1385,22 @@ async function testConnectPtyCreatesSessionAndUsesBearerHeader(): Promise<void> 
   assert.deepEqual(socket.sent[2], new TextEncoder().encode("x"));
 }
 
-async function testConnectPtyUsesTicketForBrowserWebSocket(): Promise<void> {
+async function testConnectPtyMintsAPtyKeyForBrowserWebSocket(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(
-    (method, url) => method === "POST" && url === "https://test.invalid/api/v1/vms/vm_1/sessions/sess_1/pty-ticket",
-    200,
-    { ticket: "ptyt_ticket", expires_in: 300 },
+    (method, url) => method === "POST" && url.endsWith("/v1/api-keys"),
+    201,
+    {
+      api_key: {
+        api_key_id: "key_pty",
+        name: "pty",
+        role: "member",
+        scopes: ["vmid:vm_1", "op:pty"],
+        created_at: "2026-10-12T00:00:00Z",
+        expires_at: "2026-10-12T00:05:00Z",
+      },
+      key: "ark_live_pty",
+    },
   );
   let openedUrl = "";
   let openedHeaders: Record<string, string> | undefined = { unexpected: "set" };
@@ -1347,17 +1414,18 @@ async function testConnectPtyUsesTicketForBrowserWebSocket(): Promise<void> {
     sessionId: "sess_1",
     cols: 80,
     rows: 24,
-    useTicket: true,
+    useQueryKey: true,
     webSocketFactory: factory,
   });
 
   assert.equal(
     openedUrl,
-    "wss://test.invalid/api/v1/vms/vm_1/sessions/sess_1/pty?cols=80&rows=24&ticket=ptyt_ticket",
+    "wss://test.invalid/api/v1/vms/vm_1/sessions/sess_1/pty?cols=80&rows=24&api_key=ark_live_pty",
   );
   assert.equal(openedHeaders, undefined);
+  assert.equal(fetch.calls.length, 1);
   assert.equal(fetch.calls[0]!.headers.authorization, "Bearer ark_live_test");
-  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), {});
+  assert.deepEqual((JSON.parse(fetch.calls[0]!.body!) as { scopes: string[] }).scopes, ["vmid:vm_1", "op:pty"]);
 }
 
 await testForkPostsDirectlyToSourceVm();
@@ -1387,6 +1455,8 @@ await testCreatePoolWithoutARegionFailsBeforeAnyRequest();
 await testUpdateDeleteAndWorkersUseTheRegionalBaseUrl();
 await testApiKeysUseTheControlPlane();
 testScopeBuilders();
+await testCreatePtyKeyMintsAShortLivedKeyForOneVm();
+testPtyUrlCarriesTheApiKey();
 await testDiscoverRegionsRequiresNoConfiguredClient();
 await testListedVmUsesItsPlacementEndpoint();
 testExplicitVmHandleUsesPlacementEndpoint();
@@ -1413,7 +1483,7 @@ async function testConnectPtyPassesCancelTtlSecs(): Promise<void> {
     cols: 80,
     rows: 24,
     cancelTtlSecs: 600,
-    useTicket: false,
+    useQueryKey: false,
     webSocketFactory: factory,
   });
   assert.ok(
@@ -1429,7 +1499,7 @@ async function testConnectPtyPassesCancelTtlSecs(): Promise<void> {
   await client(fetch).vm("vm_1").connectPty({
     sessionId: "sess_1",
     cancelTtlSecs: 0,
-    useTicket: false,
+    useQueryKey: false,
     webSocketFactory: factory2,
   });
   assert.ok(
@@ -1449,7 +1519,7 @@ async function testConnectPtyDeliversDataAndCloseEvents(): Promise<void> {
   );
   const socket = new FakeWebSocket();
   const pty = await client(fetch).vm("vm_1").connectPty({
-    useTicket: false,
+    useQueryKey: false,
     webSocketFactory: () => socket,
   });
   const received: string[] = [];
@@ -1659,7 +1729,7 @@ async function testUtf8WireStillYieldsBothForms(): Promise<void> {
 
 
 await testConnectPtyCreatesSessionAndUsesBearerHeader();
-await testConnectPtyUsesTicketForBrowserWebSocket();
+await testConnectPtyMintsAPtyKeyForBrowserWebSocket();
 await testConnectPtyPassesCancelTtlSecs();
 await testConnectPtyDeliversDataAndCloseEvents();
 testSurfaceStubClassificationUsesStructuredErrorCodes();

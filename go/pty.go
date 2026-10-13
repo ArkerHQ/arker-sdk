@@ -34,9 +34,6 @@ type PTYOptions struct {
 	// Plain sends PlainPTYEnv. Nil means true. Set it to false when a human is
 	// watching a full-screen TUI.
 	Plain *bool
-	// UseTicket mints a short-lived PTY ticket instead of putting the API key
-	// on the upgrade request. Nil means true.
-	UseTicket *bool
 
 	OnData  func([]byte)
 	OnClose func(PTYCloseEvent)
@@ -68,7 +65,9 @@ type PTY struct {
 	onError []func(error)
 }
 
-// ConnectPTY opens an interactive terminal in this VM.
+// ConnectPTY opens an interactive terminal in this VM, with the client's API
+// key in the upgrade's Authorization header. To hand a terminal to a browser
+// instead, see PTYURL.
 //
 // The connection outlives ctx: ctx bounds the dial only, so cancelling it after
 // ConnectPTY returns does not tear the terminal down. Use Close for that.
@@ -91,30 +90,10 @@ func (v *VM) ConnectPTY(ctx context.Context, opts PTYOptions) (*PTY, error) {
 		sessionID = session.SessionID
 	}
 
-	q := newQuery()
-	q.numPtr("cols", clampDim(opts.Cols))
-	q.numPtr("rows", clampDim(opts.Rows))
-	q.str("command", opts.Command)
-	q.boolPtr("persist", opts.Persist)
-	if opts.CancelTTLSecs != nil && *opts.CancelTTLSecs > 0 {
-		q.num("cancel_ttl_secs", *opts.CancelTTLSecs)
-	}
-
 	header := http.Header{}
-	if opts.UseTicket == nil || *opts.UseTicket {
-		var ticket struct {
-			Ticket string `json:"ticket"`
-		}
-		if _, err := v.do(ctx, http.MethodPost,
-			v.path("/sessions/"+segment(sessionID)+"/pty-ticket"), map[string]any{}, &ticket); err != nil {
-			return nil, err
-		}
-		q.str("ticket", ticket.Ticket)
-	} else {
-		v.client.auth(header)
-	}
+	v.client.auth(header)
 
-	wsURL, err := ptyWebSocketURL(v.baseURL, v.ID, sessionID, q)
+	wsURL, err := ptyWebSocketURL(v.baseURL, v.ID, sessionID, ptyQuery(opts))
 	if err != nil {
 		return nil, err
 	}
@@ -277,6 +256,30 @@ func (p *PTY) finish(event PTYCloseEvent) {
 		}
 		close(p.done)
 	})
+}
+
+// PTYURL is the WebSocket URL of a PTY on this VM that carries apiKey as its
+// api_key, for a browser to open: a browser WebSocket cannot set the
+// Authorization header ConnectPTY uses. Mint the key with Client.CreatePTYKey;
+// Arker refuses any key broader than one VM and op:pty there. sessionID must
+// exist (CreateSession). Of opts, only Cols, Rows, Command, Persist and
+// CancelTTLSecs apply.
+func (v *VM) PTYURL(sessionID, apiKey string, opts PTYOptions) (string, error) {
+	q := ptyQuery(opts)
+	q.str("api_key", apiKey)
+	return ptyWebSocketURL(v.baseURL, v.ID, sessionID, q)
+}
+
+func ptyQuery(opts PTYOptions) *query {
+	q := newQuery()
+	q.numPtr("cols", clampDim(opts.Cols))
+	q.numPtr("rows", clampDim(opts.Rows))
+	q.str("command", opts.Command)
+	q.boolPtr("persist", opts.Persist)
+	if opts.CancelTTLSecs != nil && *opts.CancelTTLSecs > 0 {
+		q.num("cancel_ttl_secs", *opts.CancelTTLSecs)
+	}
+	return q
 }
 
 func ptyWebSocketURL(baseURL, vmID, sessionID string, q *query) (string, error) {

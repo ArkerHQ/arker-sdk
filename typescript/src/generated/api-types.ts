@@ -313,8 +313,8 @@ export interface paths {
                 persist?: boolean;
                 /** @description Destroy the PTY after this many seconds without terminal input or output. Omit or set to zero to disable this PTY-specific idle limit. */
                 cancel_ttl_secs?: number;
-                /** @description Browser auth: a short-lived ticket from POST .../pty-ticket, used in place of the Authorization header (which a browser WebSocket cannot set). */
-                ticket?: string;
+                /** @description Browser auth, used in place of the Authorization header a browser WebSocket cannot set: an API key limited to `vmid:` and `op:pty` scopes. Give it a short `expires_at`. */
+                api_key?: string;
             };
             header?: never;
             path: {
@@ -327,36 +327,11 @@ export interface paths {
         };
         /**
          * Open an interactive PTY (WebSocket upgrade)
-         * @description Upgrades to a WebSocket carrying an interactive pseudo-terminal in the VM, reusing the same interactive terminal as SSH. Authenticate with a bearer API key or, for browser clients, a short-lived PTY ticket. Reopening the same `session_id` reconnects to a persistent shell and replays recent scrollback. Binary server frames contain raw terminal output; binary client frames contain stdin bytes. Text client frames accept JSON controls for `resize`, `kill`, and `ping`. Closing the socket detaches a persistent shell or destroys a non-persistent shell; `kill` always destroys it. The service enforces attachment limits and closes oversized or idle connections.
+         * @description Upgrades to a WebSocket carrying an interactive pseudo-terminal in the VM, reusing the same interactive terminal as SSH. Authenticate with a bearer API key or, for browser clients, a short-lived key limited to this VM and `op:pty` as `api_key`. Reopening the same `session_id` reconnects to a persistent shell and replays recent scrollback. Binary server frames contain raw terminal output; binary client frames contain stdin bytes. Text client frames accept JSON controls for `resize`, `kill`, and `ping`. Closing the socket detaches a persistent shell or destroys a non-persistent shell; `kill` always destroys it. The service enforces attachment limits and closes oversized or idle connections.
          */
         get: operations["attachSessionPty"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/vms/{id}/sessions/{sid}/pty-ticket": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
-                id: components["parameters"]["VmId"];
-                /** @description Session identifier. */
-                sid: components["parameters"]["SessionId"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Mint a browser PTY ticket
-         * @description Returns a short-lived, multi-use credential for opening the PTY WebSocket from a browser, which cannot set an Authorization header. The bearer-authenticated caller must own the VM. Pass the returned credential as the `ticket` query parameter on the PTY WebSocket URL.
-         */
-        post: operations["mintSessionPtyTicket"];
         delete?: never;
         options?: never;
         head?: never;
@@ -543,7 +518,7 @@ export interface paths {
         head?: never;
         /**
          * Update a pool
-         * @description Rename, resize, change commitments or join settings. Resources cannot shrink while a commitment is active. Requires an API key with every scope.
+         * @description Rename, resize, change commitments or whether the pool takes workers. Resources cannot shrink while a commitment is active. Requires an API key with every scope.
          */
         patch: operations["updatePool"];
         trace?: never;
@@ -583,7 +558,7 @@ export interface paths {
         };
         /**
          * List a pool's workers
-         * @description Workers that joined the pool and heartbeated within the last day.
+         * @description Workers that heartbeated into the pool within the last day.
          */
         get: operations["listPoolWorkers"];
         put?: never;
@@ -608,8 +583,8 @@ export interface paths {
         };
         get?: never;
         /**
-         * Join a pool or heartbeat
-         * @description Join the pool, or keep the worker in it. Requires an API key whose scopes are exactly `pool:<pool_id>:join` for this pool.
+         * Heartbeat a worker
+         * @description The first heartbeat adds the worker to the pool, each one after keeps it there, and `state` `left` removes it. Requires a worker key: an API key whose scopes are exactly `pool:<pool_id>` for this pool and `op:heartbeat`.
          */
         put: operations["heartbeatWorker"];
         post?: never;
@@ -633,10 +608,70 @@ export interface paths {
         };
         /**
          * Open the worker tunnel
-         * @description Upgrade to a WebSocket with subprotocol `arker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API. Requires the same join key as the heartbeat, after the worker has joined.
+         * @description Upgrade to a WebSocket with subprotocol `worker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API; a fork names the VM id to use in header `x-vm-id`. Requires the same worker key as the heartbeat, after the worker's first heartbeat.
          */
         get: operations["openWorkerTunnel"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier. */
+                pool_id: string;
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: string;
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Record a worker's VM
+         * @description Record the VM as it is now; send it again on every change. Arker lists the VM from this record. Requires the pool's worker key, and a VM Arker forked onto this worker; any other VM is not found.
+         */
+        put: operations["putWorkerVm"];
+        post?: never;
+        /**
+         * Forget a worker's VM
+         * @description Record that the VM is gone. Requires the pool's worker key, and a VM Arker forked onto this worker; any other VM is not found.
+         */
+        delete: operations["deleteWorkerVm"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier. */
+                pool_id: string;
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: string;
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: string;
+                /** @description Run identifier the worker chose. */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Record a run
+         * @description Record a run when it starts and again when it ends. Arker answers `listRuns` and `getRun` for the VM from these records. Requires the pool's worker key, and a VM Arker forked onto this worker; any other VM is not found.
+         */
+        put: operations["putWorkerRun"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1338,12 +1373,6 @@ export interface components {
             /** @description Advisory command for an interactive PTY session. */
             command?: string | null;
         };
-        PtyTicketResponse: {
-            /** @description Short-lived credential for opening the terminal WebSocket. */
-            ticket: string;
-            /** @description Seconds until expiry. */
-            expires_in: number;
-        };
         Mount: {
             /** @description Unique mount identifier. */
             mount_id: string;
@@ -1759,7 +1788,7 @@ export interface components {
          * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
          * @enum {string}
          */
-        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "getPoolUsage" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "listApiKeys" | "createApiKey" | "revokeApiKey";
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "getPoolUsage" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey";
         /** @enum {string} */
         HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
         /**
@@ -2767,10 +2796,10 @@ export interface components {
             /** @description Committed periods. Defaults to none. */
             commitments?: components["schemas"]["PoolCommitment"][];
             compute?: components["schemas"]["PoolCompute"];
-            /** @description Let workers holding a join key add capacity. Defaults to false. */
+            /** @description Let workers holding a worker key for this pool add capacity. Defaults to false. */
             joinable?: boolean;
-            /** @description Classes of state kept in storage owned by the pool. Defaults to none. */
-            dedicated_storage?: components["schemas"]["PoolDedicatedStorage"][];
+            /** @description What the pool keeps for itself instead of in Arker's shared regional stores. `metadata` and `logs` need `compute.type` `aws`; `vms` needs `aws` compute or `joinable`, whose workers then keep VM storage themselves. */
+            isolation?: components["schemas"]["PoolIsolation"][];
             /** @description Make this a fork-reserve pool for this VM. Requires `max_forks`. */
             source_vm_id?: string;
             /** @description The most forks of `source_vm_id` to keep room for. */
@@ -2782,7 +2811,7 @@ export interface components {
             resources?: components["schemas"]["PoolResources"];
             /** @description The full list of commitments. Commitments that have started must be kept unchanged. */
             commitments?: components["schemas"]["PoolCommitment"][];
-            /** @description Whether workers holding a join key may join. */
+            /** @description Whether workers holding a worker key for this pool add capacity. */
             joinable?: boolean;
             /** @description The most forks of `source_vm_id` to keep room for. */
             max_forks?: number;
@@ -2806,10 +2835,10 @@ export interface components {
             /** @description Committed periods, oldest first. */
             commitments: components["schemas"]["PoolCommitment"][];
             compute: components["schemas"]["PoolCompute"];
-            /** @description Whether workers holding a join key for this pool may join it. */
+            /** @description Whether workers holding a worker key for this pool add capacity. */
             joinable: boolean;
-            /** @description Classes of state kept in storage owned by the pool. */
-            dedicated_storage: components["schemas"]["PoolDedicatedStorage"][];
+            /** @description What the pool keeps for itself instead of in Arker's shared regional stores. `metadata` and `logs` need `compute.type` `aws`; `vms` needs `aws` compute or `joinable`, whose workers then keep VM storage themselves. */
+            isolation: components["schemas"]["PoolIsolation"][];
             /** @description For a fork-reserve pool, the VM whose forks it keeps room for. */
             source_vm_id: string | null;
             /** @description For a fork-reserve pool, the most forks of `source_vm_id` to keep room for. A hint: Arker keeps the VM's snapshot on enough hosts for this many forks while capacity allows. */
@@ -2986,8 +3015,8 @@ export interface components {
             type: "aws";
             /** @description Your AWS account id. */
             account_id: string;
-            /** @description Role Arker assumes to launch and terminate hosts. It must trust Arker's account with `external_id`. */
-            role_arn: string;
+            /** @description Role Arker assumes in your account; its name must start with `ArkerPool`. Defaults to `arn:aws:iam::<account_id>:role/ArkerPool-<last 8 characters of external_id>`, the role `setup_url` creates for this pool. */
+            role_arn?: string;
             /** @description External id Arker presents when assuming `role_arn`. Set by Arker. */
             readonly external_id?: string;
             /** @description AWS region to launch in. Defaults to the pool's region. */
@@ -2998,14 +3027,16 @@ export interface components {
             security_group_ids?: string[];
             /** @description Instance types to launch, in order of preference. They must support hardware virtualization. */
             instance_types?: string[];
+            /** @description Open this while signed in to the account to create the role Arker needs, with this pool's `external_id`. The pool stays `provisioning` until the role exists. */
+            readonly setup_url?: string | null;
         };
         /** @description Whose compute runs the pool's VMs. */
         PoolCompute: components["schemas"]["PoolComputeManaged"] | components["schemas"]["PoolComputeAws"];
         /**
-         * @description A class of state kept in storage owned by the pool instead of Arker's shared regional stores: `object_storage` holds snapshots and files, `database` holds VM and run records, `logs` holds run output and events. Only `object_storage` is supported today.
+         * @description A class of state a pool keeps for itself instead of in Arker's regional stores: `vms` keeps VM snapshots and files in the pool's bucket (on a joinable pool without `aws` compute, in storage each worker configures itself), `metadata` keeps VM, run and session records in a MySQL database (Amazon RDS), `logs` keeps run output and events in a ClickHouse server. `metadata` and `logs` need `aws` compute: Arker provisions them through the pool's role, and the pool stays `provisioning` until they are ready.
          * @enum {string}
          */
-        PoolDedicatedStorage: "object_storage" | "database" | "logs";
+        PoolIsolation: "vms" | "logs" | "metadata";
         WorkerResources: {
             /** @description vCPUs. */
             vcpu: number;
@@ -3016,39 +3047,25 @@ export interface components {
             /** @description Whole GPUs. */
             gpu_count?: number;
         };
-        /**
-         * @description The software the worker runs.
-         * @enum {string}
-         */
-        WorkerKind: "arkerd" | "blast";
+        /** @description The software the worker runs, such as `arkerd`. It names the software only; what the worker can do is in its `capabilities`. */
+        WorkerKind: string;
         /**
          * @description `active` takes new VMs; `draining` keeps its VMs but takes no new ones; `left` has handed back everything and is leaving the pool.
          * @enum {string}
          */
         WorkerState: "active" | "draining" | "left";
-        /** @description A VM the worker holds. */
-        WorkerVm: {
-            /** @description VM identifier. */
-            vm_id: string;
-            /** @description Resources the VM holds. */
-            resources: components["schemas"]["WorkerResources"];
-            /** @description Image the VM was created from, if known. */
-            image?: string | null;
-        };
-        /** @description A worker joins the pool in the path with its first heartbeat and stays in it while heartbeats arrive. */
+        /** @description A worker is in the pool in the path from its first heartbeat while heartbeats arrive. */
         WorkerHeartbeat: {
             kind: components["schemas"]["WorkerKind"];
             /** @description Worker software version. */
             version: string;
             /** @description Platforms the worker serves. A VM's snapshot only restores on a worker serving its platform. */
             platforms: string[];
-            /** @description What the worker offers beyond the operations every worker serves (`fork`, `getVm`, `deleteVm`, `createRun`, `getRun`, `listRuns`, `sync`): `records` (it writes its own VM records), `sessions`, `pty`, `policies`, `mounts`, `patch`, `cancel`. */
+            /** @description What the worker offers beyond the operations every worker serves (`fork`, `getVm`, `deleteVm`, `createRun`, `sync`): `records` (it writes its own VM and run records; a worker without it reports them with the worker record calls, and Arker answers `listRuns` and `getRun` from those), `sessions`, `pty`, `policies`, `mounts`, `patch`, `cancel`, `ssh`. */
             capabilities?: string[];
             state: components["schemas"]["WorkerState"];
             resources: components["schemas"]["WorkerResources"];
             free: components["schemas"]["WorkerResources"];
-            /** @description VMs on the worker. A worker without `records` reports every VM it holds; one with `records` may omit this. */
-            vms?: components["schemas"]["WorkerVm"][];
         };
         WorkerHeartbeatResponse: {
             /** @description The worker identifier from the path. */
@@ -3058,10 +3075,59 @@ export interface components {
             desired_state: components["schemas"]["WorkerState"];
             /** @description WebSocket URL the worker keeps open so Arker can reach it. */
             tunnel_url: string;
-            /** @description The pool's own bucket when the pool keeps object storage, else null. */
-            object_storage?: {
-                bucket: string;
+            stores: components["schemas"]["WorkerStores"];
+            /** @description The deployment the worker runs as. */
+            deployment: {
+                /**
+                 * @description The deployment's tier, whose defaults fill in every flag it leaves unset.
+                 * @enum {string}
+                 */
+                tier: "feature" | "staging" | "prod";
+                /** @description The provider in the service's public names, e.g. `aws`. */
+                provider: string;
+                /** @description The region in the service's public names, e.g. `us-west-2`. */
                 region: string;
+            };
+        };
+        /** @description The stores in the pool's own account this worker uses, with their credentials. Sent only to the pool's own workers. */
+        WorkerStores: {
+            /** @description Where the worker keeps VM snapshots: an `aws` pool's own bucket, else the pool's prefix of Arker's regional store. Null for a pool of customer workers that isolates `vms`, whose workers keep snapshots in storage of their own, and while the bucket does not exist or the credentials cannot be minted. Goldens are read through URLs Arker presigns for them, never with these credentials. */
+            object_storage: {
+                /** @description S3 bucket. */
+                bucket: string;
+                /** @description The bucket's AWS region. */
+                region: string;
+                /** @description Key prefix the credentials may write under; empty for the whole bucket. */
+                prefix: string;
+                /** @description Short-lived AWS credentials; every heartbeat answer carries ones that are still fresh. */
+                credentials: {
+                    /** @description AWS access key id. */
+                    access_key_id: string;
+                    /** @description AWS secret access key. */
+                    secret_access_key: string;
+                    /** @description AWS session token. */
+                    session_token: string;
+                    /**
+                     * Format: date-time
+                     * @description When the credentials stop working.
+                     */
+                    expires_at: string;
+                };
+            } | null;
+            /** @description The pool's MySQL database once it is ready, when the pool isolates `metadata`, else null. */
+            metadata: {
+                host: string;
+                port: number;
+                database: string;
+                user: string;
+                password: string;
+            } | null;
+            /** @description The pool's ClickHouse server once it is ready, when the pool isolates `logs`, else null. */
+            logs: {
+                /** @description ClickHouse HTTP endpoint, `http://<private address>:8123`. */
+                endpoint: string;
+                user: string;
+                password: string;
             } | null;
         };
         Worker: {
@@ -3069,7 +3135,7 @@ export interface components {
             worker_id: string;
             /**
              * Format: uuid
-             * @description Pool the worker joined.
+             * @description Pool the worker heartbeats into.
              */
             pool_id: string;
             /** @description Software the worker runs. */
@@ -3104,7 +3170,7 @@ export interface components {
              * @enum {string}
              */
             role: "viewer" | "member" | "developer" | "admin";
-            /** @description `*` for everything; `vmid:<id>` limits the key to those VMs; `op:sync`, `op:pty` and `op:run` limit it to those operations; `pool:<id>:join` makes it a worker join key for that pool. */
+            /** @description A key reaches what its resource scopes and its operation scopes both allow. Resource scopes: `*` for everything, `vmid:<id>` for those VMs, `pool:<id>` for that pool's workers. Operation scopes: `op:sync`, `op:pty`, `op:run` and `op:heartbeat` limit the key to those operations. A worker key is exactly `pool:<id>` and `op:heartbeat`; neither scope is valid in any other set. */
             scopes: string[];
             /**
              * Format: date-time
@@ -3142,6 +3208,58 @@ export interface components {
         ListApiKeysResponse: {
             /** @description Unrevoked keys in the organization. */
             api_keys: components["schemas"]["ApiKey"][];
+        };
+        /** @description A VM a worker without `records` holds, as it reports it. */
+        WorkerVmRecord: {
+            /**
+             * @description `running` executes; `paused` keeps its memory but no CPU; `suspended` is a snapshot in storage.
+             * @enum {string}
+             */
+            state: "running" | "paused" | "suspended";
+            /** @description Platform the VM runs on, one the worker serves. */
+            platform: string;
+            /** @description Resources the VM holds. */
+            resources: components["schemas"]["WorkerResources"];
+            /** @description Image the VM was created from, if any. */
+            image: string | null;
+            /** @description VM this one was forked from, if any. */
+            parent_vm_id: string | null;
+            /**
+             * Format: date-time
+             * @description When the VM was created.
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description When the VM last ran a command or was synced.
+             */
+            last_active_at: string | null;
+        };
+        /** @description A run on a VM of a worker without `records`, as the worker reports it when the run starts and again when it ends. */
+        WorkerRunRecord: {
+            /**
+             * @description `running` until the command ends; then `completed` (it exited), `failed` (the worker could not run or finish it) or `cancelled`.
+             * @enum {string}
+             */
+            state: "running" | "completed" | "failed" | "cancelled";
+            /** @description The command the run executes. */
+            command: string;
+            /** @description The command's exit status once it has one. */
+            exit_code: number | null;
+            /**
+             * Format: date-time
+             * @description When the run started.
+             */
+            started_at: string;
+            /**
+             * Format: date-time
+             * @description When the run ended; null while it runs.
+             */
+            finished_at: string | null;
+            /** @description Standard output. Arker keeps the first 64 KiB of stdout and stderr together, stdout first. */
+            stdout: string | null;
+            /** @description Standard error. */
+            stderr: string | null;
         };
     };
     responses: {
@@ -4348,8 +4466,8 @@ export interface operations {
                 persist?: boolean;
                 /** @description Destroy the PTY after this many seconds without terminal input or output. Omit or set to zero to disable this PTY-specific idle limit. */
                 cancel_ttl_secs?: number;
-                /** @description Browser auth: a short-lived ticket from POST .../pty-ticket, used in place of the Authorization header (which a browser WebSocket cannot set). */
-                ticket?: string;
+                /** @description Browser auth, used in place of the Authorization header a browser WebSocket cannot set: an API key limited to `vmid:` and `op:pty` scopes. Give it a short `expires_at`. */
+                api_key?: string;
             };
             header?: never;
             path: {
@@ -4376,42 +4494,6 @@ export interface operations {
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateOrResourceBusyError"];
             422: components["responses"]["UnsupportedOperationError"];
-            429: components["responses"]["QuotaExceededOrRateLimitedError"];
-            500: components["responses"]["InternalError"];
-            503: components["responses"]["UnavailableError"];
-            504: components["responses"]["GatewayTimeoutError"];
-        };
-    };
-    mintSessionPtyTicket: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
-                id: components["parameters"]["VmId"];
-                /** @description Session identifier. */
-                sid: components["parameters"]["SessionId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Ticket minted. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PtyTicketResponse"];
-                };
-            };
-            400: components["responses"]["BadRequestError"];
-            401: components["responses"]["UnauthorizedError"];
-            402: components["responses"]["PaymentRequiredError"];
-            403: components["responses"]["ForbiddenError"];
-            404: components["responses"]["NotFoundError"];
-            409: components["responses"]["InvalidStateError"];
-            413: components["responses"]["PayloadTooLargeError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4973,6 +5055,111 @@ export interface operations {
         responses: {
             /** @description Switching to the tunnel. */
             101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    putWorkerVm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier. */
+                pool_id: string;
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: string;
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkerVmRecord"];
+            };
+        };
+        responses: {
+            /** @description The VM is recorded. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    deleteWorkerVm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier. */
+                pool_id: string;
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: string;
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The VM is recorded as deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    putWorkerRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier. */
+                pool_id: string;
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: string;
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: string;
+                /** @description Run identifier the worker chose. */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkerRunRecord"];
+            };
+        };
+        responses: {
+            /** @description The run is recorded. */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };

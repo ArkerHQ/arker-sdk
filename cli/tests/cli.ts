@@ -665,7 +665,7 @@ const CLI_POOL = {
   commitments: [],
   compute: { type: "managed" },
   joinable: false,
-  dedicated_storage: [],
+  isolation: [],
   source_vm_id: null,
   max_forks: null,
   created_at: "2026-09-25T00:00:00Z",
@@ -674,7 +674,7 @@ const CLI_API_KEY = {
   api_key_id: "key_1",
   name: "worker",
   role: "member",
-  scopes: ["pool:7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61:join"],
+  scopes: ["pool:7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61", "op:heartbeat"],
   created_at: "2026-10-12T00:00:00Z",
   expires_at: null,
 };
@@ -716,8 +716,8 @@ async function testPoolsCreateAwsGoesToTheRegionalServer(): Promise<void> {
     const result = await run([
       "pools", "create", "--name", "ci", "--vcpu", "8", "--memory-mib", "32768",
       "--commitment", "2026-10-01T00:00:00Z/2026-10-31T00:00:00Z", "--joinable",
-      "--compute", "aws", "--aws-account-id", "123456789012", "--aws-role-arn", "arn:aws:iam::123456789012:role/arker",
-      "--subnet-ids", "subnet-1,subnet-2", "--dedicated-storage", "object_storage",
+      "--compute", "aws", "--aws-account-id", "123456789012",
+      "--subnet-ids", "subnet-1,subnet-2", "--isolation", "vms,logs,metadata",
     ]);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(stdoutText(result)).pool_id, CLI_POOL.pool_id);
@@ -730,11 +730,10 @@ async function testPoolsCreateAwsGoesToTheRegionalServer(): Promise<void> {
       compute: {
         type: "aws",
         account_id: "123456789012",
-        role_arn: "arn:aws:iam::123456789012:role/arker",
         subnet_ids: ["subnet-1", "subnet-2"],
       },
       joinable: true,
-      dedicated_storage: ["object_storage"],
+      isolation: ["vms", "logs", "metadata"],
     });
   });
 }
@@ -792,7 +791,7 @@ async function testApiKeysGoToTheControlPlane(): Promise<void> {
     assert.equal((await run(["api-keys", "ls"])).code, 0);
     const created = await run([
       "api-keys", "create", "--name", "worker", "--role", "member",
-      "--join-pool", CLI_POOL.pool_id, "--expires-at", "2026-12-01T00:00:00Z",
+      "--worker-pool", CLI_POOL.pool_id, "--expires-at", "2026-12-01T00:00:00Z",
     ]);
     assert.equal(created.code, 0, created.stderr);
     assert.equal(JSON.parse(stdoutText(created)).key, "ark_live_secret");
@@ -808,11 +807,19 @@ async function testApiKeysGoToTheControlPlane(): Promise<void> {
     assert.deepEqual(control[1]!.body, {
       name: "worker",
       role: "member",
-      scopes: [`pool:${CLI_POOL.pool_id}:join`],
+      scopes: [`pool:${CLI_POOL.pool_id}`, "op:heartbeat"],
       expires_at: "2026-12-01T00:00:00Z",
     });
     assert.deepEqual(control[2]!.body, { scopes: ["vmid:vm_1", "op:run"] });
   });
+}
+
+async function testWorkerPoolAndScopeAreExclusive(): Promise<void> {
+  const result = await runCli("http://127.0.0.1:1", [
+    "api-keys", "create", "--worker-pool", CLI_POOL.pool_id, "--scope", "op:run",
+  ]);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /--worker-pool and --scope are mutually exclusive/);
 }
 
 async function testRemovedSecretAndUrlFlagsFailLocally(): Promise<void> {
@@ -1569,6 +1576,7 @@ await testPoolsListAndGetGoToTheControlPlane();
 await testPoolsUpdateRmAndWorkersGoToTheRegionalServer();
 await testPoolsUpdateNeedsAField();
 await testApiKeysGoToTheControlPlane();
+await testWorkerPoolAndScopeAreExclusive();
 await testRemovedSecretAndUrlFlagsFailLocally();
 await testHelpMatchesSupportedSurface();
 await testPerCommandHelpIsCommandSpecific();

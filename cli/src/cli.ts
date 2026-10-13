@@ -41,7 +41,7 @@ import type {
   PolicyDoc,
   PoolCommitment,
   PoolComputeInput,
-  PoolDedicatedStorage,
+  PoolIsolation,
   PoolResources,
   UpdatePoolOptions,
   ForkOptions,
@@ -214,8 +214,8 @@ const POOL_OPTIONS: Record<string, OptionSpecs> = {
     "aws-region": { type: "string" },
     "aws-role-arn": { type: "string" },
     compute: { type: "string", values: ["managed", "aws"] },
-    "dedicated-storage": { type: "string" },
     "instance-types": { type: "string" },
+    isolation: { type: "string" },
     joinable: { type: "boolean" },
     "security-group-ids": { type: "string" },
     "source-vm-id": { type: "string" },
@@ -233,10 +233,10 @@ const API_KEY_OPTIONS: Record<string, OptionSpecs> = {
   create: {
     ...GLOBAL_OPTIONS,
     "expires-at": { type: "string" },
-    "join-pool": { type: "string" },
     name: { type: "string" },
     role: { type: "string", values: ["viewer", "member", "developer", "admin"] },
     scope: { type: "string", repeatable: true },
+    "worker-pool": { type: "string" },
   },
 };
 
@@ -1681,7 +1681,7 @@ function poolComputeFromArgs(args: ParsedArgs): PoolComputeInput | undefined {
   return {
     type: "aws",
     account_id: (args.flags["aws-account-id"] as string | undefined) ?? die("--compute aws needs --aws-account-id"),
-    role_arn: (args.flags["aws-role-arn"] as string | undefined) ?? die("--compute aws needs --aws-role-arn"),
+    role_arn: args.flags["aws-role-arn"] as string | undefined,
     subnet_ids: listFlag(args, "subnet-ids") ?? die("--compute aws needs --subnet-ids"),
     region: args.flags["aws-region"] as string | undefined,
     security_group_ids: listFlag(args, "security-group-ids"),
@@ -1696,7 +1696,7 @@ function poolCreateFromArgs(args: ParsedArgs): CreatePoolOptions {
     commitments: poolCommitmentsFromArgs(args),
     compute: poolComputeFromArgs(args),
     joinable: args.flags.joinable === true ? true : undefined,
-    dedicated_storage: listFlag(args, "dedicated-storage") as PoolDedicatedStorage[] | undefined,
+    isolation: listFlag(args, "isolation") as PoolIsolation[] | undefined,
     source_vm_id: args.flags["source-vm-id"] as string | undefined,
     max_forks: numFlag(args, "max-forks"),
   };
@@ -1734,11 +1734,12 @@ async function cmdApiKeys(args: ParsedArgs, client: Arker): Promise<void> {
     }
     case "create": {
       const scopeFlags = (args.flags.scope as string[] | undefined) ?? [];
-      const joinPool = args.flags["join-pool"] as string | undefined;
+      const workerPool = args.flags["worker-pool"] as string | undefined;
+      if (workerPool && scopeFlags.length) die("--worker-pool and --scope are mutually exclusive: a worker key has exactly its two scopes");
       const request: CreateApiKeyOptions = {
         name: args.flags.name as string | undefined,
         role: args.flags.role as CreateApiKeyOptions["role"],
-        scopes: joinPool ? [...scopeFlags, scopes.poolJoin(joinPool)] : scopeFlags.length ? scopeFlags : undefined,
+        scopes: workerPool ? scopes.worker(workerPool) : scopeFlags.length ? scopeFlags : undefined,
         expires_at: args.flags["expires-at"] as string | undefined,
       };
       out(await client.createApiKey(request));
@@ -1979,19 +1980,19 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   "idempotency-key": { placeholder: "<key>", desc: "deduplicate retries of this run request" },
   "aws-account-id": { placeholder: "<id>", desc: "AWS account Arker launches hosts in (--compute aws)" },
   "aws-region": { placeholder: "<region>", desc: "AWS region to launch in (default: the pool's region)" },
-  "aws-role-arn": { placeholder: "<arn>", desc: "role Arker assumes to launch and terminate hosts" },
+  "aws-role-arn": { placeholder: "<arn>", desc: "role Arker assumes (default: the ArkerPool-* role the pool's setup_url creates)" },
   "clear-name": { desc: "remove the pool's name" },
   commitment: { placeholder: "<start/end[,...]>", desc: "committed periods as RFC 3339 <starts_at>/<ends_at>; update replaces the full list" },
   compute: { placeholder: "<managed|aws>", desc: "whose compute runs the pool (default managed)" },
-  "dedicated-storage": { placeholder: "<class[,...]>", desc: "state kept in storage the pool owns (object_storage)" },
   "expires-at": { placeholder: "<timestamp>", desc: "RFC 3339 time the key stops working (default never)" },
   "instance-types": { placeholder: "<type[,...]>", desc: "EC2 instance types to launch, in order of preference" },
-  joinable: { desc: "let workers holding a join key add capacity" },
-  "join-pool": { placeholder: "<pool_id>", desc: "make the key a worker join key for this pool" },
+  isolation: { placeholder: "<vms,logs,metadata>", desc: "state the pool keeps for itself instead of in Arker's shared stores" },
+  joinable: { desc: "let workers holding a worker key for this pool add capacity" },
+  "worker-pool": { placeholder: "<pool_id>", desc: "make a worker key for this pool: scopes pool:<id> and op:heartbeat" },
   "no-joinable": { desc: "stop workers from joining the pool" },
   "max-forks": { placeholder: "<n>", desc: "forks of the source VM to keep room for" },
   role: { desc: "role of the new key; cannot exceed yours", placeholder: "<role>" },
-  scope: { placeholder: "<scope>", desc: "limit the key: *, vmid:<id>, op:<sync|pty|run>, pool:<id>:join; repeatable" },
+  scope: { placeholder: "<scope>", desc: "limit the key: *, vmid:<id>, op:<sync|pty|run>; repeatable" },
   "security-group-ids": { placeholder: "<id[,...]>", desc: "security groups for the hosts" },
   "subnet-ids": { placeholder: "<id[,...]>", desc: "subnets hosts launch into" },
   json: { desc: "emit JSON instead of tabular output" },
@@ -2122,17 +2123,26 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       "create, update, rm and workers go to --provider and --region (or ARKER_PROVIDER and ARKER_REGION).",
       "Creating, changing and deleting need an admin API key. A pool cannot shrink or be deleted",
       "while a commitment is active. For compute you own: --compute aws --aws-account-id <id>",
-      "--aws-role-arn <arn> --subnet-ids <id,...>. For a fork reserve: --source-vm-id <id> --max-forks <n>.",
+      "--subnet-ids <id,...>, then open compute.setup_url in that account to create the role; the pool",
+      "stays provisioning until it exists (state_detail says why). --isolation vms,logs,metadata keeps",
+      "that state in the pool's own account (logs and metadata need --compute aws). For a fork reserve:",
+      "--source-vm-id <id> --max-forks <n>.",
     ],
   },
   "api-keys": {
     synopsis: [
       "arker api-keys <ls|revoke> [api_key_id] [flags]",
-      "arker api-keys create [--name <n>] [--role <role>] [--scope <scope>]... [--join-pool <pool_id>] [--expires-at <time>]",
+      "arker api-keys create [--name <n>] [--role <role>] [--scope <scope>]... [--expires-at <time>]",
+      "arker api-keys create --worker-pool <pool_id> [--name <n>] [--expires-at <time>]",
     ],
     summary: "List, create and revoke API keys.",
     subs: { ls: "list keys", create: "create a key; the secret is shown once", revoke: "revoke a key" },
-    notes: ["A new key's role and reach cannot exceed the calling key's. A join key's only scope is pool:<id>:join."],
+    notes: [
+      "A key reaches what its resource scopes (*, vmid:<id>) and operation scopes (op:sync, op:pty, op:run)",
+      "both allow; the default is *. A new key's role and reach cannot exceed the calling key's.",
+      "A worker key (--worker-pool) is exactly pool:<id> and op:heartbeat, and needs an admin caller.",
+      "A browser terminal authenticates with a short-lived key scoped vmid:<id> and op:pty as ?api_key=.",
+    ],
   },
   regions: {
     synopsis: ["arker regions [flags]"],
@@ -2318,7 +2328,7 @@ function usage(command?: string, positional: string[] = []): void {
       "  arker filesystems <ls|create|get|rm> ...   (alias: fs)",
       "  arker pools <ls|get|usage|workers|create|update|rm> ...",
       "                                              create and manage pools",
-      "  arker api-keys <ls|create|revoke> ...        manage API keys and worker join keys",
+      "  arker api-keys <ls|create|revoke> ...        manage API keys and pool worker keys",
       "  arker sync <vm_id> <path> [data|-]          read a file, or write data/stdin",
       "  arker sync <vm_id> <path> --read            read a file, ignoring stdin",
       "  arker sync-dir <vm_id> <local> <remote>     sync a directory into the VM",

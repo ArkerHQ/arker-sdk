@@ -46,6 +46,34 @@ console.log(new TextDecoder().decode(data));
 await vm.delete();
 ```
 
+## Scoped API keys
+
+A key reaches what its resource scopes and its operation scopes both allow:
+
+| Kind | Scopes |
+| --- | --- |
+| Resource | `*` (everything; the default, and only valid alone), `vmid:<id>` (those VMs), `pool:<id>` (that pool's workers) |
+| Operation | `op:sync`, `op:pty`, `op:run`, `op:heartbeat` (only those operations) |
+
+A worker key is exactly `["pool:<id>", "op:heartbeat"]`, and neither scope is valid in any other set; only an admin can create one. A new key's role and reach cannot exceed the calling key's.
+
+```ts
+import { scopes } from "@arker-ai/sdk";
+
+const { key } = await arker.createApiKey({ name: "ci", scopes: [scopes.vm(vm.id), scopes.op("run")] });
+const worker = await arker.createApiKey({ name: "worker", scopes: scopes.worker(poolId) });
+```
+
+## Terminals in a browser
+
+`vm.connectPty()` authenticates with the `Authorization` header in Node. A browser WebSocket cannot set headers, so a browser passes a short-lived key limited to one VM and `op:pty` as `api_key`; Arker refuses any broader key there. In a browser, `connectPty()` mints that key for you. To hand a terminal URL from your server to a browser:
+
+```ts
+const { key } = await arker.createPtyKey(vm.id); // ["vmid:<id>", "op:pty"], expires in 5 minutes
+const session = await vm.createSession();
+const url = vm.ptyUrl({ sessionId: session.session_id, apiKey: key });
+```
+
 ## Documentation and examples
 
 Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [examples](../examples).

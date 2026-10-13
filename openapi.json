@@ -1515,13 +1515,13 @@
           "description": "Destroy the PTY after this many seconds without terminal input or output. Omit or set to zero to disable this PTY-specific idle limit."
         },
         {
-          "name": "ticket",
+          "name": "api_key",
           "in": "query",
           "required": false,
           "schema": {
             "type": "string"
           },
-          "description": "Browser auth: a short-lived ticket from POST .../pty-ticket, used in place of the Authorization header (which a browser WebSocket cannot set)."
+          "description": "Browser auth, used in place of the Authorization header a browser WebSocket cannot set: an API key limited to `vmid:` and `op:pty` scopes. Give it a short `expires_at`."
         }
       ],
       "get": {
@@ -1530,13 +1530,13 @@
           "PTY"
         ],
         "summary": "Open an interactive PTY (WebSocket upgrade)",
-        "description": "Upgrades to a WebSocket carrying an interactive pseudo-terminal in the VM, reusing the same interactive terminal as SSH. Authenticate with a bearer API key or, for browser clients, a short-lived PTY ticket. Reopening the same `session_id` reconnects to a persistent shell and replays recent scrollback. Binary server frames contain raw terminal output; binary client frames contain stdin bytes. Text client frames accept JSON controls for `resize`, `kill`, and `ping`. Closing the socket detaches a persistent shell or destroys a non-persistent shell; `kill` always destroys it. The service enforces attachment limits and closes oversized or idle connections.",
+        "description": "Upgrades to a WebSocket carrying an interactive pseudo-terminal in the VM, reusing the same interactive terminal as SSH. Authenticate with a bearer API key or, for browser clients, a short-lived key limited to this VM and `op:pty` as `api_key`. Reopening the same `session_id` reconnects to a persistent shell and replays recent scrollback. Binary server frames contain raw terminal output; binary client frames contain stdin bytes. Text client frames accept JSON controls for `resize`, `kill`, and `ping`. Closing the socket detaches a persistent shell or destroys a non-persistent shell; `kill` always destroys it. The service enforces attachment limits and closes oversized or idle connections.",
         "security": [
           {
             "BearerAuth": []
           },
           {
-            "PtyTicket": []
+            "PtyApiKey": []
           }
         ],
         "responses": {
@@ -1563,69 +1563,6 @@
           },
           "422": {
             "$ref": "#/components/responses/UnsupportedOperationError"
-          },
-          "429": {
-            "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "503": {
-            "$ref": "#/components/responses/UnavailableError"
-          },
-          "504": {
-            "$ref": "#/components/responses/GatewayTimeoutError"
-          }
-        }
-      }
-    },
-    "/v1/vms/{id}/sessions/{sid}/pty-ticket": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/VmId"
-        },
-        {
-          "$ref": "#/components/parameters/SessionId"
-        }
-      ],
-      "post": {
-        "operationId": "mintSessionPtyTicket",
-        "tags": [
-          "PTY"
-        ],
-        "summary": "Mint a browser PTY ticket",
-        "description": "Returns a short-lived, multi-use credential for opening the PTY WebSocket from a browser, which cannot set an Authorization header. The bearer-authenticated caller must own the VM. Pass the returned credential as the `ticket` query parameter on the PTY WebSocket URL.",
-        "responses": {
-          "200": {
-            "description": "Ticket minted.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PtyTicketResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequestError"
-          },
-          "401": {
-            "$ref": "#/components/responses/UnauthorizedError"
-          },
-          "402": {
-            "$ref": "#/components/responses/PaymentRequiredError"
-          },
-          "403": {
-            "$ref": "#/components/responses/ForbiddenError"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFoundError"
-          },
-          "409": {
-            "$ref": "#/components/responses/InvalidStateError"
-          },
-          "413": {
-            "$ref": "#/components/responses/PayloadTooLargeError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -2309,7 +2246,7 @@
           "Pools"
         ],
         "summary": "Update a pool",
-        "description": "Rename, resize, change commitments or join settings. Resources cannot shrink while a commitment is active. Requires an API key with every scope.",
+        "description": "Rename, resize, change commitments or whether the pool takes workers. Resources cannot shrink while a commitment is active. Requires an API key with every scope.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2462,7 +2399,7 @@
           "Pools"
         ],
         "summary": "List a pool's workers",
-        "description": "Workers that joined the pool and heartbeated within the last day.",
+        "description": "Workers that heartbeated into the pool within the last day.",
         "responses": {
           "200": {
             "description": "The pool's workers.",
@@ -2523,8 +2460,8 @@
         "tags": [
           "Pools"
         ],
-        "summary": "Join a pool or heartbeat",
-        "description": "Join the pool, or keep the worker in it. Requires an API key whose scopes are exactly `pool:<pool_id>:join` for this pool.",
+        "summary": "Heartbeat a worker",
+        "description": "The first heartbeat adds the worker to the pool, each one after keeps it there, and `state` `left` removes it. Requires a worker key: an API key whose scopes are exactly `pool:<pool_id>` for this pool and `op:heartbeat`.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2570,7 +2507,19 @@
           "503": {
             "$ref": "#/components/responses/UnavailableError"
           }
-        }
+        },
+        "servers": [
+          {
+            "url": "https://{regionalHost}/api",
+            "description": "A pool's workers call its region's endpoint, returned by GET /v1/regions; https://arker.ai/api does not serve these routes.",
+            "variables": {
+              "regionalHost": {
+                "default": "aws-us-west-2.arker.ai",
+                "description": "Hostname of the regional endpoint to query."
+              }
+            }
+          }
+        ]
       }
     },
     "/v1/pools/{pool_id}/workers/{worker_id}/tunnel": {
@@ -2602,7 +2551,7 @@
           "Pools"
         ],
         "summary": "Open the worker tunnel",
-        "description": "Upgrade to a WebSocket with subprotocol `arker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API. Requires the same join key as the heartbeat, after the worker has joined.",
+        "description": "Upgrade to a WebSocket with subprotocol `worker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API; a fork names the VM id to use in header `x-vm-id`. Requires the same worker key as the heartbeat, after the worker's first heartbeat.",
         "responses": {
           "101": {
             "description": "Switching to the tunnel."
@@ -2628,7 +2577,252 @@
           "503": {
             "$ref": "#/components/responses/UnavailableError"
           }
+        },
+        "servers": [
+          {
+            "url": "https://{regionalHost}/api",
+            "description": "A pool's workers call its region's endpoint, returned by GET /v1/regions; https://arker.ai/api does not serve these routes.",
+            "variables": {
+              "regionalHost": {
+                "default": "aws-us-west-2.arker.ai",
+                "description": "Hostname of the regional endpoint to query."
+              }
+            }
+          }
+        ]
+      }
+    },
+    "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}": {
+      "parameters": [
+        {
+          "name": "pool_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "Pool identifier."
+        },
+        {
+          "name": "worker_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "description": "Worker identifier: a ULID the worker generates once and keeps."
+        },
+        {
+          "name": "vm_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "description": "VM identifier Arker handed the worker with the fork (`x-vm-id`)."
         }
+      ],
+      "put": {
+        "operationId": "putWorkerVm",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Record a worker's VM",
+        "description": "Record the VM as it is now; send it again on every change. Arker lists the VM from this record. Requires the pool's worker key, and a VM Arker forked onto this worker; any other VM is not found.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerVmRecord"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "The VM is recorded."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        },
+        "servers": [
+          {
+            "url": "https://{regionalHost}/api",
+            "description": "A pool's workers call its region's endpoint, returned by GET /v1/regions; https://arker.ai/api does not serve these routes.",
+            "variables": {
+              "regionalHost": {
+                "default": "aws-us-west-2.arker.ai",
+                "description": "Hostname of the regional endpoint to query."
+              }
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteWorkerVm",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Forget a worker's VM",
+        "description": "Record that the VM is gone. Requires the pool's worker key, and a VM Arker forked onto this worker; any other VM is not found.",
+        "responses": {
+          "204": {
+            "description": "The VM is recorded as deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        },
+        "servers": [
+          {
+            "url": "https://{regionalHost}/api",
+            "description": "A pool's workers call its region's endpoint, returned by GET /v1/regions; https://arker.ai/api does not serve these routes.",
+            "variables": {
+              "regionalHost": {
+                "default": "aws-us-west-2.arker.ai",
+                "description": "Hostname of the regional endpoint to query."
+              }
+            }
+          }
+        ]
+      }
+    },
+    "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}/runs/{run_id}": {
+      "parameters": [
+        {
+          "name": "pool_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "Pool identifier."
+        },
+        {
+          "name": "worker_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "description": "Worker identifier: a ULID the worker generates once and keeps."
+        },
+        {
+          "name": "vm_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "description": "VM identifier Arker handed the worker with the fork (`x-vm-id`)."
+        },
+        {
+          "name": "run_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "description": "Run identifier the worker chose."
+        }
+      ],
+      "put": {
+        "operationId": "putWorkerRun",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Record a run",
+        "description": "Record a run when it starts and again when it ends. Arker answers `listRuns` and `getRun` for the VM from these records. Requires the pool's worker key, and a VM Arker forked onto this worker; any other VM is not found.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerRunRecord"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "The run is recorded."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        },
+        "servers": [
+          {
+            "url": "https://{regionalHost}/api",
+            "description": "A pool's workers call its region's endpoint, returned by GET /v1/regions; https://arker.ai/api does not serve these routes.",
+            "variables": {
+              "regionalHost": {
+                "default": "aws-us-west-2.arker.ai",
+                "description": "Hostname of the regional endpoint to query."
+              }
+            }
+          }
+        ]
       }
     },
     "/v1/api-keys": {
@@ -2768,11 +2962,11 @@
         "scheme": "bearer",
         "bearerFormat": "Arker API key"
       },
-      "PtyTicket": {
+      "PtyApiKey": {
         "type": "apiKey",
         "in": "query",
-        "name": "ticket",
-        "description": "Short-lived browser credential created by the PTY ticket endpoint."
+        "name": "api_key",
+        "description": "An API key limited to `vmid:` and `op:pty` scopes, for browser WebSockets."
       }
     },
     "parameters": {
@@ -6280,25 +6474,6 @@
           }
         }
       },
-      "PtyTicketResponse": {
-        "type": "object",
-        "required": [
-          "ticket",
-          "expires_in"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "ticket": {
-            "description": "Short-lived credential for opening the terminal WebSocket.",
-            "type": "string"
-          },
-          "expires_in": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "Seconds until expiry."
-          }
-        }
-      },
       "Mount": {
         "type": "object",
         "required": [
@@ -7574,7 +7749,6 @@
           "patchSession",
           "deleteSession",
           "attachSessionPty",
-          "mintSessionPtyTicket",
           "createMount",
           "listMounts",
           "deleteMount",
@@ -7592,6 +7766,9 @@
           "listPoolWorkers",
           "heartbeatWorker",
           "openWorkerTunnel",
+          "putWorkerVm",
+          "deleteWorkerVm",
+          "putWorkerRun",
           "listApiKeys",
           "createApiKey",
           "revokeApiKey"
@@ -10658,14 +10835,14 @@
           },
           "joinable": {
             "type": "boolean",
-            "description": "Let workers holding a join key add capacity. Defaults to false."
+            "description": "Let workers holding a worker key for this pool add capacity. Defaults to false."
           },
-          "dedicated_storage": {
+          "isolation": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PoolDedicatedStorage"
+              "$ref": "#/components/schemas/PoolIsolation"
             },
-            "description": "Classes of state kept in storage owned by the pool. Defaults to none."
+            "description": "What the pool keeps for itself instead of in Arker's shared regional stores. `metadata` and `logs` need `compute.type` `aws`; `vms` needs `aws` compute or `joinable`, whose workers then keep VM storage themselves."
           },
           "source_vm_id": {
             "type": "string",
@@ -10704,7 +10881,7 @@
           },
           "joinable": {
             "type": "boolean",
-            "description": "Whether workers holding a join key may join."
+            "description": "Whether workers holding a worker key for this pool add capacity."
           },
           "max_forks": {
             "type": "integer",
@@ -10729,7 +10906,7 @@
           "commitments",
           "compute",
           "joinable",
-          "dedicated_storage",
+          "isolation",
           "source_vm_id",
           "max_forks",
           "created_at"
@@ -10782,14 +10959,14 @@
           },
           "joinable": {
             "type": "boolean",
-            "description": "Whether workers holding a join key for this pool may join it."
+            "description": "Whether workers holding a worker key for this pool add capacity."
           },
-          "dedicated_storage": {
+          "isolation": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PoolDedicatedStorage"
+              "$ref": "#/components/schemas/PoolIsolation"
             },
-            "description": "Classes of state kept in storage owned by the pool."
+            "description": "What the pool keeps for itself instead of in Arker's shared regional stores. `metadata` and `logs` need `compute.type` `aws`; `vms` needs `aws` compute or `joinable`, whose workers then keep VM storage themselves."
           },
           "source_vm_id": {
             "type": [
@@ -11259,7 +11436,6 @@
         "required": [
           "type",
           "account_id",
-          "role_arn",
           "subnet_ids"
         ],
         "properties": {
@@ -11278,7 +11454,7 @@
           "role_arn": {
             "type": "string",
             "pattern": "^arn:aws:iam::[0-9]{12}:role/.+$",
-            "description": "Role Arker assumes to launch and terminate hosts. It must trust Arker's account with `external_id`."
+            "description": "Role Arker assumes in your account; its name must start with `ArkerPool`. Defaults to `arn:aws:iam::<account_id>:role/ArkerPool-<last 8 characters of external_id>`, the role `setup_url` creates for this pool."
           },
           "external_id": {
             "type": "string",
@@ -11310,6 +11486,14 @@
               "type": "string"
             },
             "description": "Instance types to launch, in order of preference. They must support hardware virtualization."
+          },
+          "setup_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "readOnly": true,
+            "description": "Open this while signed in to the account to create the role Arker needs, with this pool's `external_id`. The pool stays `provisioning` until the role exists."
           }
         }
       },
@@ -11331,14 +11515,14 @@
           }
         }
       },
-      "PoolDedicatedStorage": {
+      "PoolIsolation": {
         "type": "string",
         "enum": [
-          "object_storage",
-          "database",
-          "logs"
+          "vms",
+          "logs",
+          "metadata"
         ],
-        "description": "A class of state kept in storage owned by the pool instead of Arker's shared regional stores: `object_storage` holds snapshots and files, `database` holds VM and run records, `logs` holds run output and events. Only `object_storage` is supported today."
+        "description": "A class of state a pool keeps for itself instead of in Arker's regional stores: `vms` keeps VM snapshots and files in the pool's bucket (on a joinable pool without `aws` compute, in storage each worker configures itself), `metadata` keeps VM, run and session records in a MySQL database (Amazon RDS), `logs` keeps run output and events in a ClickHouse server. `metadata` and `logs` need `aws` compute: Arker provisions them through the pool's role, and the pool stays `provisioning` until they are ready."
       },
       "WorkerResources": {
         "type": "object",
@@ -11373,11 +11557,8 @@
       },
       "WorkerKind": {
         "type": "string",
-        "enum": [
-          "arkerd",
-          "blast"
-        ],
-        "description": "The software the worker runs."
+        "pattern": "^[a-z0-9][a-z0-9_-]{0,15}$",
+        "description": "The software the worker runs, such as `arkerd`. It names the software only; what the worker can do is in its `capabilities`."
       },
       "WorkerState": {
         "type": "string",
@@ -11387,32 +11568,6 @@
           "left"
         ],
         "description": "`active` takes new VMs; `draining` keeps its VMs but takes no new ones; `left` has handed back everything and is leaving the pool."
-      },
-      "WorkerVm": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "vm_id",
-          "resources"
-        ],
-        "description": "A VM the worker holds.",
-        "properties": {
-          "vm_id": {
-            "type": "string",
-            "description": "VM identifier."
-          },
-          "resources": {
-            "$ref": "#/components/schemas/WorkerResources",
-            "description": "Resources the VM holds."
-          },
-          "image": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Image the VM was created from, if known."
-          }
-        }
       },
       "WorkerHeartbeat": {
         "type": "object",
@@ -11425,7 +11580,7 @@
           "resources",
           "free"
         ],
-        "description": "A worker joins the pool in the path with its first heartbeat and stays in it while heartbeats arrive.",
+        "description": "A worker is in the pool in the path from its first heartbeat while heartbeats arrive.",
         "properties": {
           "kind": {
             "$ref": "#/components/schemas/WorkerKind"
@@ -11450,7 +11605,7 @@
               "type": "string",
               "pattern": "^[a-z0-9_]{1,64}$"
             },
-            "description": "What the worker offers beyond the operations every worker serves (`fork`, `getVm`, `deleteVm`, `createRun`, `getRun`, `listRuns`, `sync`): `records` (it writes its own VM records), `sessions`, `pty`, `policies`, `mounts`, `patch`, `cancel`."
+            "description": "What the worker offers beyond the operations every worker serves (`fork`, `getVm`, `deleteVm`, `createRun`, `sync`): `records` (it writes its own VM and run records; a worker without it reports them with the worker record calls, and Arker answers `listRuns` and `getRun` from those), `sessions`, `pty`, `policies`, `mounts`, `patch`, `cancel`, `ssh`."
           },
           "state": {
             "$ref": "#/components/schemas/WorkerState"
@@ -11460,13 +11615,6 @@
           },
           "free": {
             "$ref": "#/components/schemas/WorkerResources"
-          },
-          "vms": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WorkerVm"
-            },
-            "description": "VMs on the worker. A worker without `records` reports every VM it holds; one with `records` may omit this."
           }
         }
       },
@@ -11477,7 +11625,9 @@
           "worker_id",
           "heartbeat_interval_ms",
           "desired_state",
-          "tunnel_url"
+          "tunnel_url",
+          "stores",
+          "deployment"
         ],
         "properties": {
           "worker_id": {
@@ -11496,6 +11646,49 @@
             "type": "string",
             "description": "WebSocket URL the worker keeps open so Arker can reach it."
           },
+          "stores": {
+            "$ref": "#/components/schemas/WorkerStores"
+          },
+          "deployment": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tier",
+              "provider",
+              "region"
+            ],
+            "properties": {
+              "tier": {
+                "type": "string",
+                "enum": [
+                  "feature",
+                  "staging",
+                  "prod"
+                ],
+                "description": "The deployment's tier, whose defaults fill in every flag it leaves unset."
+              },
+              "provider": {
+                "type": "string",
+                "description": "The provider in the service's public names, e.g. `aws`."
+              },
+              "region": {
+                "type": "string",
+                "description": "The region in the service's public names, e.g. `us-west-2`."
+              }
+            },
+            "description": "The deployment the worker runs as."
+          }
+        }
+      },
+      "WorkerStores": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "object_storage",
+          "metadata",
+          "logs"
+        ],
+        "properties": {
           "object_storage": {
             "type": [
               "object",
@@ -11504,19 +11697,117 @@
             "additionalProperties": false,
             "required": [
               "bucket",
-              "region"
+              "region",
+              "prefix",
+              "credentials"
             ],
             "properties": {
               "bucket": {
-                "type": "string"
+                "type": "string",
+                "description": "S3 bucket."
               },
               "region": {
+                "type": "string",
+                "description": "The bucket's AWS region."
+              },
+              "prefix": {
+                "type": "string",
+                "description": "Key prefix the credentials may write under; empty for the whole bucket."
+              },
+              "credentials": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "access_key_id",
+                  "secret_access_key",
+                  "session_token",
+                  "expires_at"
+                ],
+                "properties": {
+                  "access_key_id": {
+                    "type": "string",
+                    "description": "AWS access key id."
+                  },
+                  "secret_access_key": {
+                    "type": "string",
+                    "description": "AWS secret access key."
+                  },
+                  "session_token": {
+                    "type": "string",
+                    "description": "AWS session token."
+                  },
+                  "expires_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "When the credentials stop working."
+                  }
+                },
+                "description": "Short-lived AWS credentials; every heartbeat answer carries ones that are still fresh."
+              }
+            },
+            "description": "Where the worker keeps VM snapshots: an `aws` pool's own bucket, else the pool's prefix of Arker's regional store. Null for a pool of customer workers that isolates `vms`, whose workers keep snapshots in storage of their own, and while the bucket does not exist or the credentials cannot be minted. Goldens are read through URLs Arker presigns for them, never with these credentials."
+          },
+          "metadata": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "required": [
+              "host",
+              "port",
+              "database",
+              "user",
+              "password"
+            ],
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "database": {
+                "type": "string"
+              },
+              "user": {
+                "type": "string"
+              },
+              "password": {
                 "type": "string"
               }
             },
-            "description": "The pool's own bucket when the pool keeps object storage, else null."
+            "description": "The pool's MySQL database once it is ready, when the pool isolates `metadata`, else null."
+          },
+          "logs": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "required": [
+              "endpoint",
+              "user",
+              "password"
+            ],
+            "properties": {
+              "endpoint": {
+                "type": "string",
+                "description": "ClickHouse HTTP endpoint, `http://<private address>:8123`."
+              },
+              "user": {
+                "type": "string"
+              },
+              "password": {
+                "type": "string"
+              }
+            },
+            "description": "The pool's ClickHouse server once it is ready, when the pool isolates `logs`, else null."
           }
-        }
+        },
+        "description": "The stores in the pool's own account this worker uses, with their credentials. Sent only to the pool's own workers."
       },
       "Worker": {
         "type": "object",
@@ -11540,7 +11831,7 @@
           "pool_id": {
             "type": "string",
             "format": "uuid",
-            "description": "Pool the worker joined."
+            "description": "Pool the worker heartbeats into."
           },
           "kind": {
             "$ref": "#/components/schemas/WorkerKind",
@@ -11630,7 +11921,7 @@
             "items": {
               "type": "string"
             },
-            "description": "`*` for everything; `vmid:<id>` limits the key to those VMs; `op:sync`, `op:pty` and `op:run` limit it to those operations; `pool:<id>:join` makes it a worker join key for that pool."
+            "description": "A key reaches what its resource scopes and its operation scopes both allow. Resource scopes: `*` for everything, `vmid:<id>` for those VMs, `pool:<id>` for that pool's workers. Operation scopes: `op:sync`, `op:pty`, `op:run` and `op:heartbeat` limit the key to those operations. A worker key is exactly `pool:<id>` and `op:heartbeat`; neither scope is valid in any other set."
           },
           "created_at": {
             "type": "string",
@@ -11674,7 +11965,7 @@
             "maxItems": 16,
             "items": {
               "type": "string",
-              "pattern": "^(\\*|vmid:[A-Za-z0-9_-]{1,96}|op:(sync|pty|run)|pool:[0-9a-f-]{36}:join)$"
+              "pattern": "^(\\*|vmid:[A-Za-z0-9_-]{1,96}|op:(sync|pty|run|heartbeat)|pool:[0-9a-f-]{36})$"
             },
             "description": "Defaults to `[\"*\"]`. The new key cannot reach anything the calling key cannot."
           },
@@ -11719,6 +12010,134 @@
               "$ref": "#/components/schemas/ApiKey"
             },
             "description": "Unrevoked keys in the organization."
+          }
+        }
+      },
+      "WorkerVmRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "platform",
+          "resources",
+          "image",
+          "parent_vm_id",
+          "created_at",
+          "last_active_at"
+        ],
+        "description": "A VM a worker without `records` holds, as it reports it.",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "paused",
+              "suspended"
+            ],
+            "description": "`running` executes; `paused` keeps its memory but no CPU; `suspended` is a snapshot in storage."
+          },
+          "platform": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$",
+            "description": "Platform the VM runs on, one the worker serves."
+          },
+          "resources": {
+            "$ref": "#/components/schemas/WorkerResources",
+            "description": "Resources the VM holds."
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 255,
+            "description": "Image the VM was created from, if any."
+          },
+          "parent_vm_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64,
+            "description": "VM this one was forked from, if any."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the VM was created."
+          },
+          "last_active_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the VM last ran a command or was synced."
+          }
+        }
+      },
+      "WorkerRunRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "command",
+          "exit_code",
+          "started_at",
+          "finished_at",
+          "stdout",
+          "stderr"
+        ],
+        "description": "A run on a VM of a worker without `records`, as the worker reports it when the run starts and again when it ends.",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "description": "`running` until the command ends; then `completed` (it exited), `failed` (the worker could not run or finish it) or `cancelled`."
+          },
+          "command": {
+            "type": "string",
+            "maxLength": 65535,
+            "description": "The command the run executes."
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The command's exit status once it has one."
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the run started."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the run ended; null while it runs."
+          },
+          "stdout": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Standard output. Arker keeps the first 64 KiB of stdout and stderr together, stdout first."
+          },
+          "stderr": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Standard error."
           }
         }
       }

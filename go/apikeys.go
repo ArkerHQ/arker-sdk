@@ -3,13 +3,25 @@ package arker
 import (
 	"context"
 	"net/http"
+	"time"
 )
 
-// Scope limits what an API key can reach. Build them with ScopeAll, ScopeVM,
-// ScopeOp and ScopePoolJoin.
+// Scope limits what an API key can reach. A key reaches what its resource
+// scopes and its operation scopes both allow:
+//
+//   - resource scopes: "*" (everything; the default, and only valid alone),
+//     "vmid:<id>" (those VMs), "pool:<id>" (that pool's workers);
+//   - operation scopes: "op:sync", "op:pty", "op:run", "op:heartbeat" limit
+//     the key to those operations.
+//
+// A worker key is exactly WorkerKeyScopes(poolID), "pool:<id>" and
+// "op:heartbeat"; neither scope is valid in any other set. A browser PTY key
+// is PTYKeyScopes(vmID), "vmid:<id>" and "op:pty". Build the rest with
+// ScopeAll, ScopeVM and ScopeOp.
 type Scope string
 
-// Op is an operation a key can be limited to.
+// Op is an operation a key can be limited to. "heartbeat" is only part of
+// WorkerKeyScopes.
 type Op string
 
 const (
@@ -27,9 +39,19 @@ func ScopeVM(vmID string) Scope { return Scope("vmid:" + vmID) }
 // ScopeOp limits a key to one operation.
 func ScopeOp(op Op) Scope { return Scope("op:" + string(op)) }
 
-// ScopePoolJoin makes a key a worker join key for one pool. It must be the
-// key's only scope.
-func ScopePoolJoin(poolID string) Scope { return Scope("pool:" + poolID + ":join") }
+// PTYKeyScopes are the scopes of a key that only opens terminals on one VM,
+// which a browser passes as the PTY's api_key. See Client.CreatePTYKey.
+func PTYKeyScopes(vmID string) []Scope { return []Scope{ScopeVM(vmID), ScopeOp(OpPTY)} }
+
+// WorkerKeyScopes are the scopes of a worker key for one pool: exactly these
+// two. Only an admin can create one.
+func WorkerKeyScopes(poolID string) []Scope {
+	return []Scope{Scope("pool:" + poolID), Scope("op:heartbeat")}
+}
+
+// ptyKeyTTL is how long CreatePTYKey keys live by default: long enough to open
+// a WebSocket.
+const ptyKeyTTL = 5 * time.Minute
 
 // APIKey is an API key's metadata. The secret is only in CreatedAPIKey.
 type APIKey struct {
@@ -74,6 +96,21 @@ func (c *Client) CreateAPIKey(ctx context.Context, req CreateAPIKeyRequest) (*Cr
 	var out CreatedAPIKey
 	_, err := c.do(ctx, call{method: http.MethodPost, path: "/v1/api-keys", base: c.controlURL, body: req, out: &out})
 	return &out, err
+}
+
+// CreatePTYKey mints a short-lived key that only opens terminals on one VM
+// (PTYKeyScopes), for a browser to pass as api_key: a browser WebSocket cannot
+// set an Authorization header. See VM.PTYURL. A ttl of zero means five
+// minutes; the key also expires with the calling key if that is sooner.
+func (c *Client) CreatePTYKey(ctx context.Context, vmID string, ttl time.Duration) (*CreatedAPIKey, error) {
+	if ttl <= 0 {
+		ttl = ptyKeyTTL
+	}
+	return c.CreateAPIKey(ctx, CreateAPIKeyRequest{
+		Name:      "pty",
+		Scopes:    PTYKeyScopes(vmID),
+		ExpiresAt: time.Now().Add(ttl).UTC().Format(time.RFC3339),
+	})
 }
 
 // RevokeAPIKey revokes a key.

@@ -324,16 +324,15 @@ export type PoolUsage = ApiSchema<"PoolUsage">;
 export type PoolState = ApiSchema<"PoolState">;
 export type PoolCapacity = ApiSchema<"PoolCapacity">;
 export type PoolCommitment = ApiSchema<"PoolCommitment">;
-export type PoolDedicatedStorage = ApiSchema<"PoolDedicatedStorage">;
+export type PoolIsolation = ApiSchema<"PoolIsolation">;
 export type ListPoolsResponse = ApiSchema<"ListPoolsResponse">;
 /**
- * `compute` as sent on the wire. The generated `PoolCompute` tags its variants
- * with schema names because the contract's discriminator has no mapping, so
- * writes use this type instead.
+ * `compute` as sent on the wire: the generated `PoolCompute` without the
+ * fields Arker sets (`external_id`, `setup_url`).
  */
 export type PoolComputeInput =
-  | { type: "managed" }
-  | (Omit<ApiSchema<"PoolComputeAws">, "type" | "external_id"> & { type: "aws" });
+  | ApiSchema<"PoolComputeManaged">
+  | Omit<ApiSchema<"PoolComputeAws">, "external_id" | "setup_url">;
 export type CreatePoolOptions = Omit<ApiSchema<"CreatePoolRequest">, "compute"> & { compute?: PoolComputeInput };
 export type UpdatePoolOptions = ApiSchema<"UpdatePoolRequest">;
 export type Worker = ApiSchema<"Worker">;
@@ -344,11 +343,20 @@ export type ApiKey = ApiSchema<"ApiKey">;
 export type CreatedApiKey = ApiSchema<"CreatedApiKey">;
 export type ListApiKeysResponse = ApiSchema<"ListApiKeysResponse">;
 export type CreateApiKeyOptions = ApiSchema<"CreateApiKeyRequest">;
+export type ScopeOperation = "sync" | "pty" | "run";
 
 /**
- * Builders for the `scopes` of {@link Arker.createApiKey}. A key with no
- * scopes reaches everything its role allows (`scopes.all`); scopes narrow it
- * to certain VMs, certain operations, or joining one pool as a worker.
+ * Builders for the `scopes` of {@link Arker.createApiKey}. A key reaches what
+ * its resource scopes and its operation scopes both allow.
+ *
+ * - Resource scopes: `*` (everything; the default, and only valid alone),
+ *   `vmid:<id>` (those VMs), `pool:<id>` (that pool's workers).
+ * - Operation scopes: `op:sync`, `op:pty`, `op:run`, `op:heartbeat` limit the
+ *   key to those operations.
+ *
+ * A worker key is exactly `["pool:<id>", "op:heartbeat"]` ({@link scopes.worker});
+ * neither scope is valid in any other set. A browser PTY key is
+ * `["vmid:<id>", "op:pty"]` ({@link scopes.pty}).
  */
 export const scopes = {
   all: "*",
@@ -357,19 +365,26 @@ export const scopes = {
     if (!/^[A-Za-z0-9_-]{1,96}$/.test(vmId)) throw new Error(`invalid vm id for a scope: ${vmId}`);
     return `vmid:${vmId}`;
   },
-  /** Limit the key to one operation. */
-  op(operation: "sync" | "pty" | "run"): `op:${"sync" | "pty" | "run"}` {
+  /** Limit the key to one operation. `op:heartbeat` is only part of {@link scopes.worker}. */
+  op(operation: ScopeOperation): `op:${ScopeOperation}` {
     if (operation !== "sync" && operation !== "pty" && operation !== "run") {
       throw new Error(`invalid operation for a scope: ${String(operation)}`);
     }
     return `op:${operation}`;
   },
-  /** Make the key a worker join key for one pool. It must be the key's only scope. */
-  poolJoin(poolId: string): `pool:${string}:join` {
+  /** The scopes of a key that only opens terminals on one VM, as a browser passes in `api_key`. */
+  pty(vmId: string): [`vmid:${string}`, "op:pty"] {
+    return [scopes.vm(vmId), "op:pty"];
+  },
+  /** The scopes of a worker key for one pool: exactly these two, nothing else. Needs an admin caller. */
+  worker(poolId: string): [`pool:${string}`, "op:heartbeat"] {
     if (!/^[0-9a-f-]{36}$/.test(poolId)) throw new Error(`invalid pool id for a scope: ${poolId}`);
-    return `pool:${poolId}:join`;
+    return [`pool:${poolId}`, "op:heartbeat"];
   },
 } as const;
+
+/** How long {@link Arker.createPtyKey} keys live by default: long enough to open a WebSocket. */
+const PTY_KEY_TTL_SECS = 300;
 
 // ── Mounts ──────────────────────────────────────────────────────────
 export type Mount = ApiSchema<"Mount">;
@@ -454,7 +469,6 @@ export type CancelRunResponse = ApiSchema<"CancelRunResponse">;
 export type CreateSessionRequest = ApiSchema<"CreateSessionRequest">;
 export type PatchSessionRequest = ApiSchema<"PatchSessionRequest">;
 export type PatchSessionResponse = ApiSchema<"PatchSessionResponse">;
-export type PtyTicketResponse = ApiSchema<"PtyTicketResponse">;
 
 // ── Operation query parameters ─────────────────────────────────────
 export type ListVmsParameters = ApiQuery<"listVms">;
@@ -562,10 +576,17 @@ export interface PtyConnectOptions {
    * fresh. Unset (default) means no auto-cancel.
    */
   cancelTtlSecs?: number;
-  /** @internal Test/runtime override for browser-ticket vs Node-header auth. */
-  useTicket?: boolean;
+  /** @internal Test/runtime override for browser `api_key` vs Node-header auth. */
+  useQueryKey?: boolean;
   /** @internal Test/runtime override for WebSocket construction. */
   webSocketFactory?: PtyWebSocketFactory;
+}
+
+/** What {@link VM.ptyUrl} puts in a PTY WebSocket URL. */
+export interface PtyUrlOptions extends Pick<PtyConnectOptions, "cols" | "rows" | "command" | "persist" | "cancelTtlSecs"> {
+  sessionId: string;
+  /** A key limited to this VM and `op:pty`, from {@link Arker.createPtyKey}. */
+  apiKey: string;
 }
 
 export interface PtyCloseEvent {
@@ -919,6 +940,12 @@ export class Arker {
    *
    *     createPool({ name: "ci", resources: { vcpu: 8, memory_mib: 32768 }, joinable: true })
    *     createPool({ source_vm_id: "vm_abc", max_forks: 50 })
+   *     createPool({ compute: { type: "aws", account_id: "123456789012", subnet_ids: ["subnet-1"] } })
+   *
+   * An `aws` pool stays `provisioning` until the role Arker assumes exists:
+   * open the returned `compute.setup_url` while signed in to the account to
+   * create it (`role_arn` defaults to that role). `state_detail` says what is
+   * still missing.
    */
   async createPool(options: CreatePoolOptions): Promise<Pool> {
     return this._request("POST", "/v1/pools", options, this.baseUrl);
@@ -938,7 +965,7 @@ export class Arker {
     await this._request("DELETE", `/v1/pools/${pathSegment(poolId)}`, undefined, this.baseUrl);
   }
 
-  /** Workers that have joined the pool. */
+  /** Workers that heartbeated into the pool within the last day. */
   async listPoolWorkers(poolId: string): Promise<ListWorkersResponse> {
     return this._request("GET", `/v1/pools/${pathSegment(poolId)}/workers`, undefined, this.baseUrl);
   }
@@ -956,6 +983,21 @@ export class Arker {
    */
   async createApiKey(options: CreateApiKeyOptions = {}): Promise<CreatedApiKey> {
     return this._request("POST", "/v1/api-keys", options, this.controlBaseUrl);
+  }
+
+  /**
+   * Mint a short-lived key that only opens terminals on one VM
+   * (`["vmid:<id>", "op:pty"]`), for a browser to pass as `api_key` — see
+   * {@link VM.ptyUrl}. It expires after `ttlSecs` (default 300), or with the
+   * calling key if that is sooner.
+   */
+  async createPtyKey(vmId: string, options: { ttlSecs?: number; name?: string } = {}): Promise<CreatedApiKey> {
+    const ttlSecs = options.ttlSecs ?? PTY_KEY_TTL_SECS;
+    return this.createApiKey({
+      name: options.name ?? "pty",
+      scopes: scopes.pty(vmId),
+      expires_at: new Date(Date.now() + ttlSecs * 1000).toISOString(),
+    });
   }
 
   async revokeApiKey(apiKeyId: string): Promise<void> {
@@ -1846,33 +1888,38 @@ export class VM {
     );
   }
 
+  /**
+   * Open an interactive terminal. In Node the API key rides the upgrade's
+   * `Authorization` header. A browser WebSocket cannot set headers, so there
+   * the SDK first mints a short-lived key limited to this VM and `op:pty`
+   * ({@link Arker.createPtyKey}) and passes it as `api_key`.
+   */
   async connectPty(options: PtyConnectOptions = {}): Promise<PtyConnection> {
     const sessionId = options.sessionId ?? sessionIdFrom(await this.createSession());
-    const useTicket = options.useTicket ?? !isNodeRuntime();
-    const params = {
-      cols: options.cols,
-      rows: options.rows,
-      command: options.command,
-      persist: options.persist,
-      cancel_ttl_secs:
-        options.cancelTtlSecs && options.cancelTtlSecs > 0
-          ? Math.floor(options.cancelTtlSecs)
-          : undefined,
-    };
-    let ticket: string | undefined;
-    if (useTicket) {
-      const response = await this._client._request<PtyTicketResponse>(
-        "POST",
-        `${vmPath(this.id)}/sessions/${pathSegment(sessionId)}/pty-ticket`,
-        {},
-        this.baseUrl,
-      );
-      ticket = response.ticket;
-    }
-    const url = buildPtyWebSocketUrl(this.baseUrl, this.id, sessionId, { ...params, ticket });
-    const factory = options.webSocketFactory ?? (useTicket ? browserPtyWebSocketFactory : nodePtyWebSocketFactory);
-    const socket = await factory(url, useTicket ? {} : { headers: this._client._authHeaders() });
+    const useQueryKey = options.useQueryKey ?? !isNodeRuntime();
+    const params = ptyQueryParams(options);
+    const apiKey = useQueryKey ? (await this._client.createPtyKey(this.id)).key : undefined;
+    const url = buildPtyWebSocketUrl(this.baseUrl, this.id, sessionId, { ...params, api_key: apiKey });
+    const factory = options.webSocketFactory ?? (useQueryKey ? browserPtyWebSocketFactory : nodePtyWebSocketFactory);
+    const socket = await factory(url, useQueryKey ? {} : { headers: this._client._authHeaders() });
     return new PtyConnectionImpl(sessionId, socket);
+  }
+
+  /**
+   * The WebSocket URL of a PTY on this VM that carries `apiKey` as its
+   * `api_key`, for a browser to open. Mint the key with
+   * {@link Arker.createPtyKey}; Arker refuses any key broader than one VM and
+   * `op:pty` there. Create the session first ({@link VM.createSession}).
+   *
+   *     const { key } = await arker.createPtyKey(vm.id);
+   *     const session = await vm.createSession();
+   *     const url = vm.ptyUrl({ sessionId: session.session_id, apiKey: key });
+   */
+  ptyUrl(options: PtyUrlOptions): string {
+    return buildPtyWebSocketUrl(this.baseUrl, this.id, options.sessionId, {
+      ...ptyQueryParams(options),
+      api_key: options.apiKey,
+    });
   }
 }
 
@@ -1892,7 +1939,7 @@ function buildPtyWebSocketUrl(
   baseUrl: string,
   vmId: string,
   sessionId: string,
-  params: { cols?: number; rows?: number; command?: string; persist?: boolean; cancel_ttl_secs?: number; ticket?: string },
+  params: { cols?: number; rows?: number; command?: string; persist?: boolean; cancel_ttl_secs?: number; api_key?: string },
 ): string {
   const url = new URL(`${normalizeBaseUrl(baseUrl)}${vmPath(vmId)}/sessions/${pathSegment(sessionId)}/pty`);
   if (url.protocol === "https:") url.protocol = "wss:";
@@ -1903,6 +1950,17 @@ function buildPtyWebSocketUrl(
     url.searchParams.set(key, String(value));
   }
   return url.toString();
+}
+
+function ptyQueryParams(options: Omit<PtyUrlOptions, "sessionId" | "apiKey">) {
+  return {
+    cols: options.cols,
+    rows: options.rows,
+    command: options.command,
+    persist: options.persist,
+    cancel_ttl_secs:
+      options.cancelTtlSecs && options.cancelTtlSecs > 0 ? Math.floor(options.cancelTtlSecs) : undefined,
+  };
 }
 
 function sessionIdFrom(session: Session): string {

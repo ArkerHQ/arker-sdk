@@ -247,12 +247,6 @@ class CreateSessionRequest:
 
 
 @dataclass(frozen=True)
-class PtyTicketResponse:
-    ticket: str
-    expires_in: int
-
-
-@dataclass(frozen=True)
 class Mount:
     mount_id: str
     vm_id: str
@@ -487,7 +481,6 @@ OpenApiOperationId: TypeAlias = Literal[
     'patchSession',
     'deleteSession',
     'attachSessionPty',
-    'mintSessionPtyTicket',
     'createMount',
     'listMounts',
     'deleteMount',
@@ -505,6 +498,9 @@ OpenApiOperationId: TypeAlias = Literal[
     'listPoolWorkers',
     'heartbeatWorker',
     'openWorkerTunnel',
+    'putWorkerVm',
+    'deleteWorkerVm',
+    'putWorkerRun',
     'listApiKeys',
     'createApiKey',
     'revokeApiKey',
@@ -1423,18 +1419,19 @@ class PoolComputeManaged:
 class PoolComputeAws:
     type: Literal['aws']
     account_id: str
-    role_arn: str
     subnet_ids: list[str]
+    role_arn: str | None = None
     external_id: str | None = None
     region: str | None = None
     security_group_ids: list[str] | None = None
     instance_types: list[str] | None = None
+    setup_url: str | None = None
 
 
 PoolCompute: TypeAlias = PoolComputeManaged | PoolComputeAws
 
 
-PoolDedicatedStorage: TypeAlias = Literal['object_storage', 'database', 'logs']
+PoolIsolation: TypeAlias = Literal['vms', 'logs', 'metadata']
 
 
 @dataclass(frozen=True)
@@ -1445,17 +1442,10 @@ class WorkerResources:
     gpu_count: int | None = None
 
 
-WorkerKind: TypeAlias = Literal['arkerd', 'blast']
+WorkerKind: TypeAlias = str
 
 
 WorkerState: TypeAlias = Literal['active', 'draining', 'left']
-
-
-@dataclass(frozen=True)
-class WorkerVm:
-    vm_id: str
-    resources: WorkerResources
-    image: str | None = None
 
 
 Platform: TypeAlias = str
@@ -1470,22 +1460,52 @@ class WorkerHeartbeat:
     resources: WorkerResources
     free: WorkerResources
     capabilities: list[str] | None = None
-    vms: list[WorkerVm] | None = None
+
+
+@dataclass(frozen=True)
+class Deployment:
+    tier: Literal['feature', 'staging', 'prod']
+    provider: str
+    region: str
+
+
+@dataclass(frozen=True)
+class Credentials:
+    access_key_id: str
+    secret_access_key: str
+    session_token: str
+    expires_at: str
 
 
 @dataclass(frozen=True)
 class ObjectStorage:
     bucket: str
     region: str
+    prefix: str
+    credentials: Credentials
 
 
 @dataclass(frozen=True)
-class WorkerHeartbeatResponse:
-    worker_id: str
-    heartbeat_interval_ms: int
-    desired_state: WorkerState
-    tunnel_url: str
-    object_storage: ObjectStorage | None = None
+class Metadata:
+    host: str
+    port: int
+    database: str
+    user: str
+    password: str
+
+
+@dataclass(frozen=True)
+class Logs:
+    endpoint: str
+    user: str
+    password: str
+
+
+@dataclass(frozen=True)
+class WorkerStores:
+    object_storage: ObjectStorage | None
+    metadata: Metadata | None
+    logs: Logs | None
 
 
 @dataclass(frozen=True)
@@ -1536,6 +1556,28 @@ class CreatedApiKey:
 @dataclass(frozen=True)
 class ListApiKeysResponse:
     api_keys: list[ApiKey]
+
+
+@dataclass(frozen=True)
+class WorkerVmRecord:
+    state: Literal['running', 'paused', 'suspended']
+    platform: str
+    resources: WorkerResources
+    image: str | None
+    parent_vm_id: str | None
+    created_at: str
+    last_active_at: str | None
+
+
+@dataclass(frozen=True)
+class WorkerRunRecord:
+    state: Literal['running', 'completed', 'failed', 'cancelled']
+    command: str
+    exit_code: int | None
+    started_at: str
+    finished_at: str | None
+    stdout: str | None
+    stderr: str | None
 
 
 @dataclass(frozen=True)
@@ -1669,13 +1711,7 @@ class AttachSessionPtyParameters:
     command: str | None = None
     persist: bool | None = True
     cancel_ttl_secs: int | None = None
-    ticket: str | None = None
-
-
-@dataclass(frozen=True)
-class MintSessionPtyTicketParameters:
-    id: str
-    sid: str
+    api_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1760,6 +1796,28 @@ class HeartbeatWorkerParameters:
 class OpenWorkerTunnelParameters:
     pool_id: str
     worker_id: str
+
+
+@dataclass(frozen=True)
+class PutWorkerVmParameters:
+    pool_id: str
+    worker_id: str
+    vm_id: str
+
+
+@dataclass(frozen=True)
+class DeleteWorkerVmParameters:
+    pool_id: str
+    worker_id: str
+    vm_id: str
+
+
+@dataclass(frozen=True)
+class PutWorkerRunParameters:
+    pool_id: str
+    worker_id: str
+    vm_id: str
+    run_id: str
 
 
 @dataclass(frozen=True)
@@ -1893,7 +1951,7 @@ class CreatePoolRequest:
     commitments: list[PoolCommitment] | None = None
     compute: PoolCompute | None = None
     joinable: bool | None = None
-    dedicated_storage: list[PoolDedicatedStorage] | None = None
+    isolation: list[PoolIsolation] | None = None
     source_vm_id: str | None = None
     max_forks: int | None = None
 
@@ -1920,7 +1978,7 @@ class Pool:
     commitments: list[PoolCommitment]
     compute: PoolCompute
     joinable: bool
-    dedicated_storage: list[PoolDedicatedStorage]
+    isolation: list[PoolIsolation]
     source_vm_id: str | None
     max_forks: int | None
     created_at: str
@@ -1943,6 +2001,16 @@ class PolicyRule:
 
 
 PolicyRules: TypeAlias = dict[str, PolicyRule | LifecycleRule]
+
+
+@dataclass(frozen=True)
+class WorkerHeartbeatResponse:
+    worker_id: str
+    heartbeat_interval_ms: int
+    desired_state: WorkerState
+    tunnel_url: str
+    stores: WorkerStores
+    deployment: Deployment
 
 
 @dataclass(frozen=True)
