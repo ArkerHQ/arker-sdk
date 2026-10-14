@@ -15,7 +15,7 @@
  *     arker sync <vm> ...      → read or write files on <vm>
  *     arker shell [vm]         → native PTY shell over WebSocket
  *
- * Resources: vms, runs, sessions, mounts, filesystems (alias `fs`), pools.
+ * Resources: vms, runs, sessions, mounts, filesystems (alias `fs`), pools, api-keys.
  * Each supports `ls`, `get`, `rm`, and the resource-specific verbs.
  *
  * Auth: reads `ARKER_API_KEY` from the environment (or `~/.arker/config`).
@@ -28,18 +28,22 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
-import { createInterface } from "node:readline/promises";
 import {
   Arker,
   ArkerError,
   discoverRegions,
+  scopes,
 } from "@arker-ai/sdk";
 import { bridgePty } from "./cli-pty.js";
 import type {
+  CreateApiKeyOptions,
+  CreatePoolOptions,
   PolicyDoc,
-  PoolQuote,
-  PoolQuoteRequest,
+  PoolCommitment,
+  PoolComputeInput,
+  PoolIsolation,
   PoolResources,
+  UpdatePoolOptions,
   ForkOptions,
   RunOptions,
   RunRecord,
@@ -121,6 +125,7 @@ const FORK_RESOURCE_OPTIONS: OptionSpecs = {
 const FORK_OPTIONS: OptionSpecs = {
   ...GLOBAL_OPTIONS,
   ...FORK_RESOURCE_OPTIONS,
+  command: { type: "string" },
   context: { type: "string" },
   description: { type: "string", allowEmpty: true },
   disk: { type: "boolean" },
@@ -194,19 +199,46 @@ const RUN_LIST_OPTIONS: OptionSpecs = {
   vms: { type: "string" },
 };
 
-const POOL_TERM_OPTIONS: OptionSpecs = {
+const POOL_SHAPE_OPTIONS: OptionSpecs = {
   ...GLOBAL_OPTIONS,
   ...RESOURCE_OPTIONS,
-  // The 30-day floor is checked with its own message in cmdPools.
-  days: { type: "integer", min: 1 },
+  commitment: { type: "string" },
   name: { type: "string" },
+  "max-forks": { type: "integer", min: 1, max: 100_000 },
 };
 
 const POOL_OPTIONS: Record<string, OptionSpecs> = {
   ls: { ...GLOBAL_OPTIONS, cursor: PAGINATION_OPTIONS.cursor!, limit: { type: "integer", min: 1, max: 100 } },
-  quote: POOL_TERM_OPTIONS,
-  create: { ...POOL_TERM_OPTIONS, yes: { type: "boolean" } },
-  rename: { ...GLOBAL_OPTIONS, clear: { type: "boolean" } },
+  create: {
+    ...POOL_SHAPE_OPTIONS,
+    "aws-account-id": { type: "string" },
+    "aws-region": { type: "string" },
+    "aws-role-arn": { type: "string" },
+    compute: { type: "string", values: ["managed", "aws"] },
+    "instance-types": { type: "string" },
+    isolation: { type: "string" },
+    joinable: { type: "boolean" },
+    "security-group-ids": { type: "string" },
+    "source-vm-id": { type: "string" },
+    "subnet-ids": { type: "string" },
+  },
+  update: {
+    ...POOL_SHAPE_OPTIONS,
+    "clear-name": { type: "boolean" },
+    joinable: { type: "boolean" },
+    "no-joinable": { type: "boolean" },
+  },
+};
+
+const API_KEY_OPTIONS: Record<string, OptionSpecs> = {
+  create: {
+    ...GLOBAL_OPTIONS,
+    "expires-at": { type: "string" },
+    name: { type: "string" },
+    role: { type: "string", values: ["viewer", "member", "developer", "admin"] },
+    scope: { type: "string", repeatable: true },
+    "worker-pool": { type: "string" },
+  },
 };
 
 const UPDATE_OPTIONS: OptionSpecs = {
@@ -271,6 +303,7 @@ const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
     file: { type: "string" },
   },
   pools: Object.assign({}, ...Object.values(POOL_OPTIONS)) as OptionSpecs,
+  "api-keys": Object.assign({}, GLOBAL_OPTIONS, ...Object.values(API_KEY_OPTIONS)) as OptionSpecs,
   regions: {
     help: { type: "boolean" },
     json: { type: "boolean" },
@@ -417,6 +450,9 @@ function invocationOptions(command: string, positional: string[]): { options: Op
     context = `pools ${subcommand ?? "ls"}`;
     const key = subcommand === undefined || subcommand === "list" ? "ls" : subcommand;
     allowed = POOL_OPTIONS[key] ?? GLOBAL_OPTIONS;
+  } else if (command === "api-keys") {
+    context = `api-keys ${subcommand ?? "ls"}`;
+    allowed = subcommand === "create" ? API_KEY_OPTIONS.create! : GLOBAL_OPTIONS;
   } else if (command === "policies") {
     context = `policies ${subcommand ?? "get"}`;
     allowed = subcommand === "set" ? COMMAND_OPTIONS.policies! : GLOBAL_OPTIONS;
@@ -438,7 +474,8 @@ const POSITIONAL_LIMITS: Record<string, number | Record<string, number>> = {
   sessions: { ls: 1, list: 1, get: 2, create: 1, rm: 2, delete: 2, update: 2 },
   shell: 1,
   policies: { get: 1, set: 1 },
-  pools: { ls: 0, list: 0, get: 1, usage: 1, rename: 2, quote: 0, create: 0 },
+  pools: { ls: 0, list: 0, get: 1, workers: 1, create: 0, update: 1, delete: 1, rm: 1 },
+  "api-keys": { ls: 0, list: 0, create: 0, revoke: 1, rm: 1 },
   regions: 0,
   whoami: 0,
   signal: 2,
@@ -697,9 +734,14 @@ function commandRequiresComputePlacement(
   command: string,
   args: ParsedArgs,
 ): boolean {
-  // Pools live on the control plane; quote and create take their placement
-  // from --provider/--region in cmdPools.
-  if (command === "ls" || command === "list" || command === "whoami" || command === "pools") return false;
+  // Listing and fetching pools, and API keys, are control-plane calls. A pool
+  // is created, changed, deleted and its workers listed in its region.
+  if (command === "pools") {
+    const subcommand = args.positional[0];
+    return subcommand === "create" || subcommand === "update" || subcommand === "delete" || subcommand === "rm" ||
+      subcommand === "workers";
+  }
+  if (command === "ls" || command === "list" || command === "whoami" || command === "api-keys") return false;
   if (command === "runs") {
     const [subcommand, vm] = args.positional;
     if ((subcommand === "ls" || subcommand === "list") && vm === undefined) return false;
@@ -941,11 +983,13 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
       : image
         ? { image }
         : { dockerfile: dockerfile!, ...(context ? { context } : {}) };
+  const command = args.flags.command as string | undefined;
   const forkOptions: ForkOptions = {
     ...source,
     ...pool,
     name,
     description,
+    ...(command !== undefined ? { command } : {}),
     public: publicFlag,
     ...(platforms && platforms.length > 0 ? { platforms } : {}),
     ...(resources ? { resources } : {}),
@@ -1551,8 +1595,6 @@ async function cmdFilesystems(args: ParsedArgs, client: Arker): Promise<void> {
 
 // ── Pools ──────────────────────────────────────────────────────────
 
-const MIN_POOL_DAYS = 30;
-
 async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
   const sub = args.positional[0];
   const rest = args.positional.slice(1);
@@ -1566,7 +1608,7 @@ async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
       });
       if (args.flags.json) return out(res);
       for (const p of res.pools) {
-        out(`${p.pool_id}\t${p.name ?? "—"}\t${p.provider}-${p.region}\t${p.status}\t${p.ends_at}`);
+        out(`${p.pool_id}\t${p.name ?? "—"}\t${p.provider}-${p.region}\t${p.state}\t${p.compute.type}`);
       }
       if (res.next_cursor) out(`# next_cursor=${res.next_cursor}`);
       return;
@@ -1575,119 +1617,142 @@ async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
       out(await client.getPool(rest[0] ?? die("usage: arker pools get <pool_id>")));
       return;
     }
-    case "usage": {
-      out(await client.getPoolUsage(rest[0] ?? die("usage: arker pools usage <pool_id>")));
-      return;
-    }
-    case "rename": {
-      const usage = "usage: arker pools rename <pool_id> <name>  (or: --clear to remove the name)";
-      const id = rest[0] ?? die(usage);
-      const name = rest[1];
-      if ((name === undefined) === (args.flags.clear !== true)) die(usage);
-      out(await client.renamePool(id, name ?? null));
-      return;
-    }
-    case "quote": {
-      const quote = await client._quotePool(poolRequestFromArgs(args, client));
-      if (args.flags.json) return out(quote);
-      out(describePoolQuote(quote));
+    case "workers": {
+      const res = await client.listPoolWorkers(rest[0] ?? die("usage: arker pools workers <pool_id>"));
+      if (args.flags.json) return out(res);
+      for (const w of res.workers) {
+        out(`${w.worker_id}\t${w.kind}\t${w.state}\t${w.free.vcpu}/${w.resources.vcpu} vCPU free\t${w.last_heartbeat_at}`);
+      }
       return;
     }
     case "create":
-      return await cmdPoolsCreate(args, client);
-    default:
-      die("usage: arker pools <ls|get|usage|rename|quote|create> ...");
-  }
-}
-
-/** Show the price, confirm, then buy at exactly that price. */
-async function cmdPoolsCreate(args: ParsedArgs, client: Arker): Promise<void> {
-  const request = poolRequestFromArgs(args, client);
-  const yes = args.flags.yes === true;
-  if (!yes && !input.isTTY) {
-    die("refusing to buy a pool without confirmation; run in a terminal or pass --yes");
-  }
-  for (;;) {
-    const quote = await client._quotePool(request);
-    if (!yes) {
-      process.stderr.write(`${describePoolQuote(quote)}\n`);
-      if (!(await confirm("Buy this pool? [y/N] "))) die("cancelled; nothing was bought");
-    }
-    try {
-      // A fresh key per confirmed price: every retry of this attempt replays
-      // it, and a re-confirmed price is a new purchase.
-      out(await client._buyPool(request, quote.amount_cents, `cli-pool-${randomUUID()}`));
+      out(await client.createPool(poolCreateFromArgs(args)));
       return;
-    } catch (error) {
-      if (!isPoolPriceChange(error)) throw error;
-      if (yes) die("the pool price changed after it was quoted; rerun to buy at the new price");
-      err("The price changed after it was quoted. Here is the new price.");
+    case "update": {
+      const id = rest[0] ?? die("usage: arker pools update <pool_id> [flags]");
+      out(await client.updatePool(id, poolUpdateFromArgs(args)));
+      return;
     }
+    case "delete":
+    case "rm": {
+      const id = rest[0] ?? die("usage: arker pools rm <pool_id>");
+      await client.deletePool(id);
+      out(args.flags.json ? { deleted: id } : `deleted ${id}`);
+      return;
+    }
+    default:
+      die("usage: arker pools <ls|get|workers|create|update|rm> ...");
   }
 }
 
-function poolRequestFromArgs(args: ParsedArgs, client: Arker): PoolQuoteRequest {
-  const file = readFileConfig();
-  const provider = (args.flags.provider as string | undefined) ?? process.env.ARKER_PROVIDER ?? file.provider;
-  const region = (args.flags.region as string | undefined) ?? process.env.ARKER_REGION ?? file.region;
-  if (!provider || !region) {
-    die("Provider and region are required for a pool. Set --provider and --region, or ARKER_PROVIDER and ARKER_REGION.");
-  }
-  const days = numFlag(args, "days") ?? die(`--days is required (at least ${MIN_POOL_DAYS})`);
-  if (days < MIN_POOL_DAYS) die(`--days must be at least ${MIN_POOL_DAYS}; that is the shortest pool term`);
+function poolResourcesFromArgs(args: ParsedArgs): PoolResources | undefined {
   const resources: PoolResources = {
     vcpu: numFlag(args, "vcpu"),
     memory_mib: numFlag(args, "memory-mib"),
     disk_mib: numFlag(args, "disk-mib"),
   };
-  if (!Object.values(resources).some((amount) => amount !== undefined && amount > 0)) {
-    die("give at least one of --vcpu, --memory-mib, or --disk-mib");
-  }
-  return client._poolRequest({
-    provider,
-    region,
-    resources,
-    duration_seconds: days * 86_400,
-    name: args.flags.name as string | undefined,
+  return Object.values(resources).some((amount) => amount !== undefined) ? resources : undefined;
+}
+
+function listFlag(args: ParsedArgs, name: string): string[] | undefined {
+  const v = args.flags[name];
+  return typeof v === "string" ? v.split(",").map((item) => item.trim()).filter(Boolean) : undefined;
+}
+
+/** `--commitment 2026-10-01T00:00:00Z/2026-10-31T00:00:00Z[,...]` */
+function poolCommitmentsFromArgs(args: ParsedArgs): PoolCommitment[] | undefined {
+  return listFlag(args, "commitment")?.map((period) => {
+    const [starts_at, ends_at, extra] = period.split("/");
+    if (!starts_at || !ends_at || extra !== undefined) {
+      die(`--commitment takes <starts_at>/<ends_at> (RFC 3339), comma-separated; got "${period}"`);
+    }
+    return { starts_at, ends_at };
   });
 }
 
-function describePoolQuote(quote: PoolQuote): string {
-  const { vcpu, memory_mib, disk_mib } = quote.resources;
-  const size = [
-    vcpu ? `${vcpu} vCPU` : undefined,
-    memory_mib ? `${formatPoolSize(memory_mib)} memory` : undefined,
-    disk_mib ? `${formatPoolSize(disk_mib)} disk` : undefined,
-    `${Math.round(quote.duration_seconds / 86_400)} days`,
-  ].filter(Boolean).join(" · ");
-  const price = new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: quote.currency.toUpperCase(),
-  }).format(quote.amount_cents / 100);
-  const discount = quote.discount_percent > 0 ? ` (${quote.discount_percent}% off on-demand)` : "";
-  return [
-    `Pool${quote.name ? ` "${quote.name}"` : ""} in ${quote.provider}/${quote.region}`,
-    `  ${size}`,
-    `  ${price} ${quote.currency.toUpperCase()}, billed on your next invoice${discount}`,
-  ].join("\n");
+function poolComputeFromArgs(args: ParsedArgs): PoolComputeInput | undefined {
+  const awsFlags = ["aws-account-id", "aws-role-arn", "aws-region", "subnet-ids", "security-group-ids", "instance-types"];
+  const compute = args.flags.compute as string | undefined;
+  if (compute !== "aws") {
+    if (awsFlags.some((flag) => args.flags[flag] !== undefined)) die("--aws-* flags need --compute aws");
+    return compute === "managed" ? { type: "managed" } : undefined;
+  }
+  return {
+    type: "aws",
+    account_id: (args.flags["aws-account-id"] as string | undefined) ?? die("--compute aws needs --aws-account-id"),
+    role_arn: args.flags["aws-role-arn"] as string | undefined,
+    subnet_ids: listFlag(args, "subnet-ids") ?? die("--compute aws needs --subnet-ids"),
+    region: args.flags["aws-region"] as string | undefined,
+    security_group_ids: listFlag(args, "security-group-ids"),
+    instance_types: listFlag(args, "instance-types"),
+  };
 }
 
-function formatPoolSize(mib: number): string {
-  return mib % 1024 === 0 ? `${mib / 1024} GiB` : `${mib} MiB`;
+function poolCreateFromArgs(args: ParsedArgs): CreatePoolOptions {
+  return {
+    name: args.flags.name as string | undefined,
+    resources: poolResourcesFromArgs(args),
+    commitments: poolCommitmentsFromArgs(args),
+    compute: poolComputeFromArgs(args),
+    joinable: args.flags.joinable === true ? true : undefined,
+    isolation: listFlag(args, "isolation") as PoolIsolation[] | undefined,
+    source_vm_id: args.flags["source-vm-id"] as string | undefined,
+    max_forks: numFlag(args, "max-forks"),
+  };
 }
 
-function isPoolPriceChange(error: unknown): boolean {
-  if (!(error instanceof ArkerError) || error.code !== "conflict") return false;
-  const details = (error.body as { details?: { resource?: string } } | undefined)?.details;
-  return details?.resource === "pool_quote";
+function poolUpdateFromArgs(args: ParsedArgs): UpdatePoolOptions {
+  if (args.flags["clear-name"] === true && args.flags.name !== undefined) die("--clear-name and --name are mutually exclusive");
+  if (args.flags.joinable === true && args.flags["no-joinable"] === true) die("--joinable and --no-joinable are mutually exclusive");
+  const update: UpdatePoolOptions = {
+    name: args.flags["clear-name"] === true ? null : (args.flags.name as string | undefined),
+    resources: poolResourcesFromArgs(args),
+    commitments: poolCommitmentsFromArgs(args),
+    joinable: args.flags.joinable === true ? true : args.flags["no-joinable"] === true ? false : undefined,
+    max_forks: numFlag(args, "max-forks"),
+  };
+  if (Object.values(update).every((value) => value === undefined)) die("update: pass at least one field to change");
+  return update;
 }
 
-async function confirm(question: string): Promise<boolean> {
-  const prompt = createInterface({ input, output: process.stderr });
-  try {
-    return /^y(es)?$/i.test((await prompt.question(question)).trim());
-  } finally {
-    prompt.close();
+// ── API keys ───────────────────────────────────────────────────────
+
+async function cmdApiKeys(args: ParsedArgs, client: Arker): Promise<void> {
+  const sub = args.positional[0];
+  const rest = args.positional.slice(1);
+  switch (sub) {
+    case undefined:
+    case "ls":
+    case "list": {
+      const res = await client.listApiKeys();
+      if (args.flags.json) return out(res);
+      for (const k of res.api_keys) {
+        out(`${k.api_key_id}\t${k.name ?? "—"}\t${k.role}\t${k.scopes.join(",")}\t${k.expires_at ?? "never"}`);
+      }
+      return;
+    }
+    case "create": {
+      const scopeFlags = (args.flags.scope as string[] | undefined) ?? [];
+      const workerPool = args.flags["worker-pool"] as string | undefined;
+      if (workerPool && scopeFlags.length) die("--worker-pool and --scope are mutually exclusive: a worker key has exactly its two scopes");
+      const request: CreateApiKeyOptions = {
+        name: args.flags.name as string | undefined,
+        role: args.flags.role as CreateApiKeyOptions["role"],
+        scopes: workerPool ? scopes.worker(workerPool) : scopeFlags.length ? scopeFlags : undefined,
+        expires_at: args.flags["expires-at"] as string | undefined,
+      };
+      out(await client.createApiKey(request));
+      return;
+    }
+    case "revoke":
+    case "rm": {
+      const id = rest[0] ?? die("usage: arker api-keys revoke <api_key_id>");
+      await client.revokeApiKey(id);
+      out(args.flags.json ? { revoked: id } : `revoked ${id}`);
+      return;
+    }
+    default:
+      die("usage: arker api-keys <ls|create|revoke> ...");
   }
 }
 
@@ -1912,9 +1977,23 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   help: { desc: "show help without connecting" },
   image: { placeholder: "<reference>", desc: "fork from an OCI image" },
   "idempotency-key": { placeholder: "<key>", desc: "deduplicate retries of this run request" },
-  clear: { desc: "remove the pool's name" },
-  days: { placeholder: "<n>", desc: "pool term in days (at least 30)" },
-  yes: { desc: "buy without asking for confirmation" },
+  "aws-account-id": { placeholder: "<id>", desc: "AWS account Arker launches hosts in (--compute aws)" },
+  "aws-region": { placeholder: "<region>", desc: "AWS region to launch in (default: the pool's region)" },
+  "aws-role-arn": { placeholder: "<arn>", desc: "role Arker assumes (default: the ArkerPool-* role the pool's setup_url creates)" },
+  "clear-name": { desc: "remove the pool's name" },
+  commitment: { placeholder: "<start/end[,...]>", desc: "committed periods as RFC 3339 <starts_at>/<ends_at>; update replaces the full list" },
+  compute: { placeholder: "<managed|aws>", desc: "whose compute runs the pool (default managed)" },
+  "expires-at": { placeholder: "<timestamp>", desc: "RFC 3339 time the key stops working (default never)" },
+  "instance-types": { placeholder: "<type[,...]>", desc: "EC2 instance types to launch, in order of preference" },
+  isolation: { placeholder: "<vms,logs,metadata>", desc: "state the pool keeps for itself instead of in Arker's shared stores" },
+  joinable: { desc: "let workers holding a worker key for this pool add capacity" },
+  "worker-pool": { placeholder: "<pool_id>", desc: "make a worker key for this pool: scopes pool:<id> and op:heartbeat" },
+  "no-joinable": { desc: "stop workers from joining the pool" },
+  "max-forks": { placeholder: "<n>", desc: "forks of the source VM to keep room for" },
+  role: { desc: "role of the new key; cannot exceed yours", placeholder: "<role>" },
+  scope: { placeholder: "<scope>", desc: "limit the key: *, vmid:<id>, op:<sync|pty|run>; repeatable" },
+  "security-group-ids": { placeholder: "<id[,...]>", desc: "security groups for the hosts" },
+  "subnet-ids": { placeholder: "<id[,...]>", desc: "subnets hosts launch into" },
   json: { desc: "emit JSON instead of tabular output" },
   limit: { placeholder: "<n>", desc: "maximum rows to return; the command-specific service cap applies" },
   layers: { placeholder: "<disk[,memory]>", desc: "state layers to inherit from a source VM" },
@@ -1948,7 +2027,7 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   sort: { placeholder: "<column>", desc: "sort column for organization-wide activity" },
   "source-org-id": { placeholder: "<org>", desc: "organization ID for a VM listing or named source VM" },
   "source-org-name": { placeholder: "<name>", desc: "organization name that owns the source VM" },
-  "source-vm-id": { placeholder: "<id>", desc: "fork by global source VM id" },
+  "source-vm-id": { placeholder: "<id>", desc: "source VM by global id (the fork source, or the VM a fork-reserve pool serves)" },
   "source-vm-name": { placeholder: "<name>", desc: "fork by source VM name" },
   "ssh-public-key": { placeholder: "<key>", desc: "supply one authorized SSH key; repeatable (update replaces the set)" },
   "ssh-public-keys-file": { placeholder: "<path>", desc: "read SSH keys; an empty file clears them during update" },
@@ -2025,23 +2104,42 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   pools: {
     synopsis: [
-      "arker pools <ls|get|usage|rename> [args] [flags]",
-      "arker pools <quote|create> --days <n> [--vcpu <n>] [--memory-mib <n>] [--disk-mib <n>] [flags]",
+      "arker pools <ls|get|workers|rm> [pool_id] [flags]",
+      "arker pools create [--name <n>] [--vcpu <n>] [--memory-mib <n>] [--disk-mib <n>] [--commitment <start/end>] [flags]",
+      "arker pools update <pool_id> [flags]",
     ],
-    summary: "Buy and manage prepaid regional capacity for your organization's VMs.",
+    summary: "Create and manage pools: groups of VMs that share capacity in one region.",
     subs: {
       ls: "list pools",
       get: "show one pool",
-      usage: "show resources allocated to the pool's VMs",
-      rename: "rename a pool, or remove its name with --clear",
-      quote: "price a pool without buying it",
-      create: "show the price, confirm, and buy a pool",
+      workers: "list the workers heartbeating into the pool",
+      create: "create a pool in --provider/--region",
+      update: "change a pool's name, resources, commitments, joinable or max-forks",
+      rm: "delete a pool and every VM in it",
     },
     notes: [
-      "quote and create use --provider and --region (or ARKER_PROVIDER and ARKER_REGION).",
-      "Terms are at least 30 days. A pool is billed on your next invoice; buying and",
-      "renaming need an admin API key. create asks before buying; --yes skips the question,",
-      "and without a terminal create refuses unless --yes is given.",
+      "create, update, rm and workers go to --provider and --region (or ARKER_PROVIDER and ARKER_REGION).",
+      "Creating, changing and deleting need an admin API key. A pool cannot shrink or be deleted",
+      "while a commitment is active. For compute you own: --compute aws --aws-account-id <id>",
+      "--subnet-ids <id,...>, then open compute.setup_url in that account to create the role; the pool",
+      "stays provisioning until it exists (state_detail says why). --isolation vms,logs,metadata keeps",
+      "that state in the pool's own account (logs and metadata need --compute aws). For a fork reserve:",
+      "--source-vm-id <id> --max-forks <n>.",
+    ],
+  },
+  "api-keys": {
+    synopsis: [
+      "arker api-keys <ls|revoke> [api_key_id] [flags]",
+      "arker api-keys create [--name <n>] [--role <role>] [--scope <scope>]... [--expires-at <time>]",
+      "arker api-keys create --worker-pool <pool_id> [--name <n>] [--expires-at <time>]",
+    ],
+    summary: "List, create and revoke API keys.",
+    subs: { ls: "list keys", create: "create a key; the secret is shown once", revoke: "revoke a key" },
+    notes: [
+      "A key reaches what its resource scopes (*, vmid:<id>) and operation scopes (op:sync, op:pty, op:run)",
+      "both allow; the default is *. A new key's role and reach cannot exceed the calling key's.",
+      "A worker key (--worker-pool) is exactly pool:<id> and op:heartbeat, and needs an admin caller.",
+      "A browser terminal authenticates with a short-lived key scoped vmid:<id> and op:pty as ?api_key=.",
     ],
   },
   regions: {
@@ -2226,8 +2324,9 @@ function usage(command?: string, positional: string[] = []): void {
       "  arker sessions    <ls|get|create|rm|update> <vm_id> ...",
       "  arker mounts       <ls|create|rm> <vm_id> ...",
       "  arker filesystems <ls|create|get|rm> ...   (alias: fs)",
-      "  arker pools <ls|get|usage|rename|quote|create> ...",
-      "                                              buy and manage prepaid capacity",
+      "  arker pools <ls|get|workers|create|update|rm> ...",
+      "                                              create and manage pools",
+      "  arker api-keys <ls|create|revoke> ...        manage API keys and pool worker keys",
       "  arker sync <vm_id> <path> [data|-]          read a file, or write data/stdin",
       "  arker sync <vm_id> <path> --read            read a file, ignoring stdin",
       "  arker sync-dir <vm_id> <local> <remote>     sync a directory into the VM",
@@ -2259,6 +2358,7 @@ function usage(command?: string, positional: string[] = []): void {
       "  --nestedvirt               request nested virtualization for an image-based fork",
       "  --layers <disk[,memory]>   state layers to inherit from a source VM",
       "  --policies-file <path>     JSON policy document for the new VM",
+      "  --command <command>        start a background run on the new VM once it is forked",
       "  --source-org-name <name>   organization name that owns the source VM",
       "  --description <text>       short description for the new VM",
       "  --vcpu <n>                 vCPU count for the new VM (capped by source max_vcpus)",
@@ -2366,6 +2466,8 @@ async function main(): Promise<void> {
         return await cmdFilesystems(args, client);
       case "pools":
         return await cmdPools(args, client);
+      case "api-keys":
+        return await cmdApiKeys(args, client);
       default:
         die(`unknown command: ${cmd}. Run 'arker --help'.`);
     }

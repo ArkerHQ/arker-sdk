@@ -10,11 +10,13 @@ import atexit
 import base64
 import contextlib
 import dataclasses
+import datetime
 import gzip
 import hashlib
 import json
 import math
 import os
+import re
 import secrets
 import shlex
 import tarfile
@@ -28,6 +30,7 @@ from concurrent.futures import ThreadPoolExecutor
 from importlib.resources import files as package_files
 from typing import (
     Any,
+    Literal,
     TypeVar,
     get_args,
     get_origin,
@@ -43,6 +46,8 @@ from .generated.api_models import (
     BackgroundRunResponse,
     CancelRunResponse,
     CompletedRunResponse,
+    CreateApiKeyRequest,
+    CreatedApiKey,
     CreatePoolRequest,
     CreateSessionRequest,
     DeleteFilesystemResponse,
@@ -52,6 +57,7 @@ from .generated.api_models import (
     ErrorBody,
     Filesystem,
     FilesystemCreateRequest,
+    ListApiKeysResponse,
     ListFilesystemsParameters,
     ListFilesystemsResponse,
     ListMountsParameters,
@@ -66,6 +72,7 @@ from .generated.api_models import (
     ListSessionsParameters,
     ListSessionsResponse,
     ListVmsParameters,
+    ListWorkersResponse,
     Mount,
     MountCreateRequest,
     PatchSessionRequest,
@@ -73,11 +80,10 @@ from .generated.api_models import (
     PatchVmRequest,
     PolicyDoc,
     Pool,
-    PoolQuote,
-    PoolQuoteRequest,
+    PoolCommitment,
+    PoolCompute,
+    PoolIsolation,
     PoolResources,
-    PoolUsage,
-    PtyTicketResponse,
     ResourcesInput,
     Run,
     RunRequest,
@@ -95,6 +101,7 @@ from .generated.api_models import (
     SyncWriteOperationRequest,
     SyncWriteResponse,
     SyncWriteResult,
+    UpdatePoolRequest,
     Vm,
     VmNetwork,
     VmResources,
@@ -102,6 +109,58 @@ from .generated.api_models import (
 )
 
 Model = TypeVar("Model")
+
+
+_VM_SCOPE_ID = re.compile(r"[A-Za-z0-9_-]{1,96}")
+_POOL_SCOPE_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+class Scopes:
+    """Builders for the ``scopes`` of :meth:`Arker.create_api_key`.
+
+    A key reaches what its resource scopes and its operation scopes both allow.
+
+    - Resource scopes: ``*`` (everything; the default, and only valid alone),
+      ``vmid:<id>`` (those VMs), ``pool:<id>`` (that pool's workers).
+    - Operation scopes: ``op:sync``, ``op:pty``, ``op:run``, ``op:heartbeat``
+      limit the key to those operations.
+
+    A worker key is exactly ``["pool:<id>", "op:heartbeat"]`` (:meth:`worker`);
+    neither scope is valid in any other set. A browser PTY key is
+    ``["vmid:<id>", "op:pty"]`` (:meth:`pty`).
+    """
+
+    ALL = "*"
+
+    @staticmethod
+    def vm(vm_id: str) -> str:
+        """Limit the key to one VM."""
+        if not _VM_SCOPE_ID.fullmatch(vm_id):
+            raise ValueError(f"invalid vm id for a scope: {vm_id!r}")
+        return f"vmid:{vm_id}"
+
+    @staticmethod
+    def op(operation: Literal["sync", "pty", "run"]) -> str:
+        """Limit the key to one operation. ``op:heartbeat`` is only part of :meth:`worker`."""
+        if operation not in ("sync", "pty", "run"):
+            raise ValueError(f"invalid operation for a scope: {operation!r}")
+        return f"op:{operation}"
+
+    @staticmethod
+    def pty(vm_id: str) -> list[str]:
+        """The scopes of a key that only opens terminals on one VM, as a browser passes in ``api_key``."""
+        return [Scopes.vm(vm_id), "op:pty"]
+
+    @staticmethod
+    def worker(pool_id: str) -> list[str]:
+        """The scopes of a worker key for one pool: exactly these two. Needs an admin caller."""
+        if not _POOL_SCOPE_ID.fullmatch(pool_id):
+            raise ValueError(f"invalid pool id for a scope: {pool_id!r}")
+        return [f"pool:{pool_id}", "op:heartbeat"]
+
+
+# How long create_pty_key keys live by default: long enough to open a WebSocket.
+_PTY_KEY_TTL_SECS = 300
 
 
 class _UnsetType:
@@ -445,6 +504,8 @@ class Arker:
         if not os.path.isdir(context_root):
             raise ArkerError("bad_request", f"fork: context is not a directory: {context_root}", 400)
 
+        # The command starts the built image, so it waits for the build steps.
+        command = fork_options.pop("command", None)
         vm = self._fork(
             {**fork_options, "image": parsed.base_image},
             base_url=base_url,
@@ -456,6 +517,8 @@ class Arker:
                 context_root,
                 queueing_timeout=fork_options.get("queueing_timeout"),
             )
+            if command is not None:
+                vm.run(command, time_to_background=0)
         except BaseException:
             _delete_after_failed_build(vm)
             raise
@@ -590,8 +653,10 @@ class Arker:
         )
         return _decode_model(DeleteFilesystemResponse, payload)
 
-    # ── Pools (org-scoped, control-plane) ───────────────────────────────
-    # Available to organizations with pools enabled; others get `not_found`.
+    # ── Pools ───────────────────────────────────────────────────────────
+    # Pools are regional: create, update, delete and the worker list go to the
+    # client's regional base URL (provider and region, or base_url). Listing and
+    # fetching go to the control plane, which finds the pool's region.
     def list_pools(self, *, cursor: str | None = None, limit: int | None = None) -> ListPoolsResponse:
         """List the organization's pools, newest first."""
         path = _build_query("/v1/pools", ListPoolsParameters(cursor=cursor, limit=limit))
@@ -601,96 +666,126 @@ class Arker:
         payload = self._request("GET", f"/v1/pools/{_segment(pool_id)}", base_url=self._control_base_url)
         return _decode_model(Pool, payload)
 
-    def get_pool_usage(self, pool_id: str) -> PoolUsage:
-        """Resources currently allocated to VMs in the pool."""
-        payload = self._request("GET", f"/v1/pools/{_segment(pool_id)}/usage", base_url=self._control_base_url)
-        return _decode_model(PoolUsage, payload)
-
-    def rename_pool(self, pool_id: str, name: str | None) -> Pool:
-        """Set a pool's name, or pass ``None`` to remove it. Requires an admin key."""
-        payload = self._request(
-            "PATCH",
-            f"/v1/pools/{_segment(pool_id)}",
-            {"name": name},
-            base_url=self._control_base_url,
-            preserve_nulls=True,
-        )
-        return _decode_model(Pool, payload)
-
     def create_pool(
         self,
         *,
-        resources: PoolResources | dict[str, int],
-        duration_seconds: int,
         name: str | None = None,
-        provider: str | None = None,
-        region: str | None = None,
-        idempotency_key: str | None = None,
+        resources: PoolResources | dict[str, int] | None = None,
+        commitments: list[PoolCommitment | dict[str, str]] | None = None,
+        compute: PoolCompute | dict[str, Any] | None = None,
+        joinable: bool | None = None,
+        isolation: list[PoolIsolation] | None = None,
+        source_vm_id: str | None = None,
+        max_forks: int | None = None,
     ) -> Pool:
-        """Buy a pool at the current price, billed on the next invoice. Requires an admin key.
+        """Create a pool in the client's region. Requires an admin key.
 
-        Prices the pool, then buys it at exactly that price: if the price
-        changes in between, this raises a ``conflict`` rather than paying a
-        different amount. Member VMs' usage beyond the pool's resources bills at
-        normal rates. ``provider`` and ``region`` default to the client's
-        placement. Without ``idempotency_key`` each call buys a new pool; only
-        this SDK's own retries within that call are deduplicated.
-        """
-        request = self._pool_request(resources, duration_seconds, name, provider, region)
-        quote = self._quote_pool(request)
-        return self._buy_pool(request, quote.amount_cents, idempotency_key or f"sdk-pool-{_ulid()}")
-
-    def _pool_request(
-        self,
-        resources: PoolResources | dict[str, int],
-        duration_seconds: int,
-        name: str | None,
-        provider: str | None,
-        region: str | None,
-    ) -> PoolQuoteRequest:
-        provider = provider or self._provider
-        region = region or self._region
-        if not provider or not region:
-            raise ValueError(
-                "provider and region are required for a pool; pass them or configure the client's placement"
-            )
-        return PoolQuoteRequest(
-            provider=provider,
-            region=region,
-            resources=resources if isinstance(resources, PoolResources) else PoolResources(**resources),
-            duration_seconds=duration_seconds,
-            name=name,
-        )
-
-    def _quote_pool(self, request: PoolQuoteRequest) -> PoolQuote:
-        """Price a pool without buying it."""
-        payload = self._request("POST", "/v1/pools/quote", request, base_url=self._control_base_url)
-        return _decode_model(PoolQuote, payload)
-
-    def _buy_pool(self, request: PoolQuoteRequest, amount_cents: int, idempotency_key: str) -> Pool:
-        """Buy at a quoted price.
-
-        The key is bound once, so every retry replays the same purchase rather
-        than buying another -- which is what makes it safe to retry a purchase
-        whose response was lost.
+        ``compute`` is managed (the default) or an AWS account Arker launches
+        hosts in. An ``aws`` pool stays ``provisioning`` until the role Arker
+        assumes exists: open the returned ``compute.setup_url`` while signed in
+        to the account to create it (``role_arn`` defaults to that role), and
+        read ``state_detail`` for what is still missing. ``isolation`` keeps
+        ``vms``, ``logs`` or ``metadata`` in the pool's own account instead of
+        Arker's shared stores. Pass ``source_vm_id`` with ``max_forks`` for a
+        fork-reserve pool. Only a managed pool that is not ``joinable`` may hold
+        ``commitments``. Without ``provider`` and ``region`` (or
+        ``base_url``) on the client there is no region to create it in.
         """
         body = CreatePoolRequest(
-            provider=request.provider,
-            region=request.region,
-            resources=request.resources,
-            duration_seconds=request.duration_seconds,
-            amount_cents=amount_cents,
-            name=request.name,
+            name=name,
+            resources=resources,  # type: ignore[arg-type]
+            commitments=commitments,  # type: ignore[arg-type]
+            compute=compute,  # type: ignore[arg-type]
+            joinable=joinable,
+            isolation=isolation,
+            source_vm_id=source_vm_id,
+            max_forks=max_forks,
         )
-        payload = self._request(
-            "POST",
-            "/v1/pools",
-            body,
-            base_url=self._control_base_url,
-            extra_headers={"Idempotency-Key": idempotency_key},
-            retry_network_failures=True,
-        )
+        payload = self._request("POST", "/v1/pools", body, base_url=self.base_url)
         return _decode_model(Pool, payload)
+
+    def update_pool(
+        self,
+        pool_id: str,
+        *,
+        name: str | _UnsetType | None = _UNSET,
+        resources: PoolResources | dict[str, int] | None = None,
+        commitments: list[PoolCommitment | dict[str, str]] | None = None,
+        joinable: bool | None = None,
+        max_forks: int | None = None,
+    ) -> Pool:
+        """Change a pool. Requires an admin key.
+
+        Pass only what changes. ``name=None`` removes the name. ``commitments``
+        is the full list: ones that have started must be kept unchanged.
+        """
+        body = UpdatePoolRequest(
+            name=_EXPLICIT_NULL if name is None else (None if name is _UNSET else name),  # type: ignore[arg-type]
+            resources=resources,  # type: ignore[arg-type]
+            commitments=commitments,  # type: ignore[arg-type]
+            joinable=joinable,
+            max_forks=max_forks,
+        )
+        payload = self._request("PATCH", f"/v1/pools/{_segment(pool_id)}", body, base_url=self.base_url)
+        return _decode_model(Pool, payload)
+
+    def delete_pool(self, pool_id: str) -> None:
+        """Delete a pool and every VM in it. Refused while a commitment is active. Requires an admin key."""
+        self._request("DELETE", f"/v1/pools/{_segment(pool_id)}", base_url=self.base_url)
+
+    def list_pool_workers(self, pool_id: str) -> ListWorkersResponse:
+        """Workers that heartbeated into the pool within the last day."""
+        payload = self._request("GET", f"/v1/pools/{_segment(pool_id)}/workers", base_url=self.base_url)
+        return _decode_model(ListWorkersResponse, payload)
+
+    # ── API keys (org-scoped, control-plane) ────────────────────────────
+    def list_api_keys(self) -> ListApiKeysResponse:
+        """The organization's unrevoked, unexpired keys. Needs a ``*``-scoped caller."""
+        return _decode_model(ListApiKeysResponse, self._request("GET", "/v1/api-keys", base_url=self._control_base_url))
+
+    def create_api_key(
+        self,
+        *,
+        name: str | None = None,
+        role: Literal["viewer", "member", "developer", "admin"] | None = None,
+        scopes: list[str] | None = None,
+        expires_at: str | None = None,
+    ) -> CreatedApiKey:
+        """Mint a key. The secret is in the result's ``key`` and is shown only once.
+
+        The new key's role cannot exceed the caller's, its reach is limited
+        to the caller's, and it cannot outlive the caller: a later
+        ``expires_at`` is cut to the caller's. Build ``scopes`` with
+        :class:`Scopes`.
+        """
+        body = CreateApiKeyRequest(name=name, role=role, scopes=scopes, expires_at=expires_at)
+        payload = self._request("POST", "/v1/api-keys", body, base_url=self._control_base_url)
+        return _decode_model(CreatedApiKey, payload)
+
+    def create_pty_key(
+        self,
+        vm_id: str,
+        *,
+        ttl_secs: int = _PTY_KEY_TTL_SECS,
+        name: str = "pty",
+    ) -> CreatedApiKey:
+        """Mint a short-lived key that only opens terminals on one VM.
+
+        Its scopes are ``["vmid:<vm_id>", "op:pty"]``: a browser passes it as
+        ``api_key`` (see :meth:`VM.pty_url`), because a browser WebSocket
+        cannot set an ``Authorization`` header. It expires after ``ttl_secs``,
+        or with the calling key if that is sooner.
+        """
+        expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=ttl_secs)
+        return self.create_api_key(
+            name=name,
+            scopes=Scopes.pty(vm_id),
+            expires_at=expires_at.isoformat().replace("+00:00", "Z"),
+        )
+
+    def revoke_api_key(self, api_key_id: str) -> None:
+        """Revoke a key no broader than the caller. Needs a ``*``-scoped caller above viewer."""
+        self._request("DELETE", f"/v1/api-keys/{_segment(api_key_id)}", base_url=self._control_base_url)
 
     def _request(
         self,
@@ -1426,17 +1521,17 @@ class VM:
         cancel_ttl_secs: int | None = None,
         on_close: Callable[[Pty.CloseEvent], None] | None = None,
         on_error: Callable[[Exception], None] | None = None,
-        use_ticket: bool = True,
         env: dict[str, str] | None = None,
         plain: bool = True,
     ) -> Pty:
         """Open an interactive pseudo-terminal in this VM over a WebSocket.
 
         Mirrors the TypeScript ``connectPty``. Creates a session if
-        ``session_id`` is omitted, mints a browser PTY ticket
-        (``POST .../pty-ticket``), then opens the PTY WebSocket against this
-        VM's *regional* base url. Server→client binary frames are delivered to
-        ``on_data`` from a background reader thread.
+        ``session_id`` is omitted, then opens the PTY WebSocket against this
+        VM's *regional* base url with the API key in the ``Authorization``
+        header. Server→client binary frames are delivered to ``on_data`` from a
+        background reader thread. To hand a terminal to a browser instead, see
+        :meth:`pty_url`.
 
         Reconnect/persist: pass an existing ``session_id`` with
         ``persist=True`` (the default backend behavior) to reattach to a
@@ -1463,33 +1558,13 @@ class VM:
         else:
             sid = self.create_session(env=session_env or None).session_id
 
-        params: dict[str, Any] = {
-            "cols": _clamp_pty_dimension(cols) if cols is not None else None,
-            "rows": _clamp_pty_dimension(rows) if rows is not None else None,
-            "command": command,
-            "persist": persist,
-            "cancel_ttl_secs": int(cancel_ttl_secs) if cancel_ttl_secs and cancel_ttl_secs > 0 else None,
-        }
-
-        ticket: str | None = None
-        headers: dict[str, str] | None = None
-        if use_ticket:
-            payload = self._client._request(
-                "POST",
-                f"{_vm_path(self.id)}/sessions/{_segment(sid)}/pty-ticket",
-                {},
-                base_url=self.base_url,
-            )
-            response = _decode_model(PtyTicketResponse, payload)
-            ticket = response.ticket
-        else:
-            # Header auth (server-side use): Bearer key on the WS upgrade.
-            headers = {"authorization": f"Bearer {self._client._api_key}"}
-
-        ws_params = dict(params)
-        if ticket is not None:
-            ws_params["ticket"] = ticket
-        url = _build_pty_ws_url(self.base_url, self.id, sid, ws_params)
+        url = _build_pty_ws_url(
+            self.base_url,
+            self.id,
+            sid,
+            _pty_query_params(cols=cols, rows=rows, command=command, persist=persist, cancel_ttl_secs=cancel_ttl_secs),
+        )
+        headers = {"authorization": f"Bearer {self._client._api_key}"}
 
         return Pty(
             session_id=sid,
@@ -1499,6 +1574,30 @@ class VM:
             on_close=on_close,
             on_error=on_error,
         )
+
+    def pty_url(
+        self,
+        session_id: str,
+        api_key: str,
+        *,
+        cols: int | None = None,
+        rows: int | None = None,
+        command: str | None = None,
+        persist: bool | None = None,
+        cancel_ttl_secs: int | None = None,
+    ) -> str:
+        """The WebSocket URL of a PTY on this VM that carries ``api_key``, for a browser to open.
+
+        Mint the key with :meth:`Arker.create_pty_key`; Arker refuses any key
+        broader than one VM and ``op:pty`` there. Create the session first::
+
+            key = arker.create_pty_key(vm.id).key
+            url = vm.pty_url(vm.create_session().session_id, key)
+        """
+        params = _pty_query_params(
+            cols=cols, rows=rows, command=command, persist=persist, cancel_ttl_secs=cancel_ttl_secs
+        )
+        return _build_pty_ws_url(self.base_url, self.id, session_id, {**params, "api_key": api_key})
 
 
 class Pty:
@@ -1901,6 +2000,23 @@ PLAIN_PTY_ENV: dict[str, str] = {
     "FORCE_COLOR": "0",
     "CLICOLOR": "0",
 }
+
+
+def _pty_query_params(
+    *,
+    cols: int | None,
+    rows: int | None,
+    command: str | None,
+    persist: bool | None,
+    cancel_ttl_secs: int | None,
+) -> dict[str, Any]:
+    return {
+        "cols": _clamp_pty_dimension(cols) if cols is not None else None,
+        "rows": _clamp_pty_dimension(rows) if rows is not None else None,
+        "command": command,
+        "persist": persist,
+        "cancel_ttl_secs": int(cancel_ttl_secs) if cancel_ttl_secs and cancel_ttl_secs > 0 else None,
+    }
 
 
 def _build_pty_ws_url(base_url: str, vm_id: str, session_id: str, params: dict[str, Any]) -> str:

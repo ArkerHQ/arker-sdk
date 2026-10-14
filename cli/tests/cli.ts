@@ -428,6 +428,7 @@ async function testForkForwardsImageOptionsAndRedactsSecrets(): Promise<void> {
           "--durable",
           "--nestedvirt",
           "--policies-file", policiesFile,
+          "--command", "python3 -m http.server",
         ]);
         assert.equal(result.code, 0, result.stderr);
         assertNoForkKeys(requests);
@@ -445,6 +446,7 @@ async function testForkForwardsImageOptionsAndRedactsSecrets(): Promise<void> {
             nestedvirt: true,
             policies,
             registry_auth: { username: "registry-user", password },
+            command: "python3 -m http.server",
           },
         }]);
       },
@@ -653,61 +655,173 @@ async function testWhoamiUsesAuthenticatedControlPlane(): Promise<void> {
   );
 }
 
-const POOL_TERMS = { resources: { vcpu: 8, memory_mib: 32768 }, duration_seconds: 2_592_000 };
 const CLI_POOL = {
   pool_id: "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61",
   name: "ci",
   provider: "aws",
   region: "us-west-2",
-  ...POOL_TERMS,
-  status: "active",
+  state: "idle",
+  state_detail: null,
+  resources: { vcpu: 8, memory_mib: 32768 },
+  capacity: { vcpu: 0, memory_mib: 0, disk_mib: 0, forks: null },
+  commitments: [],
+  compute: { type: "managed" },
+  joinable: false,
+  isolation: [],
+  source_vm_id: null,
+  max_forks: null,
   created_at: "2026-09-25T00:00:00Z",
-  starts_at: "2026-09-25T00:00:00Z",
-  ends_at: "2026-10-25T00:00:00Z",
-  currency: "usd",
-  amount_cents: 12_345,
-  invoice_id: null,
 };
-const CLI_POOL_QUOTE = {
-  name: "ci",
-  catalog_version: "v1",
-  baseline_cents: 15_000,
-  discount_percent: 17.7,
-  provider: "aws",
-  region: "us-west-2",
-  ...POOL_TERMS,
-  currency: "usd",
-  amount_cents: 12_345,
+const CLI_API_KEY = {
+  api_key_id: "key_1",
+  name: "worker",
+  role: "member",
+  scopes: ["pool:7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61", "op:heartbeat"],
+  created_at: "2026-10-12T00:00:00Z",
+  expires_at: null,
 };
-const POOL_ARGS = [
-  "--provider", "aws", "--region", "us-west-2", "--vcpu", "8", "--memory-mib", "32768", "--days", "30", "--name", "ci",
-];
 
 function poolResponder(request: CapturedRequest, res: ServerResponse): void {
-  jsonResponse(res, request.url === "/api/v1/pools/quote" ? CLI_POOL_QUOTE : CLI_POOL);
+  if (request.method === "DELETE") {
+    res.statusCode = 204;
+    res.end();
+  } else if (request.url === "/api/v1/api-keys" && request.method === "GET") {
+    jsonResponse(res, { api_keys: [CLI_API_KEY] });
+  } else if (request.url === "/api/v1/api-keys") {
+    jsonResponse(res, { api_key: CLI_API_KEY, key: "ark_live_secret" });
+  } else if (request.url === "/api/v1/pools" && request.method === "GET") {
+    jsonResponse(res, { pools: [CLI_POOL], next_cursor: null });
+  } else if (request.url?.endsWith("/workers")) {
+    jsonResponse(res, { workers: [] });
+  } else {
+    jsonResponse(res, CLI_POOL);
+  }
 }
 
-async function testPoolsCreateNeedsConfirmationWithoutATerminal(): Promise<void> {
-  await withCapturedServer(poolResponder, async (baseUrl, requests) => {
-    const result = await runCli(baseUrl, ["pools", "create", ...POOL_ARGS], { controlOnly: true });
-    assert.equal(result.code, 1);
-    assert.match(result.stderr, /pass --yes/);
-    assert.equal(requests.length, 0, "nothing may be quoted or bought without confirmation");
+/** Run against two servers so a test can tell which one a call used. */
+async function withRegionalAndControl(
+  fn: (run: (args: string[]) => Promise<CliResult>, regional: CapturedRequest[], control: CapturedRequest[]) => Promise<void>,
+): Promise<void> {
+  await withCapturedServer(poolResponder, async (regionalUrl, regional) => {
+    await withCapturedServer(poolResponder, async (controlUrl, control) => {
+      await fn(
+        (args) => runCli(regionalUrl, args, { environment: { ARKER_CONTROL_BASE_URL: controlUrl } }),
+        regional,
+        control,
+      );
+    });
   });
 }
 
-async function testPoolsCreateYesBuysAtTheQuotedPrice(): Promise<void> {
-  await withCapturedServer(poolResponder, async (baseUrl, requests) => {
-    const result = await runCli(baseUrl, ["pools", "create", "--yes", ...POOL_ARGS], { controlOnly: true });
+async function testPoolsCreateAwsGoesToTheRegionalServer(): Promise<void> {
+  await withRegionalAndControl(async (run, regional, control) => {
+    const result = await run([
+      "pools", "create", "--name", "ci", "--vcpu", "8", "--memory-mib", "32768",
+      "--commitment", "2026-10-01T00:00:00Z/2026-10-31T00:00:00Z", "--joinable",
+      "--compute", "aws", "--aws-account-id", "123456789012",
+      "--subnet-ids", "subnet-1,subnet-2", "--isolation", "vms,logs,metadata",
+    ]);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(stdoutText(result)).pool_id, CLI_POOL.pool_id);
-    const [quote, buy] = requests;
-    assert.equal(quote!.url, "/api/v1/pools/quote");
-    assert.equal(quote!.idempotencyKey, undefined);
-    assert.equal(buy!.url, "/api/v1/pools");
-    assert.deepEqual(buy!.body, { ...(quote!.body as object), amount_cents: 12_345 });
-    assert.match(buy!.idempotencyKey ?? "", /^cli-pool-/);
+    assert.equal(control.length, 0);
+    assert.deepEqual(regional.map(({ method, url }) => [method, url]), [["POST", "/api/v1/pools"]]);
+    assert.deepEqual(regional[0]!.body, {
+      name: "ci",
+      resources: { vcpu: 8, memory_mib: 32768 },
+      commitments: [{ starts_at: "2026-10-01T00:00:00Z", ends_at: "2026-10-31T00:00:00Z" }],
+      compute: {
+        type: "aws",
+        account_id: "123456789012",
+        subnet_ids: ["subnet-1", "subnet-2"],
+      },
+      joinable: true,
+      isolation: ["vms", "logs", "metadata"],
+    });
   });
+}
+
+async function testPoolsCreateForkReserve(): Promise<void> {
+  await withRegionalAndControl(async (run, regional) => {
+    const result = await run(["pools", "create", "--source-vm-id", "vm_1", "--max-forks", "50"]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(regional[0]!.body, { source_vm_id: "vm_1", max_forks: 50 });
+  });
+}
+
+async function testPoolsAwsFlagsNeedComputeAws(): Promise<void> {
+  const result = await runCli("http://127.0.0.1:1", ["pools", "create", "--aws-account-id", "123456789012"]);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /--compute aws/);
+}
+
+async function testPoolsListAndGetGoToTheControlPlane(): Promise<void> {
+  await withRegionalAndControl(async (run, regional, control) => {
+    assert.equal((await run(["pools", "ls"])).code, 0);
+    assert.equal((await run(["pools", "get", CLI_POOL.pool_id])).code, 0);
+    assert.equal(regional.length, 0);
+    assert.deepEqual(control.map(({ method, url }) => [method, url]), [
+      ["GET", "/api/v1/pools"],
+      ["GET", `/api/v1/pools/${CLI_POOL.pool_id}`],
+    ]);
+  });
+}
+
+async function testPoolsUpdateRmAndWorkersGoToTheRegionalServer(): Promise<void> {
+  await withRegionalAndControl(async (run, regional, control) => {
+    const id = CLI_POOL.pool_id;
+    assert.equal((await run(["pools", "update", id, "--clear-name", "--no-joinable", "--vcpu", "16"])).code, 0);
+    assert.equal((await run(["pools", "rm", id])).code, 0);
+    assert.equal((await run(["pools", "workers", id])).code, 0);
+    assert.equal(control.length, 0);
+    assert.deepEqual(regional.map(({ method, url }) => [method, url]), [
+      ["PATCH", `/api/v1/pools/${id}`],
+      ["DELETE", `/api/v1/pools/${id}`],
+      ["GET", `/api/v1/pools/${id}/workers`],
+    ]);
+    assert.deepEqual(regional[0]!.body, { name: null, joinable: false, resources: { vcpu: 16 } });
+  });
+}
+
+async function testPoolsUpdateNeedsAField(): Promise<void> {
+  const result = await runCli("http://127.0.0.1:1", ["pools", "update", CLI_POOL.pool_id]);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /at least one field/);
+}
+
+async function testApiKeysGoToTheControlPlane(): Promise<void> {
+  await withRegionalAndControl(async (run, regional, control) => {
+    assert.equal((await run(["api-keys", "ls"])).code, 0);
+    const created = await run([
+      "api-keys", "create", "--name", "worker", "--role", "member",
+      "--worker-pool", CLI_POOL.pool_id, "--expires-at", "2026-12-01T00:00:00Z",
+    ]);
+    assert.equal(created.code, 0, created.stderr);
+    assert.equal(JSON.parse(stdoutText(created)).key, "ark_live_secret");
+    assert.equal((await run(["api-keys", "create", "--scope", "vmid:vm_1", "--scope", "op:run"])).code, 0);
+    assert.equal((await run(["api-keys", "revoke", "key_1"])).code, 0);
+    assert.equal(regional.length, 0);
+    assert.deepEqual(control.map(({ method, url }) => [method, url]), [
+      ["GET", "/api/v1/api-keys"],
+      ["POST", "/api/v1/api-keys"],
+      ["POST", "/api/v1/api-keys"],
+      ["DELETE", "/api/v1/api-keys/key_1"],
+    ]);
+    assert.deepEqual(control[1]!.body, {
+      name: "worker",
+      role: "member",
+      scopes: [`pool:${CLI_POOL.pool_id}`, "op:heartbeat"],
+      expires_at: "2026-12-01T00:00:00Z",
+    });
+    assert.deepEqual(control[2]!.body, { scopes: ["vmid:vm_1", "op:run"] });
+  });
+}
+
+async function testWorkerPoolAndScopeAreExclusive(): Promise<void> {
+  const result = await runCli("http://127.0.0.1:1", [
+    "api-keys", "create", "--worker-pool", CLI_POOL.pool_id, "--scope", "op:run",
+  ]);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /--worker-pool and --scope are mutually exclusive/);
 }
 
 async function testRemovedSecretAndUrlFlagsFailLocally(): Promise<void> {
@@ -729,7 +843,7 @@ async function testPerCommandHelpIsCommandSpecific(): Promise<void> {
   for (const command of [
     "delete", "filesystems", "fork", "fs", "list", "ls", "policies", "regions",
     "rm", "run", "runs", "sessions", "shell", "signal", "sync", "sync-dir",
-    "mounts", "pools", "update", "vms", "whoami",
+    "mounts", "pools", "api-keys", "update", "vms", "whoami",
   ]) {
     const result = await runCli(undefined, [command, "--help"], { authenticated: false });
     assert.equal(result.code, 0, `${command} --help should succeed`);
@@ -1457,8 +1571,14 @@ await testComputeCommandRequiresProviderAndRegion();
 await testProviderOnlyVmListDoesNotRequireAComputeRegion();
 await testRegionsDiscoveryNeedsNoCredentialsOrPlacement();
 await testWhoamiUsesAuthenticatedControlPlane();
-await testPoolsCreateNeedsConfirmationWithoutATerminal();
-await testPoolsCreateYesBuysAtTheQuotedPrice();
+await testPoolsCreateAwsGoesToTheRegionalServer();
+await testPoolsCreateForkReserve();
+await testPoolsAwsFlagsNeedComputeAws();
+await testPoolsListAndGetGoToTheControlPlane();
+await testPoolsUpdateRmAndWorkersGoToTheRegionalServer();
+await testPoolsUpdateNeedsAField();
+await testApiKeysGoToTheControlPlane();
+await testWorkerPoolAndScopeAreExclusive();
 await testRemovedSecretAndUrlFlagsFailLocally();
 await testHelpMatchesSupportedSurface();
 await testPerCommandHelpIsCommandSpecific();

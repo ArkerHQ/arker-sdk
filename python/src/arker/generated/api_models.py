@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Literal, TypeAlias
 
+from typing_extensions import deprecated
+
 
 @dataclass(frozen=True)
 class HealthResponse:
@@ -84,13 +86,8 @@ class PolicyMatch:
     methods: list[str] | None = None
     paths: list[str] | None = None
     headers: dict[str, list[str]] | None = None
+    query_params: dict[str, list[str]] | None = None
     body_contains: list[str] | None = None
-
-
-@dataclass(frozen=True)
-class ScalingAction:
-    suspend: bool | None = False
-    wake: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +96,7 @@ class Rewrite:
     path: str | None = None
     headers: dict[str, str] | None = None
     remove_headers: list[str] | None = None
+    remove_query_params: list[str] | None = None
     body: str | None = None
 
 
@@ -244,12 +242,6 @@ class CreateSessionRequest:
     cols: int | None = None
     rows: int | None = None
     command: str | None = None
-
-
-@dataclass(frozen=True)
-class PtyTicketResponse:
-    ticket: str
-    expires_in: int
 
 
 @dataclass(frozen=True)
@@ -487,7 +479,6 @@ OpenApiOperationId: TypeAlias = Literal[
     'patchSession',
     'deleteSession',
     'attachSessionPty',
-    'mintSessionPtyTicket',
     'createMount',
     'listMounts',
     'deleteMount',
@@ -498,10 +489,18 @@ OpenApiOperationId: TypeAlias = Literal[
     'deleteFilesystem',
     'listPools',
     'createPool',
-    'quotePool',
     'getPool',
     'updatePool',
-    'getPoolUsage',
+    'deletePool',
+    'listPoolWorkers',
+    'heartbeatWorker',
+    'openWorkerTunnel',
+    'putWorkerVm',
+    'deleteWorkerVm',
+    'putWorkerRun',
+    'listApiKeys',
+    'createApiKey',
+    'revokeApiKey',
 ]
 
 
@@ -543,7 +542,6 @@ ResourceKind: TypeAlias = Literal[
     'webhook',
     'resource',
     'pool',
-    'pool_quote',
     'pool_name',
 ]
 
@@ -555,13 +553,7 @@ RateLimiter: TypeAlias = Literal['arker', 'upstream']
 
 
 StateRequirement: TypeAlias = Literal[
-    'running',
-    'mutable',
-    'unclaimed',
-    'active',
-    'same_location',
-    'pool_purchases_enabled',
-    'pool_pricing_configured',
+    'running', 'mutable', 'unclaimed', 'active', 'same_location'
 ]
 
 
@@ -1346,78 +1338,6 @@ class PoolResources:
     disk_mib: int | None = None
 
 
-PoolStatus: TypeAlias = Literal['active', 'expired']
-
-
-@dataclass(frozen=True)
-class PoolQuoteRequest:
-    provider: Provider
-    region: str
-    resources: PoolResources
-    duration_seconds: int
-    name: str | None = None
-
-
-@dataclass(frozen=True)
-class CreatePoolRequest:
-    provider: Provider
-    region: str
-    resources: PoolResources
-    duration_seconds: int
-    amount_cents: int
-    name: str | None = None
-
-
-@dataclass(frozen=True)
-class UpdatePoolRequest:
-    name: str | None
-
-
-@dataclass(frozen=True)
-class PoolQuote:
-    name: str | None
-    catalog_version: str
-    baseline_cents: int
-    discount_percent: float
-    provider: Provider
-    region: str
-    resources: PoolResources
-    duration_seconds: int
-    currency: Literal['usd']
-    amount_cents: int
-
-
-@dataclass(frozen=True)
-class Pool:
-    pool_id: str
-    name: str | None
-    provider: Provider
-    region: str
-    resources: PoolResources
-    duration_seconds: int
-    status: PoolStatus
-    created_at: str
-    starts_at: str
-    ends_at: str
-    currency: Literal['usd']
-    amount_cents: int
-    invoice_id: str | None
-
-
-@dataclass(frozen=True)
-class ListPoolsResponse:
-    pools: list[Pool]
-    purchases_enabled: bool
-    next_cursor: str | None
-
-
-@dataclass(frozen=True)
-class PoolUsage:
-    pool_id: str
-    resources_allocated: PoolResources
-    allocation_observed_at: str | None
-
-
 @dataclass(frozen=True)
 class ActionRequiredOrForbiddenErrorResponse:
     error: ActionRequired | Forbidden
@@ -1428,6 +1348,7 @@ class ConflictOrIdempotencyConflictOrInvalidStateErrorResponse:
     error: Conflict | IdempotencyConflict | InvalidState
 
 
+@deprecated('Auth is deprecated.')
 @dataclass(frozen=True)
 class Auth:
     token: str
@@ -1449,11 +1370,217 @@ class When:
     after: int | None = None
 
 
+@deprecated('LifecycleRule is deprecated.')
 @dataclass(frozen=True)
 class LifecycleRule:
     type: Literal['lifecycle']
     when: When
     action: Literal['delete']
+
+
+@dataclass(frozen=True)
+class PoolCapacity:
+    vcpu: int
+    memory_mib: int
+    disk_mib: int
+    forks: int | None
+
+
+PoolState: TypeAlias = Literal['provisioning', 'idle', 'running']
+
+
+@dataclass(frozen=True)
+class PoolCommitment:
+    starts_at: str
+    ends_at: str
+
+
+@dataclass(frozen=True)
+class PoolComputeManaged:
+    type: Literal['managed']
+
+
+@dataclass(frozen=True)
+class PoolComputeAws:
+    type: Literal['aws']
+    account_id: str
+    subnet_ids: list[str]
+    role_arn: str | None = None
+    external_id: str | None = None
+    region: str | None = None
+    security_group_ids: list[str] | None = None
+    instance_types: list[str] | None = None
+    setup_url: str | None = None
+
+
+PoolCompute: TypeAlias = PoolComputeManaged | PoolComputeAws
+
+
+PoolIsolation: TypeAlias = Literal['vms', 'logs', 'metadata']
+
+
+@dataclass(frozen=True)
+class WorkerResources:
+    vcpu: int
+    memory_mib: int
+    disk_mib: int
+    gpu_count: int | None = None
+
+
+WorkerKind: TypeAlias = str
+
+
+WorkerState: TypeAlias = Literal['active', 'draining', 'left']
+
+
+Platform: TypeAlias = str
+
+
+@dataclass(frozen=True)
+class WorkerHeartbeat:
+    kind: WorkerKind
+    version: str
+    platforms: list[Platform]
+    state: WorkerState
+    resources: WorkerResources
+    free: WorkerResources
+    capabilities: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class Deployment:
+    tier: Literal['feature', 'staging', 'prod']
+    provider: str
+    region: str
+
+
+@dataclass(frozen=True)
+class Credentials:
+    access_key_id: str
+    secret_access_key: str
+    session_token: str
+    expires_at: str
+
+
+@dataclass(frozen=True)
+class ObjectStorage:
+    bucket: str
+    region: str
+    prefix: str
+    credentials: Credentials
+
+
+@dataclass(frozen=True)
+class Metadata:
+    host: str
+    port: int
+    database: str
+    user: str
+    password: str
+
+
+@dataclass(frozen=True)
+class Logs:
+    endpoint: str
+    user: str
+    password: str
+
+
+@dataclass(frozen=True)
+class WorkerStores:
+    object_storage: ObjectStorage | None
+    metadata: Metadata | None
+    logs: Logs | None
+
+
+@dataclass(frozen=True)
+class Worker:
+    worker_id: str
+    pool_id: str
+    kind: WorkerKind
+    version: str
+    platforms: list[str]
+    capabilities: list[str]
+    state: WorkerState
+    resources: WorkerResources
+    free: WorkerResources
+    last_heartbeat_at: str
+
+
+@dataclass(frozen=True)
+class ListWorkersResponse:
+    workers: list[Worker]
+
+
+@dataclass(frozen=True)
+class ApiKey:
+    api_key_id: str
+    name: str | None
+    role: Literal['viewer', 'member', 'developer', 'admin']
+    scopes: list[str]
+    created_at: str
+    expires_at: str | None
+
+
+Scope: TypeAlias = str
+
+
+@dataclass(frozen=True)
+class CreateApiKeyRequest:
+    name: str | None = None
+    role: Literal['viewer', 'member', 'developer', 'admin'] | None = None
+    scopes: list[Scope] | None = None
+    expires_at: str | None = None
+
+
+@dataclass(frozen=True)
+class CreatedApiKey:
+    api_key: ApiKey
+    key: str
+
+
+@dataclass(frozen=True)
+class ListApiKeysResponse:
+    api_keys: list[ApiKey]
+
+
+@dataclass(frozen=True)
+class WorkerVmRecord:
+    state: Literal['running', 'paused', 'suspended']
+    platform: str
+    resources: WorkerResources
+    image: str | None
+    parent_vm_id: str | None
+    created_at: str
+    last_active_at: str | None
+
+
+@dataclass(frozen=True)
+class WorkerRunRecord:
+    state: Literal['running', 'completed', 'failed', 'cancelled']
+    command: str
+    exit_code: int | None
+    started_at: str
+    finished_at: str | None
+    stdout: str | None
+    stderr: str | None
+
+
+@dataclass(frozen=True)
+class ResourceFactors:
+    vcpu: float | None = None
+    memory_mib: float | None = None
+    disk_mib: float | None = None
+
+
+@dataclass(frozen=True)
+class Webhook:
+    host: str
+    path: str | None = None
+    method: str | None = None
+    headers: dict[str, str] | None = None
+    body: Any | None = None
+    timeout_ms: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1587,13 +1714,7 @@ class AttachSessionPtyParameters:
     command: str | None = None
     persist: bool | None = True
     cancel_ttl_secs: int | None = None
-    ticket: str | None = None
-
-
-@dataclass(frozen=True)
-class MintSessionPtyTicketParameters:
-    id: str
-    sid: str
+    api_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1654,8 +1775,52 @@ class UpdatePoolParameters:
 
 
 @dataclass(frozen=True)
-class GetPoolUsageParameters:
+class DeletePoolParameters:
     pool_id: str
+
+
+@dataclass(frozen=True)
+class ListPoolWorkersParameters:
+    pool_id: str
+
+
+@dataclass(frozen=True)
+class HeartbeatWorkerParameters:
+    pool_id: str
+    worker_id: str
+
+
+@dataclass(frozen=True)
+class OpenWorkerTunnelParameters:
+    pool_id: str
+    worker_id: str
+
+
+@dataclass(frozen=True)
+class PutWorkerVmParameters:
+    pool_id: str
+    worker_id: str
+    vm_id: str
+
+
+@dataclass(frozen=True)
+class DeleteWorkerVmParameters:
+    pool_id: str
+    worker_id: str
+    vm_id: str
+
+
+@dataclass(frozen=True)
+class PutWorkerRunParameters:
+    pool_id: str
+    worker_id: str
+    vm_id: str
+    run_id: str
+
+
+@dataclass(frozen=True)
+class RevokeApiKeyParameters:
+    api_key_id: str
 
 
 ErrorBody: TypeAlias = (
@@ -1689,16 +1854,6 @@ ErrorBody: TypeAlias = (
 @dataclass(frozen=True)
 class ErrorResponse:
     error: ErrorBody
-
-
-@dataclass(frozen=True)
-class PolicyAction1:
-    rewrite: Rewrite | None = None
-    gate: Gate | None = None
-    scaling: ScalingAction | None = None
-
-
-PolicyAction: TypeAlias = Literal['allow', 'deny'] | PolicyAction1
 
 
 @dataclass(frozen=True)
@@ -1778,24 +1933,78 @@ HealthUnavailableResponse: TypeAlias = (
 
 
 @dataclass(frozen=True)
-class PolicyRule:
-    type: Literal['outbound', 'inbound']
-    priority: int
-    action: PolicyAction
-    match: PolicyMatch | None = None
-    auth: Literal['open', 'arker'] | Auth | None = None
-    expires_at: str | None = None
-
-
-PolicyRules: TypeAlias = dict[str, PolicyRule | LifecycleRule]
+class CreatePoolRequest:
+    name: str | None = None
+    resources: PoolResources | None = None
+    commitments: list[PoolCommitment] | None = None
+    compute: PoolCompute | None = None
+    joinable: bool | None = None
+    isolation: list[PoolIsolation] | None = None
+    source_vm_id: str | None = None
+    max_forks: int | None = None
 
 
 @dataclass(frozen=True)
-class PolicyEntry:
-    type: Literal['outbound', 'inbound']
-    action: PolicyAction
-    match: PolicyMatch | None = None
-    auth: Literal['open', 'arker'] | None = None
+class UpdatePoolRequest:
+    name: str | None = None
+    resources: PoolResources | None = None
+    commitments: list[PoolCommitment] | None = None
+    joinable: bool | None = None
+    max_forks: int | None = None
+
+
+@dataclass(frozen=True)
+class Pool:
+    pool_id: str
+    name: str | None
+    provider: Provider
+    region: str
+    state: PoolState
+    state_detail: str | None
+    resources: PoolResources
+    capacity: PoolCapacity
+    commitments: list[PoolCommitment]
+    compute: PoolCompute
+    joinable: bool
+    isolation: list[PoolIsolation]
+    source_vm_id: str | None
+    max_forks: int | None
+    created_at: str
+
+
+@dataclass(frozen=True)
+class ListPoolsResponse:
+    pools: list[Pool]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class WorkerHeartbeatResponse:
+    worker_id: str
+    heartbeat_interval_ms: int
+    desired_state: WorkerState
+    tunnel_url: str
+    stores: WorkerStores
+    deployment: Deployment
+
+
+@dataclass(frozen=True)
+class ScaleAction:
+    suspend: bool | None = False
+    wake: bool | None = None
+    resource_factors: ResourceFactors | None = None
+
+
+@dataclass(frozen=True)
+class PolicyAction1:
+    rewrite: Rewrite | None = None
+    gate: Gate | None = None
+    scale: ScaleAction | None = None
+    scaling: ScaleAction | None = None
+    webhook: Webhook | None = None
+
+
+PolicyAction: TypeAlias = Literal['allow', 'deny', 'delete'] | PolicyAction1
 
 
 RunResponse: TypeAlias = CompletedRunResponse | BackgroundRunResponse
@@ -1846,18 +2055,57 @@ class SyncCommitWriteResult:
 
 
 @dataclass(frozen=True)
+class PolicyRule:
+    type: Literal['outbound', 'inbound']
+    priority: int
+    action: PolicyAction
+    match: PolicyMatch | None = None
+    auth: Literal['open', 'arker'] | Auth | None = None
+    expires_at: str | None = None
+
+
+@dataclass(frozen=True)
+class ScheduleRule:
+    type: Literal['schedule']
+    action: PolicyAction
+    at: str | None = None
+    after_wake: int | None = None
+
+
+@dataclass(frozen=True)
+class ResourcesRule:
+    type: Literal['resources']
+    action: PolicyAction
+    above: ResourceFactors | None = None
+    below: ResourceFactors | None = None
+
+
+@dataclass(frozen=True)
+class PolicyEntry:
+    type: Literal['outbound', 'inbound']
+    action: PolicyAction
+    match: PolicyMatch | None = None
+    auth: Literal['open', 'arker'] | None = None
+
+
+SyncWriteResult: TypeAlias = (
+    SyncChunkWriteResult | SyncPresignedWriteRequestResult | SyncCommitWriteResult
+)
+
+
+@dataclass(frozen=True)
 class PolicyUpdate:
-    rules: dict[str, PolicyRule | LifecycleRule | None] | None = None
+    rules: (
+        dict[str, PolicyRule | ScheduleRule | ResourcesRule | LifecycleRule | None]
+        | None
+    ) = None
     secrets: dict[str, str | None] | None = None
     policies: list[PolicyEntry] | None = None
 
 
-@dataclass(frozen=True)
-class VmPolicies:
-    rules: PolicyRules | None = None
-    secrets: dict[str, str] | None = None
-    mitm_domains: list[str] | None = None
-    warnings: list[str] | None = None
+PolicyRules: TypeAlias = dict[
+    str, PolicyRule | ScheduleRule | ResourcesRule | LifecycleRule
+]
 
 
 @dataclass(frozen=True)
@@ -1901,6 +2149,7 @@ class ForkRequest1:
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
     pool_name: str | None = None
+    command: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1926,6 +2175,7 @@ class ForkRequest2:
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
     pool_name: str | None = None
+    command: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1951,6 +2201,7 @@ class ForkRequest3:
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
     pool_name: str | None = None
+    command: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1976,6 +2227,7 @@ class ForkRequest4:
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
     pool_name: str | None = None
+    command: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2001,6 +2253,7 @@ class ForkRequest5:
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
     pool_name: str | None = None
+    command: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2026,6 +2279,7 @@ class ForkRequest6:
     registry_auth: RegistryAuth | None = None
     pool_id: str | None = None
     pool_name: str | None = None
+    command: str | None = None
 
 
 ForkRequest: TypeAlias = (
@@ -2036,6 +2290,45 @@ ForkRequest: TypeAlias = (
     | ForkRequest5
     | ForkRequest6
 )
+
+
+@dataclass(frozen=True)
+class RunRequest:
+    session_id: str | None = None
+    session_idx: int | None = None
+    command: str | None = None
+    timeout: int | None = None
+    time_to_background: int | None = None
+    background: bool | None = None
+    queueing_timeout: int | None = None
+    end_symbol: str | None = 'auto'
+    signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
+    policies: PolicyUpdate | None = None
+
+
+@dataclass(frozen=True)
+class SyncWriteResponse:
+    ok: bool
+    op: Literal['write']
+    results: list[SyncWriteResult]
+
+
+@dataclass(frozen=True)
+class PatchVmRequest:
+    description: str | None = None
+    resources: ResourcesInput | None = None
+    ssh_public_keys: SshKeysUpdate | list[str] | None = None
+    policies: PolicyUpdate | None = None
+    pool_id: str | None = None
+    pool_name: str | None = None
+
+
+@dataclass(frozen=True)
+class VmPolicies:
+    rules: PolicyRules | None = None
+    secrets: dict[str, str] | None = None
+    mitm_domains: list[str] | None = None
+    warnings: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -2073,42 +2366,6 @@ class Vm:
 class ListVmsResponse:
     vms: list[Vm]
     next_cursor: str | None = None
-
-
-@dataclass(frozen=True)
-class RunRequest:
-    session_id: str | None = None
-    session_idx: int | None = None
-    command: str | None = None
-    timeout: int | None = None
-    time_to_background: int | None = None
-    background: bool | None = None
-    queueing_timeout: int | None = None
-    end_symbol: str | None = 'auto'
-    signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
-    policies: PolicyUpdate | None = None
-
-
-SyncWriteResult: TypeAlias = (
-    SyncChunkWriteResult | SyncPresignedWriteRequestResult | SyncCommitWriteResult
-)
-
-
-@dataclass(frozen=True)
-class PatchVmRequest:
-    description: str | None = None
-    resources: ResourcesInput | None = None
-    ssh_public_keys: SshKeysUpdate | list[str] | None = None
-    policies: PolicyUpdate | None = None
-    pool_id: str | None = None
-    pool_name: str | None = None
-
-
-@dataclass(frozen=True)
-class SyncWriteResponse:
-    ok: bool
-    op: Literal['write']
-    results: list[SyncWriteResult]
 
 
 SyncResponse: TypeAlias = SyncReadResponse | SyncWriteResponse | SyncManifestResponse

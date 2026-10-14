@@ -102,6 +102,18 @@ warns and prints what was kept when the command finishes. `--json` prints one
 object when the command finishes, and `--time-to-background 0` returns a run
 ID immediately.
 
+## API keys
+
+`arker api-keys create` mints a key; its secret is printed once. `--scope`
+narrows it and is repeatable: `*` (the default), `vmid:<id>`, and `op:sync`,
+`op:pty`, `op:run`. A key reaches what its VM and operation scopes both allow,
+and never more than the key that made it.
+
+```bash
+arker api-keys create --name ci --scope vmid:<vm-id> --scope op:run
+arker api-keys create --name worker --worker-pool <pool-id>   # pool:<id> + op:heartbeat
+```
+
 ## Documentation and examples
 
 Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [examples](../examples).

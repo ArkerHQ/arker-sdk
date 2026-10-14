@@ -32,9 +32,9 @@ fmt.Print(out.Stdout)
 Placement works exactly as in the other SDKs. `BaseURL` fully determines
 routing, so `Provider` and `Region` are ignored when it is set; supply either
 `BaseURL` or *both* `Provider` and `Region`. Org-wide calls — `ListVMs`,
-`ListRuns`, `ListRegions`, `Whoami` and the pool calls — reach the control plane
-and work with no placement at all (`CreatePool` needs a provider and region,
-from the request or the client); everything else needs one.
+`ListRuns`, `ListRegions`, `Whoami`, `ListPools`, `GetPool` and the API-key calls — reach the control plane
+and work with no placement at all (`CreatePool`, `UpdatePool`, `DeletePool` and
+`ListPoolWorkers` go to the region and need one); everything else needs one.
 
 ## Surface
 
@@ -44,8 +44,11 @@ from the request or the client); everything else needs one.
 | `ListRuns` `ListRegions` `Whoami` | `Run` `ListRuns` `GetRun` `CancelRun` |
 | `ListFilesystems` `CreateFilesystem` | `ListSessions` `CreateSession` `GetSession` |
 | `GetFilesystem` `DeleteFilesystem` | `UpdateSession` `DeleteSession` |
-| `ListPools` `GetPool` `GetPoolUsage` | |
-| `RenamePool` `CreatePool` | |
+| `ListPools` `GetPool` | |
+| `CreatePool` `UpdatePool` `DeletePool` | |
+| `ListPoolWorkers` | |
+| `ListAPIKeys` `CreateAPIKey` `RevokeAPIKey` | |
+| `CreatePTYKey` | `PTYURL` |
 | `BaseURL` `ControlBaseURL` `Provider` `Region` | `GetPolicies` `SetPolicies` |
 | package-level `DiscoverRegions` | `ReadFile` `WriteFile` `SyncDir` |
 | | `ListMounts` `CreateMount` `DeleteMount` `ConnectPTY` |
@@ -153,6 +156,35 @@ pty.SendString("ls -la\n")
 <-pty.Done()
 ```
 
+`ConnectPTY` sends the API key in the `Authorization` header. A browser
+WebSocket cannot set headers, so a browser passes a short-lived key limited to
+one VM and `op:pty` as `api_key`; Arker refuses any broader key there. To hand
+a terminal URL to a browser:
+
+```go
+key, err := client.CreatePTYKey(ctx, vm.ID, 0) // PTYKeyScopes(vm.ID), expires in 5 minutes
+session, err := vm.CreateSession(ctx, arker.CreateSessionRequest{})
+url, err := vm.PTYURL(session.SessionID, key.Key, arker.PTYOptions{})
+```
+
 PTYs are plain-text by default (`PlainPTYEnv`): the usual consumer is a program,
 and stripping escape sequences after the fact is lossy. Pass
 `Plain: arker.Ptr(false)` when a human is watching a full-screen TUI.
+
+## Scoped API keys
+
+A key reaches what its resource scopes and its operation scopes both allow:
+
+| Kind | Scopes |
+| --- | --- |
+| Resource | `*` (everything; the default, and only valid alone), `vmid:<id>` (those VMs), `pool:<id>` (that pool's workers) |
+| Operation | `op:sync`, `op:pty`, `op:run`, `op:heartbeat` (only those operations) |
+
+A worker key is exactly `["pool:<id>", "op:heartbeat"]`, and neither scope is valid in any other set; only an admin can create one. A new key's role and reach cannot exceed the calling key's.
+
+```go
+key, err := client.CreateAPIKey(ctx, arker.CreateAPIKeyRequest{
+    Name: "ci", Scopes: []arker.Scope{arker.ScopeVM(vm.ID), arker.ScopeOp(arker.OpRun)},
+})
+worker, err := client.CreateAPIKey(ctx, arker.CreateAPIKeyRequest{Name: "worker", Scopes: arker.WorkerKeyScopes(poolID)})
+```
