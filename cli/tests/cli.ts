@@ -428,6 +428,7 @@ async function testForkForwardsImageOptionsAndRedactsSecrets(): Promise<void> {
           "--durable",
           "--nestedvirt",
           "--policies-file", policiesFile,
+          "--command", "python3 -m http.server",
         ]);
         assert.equal(result.code, 0, result.stderr);
         assertNoForkKeys(requests);
@@ -445,6 +446,7 @@ async function testForkForwardsImageOptionsAndRedactsSecrets(): Promise<void> {
             nestedvirt: true,
             policies,
             registry_auth: { username: "registry-user", password },
+            command: "python3 -m http.server",
           },
         }]);
       },

@@ -320,7 +320,6 @@ export type FilesystemCreateRequest = ApiSchema<"FilesystemCreateRequest">;
 // ── Pools ──────────────────────────────────────────────────────────
 export type Pool = ApiSchema<"Pool">;
 export type PoolResources = ApiSchema<"PoolResources">;
-export type PoolUsage = ApiSchema<"PoolUsage">;
 export type PoolState = ApiSchema<"PoolState">;
 export type PoolCapacity = ApiSchema<"PoolCapacity">;
 export type PoolCommitment = ApiSchema<"PoolCommitment">;
@@ -378,7 +377,7 @@ export const scopes = {
   },
   /** The scopes of a worker key for one pool: exactly these two, nothing else. Needs an admin caller. */
   worker(poolId: string): [`pool:${string}`, "op:heartbeat"] {
-    if (!/^[0-9a-f-]{36}$/.test(poolId)) throw new Error(`invalid pool id for a scope: ${poolId}`);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(poolId)) throw new Error(`invalid pool id for a scope: ${poolId}`);
     return [`pool:${poolId}`, "op:heartbeat"];
   },
 } as const;
@@ -824,13 +823,16 @@ export class Arker {
       throw new ArkerError("bad_request", `fork: context is not a directory: ${contextRoot}`, 400);
     }
 
+    // The command starts the built image, so it waits for the build steps.
+    const { command, ...imageForkOptions } = forkOptions;
     const vm = await this._fork(
-      { ...forkOptions, image: parsed.baseImage } as ForkRequest,
+      { ...imageForkOptions, image: parsed.baseImage } as ForkRequest,
       this.baseUrl,
     );
     const queueingTimeout = forkOptions.queueing_timeout as number | undefined;
     try {
       await applySteps(vm, parsed.steps, contextRoot, { queueingTimeout });
+      if (typeof command === "string") await vm.run(command, { time_to_background: 0 });
     } catch (error) {
       await deleteAfterFailedBuild(vm);
       throw error;
@@ -930,11 +932,6 @@ export class Arker {
     return this._request("GET", `/v1/pools/${pathSegment(poolId)}`, undefined, this.controlBaseUrl);
   }
 
-  /** Resources currently allocated to VMs in the pool. */
-  async getPoolUsage(poolId: string): Promise<PoolUsage> {
-    return this._request("GET", `/v1/pools/${pathSegment(poolId)}/usage`, undefined, this.controlBaseUrl);
-  }
-
   /**
    * Create a pool in the client's region. Requires an admin key.
    *
@@ -945,7 +942,8 @@ export class Arker {
    * An `aws` pool stays `provisioning` until the role Arker assumes exists:
    * open the returned `compute.setup_url` while signed in to the account to
    * create it (`role_arn` defaults to that role). `state_detail` says what is
-   * still missing.
+   * still missing. Pass `source_vm_id` with `max_forks` for a fork-reserve
+   * pool. Only a managed pool that is not `joinable` may hold `commitments`.
    */
   async createPool(options: CreatePoolOptions): Promise<Pool> {
     return this._request("POST", "/v1/pools", options, this.baseUrl);
@@ -972,14 +970,16 @@ export class Arker {
 
   // ── API keys (org-scoped, control-plane) ───────────────────────────
 
+  /** The organization's unrevoked, unexpired keys. Needs a `*`-scoped caller. */
   async listApiKeys(): Promise<ListApiKeysResponse> {
     return this._request("GET", "/v1/api-keys", undefined, this.controlBaseUrl);
   }
 
   /**
    * Mint a key. The secret is in the result's `key` and is shown only once.
-   * The new key's role cannot exceed the caller's and its reach is limited to
-   * the caller's. Build `scopes` with {@link scopes}.
+   * The new key's role cannot exceed the caller's, its reach is limited to
+   * the caller's, and it cannot outlive the caller: a later `expires_at` is
+   * cut to the caller's. Build `scopes` with {@link scopes}.
    */
   async createApiKey(options: CreateApiKeyOptions = {}): Promise<CreatedApiKey> {
     return this._request("POST", "/v1/api-keys", options, this.controlBaseUrl);
@@ -1000,6 +1000,7 @@ export class Arker {
     });
   }
 
+  /** Revoke a key no broader than the caller. Needs a `*`-scoped caller above viewer. */
   async revokeApiKey(apiKeyId: string): Promise<void> {
     await this._request("DELETE", `/v1/api-keys/${pathSegment(apiKeyId)}`, undefined, this.controlBaseUrl);
   }

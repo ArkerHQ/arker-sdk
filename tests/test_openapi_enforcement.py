@@ -204,6 +204,7 @@ def test_public_surface_uses_only_current_names_and_copy() -> None:
         "NetworkRequest",
         "NetworkStatus",
         "PoolDedicatedStorage",
+        "PoolUsage",
         "PtyTicketResponse",
         "PutPoliciesResponse",
         "RunStatusResponse",

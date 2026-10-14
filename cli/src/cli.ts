@@ -125,6 +125,7 @@ const FORK_RESOURCE_OPTIONS: OptionSpecs = {
 const FORK_OPTIONS: OptionSpecs = {
   ...GLOBAL_OPTIONS,
   ...FORK_RESOURCE_OPTIONS,
+  command: { type: "string" },
   context: { type: "string" },
   description: { type: "string", allowEmpty: true },
   disk: { type: "boolean" },
@@ -473,7 +474,7 @@ const POSITIONAL_LIMITS: Record<string, number | Record<string, number>> = {
   sessions: { ls: 1, list: 1, get: 2, create: 1, rm: 2, delete: 2, update: 2 },
   shell: 1,
   policies: { get: 1, set: 1 },
-  pools: { ls: 0, list: 0, get: 1, usage: 1, workers: 1, create: 0, update: 1, delete: 1, rm: 1 },
+  pools: { ls: 0, list: 0, get: 1, workers: 1, create: 0, update: 1, delete: 1, rm: 1 },
   "api-keys": { ls: 0, list: 0, create: 0, revoke: 1, rm: 1 },
   regions: 0,
   whoami: 0,
@@ -982,11 +983,13 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
       : image
         ? { image }
         : { dockerfile: dockerfile!, ...(context ? { context } : {}) };
+  const command = args.flags.command as string | undefined;
   const forkOptions: ForkOptions = {
     ...source,
     ...pool,
     name,
     description,
+    ...(command !== undefined ? { command } : {}),
     public: publicFlag,
     ...(platforms && platforms.length > 0 ? { platforms } : {}),
     ...(resources ? { resources } : {}),
@@ -1614,10 +1617,6 @@ async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
       out(await client.getPool(rest[0] ?? die("usage: arker pools get <pool_id>")));
       return;
     }
-    case "usage": {
-      out(await client.getPoolUsage(rest[0] ?? die("usage: arker pools usage <pool_id>")));
-      return;
-    }
     case "workers": {
       const res = await client.listPoolWorkers(rest[0] ?? die("usage: arker pools workers <pool_id>"));
       if (args.flags.json) return out(res);
@@ -1642,7 +1641,7 @@ async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
       return;
     }
     default:
-      die("usage: arker pools <ls|get|usage|workers|create|update|rm> ...");
+      die("usage: arker pools <ls|get|workers|create|update|rm> ...");
   }
 }
 
@@ -2105,7 +2104,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   pools: {
     synopsis: [
-      "arker pools <ls|get|usage|workers|rm> [pool_id] [flags]",
+      "arker pools <ls|get|workers|rm> [pool_id] [flags]",
       "arker pools create [--name <n>] [--vcpu <n>] [--memory-mib <n>] [--disk-mib <n>] [--commitment <start/end>] [flags]",
       "arker pools update <pool_id> [flags]",
     ],
@@ -2113,8 +2112,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     subs: {
       ls: "list pools",
       get: "show one pool",
-      usage: "show resources allocated to the pool's VMs",
-      workers: "list the workers that joined the pool",
+      workers: "list the workers heartbeating into the pool",
       create: "create a pool in --provider/--region",
       update: "change a pool's name, resources, commitments, joinable or max-forks",
       rm: "delete a pool and every VM in it",
@@ -2326,7 +2324,7 @@ function usage(command?: string, positional: string[] = []): void {
       "  arker sessions    <ls|get|create|rm|update> <vm_id> ...",
       "  arker mounts       <ls|create|rm> <vm_id> ...",
       "  arker filesystems <ls|create|get|rm> ...   (alias: fs)",
-      "  arker pools <ls|get|usage|workers|create|update|rm> ...",
+      "  arker pools <ls|get|workers|create|update|rm> ...",
       "                                              create and manage pools",
       "  arker api-keys <ls|create|revoke> ...        manage API keys and pool worker keys",
       "  arker sync <vm_id> <path> [data|-]          read a file, or write data/stdin",
@@ -2360,6 +2358,7 @@ function usage(command?: string, positional: string[] = []): void {
       "  --nestedvirt               request nested virtualization for an image-based fork",
       "  --layers <disk[,memory]>   state layers to inherit from a source VM",
       "  --policies-file <path>     JSON policy document for the new VM",
+      "  --command <command>        start a background run on the new VM once it is forked",
       "  --source-org-name <name>   organization name that owns the source VM",
       "  --description <text>       short description for the new VM",
       "  --vcpu <n>                 vCPU count for the new VM (capped by source max_vcpus)",

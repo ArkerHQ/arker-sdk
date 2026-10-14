@@ -13,6 +13,7 @@ type PolicyMatch struct {
 	Methods      []string       `json:"methods,omitempty"`
 	Paths        []string       `json:"paths,omitempty"`
 	Headers      map[string]any `json:"headers,omitempty"`
+	QueryParams  map[string]any `json:"query_params,omitempty"`
 	BodyContains []string       `json:"body_contains,omitempty"`
 }
 

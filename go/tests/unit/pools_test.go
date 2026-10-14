@@ -24,7 +24,7 @@ const poolBody = `{"pool_id":"` + poolID + `","name":"ci","provider":"aws","regi
 	`"source_vm_id":null,"max_forks":null,"created_at":"2026-09-25T00:00:00Z"}`
 
 const workerBody = `{"workers":[{"worker_id":"01J","pool_id":"` + poolID + `","kind":"blast","version":"1",` +
-	`"platforms":["blast-docker-x86_64"],"state":"active",` +
+	`"platforms":["blast-docker-x86_64"],"capabilities":["gpu"],"state":"active",` +
 	`"resources":{"vcpu":4,"memory_mib":8192,"disk_mib":1024},"free":{"vcpu":2,"memory_mib":4096,"disk_mib":512},` +
 	`"last_heartbeat_at":"2026-10-12T00:00:00Z"}]}`
 
@@ -190,7 +190,8 @@ func TestUpdateDeleteAndWorkersUseTheRegionalBaseURL(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 	workers, err := c.ListPoolWorkers(ctx, poolID)
-	if err != nil || len(workers) != 1 || workers[0].Free.VCPU != 2 || workers[0].Kind != "blast" {
+	if err != nil || len(workers) != 1 || workers[0].Free.VCPU != 2 || workers[0].Kind != "blast" ||
+		!reflect.DeepEqual(workers[0].Capabilities, []string{"gpu"}) {
 		t.Fatalf("workers %+v %v", workers, err)
 	}
 

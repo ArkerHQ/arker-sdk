@@ -100,13 +100,6 @@ type PoolList struct {
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
-// PoolUsage is what a pool's VMs currently hold.
-type PoolUsage struct {
-	PoolID               string        `json:"pool_id"`
-	ResourcesAllocated   PoolResources `json:"resources_allocated"`
-	AllocationObservedAt *string       `json:"allocation_observed_at"`
-}
-
 // WorkerResources is a worker's capacity.
 type WorkerResources struct {
 	VCPU      int64 `json:"vcpu"`
@@ -117,11 +110,14 @@ type WorkerResources struct {
 
 // Worker is a host heartbeating into a pool.
 type Worker struct {
-	WorkerID        string          `json:"worker_id"`
-	PoolID          string          `json:"pool_id"`
-	Kind            string          `json:"kind"` // the worker's software, such as "arkerd"
-	Version         string          `json:"version"`
-	Platforms       []string        `json:"platforms"`
+	WorkerID  string   `json:"worker_id"`
+	PoolID    string   `json:"pool_id"`
+	Kind      string   `json:"kind"` // the worker's software, such as "arkerd"
+	Version   string   `json:"version"`
+	Platforms []string `json:"platforms"`
+	// Capabilities is what the worker offers beyond the operations every
+	// worker serves, as its last heartbeat listed them.
+	Capabilities    []string        `json:"capabilities"`
 	State           string          `json:"state"` // "active", "draining" or "left"
 	Resources       WorkerResources `json:"resources"`
 	Free            WorkerResources `json:"free"`
@@ -136,7 +132,7 @@ type ListPoolsOptions struct {
 
 // CreatePoolRequest describes a pool. Everything is optional: a pool with no
 // compute is managed. Set SourceVMID and MaxForks together for a fork-reserve
-// pool.
+// pool. Only a managed pool that is not joinable may hold commitments.
 type CreatePoolRequest struct {
 	Name        string           `json:"name,omitempty"`
 	Resources   *PoolResources   `json:"resources,omitempty"`
@@ -204,13 +200,6 @@ func (c *Client) ListPools(ctx context.Context, opts ListPoolsOptions) (*PoolLis
 func (c *Client) GetPool(ctx context.Context, poolID string) (*Pool, error) {
 	var out Pool
 	_, err := c.control(ctx, "/v1/pools/"+segment(poolID), &out)
-	return &out, err
-}
-
-// GetPoolUsage reports the resources currently allocated to VMs in the pool.
-func (c *Client) GetPoolUsage(ctx context.Context, poolID string) (*PoolUsage, error) {
-	var out PoolUsage
-	_, err := c.control(ctx, "/v1/pools/"+segment(poolID)+"/usage", &out)
 	return &out, err
 }
 

@@ -71,7 +71,8 @@ type CreatedAPIKey struct {
 }
 
 // CreateAPIKeyRequest describes a new key. The key's role cannot exceed the
-// caller's and its reach is limited to the caller's.
+// caller's, its reach is limited to the caller's, and it cannot outlive the
+// caller: a later ExpiresAt is cut to the caller's.
 type CreateAPIKeyRequest struct {
 	Name string `json:"name,omitempty"`
 	// Role defaults to the caller's role.
@@ -82,7 +83,8 @@ type CreateAPIKeyRequest struct {
 	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
-// ListAPIKeys lists the organization's API keys.
+// ListAPIKeys lists the organization's unrevoked, unexpired API keys. It
+// needs a caller with ScopeAll.
 func (c *Client) ListAPIKeys(ctx context.Context) ([]APIKey, error) {
 	var out struct {
 		APIKeys []APIKey `json:"api_keys"`
@@ -113,7 +115,8 @@ func (c *Client) CreatePTYKey(ctx context.Context, vmID string, ttl time.Duratio
 	})
 }
 
-// RevokeAPIKey revokes a key.
+// RevokeAPIKey revokes a key no broader than the caller. It needs a caller
+// with ScopeAll and a role above viewer.
 func (c *Client) RevokeAPIKey(ctx context.Context, apiKeyID string) error {
 	_, err := c.do(ctx, call{method: http.MethodDelete, path: "/v1/api-keys/" + segment(apiKeyID), base: c.controlURL})
 	return err

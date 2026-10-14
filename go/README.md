@@ -44,7 +44,7 @@ and work with no placement at all (`CreatePool`, `UpdatePool`, `DeletePool` and
 | `ListRuns` `ListRegions` `Whoami` | `Run` `ListRuns` `GetRun` `CancelRun` |
 | `ListFilesystems` `CreateFilesystem` | `ListSessions` `CreateSession` `GetSession` |
 | `GetFilesystem` `DeleteFilesystem` | `UpdateSession` `DeleteSession` |
-| `ListPools` `GetPool` `GetPoolUsage` | |
+| `ListPools` `GetPool` | |
 | `CreatePool` `UpdatePool` `DeletePool` | |
 | `ListPoolWorkers` | |
 | `ListAPIKeys` `CreateAPIKey` `RevokeAPIKey` | |

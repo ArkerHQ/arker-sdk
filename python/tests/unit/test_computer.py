@@ -393,6 +393,7 @@ def test_delete_pool_and_list_workers_use_the_regional_base_url() -> None:
         "kind": "blast",
         "version": "1",
         "platforms": ["blast-docker-x86_64"],
+        "capabilities": ["gpu"],
         "state": "active",
         "resources": {"vcpu": 4, "memory_mib": 8192, "disk_mib": 1024},
         "free": {"vcpu": 2, "memory_mib": 4096, "disk_mib": 512},
@@ -408,6 +409,7 @@ def test_delete_pool_and_list_workers_use_the_regional_base_url() -> None:
 
     assert workers.workers[0].worker_id == "01J"
     assert workers.workers[0].free.vcpu == 2
+    assert workers.workers[0].capabilities == ["gpu"]
 
 
 API_KEY = {
@@ -456,6 +458,8 @@ def test_scope_builders() -> None:
         lambda: sdk.Scopes.vm("a b"),
         lambda: sdk.Scopes.op("heartbeat"),  # type: ignore[arg-type]
         lambda: sdk.Scopes.worker("nope"),
+        lambda: sdk.Scopes.worker(POOL_ID.upper()),
+        lambda: sdk.Scopes.worker("-" * 36),
         lambda: sdk.Scopes.pty("a b"),
     ):
         with pytest.raises(ValueError):
@@ -721,14 +725,21 @@ def test_fork_from_a_dockerfile_forks_the_base_image_then_drives_the_rest() -> N
             "exit_code": 0,
         },
     )
+    t.add_json(
+        lambda method, url: method == "POST" and url.endswith("/runs"),
+        200,
+        {"run_id": "run_serve", "state": "running"},
+    )
 
     with use_transport(t):
-        vm = client().fork(dockerfile="FROM ubuntu:24.04\nRUN echo hi\n")
+        vm = client().fork(dockerfile="FROM ubuntu:24.04\nRUN echo hi\n", command="serve")
 
     assert vm.id == "vm_dockerfile"
     assert json.loads(t.calls[0]["body"]) == {"image": "ubuntu:24.04"}
     assert t.calls[1]["url"].endswith("/vms/vm_dockerfile/runs")
     assert json.loads(t.calls[1]["body"])["command"] == "echo hi"
+    started = json.loads(t.calls[-1]["body"])
+    assert (started["command"], started["time_to_background"]) == ("serve", 0)
 
 
 def test_fork_rejects_a_response_without_vm_id() -> None:

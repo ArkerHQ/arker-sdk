@@ -263,11 +263,18 @@ async function testForkFromDockerfileBuildsFromItsBaseImage(): Promise<void> {
       exit_code: 0,
     },
   );
+  fetch.addJson(
+    (method, url) => method === "POST" && url === "https://test.invalid/api/v1/vms/vm_build/runs",
+    200,
+    { run_id: "run_serve", state: "running" },
+  );
 
-  await client(fetch).fork({ dockerfile: "FROM ubuntu:24.04\nRUN echo hi\n" });
+  await client(fetch).fork({ dockerfile: "FROM ubuntu:24.04\nRUN echo hi\n", command: "serve" });
 
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { image: "ubuntu:24.04" });
   assert.equal(JSON.parse(fetch.calls[1]!.body!).command, "echo hi");
+  const started = JSON.parse(fetch.calls.at(-1)!.body!);
+  assert.deepEqual([started.command, started.time_to_background], ["serve", 0], "the command starts after the build");
 }
 
 async function testForkOmitsSourceOrgWhenNotExplicit(): Promise<void> {
@@ -819,6 +826,8 @@ function testScopeBuilders(): void {
   assert.throws(() => scopes.vm("a b"));
   assert.throws(() => scopes.op("heartbeat" as "run"));
   assert.throws(() => scopes.worker("nope"));
+  assert.throws(() => scopes.worker(POOL_ID.toUpperCase()));
+  assert.throws(() => scopes.worker("-".repeat(36)));
   assert.throws(() => scopes.pty("a b"));
 }
 

@@ -84,7 +84,6 @@ from .generated.api_models import (
     PoolCompute,
     PoolIsolation,
     PoolResources,
-    PoolUsage,
     ResourcesInput,
     Run,
     RunRequest,
@@ -113,7 +112,7 @@ Model = TypeVar("Model")
 
 
 _VM_SCOPE_ID = re.compile(r"[A-Za-z0-9_-]{1,96}")
-_POOL_SCOPE_ID = re.compile(r"[0-9a-f-]{36}")
+_POOL_SCOPE_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 class Scopes:
@@ -505,6 +504,8 @@ class Arker:
         if not os.path.isdir(context_root):
             raise ArkerError("bad_request", f"fork: context is not a directory: {context_root}", 400)
 
+        # The command starts the built image, so it waits for the build steps.
+        command = fork_options.pop("command", None)
         vm = self._fork(
             {**fork_options, "image": parsed.base_image},
             base_url=base_url,
@@ -516,6 +517,8 @@ class Arker:
                 context_root,
                 queueing_timeout=fork_options.get("queueing_timeout"),
             )
+            if command is not None:
+                vm.run(command, time_to_background=0)
         except BaseException:
             _delete_after_failed_build(vm)
             raise
@@ -663,11 +666,6 @@ class Arker:
         payload = self._request("GET", f"/v1/pools/{_segment(pool_id)}", base_url=self._control_base_url)
         return _decode_model(Pool, payload)
 
-    def get_pool_usage(self, pool_id: str) -> PoolUsage:
-        """Resources currently allocated to VMs in the pool."""
-        payload = self._request("GET", f"/v1/pools/{_segment(pool_id)}/usage", base_url=self._control_base_url)
-        return _decode_model(PoolUsage, payload)
-
     def create_pool(
         self,
         *,
@@ -689,7 +687,8 @@ class Arker:
         read ``state_detail`` for what is still missing. ``isolation`` keeps
         ``vms``, ``logs`` or ``metadata`` in the pool's own account instead of
         Arker's shared stores. Pass ``source_vm_id`` with ``max_forks`` for a
-        fork-reserve pool. Without ``provider`` and ``region`` (or
+        fork-reserve pool. Only a managed pool that is not ``joinable`` may hold
+        ``commitments``. Without ``provider`` and ``region`` (or
         ``base_url``) on the client there is no region to create it in.
         """
         body = CreatePoolRequest(
@@ -741,6 +740,7 @@ class Arker:
 
     # ── API keys (org-scoped, control-plane) ────────────────────────────
     def list_api_keys(self) -> ListApiKeysResponse:
+        """The organization's unrevoked, unexpired keys. Needs a ``*``-scoped caller."""
         return _decode_model(ListApiKeysResponse, self._request("GET", "/v1/api-keys", base_url=self._control_base_url))
 
     def create_api_key(
@@ -753,8 +753,10 @@ class Arker:
     ) -> CreatedApiKey:
         """Mint a key. The secret is in the result's ``key`` and is shown only once.
 
-        The new key's role cannot exceed the caller's and its reach is limited
-        to the caller's. Build ``scopes`` with :class:`Scopes`.
+        The new key's role cannot exceed the caller's, its reach is limited
+        to the caller's, and it cannot outlive the caller: a later
+        ``expires_at`` is cut to the caller's. Build ``scopes`` with
+        :class:`Scopes`.
         """
         body = CreateApiKeyRequest(name=name, role=role, scopes=scopes, expires_at=expires_at)
         payload = self._request("POST", "/v1/api-keys", body, base_url=self._control_base_url)
@@ -782,6 +784,7 @@ class Arker:
         )
 
     def revoke_api_key(self, api_key_id: str) -> None:
+        """Revoke a key no broader than the caller. Needs a ``*``-scoped caller above viewer."""
         self._request("DELETE", f"/v1/api-keys/{_segment(api_key_id)}", base_url=self._control_base_url)
 
     def _request(
