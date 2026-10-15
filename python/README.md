@@ -50,3 +50,67 @@ Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [e
 ## License
 
 Apache-2.0
+
+## Pools v2
+
+Pools require the per-organization pools flag; a disabled organization receives
+`404 not_found`. The three pool types are `arker` (reserved fleet capacity),
+`aws` (hosts in your AWS account), and `self_hosted` (your BLAST workers).
+This replaces pools v1 and BYOC: quotes, fixed purchase terms, prices, and the
+purchase idempotency key are removed with no compatibility layer.
+
+Configure a regional endpoint (or provider and region) for pool operations.
+Listing pools uses the control plane across regions; use each returned pool's
+region for subsequent operations. Fork with exactly one of `pool_id` or
+`pool_name`; names are case-insensitive within a region. A fleet VM cannot be
+forked into a pool: use a supported image source instead. Pool VMs do not support
+interactive shells; use `run` for commands.
+
+`arker` and `aws` pools have reserved `resources` with all three quantities
+(`vcpu`, `memory_mib`, `disk_mib`), including zeros. Self-hosted pools derive
+capacity from workers and take no resource reservation or commitments. AWS pools
+start `provisioning`: open `aws.setup_url` in the specified AWS account, create
+the CloudFormation stack, then inspect `state` and `state_detail` until ready.
+Join keys are for self-hosted pools only. Save the secret returned at creation;
+it is never returned by listing. Worker listing is for AWS and self-hosted pools.
+
+Commitments last at least 24 hours, cannot overlap, and new commitments cannot
+start in the past. Started commitments must remain unchanged, including expired
+ones. The add-commitment helper reads the pool and appends to the entire list.
+**Serialize commitment edits:** the API has no conditional update or atomic
+append, so concurrent edits can overwrite unstarted commitments. Active
+commitments prevent shrinking or deletion; resizing to zero otherwise releases
+the reservation. Deleting a pool deletes every VM in it.
+
+API errors retain their code, status, message, and server details. A
+`429 quota_exceeded` is returned immediately; adjust the reservation/quota or
+remove unused pools/keys instead of retrying. Ordinary rate limits keep the
+SDK's retry policy. `capacity_unavailable` means placement has no capacity;
+inspect the pool's capacity, workers, and provisioning state. Fleet-to-pool fork
+and unsupported shell refusals are surfaced without a fallback placement.
+Creation has no documented idempotency guarantee: after an ambiguous transport
+failure, inspect the pool list before creating again.
+
+```python
+from arker import CreateArkerPoolRequest, PoolResources, PoolCommitment
+
+pool = client.create_pool(
+    CreateArkerPoolRequest(
+        type="arker",
+        platform="icelake",
+        resources=PoolResources(vcpu=8, memory_mib=32768, disk_mib=102400),
+    )
+)
+client.add_pool_commitment(
+    pool.pool_id,
+    PoolCommitment(
+        starts_at="2027-01-01T00:00:00Z",
+        ends_at="2027-01-02T00:00:00Z",
+    ),
+)
+client.fork(image="ubuntu", pool_id=pool.pool_id)
+client.rename_pool(pool.pool_id, None)  # Clear the name.
+```
+
+`update_pool` accepts `UpdatePoolRequest` or a dictionary. Dataclass fields set
+to `None` are omitted; use `rename_pool(id, None)` or `{"name": None}` to clear a name.
