@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from arker._compat import routed_get
+from arker._compat import routed_create, routed_get
 from arker._router import JsonRouteCache, RouterConfig, load_router_config, select_weighted_provider
 
 
@@ -232,3 +232,31 @@ def test_race_continues_after_one_provider_errors(tmp_path: Path) -> None:
         {"e2b": fails, "arker": lambda: object()},
     )
     assert found is not None and found[0] == "arker"
+
+
+def test_missing_arker_source_falls_back_to_native_provider(tmp_path: Path) -> None:
+    config_path = tmp_path / "computesdk_router.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "existing": {"strategy": "priority", "order": ["arker", "e2b"]},
+                "create": {"strategy": "priority", "order": ["arker", "e2b"]},
+            }
+        )
+    )
+
+    def missing_source() -> None:
+        raise ValueError("Arker source is required")
+
+    provider, result = routed_create(
+        "e2b",
+        {"router_config_path": config_path},
+        {
+            "arker": missing_source,
+            "e2b": lambda: type("NativeSandbox", (), {"sandbox_id": "native-e2b"})(),
+        },
+    )
+
+    assert provider == "e2b"
+    assert result.sandbox_id == "native-e2b"

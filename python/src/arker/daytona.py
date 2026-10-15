@@ -6,6 +6,7 @@ from typing import Any
 
 from ._compat import (
     CommandResult,
+    UnsupportedCompatibilityOption,
     UnsupportedMixin,
     arker_create,
     arker_get,
@@ -112,14 +113,20 @@ class Daytona(UnsupportedMixin):
 
         def create_arker() -> VM:
             if args:
-                raise TypeError("Daytona.create positional arguments are not supported when routing to Arker")
+                raise UnsupportedCompatibilityOption(
+                    "Daytona.create positional arguments are not supported when routing to Arker"
+                )
             supported = {"image", "snapshot", "name", "resources", "envVars", "language"}
             unknown = sorted(set(kwargs) - supported)
             if unknown:
-                raise TypeError(f"Daytona.create received unsupported option(s) for Arker: {', '.join(unknown)}")
+                raise UnsupportedCompatibilityOption(
+                    f"Daytona.create received unsupported option(s) for Arker: {', '.join(unknown)}"
+                )
             unsupported = [key for key in ("envVars", "language") if kwargs.get(key) is not None]
             if unsupported:
-                raise TypeError(f"Daytona.create option(s) are not supported by Arker: {', '.join(unsupported)}")
+                raise UnsupportedCompatibilityOption(
+                    f"Daytona.create option(s) are not supported by Arker: {', '.join(unsupported)}"
+                )
             raw_resources = kwargs.get("resources") or {}
             resources = {
                 **({"vcpu": raw_resources["cpu"]} if "cpu" in raw_resources else {}),

@@ -33,6 +33,10 @@ class CommandResult:
         return self.exit_code
 
 
+class UnsupportedCompatibilityOption(TypeError):
+    """An option cannot be represented by the selected compatibility provider."""
+
+
 class UnsupportedMixin:
     _compat_name = "provider"
 
@@ -159,7 +163,7 @@ def _cache_set(cache: JsonRouteCache | None, identifier: str, provider: str) -> 
 
 
 def _is_retryable(error: Exception) -> bool:
-    if isinstance(error, (TypeError, ValueError, NotImplementedError)):
+    if isinstance(error, UnsupportedCompatibilityOption):
         return False
     current: BaseException | None = error
     for _ in range(5):

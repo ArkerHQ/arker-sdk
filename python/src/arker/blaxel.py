@@ -6,6 +6,7 @@ from typing import Any
 
 from ._compat import (
     CommandResult,
+    UnsupportedCompatibilityOption,
     UnsupportedMixin,
     arker_create,
     arker_get,
@@ -129,11 +130,15 @@ class SandboxInstance(UnsupportedMixin):
             unknown = sorted(set(values) - supported)
             if kwargs or unknown:
                 names = [*sorted(kwargs), *unknown]
-                raise TypeError(f"SandboxInstance.create received unsupported option(s) for Arker: {', '.join(names)}")
+                raise UnsupportedCompatibilityOption(
+                    f"SandboxInstance.create received unsupported option(s) for Arker: {', '.join(names)}"
+                )
             unsupported = [key for key in ("ttl", "envs", "runtime") if values.get(key) is not None]
             if unsupported:
                 names = ", ".join(unsupported)
-                raise TypeError(f"SandboxInstance.create option(s) are not supported by Arker: {names}")
+                raise UnsupportedCompatibilityOption(
+                    f"SandboxInstance.create option(s) are not supported by Arker: {names}"
+                )
             memory = values.get("memory")
             return arker_create(
                 arker_config,
