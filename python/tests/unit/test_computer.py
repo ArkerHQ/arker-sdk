@@ -12,7 +12,7 @@ import httpx2 as httpx
 import pytest
 
 import arker.computer as sdk
-from arker.generated.api_models import PolicyDoc, PolicyEntry, PolicyMatch
+from arker.generated.api_models import ArkerPool, AwsPool, PolicyDoc, PolicyEntry, PolicyMatch
 
 UNKNOWN_OUTCOME_ERROR_BODY = {
     "error": {
@@ -258,87 +258,126 @@ def test_whoami_uses_authenticated_control_plane() -> None:
 
 
 POOL_ID = "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61"
-POOL_TERMS = {"resources": {"vcpu": 8, "memory_mib": 32768}, "duration_seconds": 2_592_000}
-POOL = {
+STARTED_COMMITMENT = {"starts_at": "2026-10-01T00:00:00Z", "ends_at": "2026-10-31T00:00:00Z"}
+ARKER_POOL = {
     "pool_id": POOL_ID,
-    "name": None,
-    "provider": "aws",
+    "type": "arker",
+    "name": "agents",
     "region": "us-west-2",
-    **POOL_TERMS,
-    "status": "active",
+    "platform": "graviton4",
+    "state": "ready",
+    "state_detail": None,
     "created_at": "2026-09-25T00:00:00Z",
-    "starts_at": "2026-09-25T00:00:00Z",
-    "ends_at": "2026-10-25T00:00:00Z",
-    "currency": "usd",
-    "amount_cents": 12_345,
-    "invoice_id": None,
+    "resources": {"vcpu": 64, "memory_mib": 131_072, "disk_mib": 524_288},
+    "commitments": [STARTED_COMMITMENT],
 }
-POOL_QUOTE = {
-    "name": None,
-    "catalog_version": "v1",
-    "baseline_cents": 15_000,
-    "discount_percent": 17.7,
-    "provider": "aws",
-    "region": "us-west-2",
-    **POOL_TERMS,
-    "currency": "usd",
-    "amount_cents": 12_345,
+AWS_POOL = {
+    **ARKER_POOL,
+    "type": "aws",
+    "state": "provisioning",
+    "isolation": ["vms"],
+    "capacity": {"vcpu": 0, "memory_mib": 0, "disk_mib": 0},
+    "aws": {
+        "account_id": "123456789012",
+        "subnet_ids": ["subnet-0a1b2c3d"],
+        "security_group_ids": [],
+        "instance_types": ["c6i.metal"],
+        "role_name": "ArkerPool-7d1f7c2e",
+        "external_id": "ext",
+        "setup_url": "https://console.aws.amazon.com/cloudformation/home#/stacks/quickcreate",
+    },
 }
+REGIONAL = "https://regional.invalid/api"
 CONTROL = "https://control.invalid/api"
+POOL_URL = f"{CONTROL}/v1/pools/{POOL_ID}"
 
 
-def pool_client(attempts: int = 1) -> sdk.Arker:
-    return sdk.Arker(
-        api_key="ark_live_test",
-        provider="aws",
-        region="us-west-2",
-        control_base_url=CONTROL,
-        retry={"attempts": attempts, "base_delay_s": 0.001, "max_delay_s": 0.001, "jitter_s": 0}
-        if attempts > 1
-        else False,
+def pool_client() -> sdk.Arker:
+    return sdk.Arker(api_key="ark_live_test", base_url=REGIONAL, control_base_url=CONTROL, retry=False)
+
+
+def test_create_pool_goes_to_the_clients_region_and_decodes_its_type() -> None:
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "POST" and url == f"{REGIONAL}/v1/pools", 201, AWS_POOL)
+
+    with use_transport(t):
+        pool = pool_client().create_pool(
+            type="aws",
+            platform="icelake",
+            resources={"vcpu": 120, "memory_mib": 245_760, "disk_mib": 1_048_576},
+            aws={"account_id": "123456789012", "subnet_ids": ["subnet-0a1b2c3d"]},
+            isolation=["vms"],
+        )
+
+    assert isinstance(pool, AwsPool)
+    assert pool.aws.setup_url == AWS_POOL["aws"]["setup_url"]
+    assert json.loads(t.calls[0]["body"]) == {
+        "type": "aws",
+        "platform": "icelake",
+        "resources": {"vcpu": 120, "memory_mib": 245_760, "disk_mib": 1_048_576},
+        "aws": {"account_id": "123456789012", "subnet_ids": ["subnet-0a1b2c3d"]},
+        "isolation": ["vms"],
+    }
+
+
+USAGE = {"pool_id": POOL_ID, "resources_allocated": ARKER_POOL["resources"], "allocation_observed_at": "x"}
+JOIN_KEY = {"join_key_id": "jk_1", "key": "secret", "created_at": "x"}
+NO_POOLS = {"pools": [], "next_cursor": None}
+
+
+@pytest.mark.parametrize(
+    ("method", "url", "status", "body", "call"),
+    [
+        ("GET", POOL_URL, 200, ARKER_POOL, lambda c: c.get_pool(POOL_ID)),
+        ("DELETE", POOL_URL, 202, ARKER_POOL, lambda c: c.delete_pool(POOL_ID)),
+        ("GET", f"{POOL_URL}/usage", 200, USAGE, lambda c: c.get_pool_usage(POOL_ID)),
+        ("GET", f"{POOL_URL}/workers", 200, {"workers": []}, lambda c: c.list_pool_workers(POOL_ID)),
+        ("POST", f"{POOL_URL}/join-keys", 201, JOIN_KEY, lambda c: c.create_pool_join_key(POOL_ID)),
+        ("GET", f"{POOL_URL}/join-keys", 200, {"join_keys": []}, lambda c: c.list_pool_join_keys(POOL_ID)),
+        ("DELETE", f"{POOL_URL}/join-keys/jk_1", 204, None, lambda c: c.revoke_pool_join_key(POOL_ID, "jk_1")),
+        ("GET", f"{CONTROL}/v1/pools?limit=5", 200, NO_POOLS, lambda c: c.list_pools(limit=5)),
+    ],
+)
+def test_pool_calls_go_through_the_control_plane(method, url, status, body, call) -> None:
+    t = FakeTransport()
+    t.add_raw(lambda m, u: m == method and u == url, status, b"" if body is None else json.dumps(body).encode())
+
+    with use_transport(t):
+        call(pool_client())
+
+    assert [(c["method"], c["url"]) for c in t.calls] == [(method, url)]
+
+
+def test_update_pool_sends_only_what_changes_and_null_removes_the_name() -> None:
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "PATCH" and url == POOL_URL, 200, ARKER_POOL)
+    t.add_json(lambda method, url: method == "PATCH" and url == POOL_URL, 200, ARKER_POOL)
+
+    with use_transport(t):
+        pool_client().update_pool(POOL_ID, resources={"vcpu": 0, "memory_mib": 0, "disk_mib": 0})
+        pool_client().update_pool(POOL_ID, name=None)
+
+    assert [json.loads(call["body"]) for call in t.calls] == [
+        {"resources": {"vcpu": 0, "memory_mib": 0, "disk_mib": 0}},
+        {"name": None},
+    ]
+
+
+def test_add_pool_commitment_keeps_the_started_ones() -> None:
+    added = {"starts_at": "2026-11-01T00:00:00Z", "ends_at": "2026-12-01T00:00:00Z"}
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "GET" and url == POOL_URL, 200, ARKER_POOL)
+    t.add_json(
+        lambda method, url: method == "PATCH" and url == POOL_URL,
+        200,
+        {**ARKER_POOL, "commitments": [STARTED_COMMITMENT, added]},
     )
 
-
-def is_quote(method: str, url: str) -> bool:
-    return method == "POST" and url == f"{CONTROL}/v1/pools/quote"
-
-
-def is_buy(method: str, url: str) -> bool:
-    return method == "POST" and url == f"{CONTROL}/v1/pools"
-
-
-def test_create_pool_buys_at_the_quoted_price() -> None:
-    t = FakeTransport()
-    t.add_json(is_quote, 200, POOL_QUOTE)
-    t.add_json(is_buy, 200, POOL)
-
     with use_transport(t):
-        pool = pool_client().create_pool(**POOL_TERMS, name="ci")
+        pool = pool_client().add_pool_commitment(POOL_ID, **added)
 
-    assert pool.pool_id == POOL_ID
-    quote, buy = t.calls
-    # Placement comes from the client when the caller does not give one.
-    terms = {"provider": "aws", "region": "us-west-2", **POOL_TERMS, "name": "ci"}
-    assert json.loads(quote["body"]) == terms
-    assert json.loads(buy["body"]) == {**terms, "amount_cents": 12_345}
-    assert buy["headers"]["idempotency-key"].startswith("sdk-pool-")
-    assert "idempotency-key" not in quote["headers"]
-
-
-def test_create_pool_retry_replays_the_same_purchase() -> None:
-    # A purchase whose response was lost must be retried with the same key and
-    # price, so the service returns the original pool instead of a second one.
-    t = FakeTransport()
-    t.add_json(is_quote, 200, POOL_QUOTE)
-    t.add_network_error(is_buy)
-    t.add_json(is_buy, 200, POOL)
-
-    with use_transport(t):
-        pool_client(attempts=2).create_pool(**POOL_TERMS, idempotency_key="buy-1")
-
-    buys = [call for call in t.calls if is_buy(call["method"], call["url"])]
-    assert [call["headers"]["idempotency-key"] for call in buys] == ["buy-1", "buy-1"]
-    assert buys[0]["body"] == buys[1]["body"]
+    assert json.loads(t.calls[1]["body"]) == {"commitments": [STARTED_COMMITMENT, added]}
+    assert isinstance(pool, ArkerPool)
 
 
 def test_fork_posts_directly_to_source_vm() -> None:

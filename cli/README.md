@@ -88,6 +88,33 @@ arker rm <vm-id>
 
 Run `arker --help` for the available commands and flags.
 
+## Pools
+
+[Pools](https://arker.ai/docs/api/pools) set capacity aside for your VMs: on
+Arker's machines (`arker`), on hosts Arker launches in your AWS account (`aws`),
+or on your own machines (`self_hosted`). A pool is created in `--region`.
+
+```bash
+arker pools create --type aws --platform icelake --name agents \
+  --vcpu 120 --memory-mib 245760 --disk-mib 1048576 \
+  --aws-account-id 123456789012 --subnet-ids subnet-0a1b2c3d
+```
+
+`create` prints the pool, then the link that creates the pool's AWS role. Open
+it signed in to that account and create the stack; the pool turns `ready` once
+its hosts join. Then fork into it:
+
+```bash
+arker pools get <pool-id>
+arker fork --image ubuntu:24.04 --pool agents
+```
+
+`arker pools resize` changes a pool's size, `arker pools commit` adds a
+commitment and keeps the current ones, and `arker pools join-keys create`
+makes a key for a machine to join a `self_hosted` pool. Interactive shells
+aren't available for VMs in `aws` or `self_hosted` pools; use `arker run`.
+Run `arker pools --help` for every subcommand.
+
 ## JSON output
 
 `--json` prints one JSON object on stdout for every command, including `sync`

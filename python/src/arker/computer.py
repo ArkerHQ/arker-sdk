@@ -43,7 +43,8 @@ from .generated.api_models import (
     BackgroundRunResponse,
     CancelRunResponse,
     CompletedRunResponse,
-    CreatePoolRequest,
+    CreatedPoolJoinKey,
+    CreatePoolAws,
     CreateSessionRequest,
     DeleteFilesystemResponse,
     DeleteMountResponse,
@@ -58,8 +59,10 @@ from .generated.api_models import (
     ListMountsResponse,
     ListOrgRunsParameters,
     ListOrgRunsResponse,
+    ListPoolJoinKeysResponse,
     ListPoolsParameters,
     ListPoolsResponse,
+    ListPoolWorkersResponse,
     ListRegionsResponse,
     ListRunsParameters,
     ListRunsResponse,
@@ -73,8 +76,7 @@ from .generated.api_models import (
     PatchVmRequest,
     PolicyDoc,
     Pool,
-    PoolQuote,
-    PoolQuoteRequest,
+    PoolCommitment,
     PoolResources,
     PoolUsage,
     PtyTicketResponse,
@@ -590,107 +592,105 @@ class Arker:
         )
         return _decode_model(DeleteFilesystemResponse, payload)
 
-    # ── Pools (org-scoped, control-plane) ───────────────────────────────
-    # Available to organizations with pools enabled; others get `not_found`.
+    # ── Pools ───────────────────────────────────────────────────────────
+    # A pool is created in the client's region; every other pool call goes
+    # through the control plane, which finds the pool's region. Organizations
+    # without pools get `not_found`.
     def list_pools(self, *, cursor: str | None = None, limit: int | None = None) -> ListPoolsResponse:
-        """List the organization's pools, newest first."""
+        """List the organization's pools in every region, newest first."""
         path = _build_query("/v1/pools", ListPoolsParameters(cursor=cursor, limit=limit))
         return _decode_model(ListPoolsResponse, self._request("GET", path, base_url=self._control_base_url))
-
-    def get_pool(self, pool_id: str) -> Pool:
-        payload = self._request("GET", f"/v1/pools/{_segment(pool_id)}", base_url=self._control_base_url)
-        return _decode_model(Pool, payload)
-
-    def get_pool_usage(self, pool_id: str) -> PoolUsage:
-        """Resources currently allocated to VMs in the pool."""
-        payload = self._request("GET", f"/v1/pools/{_segment(pool_id)}/usage", base_url=self._control_base_url)
-        return _decode_model(PoolUsage, payload)
-
-    def rename_pool(self, pool_id: str, name: str | None) -> Pool:
-        """Set a pool's name, or pass ``None`` to remove it. Requires an admin key."""
-        payload = self._request(
-            "PATCH",
-            f"/v1/pools/{_segment(pool_id)}",
-            {"name": name},
-            base_url=self._control_base_url,
-            preserve_nulls=True,
-        )
-        return _decode_model(Pool, payload)
 
     def create_pool(
         self,
         *,
-        resources: PoolResources | dict[str, int],
-        duration_seconds: int,
+        type: str,
+        platform: str,
         name: str | None = None,
-        provider: str | None = None,
-        region: str | None = None,
-        idempotency_key: str | None = None,
+        resources: PoolResources | dict[str, int] | None = None,
+        commitments: list[PoolCommitment] | list[dict[str, str]] | None = None,
+        aws: CreatePoolAws | dict[str, Any] | None = None,
+        isolation: list[str] | None = None,
     ) -> Pool:
-        """Buy a pool at the current price, billed on the next invoice. Requires an admin key.
+        """Create a pool in the client's region. Requires an admin key.
 
-        Prices the pool, then buys it at exactly that price: if the price
-        changes in between, this raises a ``conflict`` rather than paying a
-        different amount. Member VMs' usage beyond the pool's resources bills at
-        normal rates. ``provider`` and ``region`` default to the client's
-        placement. Without ``idempotency_key`` each call buys a new pool; only
-        this SDK's own retries within that call are deduplicated.
+        An ``aws`` pool stays ``provisioning`` until its role stack, created
+        from ``aws.setup_url`` in that AWS account, lets Arker launch its hosts.
         """
-        request = self._pool_request(resources, duration_seconds, name, provider, region)
-        quote = self._quote_pool(request)
-        return self._buy_pool(request, quote.amount_cents, idempotency_key or f"sdk-pool-{_ulid()}")
+        body = {
+            "type": type,
+            "platform": platform,
+            "name": name,
+            "resources": resources,
+            "commitments": commitments,
+            "aws": aws,
+            "isolation": isolation,
+        }
+        return _decode_value(Pool, self._request("POST", "/v1/pools", body, base_url=self.base_url))
 
-    def _pool_request(
+    def get_pool(self, pool_id: str) -> Pool:
+        return _decode_value(Pool, self._request("GET", _pool_path(pool_id), base_url=self._control_base_url))
+
+    def update_pool(
         self,
-        resources: PoolResources | dict[str, int],
-        duration_seconds: int,
-        name: str | None,
-        provider: str | None,
-        region: str | None,
-    ) -> PoolQuoteRequest:
-        provider = provider or self._provider
-        region = region or self._region
-        if not provider or not region:
-            raise ValueError(
-                "provider and region are required for a pool; pass them or configure the client's placement"
-            )
-        return PoolQuoteRequest(
-            provider=provider,
-            region=region,
-            resources=resources if isinstance(resources, PoolResources) else PoolResources(**resources),
-            duration_seconds=duration_seconds,
-            name=name,
-        )
+        pool_id: str,
+        *,
+        name: str | _UnsetType | None = _UNSET,
+        resources: PoolResources | dict[str, int] | None = None,
+        commitments: list[PoolCommitment] | list[dict[str, str]] | None = None,
+    ) -> Pool:
+        """Rename (``None`` removes the name), resize, or replace the
+        commitments of a pool. Requires an admin key."""
+        body: dict[str, Any] = {"resources": resources, "commitments": commitments}
+        if name is not _UNSET:
+            body["name"] = _EXPLICIT_NULL if name is None else name
+        payload = self._request("PATCH", _pool_path(pool_id), body, base_url=self._control_base_url)
+        return _decode_value(Pool, payload)
 
-    def _quote_pool(self, request: PoolQuoteRequest) -> PoolQuote:
-        """Price a pool without buying it."""
-        payload = self._request("POST", "/v1/pools/quote", request, base_url=self._control_base_url)
-        return _decode_model(PoolQuote, payload)
+    def add_pool_commitment(self, pool_id: str, *, starts_at: str, ends_at: str) -> Pool:
+        """Add a commitment, keeping the pool's current ones. Requires an admin key.
 
-    def _buy_pool(self, request: PoolQuoteRequest, amount_cents: int, idempotency_key: str) -> Pool:
-        """Buy at a quoted price.
-
-        The key is bound once, so every retry replays the same purchase rather
-        than buying another -- which is what makes it safe to retry a purchase
-        whose response was lost.
+        :meth:`update_pool` replaces the whole list, and must resend every
+        commitment that has started; this reads the list and sends it back with
+        the new commitment added. It is not atomic: a change made between the
+        read and the write is lost.
         """
-        body = CreatePoolRequest(
-            provider=request.provider,
-            region=request.region,
-            resources=request.resources,
-            duration_seconds=request.duration_seconds,
-            amount_cents=amount_cents,
-            name=request.name,
-        )
-        payload = self._request(
-            "POST",
-            "/v1/pools",
-            body,
+        commitments = getattr(self.get_pool(pool_id), "commitments", [])
+        added = PoolCommitment(starts_at=starts_at, ends_at=ends_at)
+        return self.update_pool(pool_id, commitments=[*commitments, added])
+
+    def delete_pool(self, pool_id: str) -> Pool:
+        """Start deleting a pool and its VMs; it stays ``deleting`` until they
+        are gone. Refused while a commitment is active. Requires an admin key."""
+        return _decode_value(Pool, self._request("DELETE", _pool_path(pool_id), base_url=self._control_base_url))
+
+    def get_pool_usage(self, pool_id: str) -> PoolUsage:
+        """Resources currently allocated to VMs in the pool."""
+        payload = self._request("GET", f"{_pool_path(pool_id)}/usage", base_url=self._control_base_url)
+        return _decode_model(PoolUsage, payload)
+
+    def list_pool_workers(self, pool_id: str) -> ListPoolWorkersResponse:
+        """The machines of an ``aws`` or ``self_hosted`` pool that reported in the last day."""
+        payload = self._request("GET", f"{_pool_path(pool_id)}/workers", base_url=self._control_base_url)
+        return _decode_model(ListPoolWorkersResponse, payload)
+
+    def create_pool_join_key(self, pool_id: str) -> CreatedPoolJoinKey:
+        """Create a key that lets a machine join a ``self_hosted`` pool.
+        ``key`` is returned only this once. Requires an admin key."""
+        payload = self._request("POST", f"{_pool_path(pool_id)}/join-keys", base_url=self._control_base_url)
+        return _decode_model(CreatedPoolJoinKey, payload)
+
+    def list_pool_join_keys(self, pool_id: str) -> ListPoolJoinKeysResponse:
+        payload = self._request("GET", f"{_pool_path(pool_id)}/join-keys", base_url=self._control_base_url)
+        return _decode_model(ListPoolJoinKeysResponse, payload)
+
+    def revoke_pool_join_key(self, pool_id: str, join_key_id: str) -> None:
+        """Revoke a join key; machines using it leave the pool. Requires an admin key."""
+        self._request(
+            "DELETE",
+            f"{_pool_path(pool_id)}/join-keys/{_segment(join_key_id)}",
             base_url=self._control_base_url,
-            extra_headers={"Idempotency-Key": idempotency_key},
-            retry_network_failures=True,
         )
-        return _decode_model(Pool, payload)
 
     def _request(
         self,
@@ -1868,6 +1868,10 @@ def _fork_idempotency_key(key: str | None, idempotency: bool | None) -> str | No
 
 def _vm_path(vm_id: str) -> str:
     return f"/v1/vms/{_segment(vm_id)}"
+
+
+def _pool_path(pool_id: str) -> str:
+    return f"/v1/pools/{_segment(pool_id)}"
 
 
 def _segment(value: str) -> str:

@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
-	"strings"
+	"reflect"
 	"testing"
 
 	"github.com/ArkerHQ/arker-sdk/go"
@@ -15,114 +14,161 @@ import (
 
 const poolID = "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61"
 
-const poolBody = `{"pool_id":"` + poolID + `","name":null,"provider":"aws","region":"us-west-2",` +
-	`"resources":{"vcpu":8,"memory_mib":32768},"duration_seconds":2592000,"status":"active",` +
-	`"created_at":"2026-09-25T00:00:00Z","starts_at":"2026-09-25T00:00:00Z","ends_at":"2026-10-25T00:00:00Z",` +
-	`"currency":"usd","amount_cents":12345,"invoice_id":null}`
+const startedCommitment = `{"starts_at":"2026-10-01T00:00:00Z","ends_at":"2026-10-31T00:00:00Z"}`
 
-const poolQuoteBody = `{"name":null,"catalog_version":"v1","baseline_cents":15000,"discount_percent":17.7,` +
-	`"provider":"aws","region":"us-west-2","resources":{"vcpu":8,"memory_mib":32768},` +
-	`"duration_seconds":2592000,"currency":"usd","amount_cents":12345}`
+const arkerPoolBody = `{"pool_id":"` + poolID + `","type":"arker","name":"agents","region":"us-west-2",` +
+	`"platform":"graviton4","state":"ready","state_detail":null,"created_at":"2026-09-25T00:00:00Z",` +
+	`"resources":{"vcpu":64,"memory_mib":131072,"disk_mib":524288},"commitments":[` + startedCommitment + `]}`
 
-var poolTerms = arker.CreatePoolRequest{
-	Resources:       arker.PoolResources{VCPU: 8, MemoryMiB: 32768},
-	DurationSeconds: 2592000,
-}
+const awsPoolBody = `{"pool_id":"` + poolID + `","type":"aws","name":null,"region":"us-west-2",` +
+	`"platform":"icelake","state":"provisioning","state_detail":null,"created_at":"2026-09-25T00:00:00Z",` +
+	`"resources":{"vcpu":120,"memory_mib":245760,"disk_mib":1048576},"commitments":[],"isolation":["vms"],` +
+	`"capacity":{"vcpu":0,"memory_mib":0,"disk_mib":0},"aws":{"account_id":"123456789012",` +
+	`"subnet_ids":["subnet-0a1b2c3d"],"security_group_ids":[],"instance_types":["c6i.metal"],` +
+	`"role_name":"ArkerPool-7d1f7c2e","external_id":"ext","setup_url":"https://setup.invalid"}}`
 
-type poolRequest struct {
-	method, path, key string
-	body              map[string]any
-}
-
-// poolServer answers the pool routes on a control-plane server with a
-// placement-configured client, recording every request.
-func poolServer(t *testing.T, buy func(n int, w http.ResponseWriter) bool) (*arker.Client, *[]poolRequest) {
+func decodeBody(t *testing.T, r *http.Request) map[string]any {
 	t.Helper()
-	var requests []poolRequest
-	buys := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		var body map[string]any
-		if len(raw) > 0 {
-			_ = json.Unmarshal(raw, &body)
-		}
-		requests = append(requests, poolRequest{r.Method, r.URL.Path, r.Header.Get("Idempotency-Key"), body})
-		switch {
-		case r.URL.Path == "/v1/pools/quote":
-			fmt.Fprint(w, poolQuoteBody)
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/pools":
-			buys++
-			if buy != nil && buy(buys, w) {
-				return
-			}
-			fmt.Fprint(w, poolBody)
-		default:
-			fmt.Fprint(w, poolBody)
-		}
-	}))
-	t.Cleanup(srv.Close)
-	c, err := arker.New(arker.Options{
-		APIKey: "k", Provider: "aws", Region: "us-west-2", ControlBaseURL: srv.URL, Retry: fastRetry,
-	})
-	if err != nil {
-		t.Fatalf("new: %v", err)
+	raw, _ := io.ReadAll(r.Body)
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("request body %q: %v", raw, err)
 	}
-	return c, &requests
+	return body
 }
 
-func TestCreatePoolBuysAtTheQuotedPrice(t *testing.T) {
-	c, requests := poolServer(t, nil)
+func TestCreatePoolGoesToTheClientsRegion(t *testing.T) {
+	var body map[string]any
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/pools" {
+			t.Errorf("regional got %s %s", r.Method, r.URL.Path)
+		}
+		body = decodeBody(t, r)
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, awsPoolBody)
+	}, reject(t, "control"))
 
-	pool, err := c.CreatePool(context.Background(), poolTerms)
+	pool, err := c.CreatePool(context.Background(), arker.CreatePoolRequest{
+		Type:      "aws",
+		Platform:  "icelake",
+		Resources: &arker.PoolResources{VCPU: 120, MemoryMiB: 245760, DiskMiB: 1048576},
+		AWS:       &arker.CreatePoolAWS{AccountID: "123456789012", SubnetIDs: []string{"subnet-0a1b2c3d"}},
+		Isolation: []string{"vms"},
+	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if pool.PoolID != poolID {
+	if pool.AWS == nil || pool.AWS.SetupURL != "https://setup.invalid" {
 		t.Fatalf("pool %+v", pool)
 	}
-	if len(*requests) != 2 {
-		t.Fatalf("requests %+v", *requests)
+	want := map[string]any{
+		"type":      "aws",
+		"platform":  "icelake",
+		"resources": map[string]any{"vcpu": 120.0, "memory_mib": 245760.0, "disk_mib": 1048576.0},
+		"aws":       map[string]any{"account_id": "123456789012", "subnet_ids": []any{"subnet-0a1b2c3d"}},
+		"isolation": []any{"vms"},
 	}
-	quote, buy := (*requests)[0], (*requests)[1]
-	// Placement comes from the client when the caller does not give one.
-	if quote.body["provider"] != "aws" || quote.body["region"] != "us-west-2" {
-		t.Fatalf("quote body %v", quote.body)
-	}
-	if quote.key != "" {
-		t.Fatalf("the quote sent Idempotency-Key %q", quote.key)
-	}
-	if buy.body["amount_cents"] != float64(12345) || !strings.HasPrefix(buy.key, "sdk-pool-") {
-		t.Fatalf("buy %+v", buy)
-	}
-	if _, leaked := buy.body["IdempotencyKey"]; leaked {
-		t.Fatal("the idempotency key leaked into the body")
+	if !reflect.DeepEqual(body, want) {
+		t.Fatalf("body %v", body)
 	}
 }
 
-func TestCreatePoolRetryReplaysTheSamePurchase(t *testing.T) {
-	// A purchase whose response was lost must be retried with the same key and
-	// price, so the service returns the original pool instead of a second one.
-	c, requests := poolServer(t, func(n int, w http.ResponseWriter) bool {
-		if n > 1 {
-			return false
+func TestPoolCallsGoToTheControlPlane(t *testing.T) {
+	base := "/v1/pools/" + poolID
+	for _, tc := range []struct {
+		method, path, body string
+		call               func(*arker.Client) error
+	}{
+		{"GET", "/v1/pools", `{"pools":[` + arkerPoolBody + `],"next_cursor":null}`, func(c *arker.Client) error {
+			_, err := c.ListPools(context.Background(), arker.ListPoolsOptions{})
+			return err
+		}},
+		{"GET", base, arkerPoolBody, func(c *arker.Client) error {
+			_, err := c.GetPool(context.Background(), poolID)
+			return err
+		}},
+		{"DELETE", base, arkerPoolBody, func(c *arker.Client) error {
+			_, err := c.DeletePool(context.Background(), poolID)
+			return err
+		}},
+		{"GET", base + "/usage", `{"pool_id":"` + poolID + `","resources_allocated":{"vcpu":1,"memory_mib":2,"disk_mib":3},"allocation_observed_at":"x"}`, func(c *arker.Client) error {
+			_, err := c.GetPoolUsage(context.Background(), poolID)
+			return err
+		}},
+		{"GET", base + "/workers", `{"workers":[]}`, func(c *arker.Client) error {
+			_, err := c.ListPoolWorkers(context.Background(), poolID)
+			return err
+		}},
+		{"POST", base + "/join-keys", `{"join_key_id":"jk_1","key":"secret","created_at":"x"}`, func(c *arker.Client) error {
+			_, err := c.CreatePoolJoinKey(context.Background(), poolID)
+			return err
+		}},
+		{"GET", base + "/join-keys", `{"join_keys":[]}`, func(c *arker.Client) error {
+			_, err := c.ListPoolJoinKeys(context.Background(), poolID)
+			return err
+		}},
+		{"DELETE", base + "/join-keys/jk_1", "", func(c *arker.Client) error {
+			return c.RevokePoolJoinKey(context.Background(), poolID, "jk_1")
+		}},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			c := twoPlane(t, reject(t, "regional"), func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != tc.method || r.URL.Path != tc.path {
+					t.Errorf("control got %s %s", r.Method, r.URL.Path)
+				}
+				fmt.Fprint(w, tc.body)
+			})
+			if err := tc.call(c); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestUpdatePoolSendsOnlyWhatChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		req  arker.UpdatePoolRequest
+		want string
+	}{
+		{"an empty name removes it", arker.UpdatePoolRequest{Name: arker.Ptr("")}, `{"name":null}`},
+		{"zero is a size", arker.UpdatePoolRequest{Resources: &arker.PoolResources{}}, `{"resources":{"vcpu":0,"memory_mib":0,"disk_mib":0}}`},
+		{"an empty list is sent", arker.UpdatePoolRequest{Commitments: &[]arker.PoolCommitment{}}, `{"commitments":[]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var raw []byte
+			c := twoPlane(t, reject(t, "regional"), func(w http.ResponseWriter, r *http.Request) {
+				raw, _ = io.ReadAll(r.Body)
+				fmt.Fprint(w, arkerPoolBody)
+			})
+			if _, err := c.UpdatePool(context.Background(), poolID, tc.req); err != nil {
+				t.Fatal(err)
+			}
+			if string(raw) != tc.want {
+				t.Fatalf("body %s, want %s", raw, tc.want)
+			}
+		})
+	}
+}
+
+func TestAddPoolCommitmentKeepsTheStartedOnes(t *testing.T) {
+	var patched map[string]any
+	c := twoPlane(t, reject(t, "regional"), func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPatch {
+			patched = decodeBody(t, r)
 		}
-		conn, _, _ := w.(http.Hijacker).Hijack()
-		_ = conn.Close()
-		return true
+		fmt.Fprint(w, arkerPoolBody)
 	})
 
-	req := poolTerms
-	req.IdempotencyKey = "buy-1"
-	if _, err := c.CreatePool(context.Background(), req); err != nil {
-		t.Fatalf("create: %v", err)
+	added := arker.PoolCommitment{StartsAt: "2026-11-01T00:00:00Z", EndsAt: "2026-12-01T00:00:00Z"}
+	if _, err := c.AddPoolCommitment(context.Background(), poolID, added); err != nil {
+		t.Fatal(err)
 	}
-	var keys []string
-	for _, r := range *requests {
-		if r.path == "/v1/pools" {
-			keys = append(keys, r.key)
-		}
-	}
-	if strings.Join(keys, ",") != "buy-1,buy-1" {
-		t.Fatalf("purchase keys %q", keys)
+	want := map[string]any{"commitments": []any{
+		map[string]any{"starts_at": "2026-10-01T00:00:00Z", "ends_at": "2026-10-31T00:00:00Z"},
+		map[string]any{"starts_at": added.StartsAt, "ends_at": added.EndsAt},
+	}}
+	if !reflect.DeepEqual(patched, want) {
+		t.Fatalf("patch %v", patched)
 	}
 }

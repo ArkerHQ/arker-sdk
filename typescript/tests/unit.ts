@@ -10,6 +10,7 @@ import {
   VM,
   discoverRegions,
   type CompletedRunResult,
+  type CreatePoolRequest,
   type PtyWebSocketFactory,
 } from "../src/index.js";
 import { runPollBudgetMs } from "../src/internal/run-poll.js";
@@ -660,80 +661,81 @@ async function testWhoamiUsesControlPlane(): Promise<void> {
 
 // ── Pools ──────────────────────────────────────────────────────────────
 
-const POOL_TERMS = { resources: { vcpu: 8, memory_mib: 32768 }, duration_seconds: 2_592_000 };
-const POOL = {
-  pool_id: "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61",
-  name: null,
-  provider: "aws",
+const POOL_ID = "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61";
+const STARTED_COMMITMENT = { starts_at: "2026-10-01T00:00:00Z", ends_at: "2026-10-31T00:00:00Z" };
+const ARKER_POOL = {
+  pool_id: POOL_ID,
+  type: "arker",
+  name: "agents",
   region: "us-west-2",
-  ...POOL_TERMS,
-  status: "active",
+  platform: "graviton4",
+  state: "ready",
+  state_detail: null,
   created_at: "2026-09-25T00:00:00Z",
-  starts_at: "2026-09-25T00:00:00Z",
-  ends_at: "2026-10-25T00:00:00Z",
-  currency: "usd",
-  amount_cents: 12_345,
-  invoice_id: null,
-};
-const POOL_QUOTE = {
-  name: null,
-  catalog_version: "v1",
-  baseline_cents: 15_000,
-  discount_percent: 17.7,
-  provider: "aws",
-  region: "us-west-2",
-  ...POOL_TERMS,
-  currency: "usd",
-  amount_cents: 12_345,
+  resources: { vcpu: 64, memory_mib: 131_072, disk_mib: 524_288 },
+  commitments: [STARTED_COMMITMENT],
 };
 
-function poolClient(fetch: FakeFetch, attempts = 1): Arker {
+function poolClient(fetch: FakeFetch): Arker {
   return new Arker({
     apiKey: "ark_live_test",
-    provider: "aws",
-    region: "us-west-2",
+    baseUrl: "https://regional.invalid/api",
     controlBaseUrl: "https://control.invalid/api",
     fetch: fetch.fetch,
-    retry: attempts > 1 ? { attempts, baseDelayMs: 1, maxDelayMs: 1, jitterMs: 0 } : false,
+    retry: false,
   });
 }
 
-const isQuote = (method: string, url: string) =>
-  method === "POST" && url === "https://control.invalid/api/v1/pools/quote";
-const isBuy = (method: string, url: string) =>
-  method === "POST" && url === "https://control.invalid/api/v1/pools";
-
-async function testCreatePoolBuysAtTheQuotedPrice(): Promise<void> {
+async function testCreatePoolGoesToTheClientsRegion(): Promise<void> {
   const fetch = new FakeFetch();
-  fetch.addJson(isQuote, 200, POOL_QUOTE);
-  fetch.addJson(isBuy, 200, POOL);
+  fetch.addJson((method, url) => method === "POST" && url === "https://regional.invalid/api/v1/pools", 201, ARKER_POOL);
+  const request: CreatePoolRequest = {
+    type: "aws",
+    platform: "icelake",
+    resources: { vcpu: 120, memory_mib: 245_760, disk_mib: 1_048_576 },
+    aws: { account_id: "123456789012", subnet_ids: ["subnet-0a1b2c3d"] },
+    isolation: ["vms"],
+  };
 
-  const pool = await poolClient(fetch).createPool({ ...POOL_TERMS, name: "ci" });
+  await poolClient(fetch).createPool(request);
 
-  assert.equal(pool.pool_id, POOL.pool_id);
-  const [quote, buy] = fetch.calls;
-  // Placement comes from the client when the caller does not give one.
-  const terms = { ...POOL_TERMS, name: "ci", provider: "aws", region: "us-west-2" };
-  assert.deepEqual(JSON.parse(quote!.body!), terms);
-  assert.deepEqual(JSON.parse(buy!.body!), { ...terms, amount_cents: 12_345 });
-  assert.match(buy!.headers["idempotency-key"] ?? "", /^sdk-pool-/);
-  assert.equal(quote!.headers["idempotency-key"], undefined);
+  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), request);
 }
 
-async function testCreatePoolRetryReplaysTheSamePurchase(): Promise<void> {
-  // A purchase whose response was lost must be retried with the same key and
-  // price, so the service returns the original pool instead of a second one.
+async function testPoolCallsGoThroughTheControlPlane(): Promise<void> {
   const fetch = new FakeFetch();
-  fetch.addJson(isQuote, 200, POOL_QUOTE);
-  fetch.addNetworkError(isBuy);
-  fetch.addJson(isBuy, 200, POOL);
+  const pools = poolClient(fetch);
+  const base = `https://control.invalid/api/v1/pools/${POOL_ID}`;
+  const calls: Array<[string, string, () => Promise<unknown>]> = [
+    ["GET", base, () => pools.getPool(POOL_ID)],
+    ["PATCH", base, () => pools.updatePool(POOL_ID, { name: null })],
+    ["DELETE", base, () => pools.deletePool(POOL_ID)],
+    ["GET", `${base}/usage`, () => pools.getPoolUsage(POOL_ID)],
+    ["GET", `${base}/workers`, () => pools.listPoolWorkers(POOL_ID)],
+    ["POST", `${base}/join-keys`, () => pools.createPoolJoinKey(POOL_ID)],
+    ["GET", `${base}/join-keys`, () => pools.listPoolJoinKeys(POOL_ID)],
+    ["DELETE", `${base}/join-keys/jk_1`, () => pools.revokePoolJoinKey(POOL_ID, "jk_1")],
+    ["GET", "https://control.invalid/api/v1/pools?limit=5", () => pools.listPools({ limit: 5 })],
+  ];
+  for (const [method, url, call] of calls) {
+    fetch.addJson((m, u) => m === method && u === url, 200, {});
+    await call();
+  }
 
-  await poolClient(fetch, 2).createPool({ ...POOL_TERMS, idempotencyKey: "buy-1" });
+  assert.deepEqual(fetch.calls.map(({ method, url }) => [method, url]), calls.map(([method, url]) => [method, url]));
+  assert.equal(fetch.calls[1]!.body, JSON.stringify({ name: null }));
+}
 
-  const buys = fetch.calls.filter((call) => isBuy(call.method, call.url));
-  assert.equal(buys.length, 2);
-  assert.deepEqual(buys.map((call) => call.headers["idempotency-key"]), ["buy-1", "buy-1"]);
-  assert.equal(buys[0]!.body, buys[1]!.body);
+async function testAddPoolCommitmentKeepsTheStartedOnes(): Promise<void> {
+  const fetch = new FakeFetch();
+  const url = `https://control.invalid/api/v1/pools/${POOL_ID}`;
+  const added = { starts_at: "2026-11-01T00:00:00Z", ends_at: "2026-12-01T00:00:00Z" };
+  fetch.addJson((method, u) => method === "GET" && u === url, 200, ARKER_POOL);
+  fetch.addJson((method, u) => method === "PATCH" && u === url, 200, { ...ARKER_POOL, commitments: [STARTED_COMMITMENT, added] });
+
+  await poolClient(fetch).addPoolCommitment(POOL_ID, added);
+
+  assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), { commitments: [STARTED_COMMITMENT, added] });
 }
 
 async function testDiscoverRegionsRequiresNoConfiguredClient(): Promise<void> {
@@ -1319,8 +1321,9 @@ testPlacementRequiresSeparateProviderAndRegion();
 testInvalidProviderSyntaxFailsClosed();
 await testListRegionsUsesPublicControlPlaneCatalog();
 await testWhoamiUsesControlPlane();
-await testCreatePoolBuysAtTheQuotedPrice();
-await testCreatePoolRetryReplaysTheSamePurchase();
+await testCreatePoolGoesToTheClientsRegion();
+await testPoolCallsGoThroughTheControlPlane();
+await testAddPoolCommitmentKeepsTheStartedOnes();
 await testDiscoverRegionsRequiresNoConfiguredClient();
 await testListedVmUsesItsPlacementEndpoint();
 testExplicitVmHandleUsesPlacementEndpoint();

@@ -653,60 +653,72 @@ async function testWhoamiUsesAuthenticatedControlPlane(): Promise<void> {
   );
 }
 
-const POOL_TERMS = { resources: { vcpu: 8, memory_mib: 32768 }, duration_seconds: 2_592_000 };
-const CLI_POOL = {
-  pool_id: "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61",
-  name: "ci",
-  provider: "aws",
+const POOL_ID = "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61";
+const AWS_POOL = {
+  pool_id: POOL_ID,
+  type: "aws",
+  name: "agents",
   region: "us-west-2",
-  ...POOL_TERMS,
-  status: "active",
+  platform: "icelake",
+  state: "provisioning",
+  state_detail: null,
   created_at: "2026-09-25T00:00:00Z",
-  starts_at: "2026-09-25T00:00:00Z",
-  ends_at: "2026-10-25T00:00:00Z",
-  currency: "usd",
-  amount_cents: 12_345,
-  invoice_id: null,
+  resources: { vcpu: 120, memory_mib: 245_760, disk_mib: 1_048_576 },
+  commitments: [],
+  isolation: ["vms"],
+  capacity: { vcpu: 0, memory_mib: 0, disk_mib: 0 },
+  aws: {
+    account_id: "123456789012",
+    subnet_ids: ["subnet-a", "subnet-b"],
+    security_group_ids: [],
+    instance_types: ["c6i.metal"],
+    role_name: "ArkerPool-7d1f7c2e",
+    external_id: "ext",
+    setup_url: "https://console.aws.amazon.com/cloudformation/home#/stacks/quickcreate?stackName=ArkerPool-7d1f7c2e",
+  },
 };
-const CLI_POOL_QUOTE = {
-  name: "ci",
-  catalog_version: "v1",
-  baseline_cents: 15_000,
-  discount_percent: 17.7,
-  provider: "aws",
-  region: "us-west-2",
-  ...POOL_TERMS,
-  currency: "usd",
-  amount_cents: 12_345,
-};
-const POOL_ARGS = [
-  "--provider", "aws", "--region", "us-west-2", "--vcpu", "8", "--memory-mib", "32768", "--days", "30", "--name", "ci",
-];
 
-function poolResponder(request: CapturedRequest, res: ServerResponse): void {
-  jsonResponse(res, request.url === "/api/v1/pools/quote" ? CLI_POOL_QUOTE : CLI_POOL);
-}
-
-async function testPoolsCreateNeedsConfirmationWithoutATerminal(): Promise<void> {
-  await withCapturedServer(poolResponder, async (baseUrl, requests) => {
-    const result = await runCli(baseUrl, ["pools", "create", ...POOL_ARGS], { controlOnly: true });
-    assert.equal(result.code, 1);
-    assert.match(result.stderr, /pass --yes/);
-    assert.equal(requests.length, 0, "nothing may be quoted or bought without confirmation");
+async function testPoolsCreateAwsSendsItsFlagsAndPrintsTheSetupLink(): Promise<void> {
+  await withCapturedServer((_request, res) => jsonResponse(res, AWS_POOL), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, [
+      "pools", "create", "--type", "aws", "--platform", "icelake", "--name", "agents",
+      "--vcpu", "120", "--memory-mib", "245760", "--disk-mib", "1048576",
+      "--aws-account-id", "123456789012", "--subnet-ids", "subnet-a,subnet-b", "--isolation", "vms",
+    ], { environment: { ARKER_BASE_URL: `${baseUrl}/regional` } });
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(JSON.parse(stdoutText(result)), AWS_POOL);
+    assert.ok(result.stderr.includes(AWS_POOL.aws.setup_url), result.stderr);
+    assert.match(result.stderr, /AWS account 123456789012/);
+    assert.deepEqual(requests, [{
+      method: "POST",
+      url: "/api/regional/v1/pools",
+      body: {
+        type: "aws",
+        platform: "icelake",
+        name: "agents",
+        resources: AWS_POOL.resources,
+        aws: { account_id: "123456789012", subnet_ids: ["subnet-a", "subnet-b"] },
+        isolation: ["vms"],
+      },
+    }]);
   });
 }
 
-async function testPoolsCreateYesBuysAtTheQuotedPrice(): Promise<void> {
-  await withCapturedServer(poolResponder, async (baseUrl, requests) => {
-    const result = await runCli(baseUrl, ["pools", "create", "--yes", ...POOL_ARGS], { controlOnly: true });
+async function testPoolsResizeNeedsEverySize(): Promise<void> {
+  await withCapturedServer((_request, res) => jsonResponse(res, AWS_POOL), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["pools", "resize", POOL_ID, "--vcpu", "0"], { controlOnly: true });
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /--vcpu, --memory-mib, and --disk-mib together/);
+    assert.equal(requests.length, 0);
+  });
+}
+
+async function testPoolsJoinKeysRevoke(): Promise<void> {
+  await withCapturedServer((_request, res) => { res.statusCode = 204; res.end(); }, async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["pools", "join-keys", "revoke", POOL_ID, "jk_1"], { controlOnly: true });
     assert.equal(result.code, 0, result.stderr);
-    assert.equal(JSON.parse(stdoutText(result)).pool_id, CLI_POOL.pool_id);
-    const [quote, buy] = requests;
-    assert.equal(quote!.url, "/api/v1/pools/quote");
-    assert.equal(quote!.idempotencyKey, undefined);
-    assert.equal(buy!.url, "/api/v1/pools");
-    assert.deepEqual(buy!.body, { ...(quote!.body as object), amount_cents: 12_345 });
-    assert.match(buy!.idempotencyKey ?? "", /^cli-pool-/);
+    assert.equal(stdoutText(result), "revoked jk_1\n");
+    assert.deepEqual(requests.map(({ method, url }) => [method, url]), [["DELETE", `/api/v1/pools/${POOL_ID}/join-keys/jk_1`]]);
   });
 }
 
@@ -1457,8 +1469,9 @@ await testComputeCommandRequiresProviderAndRegion();
 await testProviderOnlyVmListDoesNotRequireAComputeRegion();
 await testRegionsDiscoveryNeedsNoCredentialsOrPlacement();
 await testWhoamiUsesAuthenticatedControlPlane();
-await testPoolsCreateNeedsConfirmationWithoutATerminal();
-await testPoolsCreateYesBuysAtTheQuotedPrice();
+await testPoolsCreateAwsSendsItsFlagsAndPrintsTheSetupLink();
+await testPoolsResizeNeedsEverySize();
+await testPoolsJoinKeysRevoke();
 await testRemovedSecretAndUrlFlagsFailLocally();
 await testHelpMatchesSupportedSurface();
 await testPerCommandHelpIsCommandSpecific();

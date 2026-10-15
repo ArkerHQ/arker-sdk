@@ -33,8 +33,8 @@ Placement works exactly as in the other SDKs. `BaseURL` fully determines
 routing, so `Provider` and `Region` are ignored when it is set; supply either
 `BaseURL` or *both* `Provider` and `Region`. Org-wide calls — `ListVMs`,
 `ListRuns`, `ListRegions`, `Whoami` and the pool calls — reach the control plane
-and work with no placement at all (`CreatePool` needs a provider and region,
-from the request or the client); everything else needs one.
+and work with no placement at all, except `CreatePool`, which creates the pool in
+the client's region; everything else needs one.
 
 ## Surface
 
@@ -44,8 +44,10 @@ from the request or the client); everything else needs one.
 | `ListRuns` `ListRegions` `Whoami` | `Run` `ListRuns` `GetRun` `CancelRun` |
 | `ListFilesystems` `CreateFilesystem` | `ListSessions` `CreateSession` `GetSession` |
 | `GetFilesystem` `DeleteFilesystem` | `UpdateSession` `DeleteSession` |
-| `ListPools` `GetPool` `GetPoolUsage` | |
-| `RenamePool` `CreatePool` | |
+| `ListPools` `CreatePool` `GetPool` `UpdatePool` | |
+| `AddPoolCommitment` `DeletePool` `GetPoolUsage` | |
+| `ListPoolWorkers` `CreatePoolJoinKey` | |
+| `ListPoolJoinKeys` `RevokePoolJoinKey` | |
 | `BaseURL` `ControlBaseURL` `Provider` `Region` | `GetPolicies` `SetPolicies` |
 | package-level `DiscoverRegions` | `ReadFile` `WriteFile` `SyncDir` |
 | | `ListMounts` `CreateMount` `DeleteMount` `ConnectPTY` |
@@ -97,6 +99,33 @@ arker.IsConflict(err)   // 409
 whether the server acted is unknown. The SDK does not retry those: the work may
 be done, and retrying blind is how one fork becomes two VMs. Reads are retried
 normally, as are responses the server marks retryable (and 429/502/503/504).
+
+## Pools
+
+[Pools](https://arker.ai/docs/api/pools) set capacity aside for your VMs: on
+Arker's machines (`arker`), on hosts Arker launches in your AWS account (`aws`),
+or on your own machines (`self_hosted`). Changing a pool needs an admin key.
+
+```go
+pool, err := client.CreatePool(ctx, arker.CreatePoolRequest{
+    Type: "aws", Platform: "icelake",
+    Resources: &arker.PoolResources{VCPU: 120, MemoryMiB: 245760, DiskMiB: 1048576},
+    AWS:       &arker.CreatePoolAWS{AccountID: "123456789012", SubnetIDs: []string{"subnet-0a1b2c3d"}},
+})
+fmt.Println(pool.AWS.SetupURL) // open it signed in to that account and create the stack
+vm, err := client.Fork(ctx, arker.ForkRequest{Image: "ubuntu:24.04", PoolID: pool.PoolID})
+```
+
+`UpdatePool` replaces a pool's commitments as a whole; `AddPoolCommitment` adds
+one and keeps the rest. In `UpdatePoolRequest`, `Name: arker.Ptr("")` removes the
+name, and a zero `PoolResources` is a real size. Errors to expect, by `Code`:
+
+- `quota_exceeded` (429): past a pool, machine, or join key limit.
+- `invalid_state` (409): shrinking or deleting a pool during a commitment.
+- `capacity_unavailable` (503): forking into an `aws` or `self_hosted` pool
+  while none of its machines is connected. Set `QueueingTimeout` to wait.
+- `unsupported_operation`: forking a VM from outside an `aws` or `self_hosted`
+  pool into it, or opening a PTY on a VM in such a pool.
 
 ## Sessions
 

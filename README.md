@@ -35,6 +35,7 @@ Read the [Arker documentation](https://arker.ai/docs), or see the package-specif
 - [Policies](./examples/policies): Configure host-enforced egress policies.
 - [React policy](./examples/react-policy): Control a VM's network policy from a React application.
 - [Autoresearch](./examples/autoresearch): Tune a model in parallel with fractional GPUs.
+- [AWS pool](./examples/aws-pool): Run VMs on hosts Arker launches in your AWS account.
 
 ## License
 
