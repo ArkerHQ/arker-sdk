@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import math
+import re
+import shlex
 from typing import Any
 
 from ._compat import (
@@ -122,12 +125,33 @@ class Sandbox(UnsupportedMixin):
         return cls.from_id(sandbox_id, **kwargs)
 
     def exec(self, *command: Any, **kwargs: Any) -> Process:
+        workdir = kwargs.pop("workdir", kwargs.pop("cwd", None))
+        environment = kwargs.pop("env", None)
+        timeout = kwargs.pop("timeout", None)
+        timeout_ms = kwargs.pop("timeout_ms", kwargs.pop("timeoutMs", None))
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise TypeError(f"Sandbox.exec received unsupported option(s): {unsupported}")
         if self._vm is not None:
-            return Process(run_command(self._vm, shell_command(command)))
-        return Process(self._native.exec(*command))
+            prefix = ""
+            if environment:
+                exports = []
+                for key, value in environment.items():
+                    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)) is None:
+                        raise ValueError(f"Invalid environment variable name: {key}")
+                    exports.append(f"export {key}={shlex.quote(str(value))};")
+                prefix += " ".join(exports) + " "
+            if workdir:
+                prefix += f"cd {shlex.quote(str(workdir))} && "
+            arker_timeout = timeout if timeout is not None else math.ceil(timeout_ms / 1_000) if timeout_ms else None
+            return Process(run_command(self._vm, prefix + shell_command(command), timeout=arker_timeout))
+        native_kwargs = {
+            **({"workdir": workdir} if workdir is not None else {}),
+            **({"env": environment} if environment is not None else {}),
+            **({"timeout": timeout} if timeout is not None else {}),
+            **({"timeout_ms": timeout_ms} if timeout_ms is not None else {}),
+        }
+        return Process(self._native.exec(*command, **native_kwargs))
 
     def terminate(self) -> None:
         if self._vm is not None:

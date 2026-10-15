@@ -159,13 +159,10 @@ class SandboxInstance(UnsupportedMixin):
 
     @classmethod
     def create_if_not_exists(cls, sandbox: Any = None, **kwargs: Any) -> SandboxInstance:
-        name = sandbox.get("name") if isinstance(sandbox, dict) else getattr(sandbox, "name", None)
-        if name:
-            try:
-                return cls.get(name, **kwargs)
-            except RuntimeError:
-                pass
-        return cls.create(sandbox, **kwargs)
+        raise NotImplementedError(
+            "create_if_not_exists cannot be implemented atomically across routed providers; "
+            "use create(), or the native Blaxel SDK when atomic name creation is required"
+        )
 
     def delete(self) -> None:
         if self._vm is not None:

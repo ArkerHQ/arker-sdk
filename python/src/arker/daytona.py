@@ -145,7 +145,6 @@ class Daytona(UnsupportedMixin):
             sandbox.delete()
             return
         native = self._native_client()
-        native_delete = object()
         found = routed_get(
             sandbox,
             "daytona",
@@ -155,18 +154,17 @@ class Daytona(UnsupportedMixin):
                 "daytona": lambda: (
                     native.get(sandbox)
                     if native is not None and hasattr(native, "get")
-                    else native_delete
-                    if native is not None and hasattr(native, "delete")
                     else None
                 ),
             },
         )
         if found is None:
+            if native is not None and hasattr(native, "delete"):
+                native.delete(sandbox)
+                return
             raise format_not_found("Sandbox", sandbox)
         provider, result = found
         if provider == "arker":
             Sandbox(vm=result).delete()
-        elif result is native_delete:
-            native.delete(sandbox)
         else:
             Sandbox(native=result).delete()

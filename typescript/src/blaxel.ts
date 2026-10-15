@@ -107,11 +107,12 @@ export class SandboxInstance {
   }
 
   static async createIfNotExists(options: BlaxelCreateOptions = {}, config: BlaxelCompatConfig = {}): Promise<SandboxInstance> {
-    if (options.name) {
-      const box = await makeSdk(config).sandbox.getById(options.name);
-      if (box) return new SandboxInstance(box);
-    }
-    return this.create(options, config);
+    void options;
+    void config;
+    throw new Error(
+      "createIfNotExists cannot be implemented atomically across routed providers; " +
+      "use create(), or the native Blaxel SDK when atomic name creation is required",
+    );
   }
 
   static async get(id: string, config: BlaxelCompatConfig = {}): Promise<SandboxInstance> {

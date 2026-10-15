@@ -21,7 +21,10 @@ import {
 import { emitFinalOutput, formatEnvExports, shellQuote } from "./common.js";
 
 export interface ArkerComputeProviderConfig extends ArkerOptions {
+  /** Source VM name. Retained for compatibility. */
   source?: string;
+  sourceVmName?: string;
+  sourceVmId?: string;
 }
 
 interface DirectProvider {
@@ -259,9 +262,10 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
             422,
           );
         }
-        const source = options?.templateId || options?.snapshotId || config.source || env("ARKER_SOURCE") || env("ARKER_SOURCE_VM");
+        const sourceVmId = options?.snapshotId || config.sourceVmId || env("ARKER_SOURCE_VM");
+        const sourceVmName = options?.templateId || config.sourceVmName || config.source || env("ARKER_SOURCE");
         const image = typeof values.image === "string" ? values.image : undefined;
-        if (!source && !image) {
+        if (!sourceVmId && !sourceVmName && !image) {
           throw new Error("Arker source is required; pass templateId, snapshotId, image, configure source, or set ARKER_SOURCE");
         }
         const vcpu = typeof values.cpu === "number" ? values.cpu : typeof values.vcpus === "number" ? values.vcpus : undefined;
@@ -272,9 +276,9 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
           : undefined;
         const sourceRequest: ForkOptions = image
           ? { image }
-          : String(source).startsWith("vm")
-            ? { source_vm_id: String(source) }
-            : { source_vm_name: String(source) };
+          : sourceVmId
+            ? { source_vm_id: sourceVmId }
+            : { source_vm_name: sourceVmName! };
         const request: ForkOptions = {
           ...sourceRequest,
           ...(options?.name ? { name: options.name } : {}),

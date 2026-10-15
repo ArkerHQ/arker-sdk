@@ -134,13 +134,16 @@ def test_daytona_official_surface(monkeypatch) -> None:
     with use_transport(t):
         daytona = Daytona()
         sandbox = daytona.create()
-        response = sandbox.process.exec("echo 'Hello, World!'")
+        response = sandbox.process.exec("echo 'Hello, World!'", cwd="/workspace", env={"FOO": "bar"}, timeout=7)
         alias = sandbox.process.execute_command("echo 'Hello, World!'")
         assert response.result == "Hello, World!\n"
         assert alias.result == "Hello, World!\n"
         sandbox.delete()
 
     assert json.loads(t.calls[0]["body"])["source_vm_name"] == "catalog-template"
+    first_run = json.loads(t.calls[1]["body"])
+    assert first_run["command"] == "export FOO=bar; cd /workspace && echo 'Hello, World!'"
+    assert first_run["timeout"] == 7
 
 
 def test_compat_requires_source(monkeypatch) -> None:
@@ -180,10 +183,16 @@ def test_e2b_official_surface(monkeypatch) -> None:
 
     with use_transport(t):
         sandbox = E2BSandbox.create()
-        result = sandbox.commands.run('echo "Hello from E2B Sandbox!"')
+        result = sandbox.commands.run(
+            'echo "Hello from E2B Sandbox!"', cwd="/workspace", env={"FOO": "bar"}, timeout=8
+        )
         assert result.stdout == "Hello from E2B Sandbox!\n"
         assert result.exit_code == 0
         sandbox.kill()
+
+    run = json.loads(t.calls[1]["body"])
+    assert run["command"] == 'export FOO=bar; cd /workspace && echo "Hello from E2B Sandbox!"'
+    assert run["timeout"] == 8
 
 
 def test_modal_official_surface(monkeypatch) -> None:
@@ -194,10 +203,14 @@ def test_modal_official_surface(monkeypatch) -> None:
 
     with use_transport(t):
         sandbox = ModalSandbox.create()
-        process = sandbox.exec("echo", "hello")
+        process = sandbox.exec("echo", "hello", workdir="/workspace", env={"FOO": "bar"}, timeout_ms=1_500)
         assert process.stdout.read() == "hello\n"
         assert process.wait() == 0
         sandbox.terminate()
+
+    run = json.loads(t.calls[1]["body"])
+    assert run["command"] == "export FOO=bar; cd /workspace && echo hello"
+    assert run["timeout"] == 2
 
 
 def test_blaxel_official_surface(monkeypatch) -> None:

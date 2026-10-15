@@ -355,25 +355,32 @@ async function testInternalArkerProviderImageAndResources(): Promise<void> {
   });
 }
 
-async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
-  const existing = new FakeSandbox("named-box");
-  const fake = installFakeCompute(existing, { getByIdResult: existing });
-  try {
-    const found = await BlaxelSandbox.createIfNotExists({ name: "named-box", ttl: "5m" });
-    assert.equal(found.id, "named-box");
-    assert.equal(fake.createCalls.length, 0);
-  } finally {
-    fake.cleanup();
+async function testInternalArkerProviderSourceProvenance(): Promise<void> {
+  const fetch = new FakeFetch();
+  for (const id of ["vm_from_template", "vm_from_snapshot"]) {
+    fetch.addJson(
+      (method, url) => method === "POST" && url === "https://arker.invalid/api/v1/fork",
+      200,
+      { vm_id: id, owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] },
+    );
   }
+  const provider = createArkerComputeProvider({ apiKey: "ark-key", baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false });
+  await provider.sandbox.create({ templateId: "vm-template-name" });
+  await provider.sandbox.create({ snapshotId: "snapshot-without-vm-prefix" });
+  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { source_vm_name: "vm-template-name" });
+  assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), { source_vm_id: "snapshot-without-vm-prefix" });
+}
 
+async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
   const created = new FakeSandbox("new-box");
-  const missing = installFakeCompute(created, { getByIdResult: null });
+  const fake = installFakeCompute(created, { getByIdResult: null });
   try {
-    await BlaxelSandbox.createIfNotExists({ name: "new-box", ttl: "5m" });
-    assert.deepEqual(missing.createCalls[0], { name: "new-box", image: undefined, memory: undefined, timeout: 300_000, envs: undefined, runtime: undefined });
+    await assert.rejects(() => BlaxelSandbox.createIfNotExists({ name: "named-box" }), /cannot be implemented atomically/);
+    await BlaxelSandbox.create({ name: "new-box", ttl: "5m" });
+    assert.deepEqual(fake.createCalls[0], { name: "new-box", image: undefined, memory: undefined, timeout: 300_000, envs: undefined, runtime: undefined });
     await assert.rejects(() => BlaxelSandbox.create({ ttl: "eventually" }), /Invalid Blaxel ttl/);
   } finally {
-    missing.cleanup();
+    fake.cleanup();
   }
 }
 
@@ -404,6 +411,7 @@ await testE2BSurface();
 await testModalSurface();
 await testInternalArkerProvider();
 await testInternalArkerProviderImageAndResources();
+await testInternalArkerProviderSourceProvenance();
 await testInternalArkerProviderRequiresSource();
 await testBlaxelCreateIfNotExistsAndTtl();
 

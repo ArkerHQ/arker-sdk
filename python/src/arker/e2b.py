@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shlex
 from typing import Any
 
@@ -22,10 +23,32 @@ class Commands:
         self._vm = vm
         self._native = native
 
-    def run(self, command: str) -> CommandResult | Any:
+    def run(
+        self,
+        command: str,
+        *,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> CommandResult | Any:
         if self._vm is not None:
-            return run_command(self._vm, command)
-        return self._native.run(command)
+            prefix = ""
+            if env:
+                exports = []
+                for key, value in env.items():
+                    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) is None:
+                        raise ValueError(f"Invalid environment variable name: {key}")
+                    exports.append(f"export {key}={shlex.quote(value)};")
+                prefix += " ".join(exports) + " "
+            if cwd:
+                prefix += f"cd {shlex.quote(cwd)} && "
+            return run_command(self._vm, prefix + command, timeout=timeout)
+        native_options = {
+            **({"cwd": cwd} if cwd is not None else {}),
+            **({"env": env} if env is not None else {}),
+            **({"timeout": timeout} if timeout is not None else {}),
+        }
+        return self._native.run(command, **native_options)
 
 
 class Files(UnsupportedMixin):
