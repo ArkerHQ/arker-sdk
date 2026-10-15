@@ -1,0 +1,174 @@
+from __future__ import annotations
+
+import shlex
+from typing import Any
+
+from ._compat import (
+    CommandResult,
+    UnsupportedMixin,
+    arker_create,
+    arker_get,
+    format_not_found,
+    import_optional,
+    routed_create,
+    routed_get,
+    run_command,
+)
+from .computer import VM
+
+
+class Process:
+    def __init__(self, vm: VM | None = None, native: Any | None = None) -> None:
+        self._vm = vm
+        self._native = native
+
+    def exec(self, request: str | dict[str, Any]) -> CommandResult | Any:
+        if self._vm is None:
+            module = import_optional("blaxel.core.sandbox")
+            request_type = getattr(module, "ProcessRequestWithLog", None) if module is not None else None
+            if request_type is None:
+                return self._native.exec(request)
+            values = {"command": request} if isinstance(request, str) else dict(request)
+            if "workingDir" in values:
+                values["working_dir"] = values.pop("workingDir")
+            if "envs" in values:
+                values["env"] = values.pop("envs")
+            values.setdefault("wait_for_completion", True)
+            return self._native.exec(request_type(**values))
+        if isinstance(request, str):
+            command = request
+            timeout = None
+        else:
+            command = request.get("command") or request.get("cmd")
+            if isinstance(command, list):
+                command = " ".join(shlex.quote(str(value)) for value in command)
+            if not isinstance(command, str):
+                raise TypeError("process.exec requires a command string or list")
+            working_dir = request.get("workingDir") or request.get("working_dir")
+            environment = request.get("env") or request.get("envs")
+            prefix = ""
+            if working_dir:
+                prefix += f"cd {shlex.quote(str(working_dir))} && "
+            if environment:
+                prefix += (
+                    "env " + " ".join(f"{key}={shlex.quote(str(value))}" for key, value in environment.items()) + " "
+                )
+            command = prefix + command
+            timeout = request.get("timeout")
+        return run_command(self._vm, command, timeout=timeout)
+
+
+class FileSystem:
+    def __init__(self, vm: VM | None = None, native: Any | None = None) -> None:
+        self._vm = vm
+        self._native = native
+
+    def read(self, path: str) -> str:
+        if self._vm is None:
+            return self._native.read(path)
+        return self._vm.sync(path).decode("utf-8", "replace")
+
+    def write(self, path: str, content: str | bytes) -> None:
+        if self._vm is None:
+            return self._native.write(path, content)
+        self._vm.sync(path, content)
+        return None
+
+    def mkdir(self, path: str) -> None:
+        result = (
+            self._native.mkdir(path) if self._vm is None else run_command(self._vm, f"mkdir -p {shlex.quote(path)}")
+        )
+        if isinstance(result, CommandResult) and result.exit_code != 0:
+            raise RuntimeError(result.stderr or f"mkdir failed with exit {result.exit_code}")
+
+    def rm(self, path: str) -> None:
+        result = self._native.rm(path) if self._vm is None else run_command(self._vm, f"rm -rf {shlex.quote(path)}")
+        if isinstance(result, CommandResult) and result.exit_code != 0:
+            raise RuntimeError(result.stderr or f"remove failed with exit {result.exit_code}")
+
+
+class SandboxInstance(UnsupportedMixin):
+    _compat_name = "blaxel"
+
+    def __init__(self, vm: VM | None = None, native: Any | None = None) -> None:
+        self._vm = vm
+        self._native = native
+        self.id = vm.id if vm is not None else getattr(native, "id", getattr(native, "sandbox_id", None))
+        self.process = Process(vm, getattr(native, "process", None))
+        self.fs = FileSystem(vm, getattr(native, "fs", getattr(native, "filesystem", None)))
+
+    @staticmethod
+    def _native_class() -> Any | None:
+        module = import_optional("blaxel.core.sandbox")
+        return getattr(module, "SyncSandboxInstance", None) if module is not None else None
+
+    @classmethod
+    def create(cls, sandbox: Any = None, **kwargs: Any) -> SandboxInstance:
+        arker_config = kwargs.pop("arker", None) or {}
+        router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
+        if router_path:
+            arker_config = {**arker_config, "router_config_path": router_path}
+        native = cls._native_class()
+
+        def create_native() -> Any:
+            if native is None:
+                raise RuntimeError("Native Blaxel SDK is not installed")
+            return native.create(sandbox, **kwargs)
+
+        name = sandbox.get("name") if isinstance(sandbox, dict) else getattr(sandbox, "name", None)
+        image = sandbox.get("image") if isinstance(sandbox, dict) else getattr(sandbox, "image", None)
+        provider, result = routed_create(
+            "blaxel",
+            arker_config,
+            {
+                "arker": lambda: arker_create(arker_config, name=name, template_id=image),
+                "blaxel": create_native,
+            },
+        )
+        return cls(vm=result if provider == "arker" else None, native=result if provider == "blaxel" else None)
+
+    @classmethod
+    def get(cls, sandbox_id: str, **kwargs: Any) -> SandboxInstance:
+        arker_config = kwargs.pop("arker", None) or {}
+        router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
+        if router_path:
+            arker_config = {**arker_config, "router_config_path": router_path}
+        if kwargs:
+            raise TypeError(f"SandboxInstance.get received unsupported option(s): {', '.join(sorted(kwargs))}")
+        native = cls._native_class()
+        found = routed_get(
+            sandbox_id,
+            "blaxel",
+            arker_config,
+            {
+                "arker": lambda: arker_get(sandbox_id, arker_config),
+                "blaxel": lambda: native.get(sandbox_id) if native is not None else None,
+            },
+        )
+        if found is None:
+            raise format_not_found("Sandbox", sandbox_id)
+        provider, result = found
+        return cls(vm=result if provider == "arker" else None, native=result if provider == "blaxel" else None)
+
+    @classmethod
+    def create_if_not_exists(cls, sandbox: Any = None, **kwargs: Any) -> SandboxInstance:
+        name = sandbox.get("name") if isinstance(sandbox, dict) else getattr(sandbox, "name", None)
+        if name:
+            try:
+                return cls.get(name, **kwargs)
+            except RuntimeError:
+                pass
+        return cls.create(sandbox, **kwargs)
+
+    def delete(self) -> None:
+        if self._vm is not None:
+            self._vm.delete()
+            return
+        native = self._native_class()
+        if native is not None and self.id:
+            native.delete(self.id)
+            return
+        raise AttributeError("Native Blaxel sandbox does not expose delete().")
+
+
+SyncSandboxInstance = SandboxInstance

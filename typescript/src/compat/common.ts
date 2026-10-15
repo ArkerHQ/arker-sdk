@@ -5,6 +5,9 @@ export type UniversalSandbox = SandboxInterface;
 export interface CreateOptions {
   timeout?: number;
   timeoutMs?: number;
+  routerConfigPath?: string;
+  envs?: Record<string, string>;
+  metadata?: Record<string, unknown>;
 }
 
 export function shouldGuardNested(value: unknown): value is object {

@@ -11,6 +11,7 @@ import pytest
 
 import arker.computer as sdk
 from arker._compat import arker_source
+from arker.blaxel import SandboxInstance as BlaxelSandbox
 from arker.daytona import Daytona
 from arker.e2b import Sandbox as E2BSandbox
 from arker.modal import Sandbox as ModalSandbox
@@ -197,6 +198,20 @@ def test_modal_official_surface(monkeypatch) -> None:
         assert process.stdout.read() == "hello\n"
         assert process.wait() == 0
         sandbox.terminate()
+
+
+def test_blaxel_official_surface(monkeypatch) -> None:
+    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
+    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+    t = FakeTransport()
+    add_create_run_delete(t, "vm_blaxel", "hello from blaxel\n")
+
+    with use_transport(t):
+        sandbox = BlaxelSandbox.create()
+        result = sandbox.process.exec("echo 'hello from blaxel'")
+        assert result.stdout == "hello from blaxel\n"
+        assert result.exit_code == 0
+        sandbox.delete()
 
 
 def test_unsupported_calls_fail_fast(monkeypatch) -> None:

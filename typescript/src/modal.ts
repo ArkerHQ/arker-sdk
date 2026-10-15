@@ -19,6 +19,7 @@ export interface ModalCompatConfig {
   tokenSecret?: string;
   /** Arker provider options. Falls back to ARKER_* environment variables. */
   arker?: ArkerComputeProviderConfig;
+  routerConfigPath?: string;
 }
 
 interface ModalExecOptions {
@@ -30,7 +31,7 @@ interface ModalExecOptions {
   mode?: "text";
 }
 
-const MODAL_CONFIG_KEYS = ["tokenId", "tokenSecret", "arker"] as const;
+const MODAL_CONFIG_KEYS = ["tokenId", "tokenSecret", "arker", "routerConfigPath"] as const;
 const MODAL_EXEC_OPTION_KEYS = ["workdir", "env", "timeoutMs", "stdout", "stderr", "mode"] as const;
 
 type ModalProvider = ReturnType<typeof createModalProvider>;
@@ -116,11 +117,13 @@ class ModalProcess {
 
 export class Sandbox {
   readonly sandboxId: string;
+  readonly provider: string;
   #box: UniversalSandbox;
 
   constructor(box: UniversalSandbox) {
     this.#box = box;
     this.sandboxId = box.sandboxId;
+    this.provider = box.provider;
   }
 
   async exec(cmd: string[] | string, opts?: ModalExecOptions): Promise<ModalProcess> {
@@ -146,6 +149,7 @@ export class ModalClient {
         tokenId: config?.tokenId,
         tokenSecret: config?.tokenSecret,
       }),
+      routerConfigPath: config?.routerConfigPath,
     });
     return guardUnsupported(this, "modal");
   }

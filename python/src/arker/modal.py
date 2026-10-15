@@ -9,6 +9,8 @@ from ._compat import (
     arker_get,
     format_not_found,
     import_optional,
+    routed_create,
+    routed_get,
     run_command,
     shell_command,
 )
@@ -64,30 +66,55 @@ class Sandbox(UnsupportedMixin):
 
     @classmethod
     def create(cls, *args: Any, **kwargs: Any) -> Sandbox:
-        arker_config = kwargs.pop("arker", None)
+        arker_config = kwargs.pop("arker", None) or {}
+        router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
+        if router_path:
+            arker_config = {**arker_config, "router_config_path": router_path}
         if args or kwargs:
             raise TypeError("Sandbox.create only supports create() in the Arker compatibility layer for modal.")
-        try:
-            return cls(vm=arker_create(arker_config))
-        except Exception:
-            native = cls._native_sandbox()
+        native = cls._native_sandbox()
+
+        def create_native() -> Any:
             if native is None or not hasattr(native, "create"):
-                raise
-            return cls(native=native.create())
+                raise RuntimeError("Native Modal SDK is not installed")
+            return native.create()
+
+        provider, result = routed_create(
+            "modal",
+            arker_config,
+            {
+                "arker": lambda: arker_create(arker_config),
+                "modal": create_native,
+            },
+        )
+        return cls(vm=result if provider == "arker" else None, native=result if provider == "modal" else None)
 
     @classmethod
     def from_id(cls, sandbox_id: str, **kwargs: Any) -> Sandbox:
-        arker_config = kwargs.pop("arker", None)
+        arker_config = kwargs.pop("arker", None) or {}
+        router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
+        if router_path:
+            arker_config = {**arker_config, "router_config_path": router_path}
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise TypeError(f"Sandbox.from_id received unsupported option(s): {unsupported}")
-        vm = arker_get(sandbox_id, arker_config)
-        if vm is not None:
-            return cls(vm=vm)
         native = cls._native_sandbox()
-        for method_name in ("from_id", "fromId", "connect"):
-            if native is not None and hasattr(native, method_name):
-                return cls(native=getattr(native, method_name)(sandbox_id))
+
+        def get_native() -> Any | None:
+            for method_name in ("from_id", "fromId", "connect"):
+                if native is not None and hasattr(native, method_name):
+                    return getattr(native, method_name)(sandbox_id)
+            return None
+
+        found = routed_get(
+            sandbox_id,
+            "modal",
+            arker_config,
+            {"arker": lambda: arker_get(sandbox_id, arker_config), "modal": get_native},
+        )
+        if found is not None:
+            provider, result = found
+            return cls(vm=result if provider == "arker" else None, native=result if provider == "modal" else None)
         raise format_not_found("Sandbox", sandbox_id)
 
     @classmethod

@@ -9,6 +9,7 @@ export interface DaytonaCompatConfig {
   apiKey?: string;
   /** Arker provider options. Falls back to ARKER_* environment variables. */
   arker?: ArkerComputeProviderConfig;
+  routerConfigPath?: string;
 }
 
 export interface ExecuteResponse {
@@ -19,11 +20,12 @@ export interface ExecuteResponse {
   stderr: string;
 }
 
-const DAYTONA_CONFIG_KEYS = ["apiKey", "arker"] as const;
-const DAYTONA_CREATE_OPTION_KEYS = [] as const;
+const DAYTONA_CONFIG_KEYS = ["apiKey", "arker", "routerConfigPath"] as const;
+const DAYTONA_CREATE_OPTION_KEYS = ["image", "snapshot", "envVars", "name", "language", "resources"] as const;
 
 export class Sandbox {
   readonly id: string;
+  readonly provider: string;
   #box: UniversalSandbox;
 
   readonly process: {
@@ -34,6 +36,7 @@ export class Sandbox {
   constructor(box: UniversalSandbox) {
     this.#box = box;
     this.id = box.sandboxId;
+    this.provider = box.provider;
     const run = async (command: string): Promise<ExecuteResponse> => {
       const result = await this.#box.runCommand(command);
       return {
@@ -62,13 +65,22 @@ export class Daytona {
     this.#sdk = createCompatSdk({
       arker: config?.arker,
       fallbackProvider: createDaytonaProvider({ apiKey: config?.apiKey }),
+      routerConfigPath: config?.routerConfigPath,
     });
     return guardUnsupported(this, "daytona");
   }
 
   async create(params?: Record<string, unknown>): Promise<Sandbox> {
     assertSupportedObjectKeys(params, DAYTONA_CREATE_OPTION_KEYS, "daytona", "Daytona.create");
-    const box = await this.#sdk.sandbox.create({});
+    const source = params ?? {};
+    const box = await this.#sdk.sandbox.create({
+      ...(typeof source.image === "string" ? { image: source.image } : {}),
+      ...(typeof source.snapshot === "string" ? { snapshotId: source.snapshot } : {}),
+      ...(source.envVars && typeof source.envVars === "object" ? { envs: source.envVars as Record<string, string> } : {}),
+      ...(typeof source.name === "string" ? { name: source.name } : {}),
+      ...(typeof source.language === "string" ? { runtime: source.language } : {}),
+      ...(source.resources && typeof source.resources === "object" ? source.resources : {}),
+    });
     return guardUnsupported(new Sandbox(box), "daytona");
   }
 

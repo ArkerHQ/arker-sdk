@@ -9,6 +9,8 @@ from ._compat import (
     arker_get,
     format_not_found,
     import_optional,
+    routed_create,
+    routed_get,
     run_command,
 )
 from .computer import VM
@@ -66,6 +68,10 @@ class Daytona(UnsupportedMixin):
         self._native_args = args
         self._native_kwargs = dict(kwargs)
         self._arker_config = self._native_kwargs.pop("arker", None)
+        router_path = self._native_kwargs.pop("router_config_path", self._native_kwargs.pop("routerConfigPath", None))
+        self._arker_config = dict(self._arker_config or {})
+        if router_path:
+            self._arker_config["router_config_path"] = router_path
         self._native = None
 
     def _native_client(self) -> Any | None:
@@ -78,24 +84,41 @@ class Daytona(UnsupportedMixin):
         return self._native
 
     def create(self, *args: Any, **kwargs: Any) -> Sandbox:
-        if args or kwargs:
-            raise TypeError("Daytona.create only supports create() in the Arker compatibility layer.")
-        try:
-            return Sandbox(vm=arker_create(self._arker_config))
-        except Exception:
-            native = self._native_client()
+        native = self._native_client()
+
+        def create_native() -> Any:
             if native is None:
-                raise
-            return Sandbox(native=native.create())
+                raise RuntimeError("Native Daytona SDK is not installed")
+            return native.create(*args, **kwargs)
+
+        provider, result = routed_create(
+            "daytona",
+            self._arker_config,
+            {
+                "arker": lambda: arker_create(
+                    self._arker_config,
+                    name=kwargs.get("name") if kwargs else None,
+                    template_id=kwargs.get("snapshot") if kwargs else None,
+                ),
+                "daytona": create_native,
+            },
+        )
+        return Sandbox(vm=result if provider == "arker" else None, native=result if provider == "daytona" else None)
 
     def get(self, sandbox_id: str) -> Sandbox:
-        vm = arker_get(sandbox_id, self._arker_config)
-        if vm is not None:
-            return Sandbox(vm=vm)
-
         native = self._native_client()
-        if native is not None and hasattr(native, "get"):
-            return Sandbox(native=native.get(sandbox_id))
+        found = routed_get(
+            sandbox_id,
+            "daytona",
+            self._arker_config,
+            {
+                "arker": lambda: arker_get(sandbox_id, self._arker_config),
+                "daytona": lambda: native.get(sandbox_id) if native is not None and hasattr(native, "get") else None,
+            },
+        )
+        if found is not None:
+            provider, result = found
+            return Sandbox(vm=result if provider == "arker" else None, native=result if provider == "daytona" else None)
         raise format_not_found("Sandbox", sandbox_id)
 
     def delete(self, sandbox: str | Sandbox) -> None:

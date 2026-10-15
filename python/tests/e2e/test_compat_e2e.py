@@ -11,6 +11,7 @@ import os
 
 import pytest
 
+from arker.blaxel import SandboxInstance as BlaxelSandbox
 from arker.daytona import Daytona
 from arker.e2b import Sandbox as E2BSandbox
 from arker.modal import Sandbox as ModalSandbox
@@ -49,3 +50,14 @@ def test_modal_live() -> None:
         assert process.stdout.read() == "modal-python-live"
     finally:
         sandbox.terminate()
+
+
+def test_blaxel_live() -> None:
+    sandbox = BlaxelSandbox.create()
+    try:
+        result = sandbox.process.exec("printf blaxel-python-live")
+        assert result.stdout == "blaxel-python-live"
+        sandbox.fs.write("/tmp/arker-blaxel-python-live.txt", "ok")
+        assert sandbox.fs.read("/tmp/arker-blaxel-python-live.txt") == "ok"
+    finally:
+        sandbox.delete()

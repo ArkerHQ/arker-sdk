@@ -10,6 +10,8 @@ from ._compat import (
     arker_get,
     format_not_found,
     import_optional,
+    routed_create,
+    routed_get,
     run_command,
 )
 from .computer import VM
@@ -112,36 +114,55 @@ class Sandbox(UnsupportedMixin):
     @classmethod
     def create(cls, template_id: str | None = None, **kwargs: Any) -> Sandbox:
         timeout = kwargs.pop("timeout", kwargs.pop("timeout_ms", kwargs.pop("timeoutMs", None)))
-        arker_config = kwargs.pop("arker", None)
+        arker_config = kwargs.pop("arker", None) or {}
+        router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
+        if router_path:
+            arker_config = {**arker_config, "router_config_path": router_path}
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise TypeError(f"Sandbox.create received unsupported option(s): {unsupported}")
-        try:
-            return cls(vm=arker_create(arker_config, template_id=template_id))
-        except Exception:
-            native = cls._native_sandbox()
+        native = cls._native_sandbox()
+
+        def create_native() -> Any:
             if native is None:
-                raise
+                raise RuntimeError("Native E2B SDK is not installed")
             if template_id is not None:
-                return cls(
-                    native=native.create(template_id, timeout=timeout)
-                    if timeout is not None
-                    else native.create(template_id)
-                )
-            return cls(native=native.create(timeout=timeout) if timeout is not None else native.create())
+                if timeout is not None:
+                    return native.create(template_id, timeout=timeout)
+                return native.create(template_id)
+            return native.create(timeout=timeout) if timeout is not None else native.create()
+
+        provider, result = routed_create(
+            "e2b",
+            arker_config,
+            {"arker": lambda: arker_create(arker_config, template_id=template_id), "e2b": create_native},
+        )
+        return cls(vm=result if provider == "arker" else None, native=result if provider == "e2b" else None)
 
     @classmethod
     def connect(cls, sandbox_id: str, **kwargs: Any) -> Sandbox:
-        arker_config = kwargs.pop("arker", None)
+        arker_config = kwargs.pop("arker", None) or {}
+        router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
+        if router_path:
+            arker_config = {**arker_config, "router_config_path": router_path}
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise TypeError(f"Sandbox.connect received unsupported option(s): {unsupported}")
-        vm = arker_get(sandbox_id, arker_config)
-        if vm is not None:
-            return cls(vm=vm)
         native = cls._native_sandbox()
-        if native is not None and hasattr(native, "connect"):
-            return cls(native=native.connect(sandbox_id))
+        found = routed_get(
+            sandbox_id,
+            "e2b",
+            arker_config,
+            {
+                "arker": lambda: arker_get(sandbox_id, arker_config),
+                "e2b": lambda: (
+                    native.connect(sandbox_id) if native is not None and hasattr(native, "connect") else None
+                ),
+            },
+        )
+        if found is not None:
+            provider, result = found
+            return cls(vm=result if provider == "arker" else None, native=result if provider == "e2b" else None)
         raise format_not_found("Sandbox", sandbox_id)
 
     def kill(self) -> None:

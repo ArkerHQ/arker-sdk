@@ -6,6 +6,8 @@ import type {
   SandboxFileSystem,
   SandboxInfo,
   SandboxInterface,
+  StartProcessOptions,
+  ProcessHandle,
 } from "computesdk";
 
 import {
@@ -63,6 +65,7 @@ function toFileEntries(stdout: string): FileEntry[] {
 }
 
 class ArkerComputeSandbox implements SandboxInterface {
+  readonly instanceId: string;
   readonly sandboxId: string;
   readonly provider = "arker";
   readonly filesystem: SandboxFileSystem;
@@ -72,6 +75,7 @@ class ArkerComputeSandbox implements SandboxInterface {
     private readonly destroyVm: (sandboxId: string) => Promise<void>,
   ) {
     this.sandboxId = vm.id;
+    this.instanceId = vm.id;
     this.filesystem = {
       readFile: async (path) => decode(await this.vm.sync(path)),
       writeFile: async (path, content) => {
@@ -140,6 +144,61 @@ class ArkerComputeSandbox implements SandboxInterface {
     };
     emitFinalOutput(commandResult, options);
     return commandResult;
+  }
+
+  async startProcess(command: string, options?: StartProcessOptions): Promise<ProcessHandle> {
+    if (options?.stdin) {
+      throw new ArkerError(
+        "unsupported_operation",
+        "Writable process stdin requires an Arker PTY session and is not available through this adapter",
+        422,
+      );
+    }
+    let fullCommand = command;
+    if (options?.env && Object.keys(options.env).length > 0) {
+      const envPrefix = Object.entries(options.env)
+        .map(([key, value]) => `${key}=${shellQuote(value)}`)
+        .join(" ");
+      fullCommand = `${envPrefix} ${fullCommand}`;
+    }
+    if (options?.cwd) fullCommand = `cd ${shellQuote(options.cwd)} && ${fullCommand}`;
+    const background = await this.vm.run(fullCommand, { time_to_background: 0 });
+    const runId = background.runId;
+
+    const snapshot = async () => {
+      const run = await this.vm.getRun(runId) as any;
+      const running = run.state === "running" || run.status === "running";
+      return {
+        status: running ? "running" as const : "exited" as const,
+        exitCode: running ? null : (run.exitCode ?? run.exit_code ?? null),
+        signal: null,
+        stdout: run.stdout ?? "",
+        stderr: run.stderr ?? "",
+      };
+    };
+
+    return {
+      pid: null,
+      jobId: runId,
+      write: async () => { throw new Error("Process stdin was not enabled"); },
+      closeStdin: async () => undefined,
+      status: snapshot,
+      wait: async (waitOptions) => {
+        const deadline = waitOptions?.timeout === undefined ? undefined : Date.now() + waitOptions.timeout;
+        while (true) {
+          const state = await snapshot();
+          if (state.status === "exited") {
+            options?.onStdout?.(state.stdout);
+            options?.onStderr?.(state.stderr);
+            options?.onExit?.({ exitCode: state.exitCode, signal: null });
+            return { ...state, exitCode: state.exitCode ?? -1, durationMs: 0 };
+          }
+          if (deadline !== undefined && Date.now() >= deadline) throw new Error(`daemond: wait timed out for ${runId}`);
+          await new Promise((resolve) => setTimeout(resolve, options?.pollIntervalMs ?? 500));
+        }
+      },
+      kill: async () => { await this.vm.cancelRun(runId); },
+    };
   }
 
   async getInfo(): Promise<SandboxInfo> {

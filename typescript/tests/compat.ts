@@ -15,6 +15,7 @@ type CapturedComputeConfig = {
 };
 
 class FakeSandbox implements SandboxInterface {
+  readonly instanceId: string;
   readonly sandboxId: string;
   readonly provider = "arker";
   readonly runCalls: Array<{ command: string; options?: RunCommandOptions }> = [];
@@ -23,6 +24,7 @@ class FakeSandbox implements SandboxInterface {
 
   constructor(sandboxId = "fake-arker-vm") {
     this.sandboxId = sandboxId;
+    this.instanceId = sandboxId;
   }
 
   async runCommand(command: string, options?: RunCommandOptions): Promise<CommandResult> {
@@ -33,6 +35,10 @@ class FakeSandbox implements SandboxInterface {
       exitCode: 7,
       durationMs: 3,
     };
+  }
+
+  async startProcess(): Promise<any> {
+    return { jobId: "fake", pid: null };
   }
 
   async getInfo(): Promise<SandboxInfo> {
@@ -126,8 +132,8 @@ async function testDaytonaSurface(): Promise<void> {
     assert.equal(box.destroyed, true);
 
     await assert.rejects(
-      () => daytona.create({ image: "unsupported" } as any),
-      /unsupported option\(s\) 'image'/,
+      () => daytona.create({ volumeMounts: [] } as any),
+      /unsupported option\(s\) 'volumeMounts'/,
     );
     assert.throws(
       () => (sandbox.process as any).spawn,

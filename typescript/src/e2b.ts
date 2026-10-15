@@ -15,16 +15,18 @@ export interface CommandExitResult {
   exitCode: number;
 }
 
-const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs"] as const;
+const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata"] as const;
 
-function sdk() {
+function sdk(routerConfigPath?: string) {
   return createCompatSdk({
     fallbackProvider: createE2BProvider({}),
+    routerConfigPath,
   });
 }
 
 export class Sandbox {
   readonly sandboxId: string;
+  readonly provider: string;
   #box: UniversalSandbox;
 
   readonly commands: {
@@ -43,6 +45,7 @@ export class Sandbox {
   private constructor(box: UniversalSandbox) {
     this.#box = box;
     this.sandboxId = box.sandboxId;
+    this.provider = box.provider;
     this.commands = {
       run: async (command) => {
         const result = await this.#box.runCommand(command);
@@ -78,15 +81,18 @@ export class Sandbox {
     }
     assertSupportedObjectKeys(opts, E2B_CREATE_OPTION_KEYS, "e2b", "Sandbox.create");
     const timeout = resolveTimeout(opts);
-    const box = await sdk().sandbox.create({
+    const box = await sdk((opts as any)?.routerConfigPath).sandbox.create({
       ...(templateId ? { templateId } : {}),
       ...(timeout !== undefined ? { timeout } : {}),
+      ...((opts as any)?.envs ? { envs: (opts as any).envs } : {}),
+      ...((opts as any)?.metadata ? { metadata: (opts as any).metadata } : {}),
     });
     return guardUnsupported(new Sandbox(box), "e2b");
   }
 
-  static async connect(sandboxId: string): Promise<Sandbox> {
-    const box = await sdk().sandbox.getById(sandboxId);
+  static async connect(sandboxId: string, opts?: Pick<CreateOptions, "routerConfigPath">): Promise<Sandbox> {
+    assertSupportedObjectKeys(opts, ["routerConfigPath"], "e2b", "Sandbox.connect");
+    const box = await sdk(opts?.routerConfigPath).sandbox.getById(sandboxId);
     if (!box) throw new Error(`Sandbox ${sandboxId} not found`);
     return guardUnsupported(new Sandbox(box), "e2b");
   }
