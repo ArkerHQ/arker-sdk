@@ -15,7 +15,7 @@ if (!poolId) {
     aws: { account_id: accountId, subnet_ids: [subnetId] },
   });
   if (pool.type !== "aws") throw new Error(`Unexpected pool type: ${pool.type}`);
-  console.log(`Open ${pool.aws.setup_url} signed in to AWS account ${accountId} and create the stack.`);
+  console.log(`Open ${pool.aws.setup_url} signed in to the pool's AWS account and create the stack.`);
   console.log(`Run this example again with ARKER_POOL_ID=${pool.pool_id} to inspect readiness and fork.`);
 } else {
   const pool = await client.getPool(poolId);

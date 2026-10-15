@@ -659,7 +659,7 @@ async function testPoolsCreateShowsSetup(): Promise<void> {
   await withCapturedServer((_req, res) => jsonResponse(res, CLI_POOL), async (baseUrl, requests) => {
     const result = await runCli(baseUrl, ["pools", "create", ...POOL_ARGS]);
     assert.equal(result.code, 0, result.stderr);
-    assert.match(stdoutText(result), /https:\/\/console.aws.amazon.com\/setup/);
+    assert.ok(stdoutText(result).includes(CLI_POOL.aws.setup_url));
     assert.match(stdoutText(result), /create the stack/);
     assert.equal(requests.length, 1);
     assert.equal(requests[0]!.url, "/api/v1/pools");
