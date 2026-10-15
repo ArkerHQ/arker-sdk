@@ -5,6 +5,7 @@ import json
 import math
 import os
 import random
+import secrets
 import tempfile
 import time
 from collections.abc import Callable, Mapping
@@ -151,9 +152,11 @@ class JsonRouteCache:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         lock_path = self.path.with_name(f"{self.path.name}.lock")
         descriptor: int | None = None
+        token = secrets.token_hex(16)
         for attempt in range(101):
             try:
                 descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                os.write(descriptor, token.encode())
                 break
             except FileExistsError:
                 try:
@@ -171,14 +174,27 @@ class JsonRouteCache:
             yield
         finally:
             os.close(descriptor)
-            with suppress(FileNotFoundError):
-                lock_path.unlink()
+            try:
+                if lock_path.read_text() == token:
+                    lock_path.unlink()
+            except FileNotFoundError:
+                pass
 
     def _read(self) -> dict[str, Any]:
         try:
             payload = json.loads(self.path.read_text())
             if payload.get("version") != 1 or not isinstance(payload.get("entries"), dict):
                 raise ValueError
+            payload["entries"] = {
+                identifier: entry
+                for identifier, entry in payload["entries"].items()
+                if isinstance(identifier, str)
+                and isinstance(entry, dict)
+                and isinstance(entry.get("provider"), str)
+                and isinstance(entry.get("accessedAt"), (int, float))
+                and not isinstance(entry.get("accessedAt"), bool)
+                and math.isfinite(entry["accessedAt"])
+            }
             return payload
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return {"version": 1, "entries": {}}

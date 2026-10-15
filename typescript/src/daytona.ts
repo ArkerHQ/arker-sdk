@@ -20,6 +20,12 @@ export interface ExecuteResponse {
   stderr: string;
 }
 
+export interface ExecuteCommandOptions {
+  cwd?: string;
+  env?: Record<string, string>;
+  timeout?: number;
+}
+
 const DAYTONA_CONFIG_KEYS = ["apiKey", "arker", "routerConfigPath"] as const;
 const DAYTONA_CREATE_OPTION_KEYS = ["image", "snapshot", "envVars", "name", "language", "resources"] as const;
 
@@ -29,16 +35,16 @@ export class Sandbox {
   #box: UniversalSandbox;
 
   readonly process: {
-    exec: (command: string) => Promise<ExecuteResponse>;
-    executeCommand: (command: string) => Promise<ExecuteResponse>;
+    exec: (command: string, options?: ExecuteCommandOptions) => Promise<ExecuteResponse>;
+    executeCommand: (command: string, options?: ExecuteCommandOptions) => Promise<ExecuteResponse>;
   };
 
   constructor(box: UniversalSandbox) {
     this.#box = box;
     this.id = box.sandboxId;
     this.provider = box.provider;
-    const run = async (command: string): Promise<ExecuteResponse> => {
-      const result = await this.#box.runCommand(command);
+    const run = async (command: string, options?: ExecuteCommandOptions): Promise<ExecuteResponse> => {
+      const result = await this.#box.runCommand(command, options);
       return {
         exitCode: result.exitCode,
         result: result.stdout,

@@ -5,6 +5,7 @@ import importlib
 import os
 import shlex
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -139,6 +140,42 @@ def _cache(router: RouterConfig) -> JsonRouteCache | None:
     return JsonRouteCache(router.cache.path, max_entries=router.cache.max_entries, max_bytes=router.cache.max_bytes)
 
 
+def _validate_router_providers(names: tuple[str, ...] | list[str], handlers: dict[str, Any]) -> None:
+    for name in names:
+        if name not in handlers:
+            configured = ", ".join(handlers)
+            raise ValueError(f'router config references unknown provider "{name}"; configured providers: {configured}')
+
+
+def _cache_set(cache: JsonRouteCache | None, identifier: str, provider: str) -> None:
+    if cache is not None:
+        with suppress(Exception):
+            cache.set(identifier, provider)
+
+
+def _is_retryable(error: Exception) -> bool:
+    current: BaseException | None = error
+    for _ in range(5):
+        if current is None:
+            break
+        response = getattr(current, "response", None)
+        status = (
+            getattr(current, "status", None)
+            or getattr(current, "status_code", None)
+            or getattr(response, "status_code", None)
+        )
+        if status in {400, 401, 403, 422}:
+            return False
+        code = str(getattr(current, "code", "")).lower()
+        if code in {"authentication", "authorization", "unauthorized", "forbidden", "invalid_request", "validation"}:
+            return False
+        message = str(current).lower()
+        if any(text in message for text in ("authentication failed", "unauthorized", "forbidden", "invalid api key")):
+            return False
+        current = current.__cause__ or current.__context__
+    return True
+
+
 def routed_create(
     native_provider: str,
     config: dict[str, Any] | None,
@@ -146,24 +183,24 @@ def routed_create(
 ) -> tuple[str, Any]:
     router = router_config(config, native_provider)
     if router.create.strategy == "weighted":
+        _validate_router_providers([*router.create.weights, *router.create.fallback], creators)
         first = select_weighted_provider(router.create.weights)
         order = (first, *(name for name in router.create.fallback if name != first))
     else:
+        _validate_router_providers(list(router.create.order), creators)
         order = router.create.order
-    relevant = [name for name in order if name in creators]
     last_error: Exception | None = None
-    for name in relevant:
+    for name in order:
         try:
             result = creators[name]()
             identifier = getattr(result, "id", getattr(result, "sandbox_id", None))
             cache = _cache(router)
-            if cache is not None and identifier:
-                cache.set(str(identifier), name)
+            if identifier:
+                _cache_set(cache, str(identifier), name)
             return name, result
         except Exception as error:
             last_error = error
-            status = getattr(error, "status", None)
-            if status in {400, 401, 403, 422}:
+            if not _is_retryable(error):
                 raise
     if last_error:
         raise last_error
@@ -177,29 +214,41 @@ def routed_get(
     getters: dict[str, Any],
 ) -> tuple[str, Any] | None:
     router = router_config(config, native_provider)
+    _validate_router_providers(list(router.existing.order), getters)
     cache = _cache(router)
-    cached = cache.get(identifier) if cache is not None else None
+    try:
+        cached = cache.get(identifier) if cache is not None else None
+    except Exception:
+        cached = None
     if cached is not None and cached not in getters:
         if cache is not None:
-            cache.delete(identifier)
+            with suppress(Exception):
+                cache.delete(identifier)
         cached = None
     if cached in getters:
         result = getters[cached]()
         if result is not None:
             return cached, result
-        cache.delete(identifier)
+        with suppress(Exception):
+            cache.delete(identifier)
     order = [name for name in router.existing.order if name in getters and name != cached]
     if router.existing.strategy == "race" and len(order) > 1:
         executor = ThreadPoolExecutor(max_workers=len(order))
+        errors: list[Exception] = []
         try:
             futures = {executor.submit(getters[name]): name for name in order}
             for future in as_completed(futures):
-                result = future.result()
+                try:
+                    result = future.result()
+                except Exception as error:
+                    errors.append(error)
+                    continue
                 if result is not None:
                     name = futures[future]
-                    if cache is not None:
-                        cache.set(identifier, name)
+                    _cache_set(cache, identifier, name)
                     return name, result
+            if errors:
+                raise RuntimeError(f"lookup failed for {identifier}: {errors[-1]}") from errors[-1]
             return None
         finally:
             for future in futures:
@@ -208,7 +257,6 @@ def routed_get(
     for name in order:
         result = getters[name]()
         if result is not None:
-            if cache is not None:
-                cache.set(identifier, name)
+            _cache_set(cache, identifier, name)
             return name, result
     return None

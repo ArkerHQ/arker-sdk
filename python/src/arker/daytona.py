@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import shlex
 from typing import Any
 
 from ._compat import (
@@ -29,14 +31,31 @@ class Process:
     def __init__(self, vm: VM) -> None:
         self._vm = vm
 
-    def exec(self, command: str) -> ExecuteResponse:
-        return ExecuteResponse(run_command(self._vm, command))
+    def exec(
+        self,
+        command: str,
+        *,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> ExecuteResponse:
+        prefix = ""
+        if env:
+            exports = []
+            for key, value in env.items():
+                if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) is None:
+                    raise ValueError(f"Invalid environment variable name: {key}")
+                exports.append(f"export {key}={shlex.quote(value)};")
+            prefix += " ".join(exports) + " "
+        if cwd:
+            prefix += f"cd {shlex.quote(cwd)} && "
+        return ExecuteResponse(run_command(self._vm, prefix + command, timeout=timeout))
 
-    def execute_command(self, command: str) -> ExecuteResponse:
-        return self.exec(command)
+    def execute_command(self, command: str, **kwargs: Any) -> ExecuteResponse:
+        return self.exec(command, **kwargs)
 
-    def executeCommand(self, command: str) -> ExecuteResponse:
-        return self.exec(command)
+    def executeCommand(self, command: str, **kwargs: Any) -> ExecuteResponse:
+        return self.exec(command, **kwargs)
 
 
 class Sandbox(UnsupportedMixin):
@@ -125,17 +144,29 @@ class Daytona(UnsupportedMixin):
         if not isinstance(sandbox, str):
             sandbox.delete()
             return
-
-        vm = arker_get(sandbox, self._arker_config)
-        if vm is not None:
-            Sandbox(vm=vm).delete()
-            return
-
         native = self._native_client()
-        if native is not None and hasattr(native, "delete"):
+        native_delete = object()
+        found = routed_get(
+            sandbox,
+            "daytona",
+            self._arker_config,
+            {
+                "arker": lambda: arker_get(sandbox, self._arker_config),
+                "daytona": lambda: (
+                    native.get(sandbox)
+                    if native is not None and hasattr(native, "get")
+                    else native_delete
+                    if native is not None and hasattr(native, "delete")
+                    else None
+                ),
+            },
+        )
+        if found is None:
+            raise format_not_found("Sandbox", sandbox)
+        provider, result = found
+        if provider == "arker":
+            Sandbox(vm=result).delete()
+        elif result is native_delete:
             native.delete(sandbox)
-            return
-        if native is not None and hasattr(native, "get"):
-            Sandbox(native=native.get(sandbox)).delete()
-            return
-        raise format_not_found("Sandbox", sandbox)
+        else:
+            Sandbox(native=result).delete()

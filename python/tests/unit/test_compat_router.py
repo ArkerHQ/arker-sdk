@@ -109,6 +109,24 @@ def test_json_cache_recovers_from_truncated_file(tmp_path: Path) -> None:
     assert cache.get("vm-a") == "arker"
 
 
+def test_json_cache_discards_malformed_entries_individually(tmp_path: Path) -> None:
+    path = tmp_path / "routes.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    "valid": {"provider": "arker", "accessedAt": 1},
+                    "broken": {"provider": "e2b", "accessedAt": "yesterday"},
+                },
+            }
+        )
+    )
+    cache = JsonRouteCache(path)
+    assert cache.get("valid") == "arker"
+    assert cache.get("broken") is None
+
+
 def test_json_cache_preserves_updates_from_multiple_processes(tmp_path: Path) -> None:
     path = tmp_path / "routes.json"
     processes = [multiprocessing.Process(target=_cache_writer, args=(str(path), prefix)) for prefix in ("a", "b")]
@@ -175,3 +193,42 @@ def test_lookup_evicts_cache_entry_for_removed_provider(tmp_path: Path) -> None:
 
     assert found is not None and found[0] == "e2b"
     assert JsonRouteCache(cache_path).get("vm-a") == "e2b"
+
+
+def test_routing_rejects_provider_not_configured_by_shim(tmp_path: Path) -> None:
+    config_path = tmp_path / "computesdk_router.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "existing": {"strategy": "priority", "order": ["modal", "e2b"]},
+                "create": {"strategy": "priority", "order": ["modal", "e2b"]},
+            }
+        )
+    )
+    with pytest.raises(ValueError, match=r'unknown provider "modal"'):
+        routed_get("vm-a", "e2b", {"router_config_path": config_path}, {"e2b": lambda: None})
+
+
+def test_race_continues_after_one_provider_errors(tmp_path: Path) -> None:
+    config_path = tmp_path / "computesdk_router.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "existing": {"strategy": "race", "order": ["e2b", "arker"]},
+                "create": {"strategy": "priority", "order": ["e2b", "arker"]},
+            }
+        )
+    )
+
+    def fails() -> None:
+        raise RuntimeError("temporary lookup failure")
+
+    found = routed_get(
+        "vm-a",
+        "e2b",
+        {"router_config_path": config_path},
+        {"e2b": fails, "arker": lambda: object()},
+    )
+    assert found is not None and found[0] == "arker"

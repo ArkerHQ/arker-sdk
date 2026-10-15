@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shlex
 from typing import Any
 
@@ -50,6 +51,12 @@ class Process:
             if working_dir:
                 prefix += f"cd {shlex.quote(str(working_dir))} && "
             if environment:
+                invalid = next(
+                    (key for key in environment if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key))),
+                    None,
+                )
+                if invalid is not None:
+                    raise ValueError(f"invalid environment variable name: {invalid}")
                 prefix += (
                     "env " + " ".join(f"{key}={shlex.quote(str(value))}" for key, value in environment.items()) + " "
                 )

@@ -14,10 +14,11 @@ import {
   Arker,
   ArkerError,
   type ArkerOptions,
+  type ForkOptions,
   type RunOptions,
   type VM,
 } from "../index.js";
-import { emitFinalOutput, shellQuote } from "./common.js";
+import { emitFinalOutput, formatEnvExports, shellQuote } from "./common.js";
 
 export interface ArkerComputeProviderConfig extends ArkerOptions {
   source?: string;
@@ -118,9 +119,7 @@ class ArkerComputeSandbox implements SandboxInterface {
     let fullCommand = command;
 
     if (options?.env && Object.keys(options.env).length > 0) {
-      const envPrefix = Object.entries(options.env)
-        .map(([key, value]) => `${key}=${shellQuote(String(value))}`)
-        .join(" ");
+      const envPrefix = formatEnvExports(options.env);
       fullCommand = `${envPrefix} ${fullCommand}`;
     }
     if (options?.cwd) fullCommand = `cd ${shellQuote(options.cwd)} && ${fullCommand}`;
@@ -156,9 +155,7 @@ class ArkerComputeSandbox implements SandboxInterface {
     }
     let fullCommand = command;
     if (options?.env && Object.keys(options.env).length > 0) {
-      const envPrefix = Object.entries(options.env)
-        .map(([key, value]) => `${key}=${shellQuote(value)}`)
-        .join(" ");
+      const envPrefix = formatEnvExports(options.env);
       fullCommand = `${envPrefix} ${fullCommand}`;
     }
     if (options?.cwd) fullCommand = `cd ${shellQuote(options.cwd)} && ${fullCommand}`;
@@ -252,14 +249,38 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
     sandbox: {
       create: async (options?: CreateSandboxOptions): Promise<SandboxInterface> => {
         const client = makeClient(config);
-        const source = options?.templateId || options?.snapshotId || config.source || env("ARKER_SOURCE") || env("ARKER_SOURCE_VM");
-        if (!source) {
-          throw new Error("Arker source is required; pass templateId, configure source, or set ARKER_SOURCE or ARKER_SOURCE_VM");
+        const values = (options ?? {}) as Record<string, unknown>;
+        const unsupported = ["envs", "metadata", "timeout", "runtime", "directory", "egress", "ephemeral", "namespace"]
+          .filter((key) => values[key] !== undefined);
+        if (unsupported.length > 0) {
+          throw new ArkerError(
+            "unsupported_operation",
+            `Arker create does not support option(s): ${unsupported.join(", ")}`,
+            422,
+          );
         }
-        const vm = await client.fork({
-          source_vm_name: source,
+        const source = options?.templateId || options?.snapshotId || config.source || env("ARKER_SOURCE") || env("ARKER_SOURCE_VM");
+        const image = typeof values.image === "string" ? values.image : undefined;
+        if (!source && !image) {
+          throw new Error("Arker source is required; pass templateId, snapshotId, image, configure source, or set ARKER_SOURCE");
+        }
+        const vcpu = typeof values.cpu === "number" ? values.cpu : typeof values.vcpus === "number" ? values.vcpus : undefined;
+        const memoryMiB = typeof values.memoryMiB === "number" ? values.memoryMiB : typeof values.memory === "number" ? values.memory : undefined;
+        const diskMiB = typeof values.diskMiB === "number" ? values.diskMiB : undefined;
+        const resources = vcpu !== undefined || memoryMiB !== undefined || diskMiB !== undefined
+          ? { ...(vcpu !== undefined ? { vcpu } : {}), ...(memoryMiB !== undefined ? { memory_mib: memoryMiB } : {}), ...(diskMiB !== undefined ? { disk_mib: diskMiB } : {}) }
+          : undefined;
+        const sourceRequest: ForkOptions = image
+          ? { image }
+          : String(source).startsWith("vm")
+            ? { source_vm_id: String(source) }
+            : { source_vm_name: String(source) };
+        const request: ForkOptions = {
+          ...sourceRequest,
           ...(options?.name ? { name: options.name } : {}),
-        });
+          ...(resources ? { resources } : {}),
+        };
+        const vm = await client.fork(request);
         return wrap(vm);
       },
       getById: async (sandboxId: string): Promise<SandboxInterface | null> => {

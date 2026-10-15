@@ -20,6 +20,14 @@ export interface BlaxelCreateOptions {
   runtime?: string;
 }
 
+function parseTtl(ttl: string | number | undefined): number | undefined {
+  if (ttl === undefined || typeof ttl === "number") return ttl;
+  const match = /^(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)$/i.exec(ttl.trim());
+  if (!match) throw new Error(`Invalid Blaxel ttl '${ttl}'; use milliseconds or a duration such as 30s, 5m, 2h, or 1d`);
+  const multiplier = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 }[match[2]!.toLowerCase()]!;
+  return Number(match[1]) * multiplier;
+}
+
 function makeSdk(config: BlaxelCompatConfig = {}): CompatSdk {
   return createCompatSdk({
     arker: config.arker,
@@ -91,14 +99,18 @@ export class SandboxInstance {
       name: options.name,
       image: options.image,
       memory: options.memory,
-      timeout: typeof options.ttl === "number" ? options.ttl : undefined,
+      timeout: parseTtl(options.ttl),
       envs: options.envs,
       runtime: options.runtime,
     });
     return new SandboxInstance(box);
   }
 
-  static createIfNotExists(options: BlaxelCreateOptions = {}, config: BlaxelCompatConfig = {}): Promise<SandboxInstance> {
+  static async createIfNotExists(options: BlaxelCreateOptions = {}, config: BlaxelCompatConfig = {}): Promise<SandboxInstance> {
+    if (options.name) {
+      const box = await makeSdk(config).sandbox.getById(options.name);
+      if (box) return new SandboxInstance(box);
+    }
     return this.create(options, config);
   }
 

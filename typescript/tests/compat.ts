@@ -4,6 +4,7 @@ import type { CommandResult, FileEntry, RunCommandOptions, SandboxInfo, SandboxI
 
 import { Daytona } from "../src/daytona.js";
 import { Sandbox as E2BSandbox } from "../src/e2b.js";
+import { SandboxInstance as BlaxelSandbox } from "../src/blaxel.js";
 import { ModalClient } from "../src/modal.js";
 import { createArkerComputeProvider } from "../src/compat/arker-provider.js";
 import { setCompatComputeFactoryForTests } from "../src/compat/runtime.js";
@@ -120,11 +121,12 @@ async function testDaytonaSurface(): Promise<void> {
     assertArkerFirst(fake.captured(), "daytona");
     assert.equal(sandbox.id, "daytona-box");
 
-    const result = await sandbox.process.exec("echo hi");
+    const result = await sandbox.process.exec("echo hi", { cwd: "/workspace", env: { A: "b" }, timeout: 100 });
     assert.equal(result.exitCode, 7);
     assert.equal(result.result, "stdout:echo hi");
     assert.equal(result.stdout, "stdout:echo hi");
     assert.equal(result.stderr, "stderr:echo hi");
+    assert.deepEqual(box.runCalls[0]!.options, { cwd: "/workspace", env: { A: "b" }, timeout: 100 });
     const executeCommandResult = await sandbox.process.executeCommand("echo compat");
     assert.equal(executeCommandResult.result, "stdout:echo compat");
 
@@ -167,12 +169,13 @@ async function testE2BSurface(): Promise<void> {
     assert.deepEqual(fake.createCalls[0], { templateId: "catalog-template", timeout: 123 });
     assert.equal(sandbox.sandboxId, "e2b-box");
 
-    const command = await sandbox.commands.run("printf e2b");
+    const command = await sandbox.commands.run("printf e2b", { cwd: "/tmp", env: { A: "b" }, timeout: 200 });
     assert.deepEqual(command, {
       stdout: "stdout:printf e2b",
       stderr: "stderr:printf e2b",
       exitCode: 7,
     });
+    assert.deepEqual(box.runCalls[0]!.options, { cwd: "/tmp", env: { A: "b" }, timeout: 200 });
 
     assert.equal(await sandbox.files.read("/tmp/a"), "read:/tmp/a");
     await sandbox.files.write("/tmp/a", "content");
@@ -329,6 +332,49 @@ async function testInternalArkerProvider(): Promise<void> {
   await sandbox.runCommand("sleep 1", { timeout: 1_500 });
   const runBody = JSON.parse(fetch.calls[2]!.body!) as Record<string, unknown>;
   assert.equal(runBody.timeout, 2);
+
+  await assert.rejects(
+    () => provider.sandbox.create({ templateId: "source", envs: { A: "b" } }),
+    /does not support option\(s\): envs/,
+  );
+}
+
+async function testInternalArkerProviderImageAndResources(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson(
+    (method, url) => method === "POST" && url === "https://arker.invalid/api/v1/fork",
+    200,
+    { vm_id: "vm_image", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] },
+  );
+  const provider = createArkerComputeProvider({ apiKey: "ark-key", baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false });
+  await provider.sandbox.create({ image: "ubuntu:24.04", cpu: 4, memory: 8192, diskMiB: 20480, name: "image-box" });
+  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), {
+    image: "ubuntu:24.04",
+    name: "image-box",
+    resources: { vcpu: 4, memory_mib: 8192, disk_mib: 20480 },
+  });
+}
+
+async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
+  const existing = new FakeSandbox("named-box");
+  const fake = installFakeCompute(existing, { getByIdResult: existing });
+  try {
+    const found = await BlaxelSandbox.createIfNotExists({ name: "named-box", ttl: "5m" });
+    assert.equal(found.id, "named-box");
+    assert.equal(fake.createCalls.length, 0);
+  } finally {
+    fake.cleanup();
+  }
+
+  const created = new FakeSandbox("new-box");
+  const missing = installFakeCompute(created, { getByIdResult: null });
+  try {
+    await BlaxelSandbox.createIfNotExists({ name: "new-box", ttl: "5m" });
+    assert.deepEqual(missing.createCalls[0], { name: "new-box", image: undefined, memory: undefined, timeout: 300_000, envs: undefined, runtime: undefined });
+    await assert.rejects(() => BlaxelSandbox.create({ ttl: "eventually" }), /Invalid Blaxel ttl/);
+  } finally {
+    missing.cleanup();
+  }
 }
 
 async function testInternalArkerProviderRequiresSource(): Promise<void> {
@@ -357,6 +403,8 @@ await testDaytonaGetNotFound();
 await testE2BSurface();
 await testModalSurface();
 await testInternalArkerProvider();
+await testInternalArkerProviderImageAndResources();
 await testInternalArkerProviderRequiresSource();
+await testBlaxelCreateIfNotExistsAndTtl();
 
 console.log("PASS compat");

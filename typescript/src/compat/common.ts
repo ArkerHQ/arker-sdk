@@ -108,6 +108,13 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+export function formatEnvExports(env: Record<string, string>): string {
+  return Object.entries(env).map(([key, value]) => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new Error(`Invalid environment variable name: ${key}`);
+    return `export ${key}=${shellQuote(value)};`;
+  }).join(" ");
+}
+
 export function commandName(command: string): string {
   return command.split("/").pop() || command;
 }

@@ -1,4 +1,5 @@
 import { e2b as createE2BProvider } from "@computesdk/e2b";
+import type { RunCommandOptions } from "computesdk";
 
 import {
   assertSupportedObjectKeys,
@@ -30,7 +31,7 @@ export class Sandbox {
   #box: UniversalSandbox;
 
   readonly commands: {
-    run: (command: string) => Promise<CommandExitResult>;
+    run: (command: string, options?: RunCommandOptions) => Promise<CommandExitResult>;
   };
 
   readonly files: {
@@ -47,8 +48,8 @@ export class Sandbox {
     this.sandboxId = box.sandboxId;
     this.provider = box.provider;
     this.commands = {
-      run: async (command) => {
-        const result = await this.#box.runCommand(command);
+      run: async (command, options) => {
+        const result = await this.#box.runCommand(command, options);
         return {
           stdout: result.stdout,
           stderr: result.stderr,
