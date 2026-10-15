@@ -150,7 +150,7 @@ export interface paths {
         head?: never;
         /**
          * Update a VM
-         * @description Update a VM's resources, SSH keys, or network policy.
+         * @description Update a VM's resources, SSH keys, or network policy, or make it immutable.
          */
         patch: operations["patchVm"];
         trace?: never;
@@ -502,35 +502,15 @@ export interface paths {
         };
         /**
          * List pools
-         * @description List the organization's pools, newest first. Any API key in the organization can read pools. Returns 404 when pools are not enabled for the organization.
+         * @description List the organization's pools in this region, newest first; at https://arker.ai/api without a `region` query parameter, in every region. A pool being deleted is listed until it is gone. Returns 404 when pools are not enabled for the organization.
          */
         get: operations["listPools"];
         put?: never;
         /**
-         * Buy a pool
-         * @description Buy prepaid capacity in one provider and region for a fixed term. The pool is billed on the organization's next invoice. `amount_cents` must match the current price for the same request; get it from the quote operation. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.
+         * Create a pool
+         * @description Create a pool in the region of the endpoint you call. `arker` and `self_hosted` pools start `ready`; an `aws` pool starts `provisioning` until its hosts have joined. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization. Returns 429 `quota_exceeded` when the organization already has as many pools in the region as its `pools` quota allows, or when an `arker` pool would take the organization's `arker` pools in the region past its `vcpus`, `ram_mib` or `disk_mib` quota.
          */
         post: operations["createPool"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/pools/quote": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Quote a pool
-         * @description Price a pool without buying it. Any API key in the organization can request a quote. Returns 404 when pools are not enabled for the organization.
-         */
-        post: operations["quotePool"];
         delete?: never;
         options?: never;
         head?: never;
@@ -549,17 +529,21 @@ export interface paths {
         };
         /**
          * Get a pool
-         * @description Return one pool owned by the organization. Returns 404 when pools are not enabled for the organization.
+         * @description Return one of the organization's pools, including while it is `deleting`. Returns 404 when pools are not enabled for the organization.
          */
         get: operations["getPool"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete a pool
+         * @description Start deleting the pool: it turns `deleting`, its workers are told to leave (`desired_state: left`), and every VM in it is deleted. Forks into it are refused from then on. Its join keys are revoked once the pool is gone. Refused while a commitment is active; to stop paying for a pool you mean to keep, resize it to zero instead. Deleting a pool that is already deleting answers the same way. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.
+         */
+        delete: operations["deletePool"];
         options?: never;
         head?: never;
         /**
-         * Rename a pool
-         * @description Set or remove a pool's name. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.
+         * Update a pool
+         * @description Rename a pool, resize it, or change its commitments. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization. Growing an `arker` pool returns 429 `quota_exceeded` when the organization's `arker` pools in the region would reserve more than its `vcpus`, `ram_mib` or `disk_mib` quota.
          */
         patch: operations["updatePool"];
         trace?: never;
@@ -580,6 +564,191 @@ export interface paths {
          */
         get: operations["getPoolUsage"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{pool_id}/join-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List a pool's join keys
+         * @description List the join keys of a `self_hosted` pool. Unsupported on other pools. Returns 404 when pools are not enabled for the organization.
+         */
+        get: operations["listPoolJoinKeys"];
+        put?: never;
+        /**
+         * Create a join key
+         * @description Create a key that lets workers join this `self_hosted` pool. The key is returned only once. Unsupported on other pools. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization. Returns 429 `quota_exceeded` when the pool has as many unrevoked join keys as its `pool_join_keys` quota allows.
+         */
+        post: operations["createPoolJoinKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{pool_id}/join-keys/{join_key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Join key identifier returned as `join_key_id`. */
+                join_key_id: components["parameters"]["JoinKeyId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a join key
+         * @description Revoke a join key. Workers using it can no longer heartbeat. Unsupported on pools other than `self_hosted`. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.
+         */
+        delete: operations["deletePoolJoinKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{pool_id}/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List a pool's workers
+         * @description List the workers of an `aws` or `self_hosted` pool. Unsupported on an `arker` pool. Returns 404 when pools are not enabled for the organization.
+         */
+        get: operations["listPoolWorkers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{pool_id}/workers/{worker_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Join a pool or heartbeat
+         * @description Join the pool, or keep the worker in it. The heartbeat's `platform` must be the pool's and its `kind` one the pool takes; a retired worker id is refused. Authenticate with a join key of this pool. A worker id the pool has not seen gets 429 `quota_exceeded` while the pool has as many workers as its `pool_workers` quota allows; it joins once another leaves.
+         */
+        put: operations["heartbeatWorker"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{pool_id}/workers/{worker_id}/tunnel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Open the worker tunnel
+         * @description Upgrade to a WebSocket with subprotocol `worker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API; a fork names the VM id to use in header `x-vm-id`. Requires the worker to have joined. Authenticate with a join key of this pool.
+         */
+        get: operations["openWorkerTunnel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: components["parameters"]["WorkerVmId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Record a worker's VM
+         * @description Record the VM as it is now; send it again on every change. Arker lists the VM from this record. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with a join key of this pool.
+         */
+        put: operations["putWorkerVm"];
+        post?: never;
+        /**
+         * Forget a worker's VM
+         * @description Record that the VM is gone. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with a join key of this pool.
+         */
+        delete: operations["deleteWorkerVm"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: components["parameters"]["WorkerVmId"];
+                /** @description Run identifier the worker chose. */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Record a run
+         * @description Record a run when it starts and again when it ends. Arker answers `listRuns` and `getRun` for the VM from these records. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with a join key of this pool.
+         */
+        put: operations["putWorkerRun"];
         post?: never;
         delete?: never;
         options?: never;
@@ -645,7 +814,7 @@ export interface components {
          */
         SessionState: "idle" | "running";
         /**
-         * @description Lifecycle state for a run. `pending` means the run was accepted but has not started yet because an earlier run on the same session is still in flight; it is not terminal, and a client should keep polling. `running` means the command is in progress. `completed` means the command finished; `exit_code` reports its result. `failed` means the service could not start or finish the command, with a client-safe explanation in `fail_reason`. `cancelled` means the client cancelled the run.
+         * @description Lifecycle state for a run. `pending` means the run was accepted but is not running: it has not started yet because an earlier run on the same session is still in flight, or its VM is suspended and it continues when the VM wakes. It is not terminal, and a client should keep polling. `running` means the command is in progress. `completed` means the command finished; `exit_code` reports its result. `failed` means the service could not start or finish the command, with a client-safe explanation in `fail_reason`. `cancelled` means the client cancelled the run.
          * @enum {string}
          */
         RunState: "pending" | "running" | "completed" | "failed" | "cancelled";
@@ -691,12 +860,12 @@ export interface components {
             match?: components["schemas"]["PolicyMatch"];
             action: components["schemas"]["PolicyAction"];
             /**
-             * @description Authentication for an inbound rule that exposes a port — `allow`, or a scaling-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges.
+             * @description Authentication for an inbound rule that exposes a port — `allow`, or a `scale`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges.
              * @enum {string}
              */
             auth?: "open" | "arker";
         };
-        /** @description Match criteria: present fields are combined with AND; list items are combined with OR. `ips` and `hosts` are mutually exclusive, and inbound rules cannot use `hosts`. Port, IP, and host rules operate at the connection layer. Method, path, header, and body rules operate at the request layer. */
+        /** @description Match criteria: present fields are combined with AND; list items are combined with OR. `ips` and `hosts` are mutually exclusive, and inbound rules cannot use `hosts`. Port, IP, and host rules operate at the connection layer. Method, path, header, query parameter, and body rules operate at the request layer. */
         PolicyMatch: {
             /** @description Single ports and/or inclusive [start, end] ranges, e.g. [80, 443, [1000, 2000]]. Absent = any port; an empty list is refused. Inbound allow rules require one or more individual ports and reject ranges. */
             ports?: (number | number[])[];
@@ -708,21 +877,31 @@ export interface components {
             methods?: string[];
             /** @description Full-segment path prefixes. */
             paths?: string[];
-            /** @description Header name → any-of values (names AND'd, a name's values OR'd). */
+            /** @description Header name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, `"authorization": ["Bearer $arker_api_key"]` or `"x-api-key": ["$arker_api_key"]` matches an API key of the VM's organization. */
             headers?: {
+                [key: string]: string[];
+            };
+            /** @description Query parameter name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, parameters named `arker_*` are removed from a `GET` request's URL by a redirect that keeps them in a cookie, so the rest of a browsing session carries them without the URL showing them. */
+            query_params?: {
                 [key: string]: string[];
             };
             /** @description Substrings that must appear in the request body. */
             body_contains?: string[];
         };
-        /** @description allow / deny, or an object with any combination of `rewrite`, `gate`, and `scaling` (at least one). */
-        PolicyAction: ("allow" | "deny") | {
+        /** @description allow / deny, `delete` (schedule rules), or an object with any combination of `rewrite`, `gate`, and `scale` (at least one). */
+        PolicyAction: ("allow" | "deny" | "delete") | {
             rewrite?: components["schemas"]["Rewrite"];
             gate?: components["schemas"]["Gate"];
-            scaling?: components["schemas"]["ScalingAction"];
+            scale?: components["schemas"]["ScaleAction"];
+            /**
+             * @deprecated
+             * @description Deprecated spelling of `scale`.
+             */
+            scaling?: components["schemas"]["ScaleAction"];
+            webhook?: components["schemas"]["Webhook"];
         };
-        /** @description Auto-scaling behavior for matched traffic. On an `outbound` rule it brackets the time the VM is blocked awaiting an upstream response; on an `inbound` rule it brackets the time the VM is idle between requests (scale to zero). Outbound rules may be narrowed by L7 criteria (`methods`/`paths`/`headers`/`body_contains`), for example to suspend only on `POST /v1/messages`, and compose with `rewrite` / `gate` siblings. For outbound, prefer a `match.hosts` scope: a host-less scaling rule matches every flow it can see, which breaks certificate-pinning clients. Where each is enforced differs and explains the asymmetry: an `outbound` rule runs on the MITM (TLS-terminating) data path, which is why it can match L7 fields and carry `rewrite`/`gate` siblings; an `inbound` rule is enforced host-side on the plaintext request the worker already holds, so no MITM is involved and no TLS is terminated. */
-        ScalingAction: {
+        /** @description Scales the VM when the rule matches or fires. On an `outbound` rule `suspend` brackets the time the VM is blocked awaiting an upstream response; on an `inbound` rule it suspends the VM once a matched request has been answered, and `wake` decides whether a matched request wakes a suspended VM. Outbound rules may be narrowed by request fields (`methods`/`paths`/`headers`/`body_contains`), for example to suspend only on `POST /v1/messages`, and compose with `rewrite` / `gate` siblings. For outbound, prefer a `match.hosts` scope: a host-less rule matches every flow it can see, which breaks certificate-pinning clients. */
+        ScaleAction: {
             /**
              * @description Suspend the VM (snapshot and free CPU/RAM). On an `outbound` rule: while a matched upstream request is blocked, resuming when the response arrives. On an `inbound` rule: once a matched request's response has been fully delivered and nothing else is in flight, so the next matched request wakes it again. The suspended window remains part of the VM's Running interval until the VM is paused or stopped. On an `outbound` rule, matched responses are delivered only once the upstream response is COMPLETE: a suspended VM has no running guest to receive bytes, so the proxy holds the whole body and hands it over at the end. Total latency is unchanged, but a response whose fragments are individually usable — an SSE token stream, for example — stops arriving incrementally, so a client rendering tokens as they arrive will see nothing until the response finishes. Enabling this is a deliberate trade of incremental delivery for the memory saving.
              * @default false
@@ -730,6 +909,26 @@ export interface components {
             suspend?: boolean;
             /** @description Whether a matched inbound request may wake a suspended VM. Omit this field to allow waking. Set it to `false` so a request that would need to start the VM fails with `503 vm_suspended`; requests received while the VM is running are served normally. This field is not valid on outbound rules. */
             wake?: boolean;
+            /** @description `resources` rules only. Multiplies each resource it names by its factor, within the VM's supported range: `{ "vcpu": 2 }` doubles the vCPUs. */
+            resource_factors?: components["schemas"]["ResourceFactors"];
+        };
+        /** @description A number for each resource it names: `vcpu`, `memory_mib`, `disk_mib`. */
+        ResourceFactors: {
+            /**
+             * Format: double
+             * @description For vCPUs.
+             */
+            vcpu?: number;
+            /**
+             * Format: double
+             * @description For memory.
+             */
+            memory_mib?: number;
+            /**
+             * Format: double
+             * @description For disk. A disk only grows, so a factor for it is at least 1.
+             */
+            disk_mib?: number;
         };
         /** @description Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${…}`-braced), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged. */
         Rewrite: {
@@ -743,6 +942,8 @@ export interface components {
             };
             /** @description Request header names to remove before forwarding. */
             remove_headers?: string[];
+            /** @description Query parameter names to remove from the URL before forwarding. */
+            remove_query_params?: string[];
             /** @description Replace the request body entirely with this (interpolated) value; `$body` re-injects the original body. Absent = body forwarded unchanged. */
             body?: string;
         };
@@ -773,6 +974,26 @@ export interface components {
             /**
              * Format: uint64
              * @description Max wall-clock for the gate call before it is abandoned (then deny_on_timeout applies). Default ~30000.
+             */
+            timeout_ms?: number;
+        };
+        /** @description An HTTP request Arker sends, from outside the VM, when a `resources` rule starts firing. It does not wait on or act on the response. `path`, header values and string leaves of `body` take `$vm_id` and `${secret:NAME}`, and `$$` for a literal `$`. `host` is not interpolated, and private, link-local and internal destinations are refused. */
+        Webhook: {
+            /** @description Target endpoint including scheme, e.g. `https://aws-us-west-2.arker.ai`. */
+            host: string;
+            /** @description Request path. Default `/`. */
+            path?: string;
+            /** @description HTTP method. Default `POST`. */
+            method?: string;
+            /** @description Request headers. Stored credentials are encrypted at rest and masked in policy responses. */
+            headers?: {
+                [key: string]: string;
+            };
+            /** @description JSON request body. Absent = no body. */
+            body?: unknown;
+            /**
+             * Format: uint64
+             * @description Max wall-clock for the request before it is abandoned. Default ~30000.
              */
             timeout_ms?: number;
         };
@@ -820,11 +1041,13 @@ export interface components {
             registry_auth?: components["schemas"]["RegistryAuth"];
             /**
              * Format: uuid
-             * @description Optionally join an active pool in the same organization and provider/region. Membership can be changed with VM PATCH and is never inherited from the source VM.
+             * @description Fork the VM into this pool of the caller's organization; it runs on the pool's machines. `platforms`, if given, must include the pool's platform. A pool that is deleting refuses the fork with invalid_state. A fork of a VM in an `aws` or `self_hosted` pool always stays in that pool: naming another pool, or forking a VM from outside such a pool into it, is unsupported_operation. Membership of an `arker` pool is not inherited. Mutually exclusive with pool_name.
              */
             pool_id?: string;
-            /** @description Optionally join an active pool by its unique name in the caller organization. Names are normalized and case-insensitive. Mutually exclusive with pool_id. Membership uses the resolved pool ID, can be changed with VM PATCH, and is never inherited from the source VM. */
+            /** @description Fork the VM into the pool with this name in the caller's organization. Names are case-insensitive and unique within a region; at https://arker.ai/api without a region, a name used in more than one region is a conflict (pool_name). Mutually exclusive with pool_id; otherwise the same as pool_id. */
             pool_name?: string;
+            /** @description A command to start on the new VM once it is forked, as a background run on its default session: the response is the VM, and the run is listed with `GET /v1/vms/{id}/runs`. */
+            command?: string;
         } & ({
             source_vm_id: string;
             source_vm_name?: null;
@@ -917,6 +1140,8 @@ export interface components {
             readonly hostname?: string | null;
             /** @description When `true`, other orgs can fork this VM (but cannot run on it). */
             public: boolean;
+            /** @description When `true`, the VM never changes again: it can be viewed, listed, forked, and deleted, and requests that would change it or start it are refused. Its forks are mutable. Set with `PATCH /vms/{id}`; goldens are immutable. Not every listing reports it. */
+            immutable?: boolean;
             /** @description ID of the root (deepest-ancestor) source VM, if this VM was created by a chain of forks. None for VMs forked directly from an image. */
             root_source_vm_id?: string | null;
             /** @description Name of the root source VM. Populated together with `root_source_vm_id`. */
@@ -956,9 +1181,9 @@ export interface components {
             compatible_platforms?: components["schemas"]["CompatiblePlatform"][] | null;
             /**
              * Format: uuid
-             * @description Current pool membership. Expired pools bill subsequent usage at normal rates.
+             * @description The pool the VM belongs to. Absent when the VM is in no pool.
              */
-            pool_id?: string | null;
+            pool_id?: string;
         };
         ListVmsResponse: {
             /** @description VMs visible to the authenticated caller. */
@@ -1002,7 +1227,7 @@ export interface components {
              * @description Numeric session selector. `session_id` takes precedence when both selectors are sent. A session at this index that is being deleted refuses the run with 503; retry once the delete completes, which frees the index for a new session.
              */
             session_idx?: number | null;
-            /** @description Command submitted for execution. Omit it only for a signal request. */
+            /** @description Command submitted for execution. Omit it only for a signal request, or in a request naming nothing at all, which wakes the VM: it returns once the VM is running, and every run it was suspended or forked with is `running` again. */
             command?: string;
             /** @description Maximum command runtime in seconds. Omitted means no limit; the run is killed only if you set a `timeout`. `0` is an explicit spelling of the same thing. This is separate from `time_to_background`, which controls how long the request waits for completion. A run is not complete until everything it spawned has exited, so this is also the bound on a run that leaves a daemon behind; when it fires, the run's processes are killed. */
             timeout?: number | null;
@@ -1570,6 +1795,8 @@ export interface components {
         PatchVmRequest: {
             /** @description Replace the VM description. Null or a blank string clears it; omit this field to leave it unchanged. */
             description?: string | null;
+            /** @description Make the VM immutable. Only `true` is accepted, and it must be the only field in its request: an immutable VM cannot be made mutable again. An immutable VM can be viewed, listed, forked, and deleted, and every request that would change it or start it is refused. A running VM is refused with `resource_busy`; retry once it is idle. Repeating the request for an immutable VM changes nothing. */
+            immutable?: boolean;
             /** @description CPU, memory, and disk configuration. */
             resources?: components["schemas"]["ResourcesInput"] | null;
             /** @description A change to the VM's authorized SSH keys, by key id. Omit it to leave the keys unchanged. The deprecated list form replaces every key; an empty list removes them all. */
@@ -1578,10 +1805,10 @@ export interface components {
             policies?: components["schemas"]["PolicyUpdate"] | null;
             /**
              * Format: uuid
-             * @description Move the VM to an active pool in the same organization and provider/region. Mutually exclusive with pool_name. Omit both fields to keep its current pool.
+             * @description Move the VM to another `arker` pool of the organization, or null to take it out of its pool. A VM cannot move into or out of an `aws` or `self_hosted` pool (unsupported_operation). Mutually exclusive with pool_name. Omit both fields to keep the current pool.
              */
-            pool_id?: string;
-            /** @description Move the VM to a pool by its unique, case-insensitive name in the caller organization. Only the resolved pool ID is stored. Mutually exclusive with pool_id. */
+            pool_id?: string | null;
+            /** @description Move the VM to the `arker` pool with this name in the VM's region. Names are case-insensitive. Mutually exclusive with pool_id; otherwise the same as pool_id. */
             pool_name?: string;
         };
         /** @description One platform this source can be forked onto, with the resource limits that apply there. This is the authoritative per-platform record: when an entry carries bounds they win over the flat `min_*`/`max_*` fields on the VM, which are a single-platform convenience projection of the same data. CPU, memory, and disk limits come from the source VM; GPU limits come from the platform catalog. */
@@ -1655,7 +1882,7 @@ export interface components {
          * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
          * @enum {string}
          */
-        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "quotePool" | "getPool" | "updatePool" | "getPoolUsage";
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "getPoolUsage" | "listPoolJoinKeys" | "createPoolJoinKey" | "deletePoolJoinKey" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun";
         /** @enum {string} */
         HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
         /**
@@ -1669,13 +1896,13 @@ export interface components {
          * @description Use resource only when the actual kind cannot be identified safely.
          * @enum {string}
          */
-        ResourceKind: "vm" | "source" | "run" | "session" | "filesystem" | "mount" | "file" | "sync" | "upload" | "api_key" | "ssh_key" | "ssh_setup" | "organization" | "route" | "billing" | "correction_review" | "webhook" | "resource" | "pool" | "pool_quote" | "pool_name";
+        ResourceKind: "vm" | "source" | "run" | "session" | "filesystem" | "mount" | "file" | "sync" | "upload" | "api_key" | "ssh_key" | "ssh_setup" | "organization" | "route" | "billing" | "correction_review" | "webhook" | "resource" | "pool" | "pool_name" | "join_key" | "worker";
         /** @enum {string} */
         CapacityScope: "worker" | "region" | "platform";
         /** @enum {string} */
         RateLimiter: "arker" | "upstream";
         /** @enum {string} */
-        StateRequirement: "running" | "mutable" | "unclaimed" | "active" | "same_location" | "pool_purchases_enabled" | "pool_pricing_configured";
+        StateRequirement: "running" | "mutable" | "unclaimed" | "uncommitted" | "not_deleting";
         /** @enum {string} */
         UnsupportedReason: "feature_not_supported" | "platform_mismatch" | "restore_requires_birth_host";
         /** @enum {string} */
@@ -1944,6 +2171,42 @@ export interface components {
              */
             unit: "sessions";
         };
+        PoolCountLimit: {
+            /**
+             * @description Identifies this metric as `pools`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            metric: "pools";
+            /**
+             * @description Identifies this unit as `pools`.
+             * @constant
+             */
+            unit: "pools";
+        };
+        PoolWorkerLimit: {
+            /**
+             * @description Identifies this metric as `pool_workers`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            metric: "pool_workers";
+            /**
+             * @description Identifies this unit as `workers`.
+             * @constant
+             */
+            unit: "workers";
+        };
+        PoolJoinKeyLimit: {
+            /**
+             * @description Identifies this metric as `pool_join_keys`. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            metric: "pool_join_keys";
+            /**
+             * @description Identifies this unit as `join_keys`.
+             * @constant
+             */
+            unit: "join_keys";
+        };
         BudgetLimit: {
             /**
              * @description Identifies this metric as `budget`. (enum property replaced by openapi-typescript)
@@ -1959,7 +2222,7 @@ export interface components {
             currency: string;
             period: components["schemas"]["BudgetPeriod"];
         };
-        LimitDescriptor: components["schemas"]["VcpuLimit"] | components["schemas"]["RamLimit"] | components["schemas"]["DiskLimit"] | components["schemas"]["GpuVramLimit"] | components["schemas"]["GpuSmLimit"] | components["schemas"]["PtySessionLimit"] | components["schemas"]["BudgetLimit"];
+        LimitDescriptor: components["schemas"]["VcpuLimit"] | components["schemas"]["RamLimit"] | components["schemas"]["DiskLimit"] | components["schemas"]["GpuVramLimit"] | components["schemas"]["GpuSmLimit"] | components["schemas"]["PtySessionLimit"] | components["schemas"]["PoolCountLimit"] | components["schemas"]["PoolWorkerLimit"] | components["schemas"]["PoolJoinKeyLimit"] | components["schemas"]["BudgetLimit"];
         VmLimitScope: {
             /**
              * @description Identifies this kind as `vm`. (enum property replaced by openapi-typescript)
@@ -2606,9 +2869,9 @@ export interface components {
             /** @description The error category and its details, request metadata, and recovery context. */
             error: components["schemas"]["AlreadyExists"] | components["schemas"]["Conflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
         };
-        AlreadyExistsOrInvalidStateErrorResponse: {
+        AlreadyExistsOrInvalidStateOrResourceBusyErrorResponse: {
             /** @description The error category and its details, request metadata, and recovery context. */
-            error: components["schemas"]["AlreadyExists"] | components["schemas"]["InvalidState"];
+            error: components["schemas"]["AlreadyExists"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
         };
         ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse: {
             /** @description The error category and its details, request metadata, and recovery context. */
@@ -2617,6 +2880,10 @@ export interface components {
         ConflictOrInvalidStateErrorResponse: {
             /** @description The error category and its details, request metadata, and recovery context. */
             error: components["schemas"]["Conflict"] | components["schemas"]["InvalidState"];
+        };
+        AlreadyExistsOrInvalidStateErrorResponse: {
+            /** @description The error category and its details, request metadata, and recovery context. */
+            error: components["schemas"]["AlreadyExists"] | components["schemas"]["InvalidState"];
         };
         ConflictOrInvalidStateOrResourceBusyErrorResponse: {
             /** @description The error category and its details, request metadata, and recovery context. */
@@ -2647,139 +2914,6 @@ export interface components {
          * @enum {string}
          */
         OutputEncoding: "utf-8" | "base64";
-        /** @description Reserved capacity. At least one quantity must be positive. */
-        PoolResources: {
-            /** @description Reserved vCPUs. */
-            vcpu?: number;
-            /** @description Reserved memory in MiB. */
-            memory_mib?: number;
-            /** @description Reserved disk in MiB. */
-            disk_mib?: number;
-        };
-        /**
-         * @description `expired` once `ends_at` has passed. Usage by member VMs after that bills at normal rates.
-         * @enum {string}
-         */
-        PoolStatus: "active" | "expired";
-        PoolQuoteRequest: {
-            provider: components["schemas"]["Provider"];
-            /** @description Customer-facing service region, for example `us-west`. */
-            region: string;
-            resources: components["schemas"]["PoolResources"];
-            /** @description Term length in seconds. The minimum is 30 days (2592000). */
-            duration_seconds: number;
-            /** @description Optional name, unique within the organization and case-insensitive. VMs can join the pool by this name. */
-            name?: string | null;
-        };
-        CreatePoolRequest: {
-            provider: components["schemas"]["Provider"];
-            /** @description Customer-facing service region, for example `us-west`. */
-            region: string;
-            resources: components["schemas"]["PoolResources"];
-            /** @description Term length in seconds. The minimum is 30 days (2592000). */
-            duration_seconds: number;
-            /** @description Optional name, unique within the organization and case-insensitive. VMs can join the pool by this name. */
-            name?: string | null;
-            /** @description The price you agree to pay, from a quote for the same request. The purchase fails with a pool_quote conflict if the current price differs. */
-            amount_cents: number;
-        };
-        UpdatePoolRequest: {
-            /** @description New pool name, or null to remove it. */
-            name: string | null;
-        };
-        PoolQuote: {
-            /** @description Normalized pool name, if one was given. */
-            name: string | null;
-            /** @description Price catalog used for this quote. */
-            catalog_version: string;
-            /** @description Price of the same resources and term at on-demand rates, in cents. */
-            baseline_cents: number;
-            /** @description Discount applied to the baseline, as a percentage. */
-            discount_percent: number;
-            provider: components["schemas"]["Provider"];
-            /** @description Customer-facing service region. */
-            region: string;
-            resources: components["schemas"]["PoolResources"];
-            /** @description Term length in seconds. */
-            duration_seconds: number;
-            /**
-             * @description Price currency.
-             * @enum {string}
-             */
-            currency: "usd";
-            /** @description Price to pay, in cents. Send this as `amount_cents` to buy. */
-            amount_cents: number;
-        };
-        Pool: {
-            /**
-             * Format: uuid
-             * @description Pool identifier. Pass it as `pool_id` when forking or updating a VM.
-             */
-            pool_id: string;
-            /** @description Pool name, if set. */
-            name: string | null;
-            provider: components["schemas"]["Provider"];
-            /** @description Customer-facing service region. Only VMs in this provider and region can join. */
-            region: string;
-            resources: components["schemas"]["PoolResources"];
-            /** @description Term length in seconds. */
-            duration_seconds: number;
-            status: components["schemas"]["PoolStatus"];
-            /**
-             * Format: date-time
-             * @description When the pool was bought.
-             */
-            created_at: string;
-            /**
-             * Format: date-time
-             * @description Start of the term.
-             */
-            starts_at: string;
-            /**
-             * Format: date-time
-             * @description End of the term.
-             */
-            ends_at: string;
-            /**
-             * @description Price currency.
-             * @enum {string}
-             */
-            currency: "usd";
-            /** @description Price paid, in cents. */
-            amount_cents: number;
-            /** @description Invoice that bills this pool, once one exists. */
-            invoice_id: string | null;
-        };
-        ListPoolsResponse: {
-            /** @description Pools owned by the organization, newest first. */
-            pools: components["schemas"]["Pool"][];
-            /** @description Whether the organization can buy new pools. */
-            purchases_enabled: boolean;
-            /** @description Cursor for the next page, or null when no further page is available. */
-            next_cursor: string | null;
-        };
-        PoolUsage: {
-            /**
-             * Format: uuid
-             * @description Pool identifier.
-             */
-            pool_id: string;
-            /** @description Resources currently allocated to member VMs. */
-            resources_allocated: components["schemas"]["PoolResources"];
-            /**
-             * Format: date-time
-             * @description When the allocation was last measured, or null if no measurement exists yet.
-             */
-            allocation_observed_at: string | null;
-        };
-        ActionRequiredOrForbiddenErrorResponse: {
-            /** @description The error category and its details, request metadata, and recovery context. */
-            error: components["schemas"]["ActionRequired"] | components["schemas"]["Forbidden"];
-        };
-        ConflictOrIdempotencyConflictOrInvalidStateErrorResponse: {
-            /** @description The error category and its details, request metadata, and recovery context. */
-            error: components["schemas"]["Conflict"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["InvalidState"];
-        };
         /** @description One network policy rule, keyed by its id in a policy's `rules`. `match` ANDs its present fields (absent ⇒ catch-all). Rules are evaluated highest `priority` first, and the first rule that matches decides. */
         PolicyRule: {
             /**
@@ -2794,7 +2928,10 @@ export interface components {
             priority: number;
             match?: components["schemas"]["PolicyMatch"];
             action: components["schemas"]["PolicyAction"];
-            /** @description For inbound `allow` rules. `arker` requires an API key for the VM's organization, `open` requires none, and `{"token": ...}` accepts the token or an API key. A token is at least 32 letters, digits, `-`, `_`, `.` or `~`. Defaults to `arker`. */
+            /**
+             * @deprecated
+             * @description Deprecated: put the credential a request must carry in `match`. For inbound `allow` rules. `arker` requires an API key for the VM's organization, `open` requires none, and `{"token": ...}` accepts the token in the `arker_token` query parameter or cookie, or an API key. Omitted, the rule's `match` alone decides.
+             */
             auth?: ("open" | "arker") | {
                 /** @description The token, usually `${secret:NAME}`. */
                 token: string;
@@ -2809,7 +2946,7 @@ export interface components {
         PolicyUpdate: {
             /** @description Rules to write, keyed by rule id. A rule replaces any rule with the same id; `null` removes the rule with that id. Rules not named here are kept. The resulting policy must not give two rules the same priority. */
             rules?: {
-                [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["LifecycleRule"] | null;
+                [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["ScheduleRule"] | components["schemas"]["ResourcesRule"] | components["schemas"]["LifecycleRule"] | null;
             };
             /** @description Secrets to write, referenced by `${secret:NAME}` in rewrite actions. A value replaces the secret with that name; `null` removes it. Secrets not named here are kept. Values are encrypted at rest and masked as `***` in responses; `***` is not accepted as a value. */
             secrets?: {
@@ -2836,7 +2973,7 @@ export interface components {
         };
         /** @description The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With rules, unmatched outbound traffic is denied. If no inbound rules are present, inbound access keeps the authenticated default; explicit inbound allow rules restrict exposure to their listed ports. */
         PolicyRules: {
-            [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["LifecycleRule"];
+            [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["ScheduleRule"] | components["schemas"]["ResourcesRule"] | components["schemas"]["LifecycleRule"];
         };
         /** @description An SSH key to authorize. */
         SshKeyInput: {
@@ -2851,7 +2988,44 @@ export interface components {
         SshKeysUpdate: {
             [key: string]: components["schemas"]["SshKeyInput"] | null;
         };
-        /** @description A rule that deletes the VM at a set time, or a set number of seconds after it was created. It has no `priority` and does not affect traffic. A fork inherits it, and an `after` deadline counts from the fork's own creation. */
+        /** @description A rule that acts on the VM itself when its trigger fires: `delete` it `at` a time, or suspend it with `scale` or `delete` it `after_wake` seconds after it last started or woke. It has no `priority` and does not affect traffic. It names exactly one of `at` and `after_wake`. */
+        ScheduleRule: {
+            /**
+             * @description `schedule`.
+             * @enum {string}
+             */
+            type: "schedule";
+            /**
+             * Format: date-time
+             * @description When the rule fires: an RFC 3339 time in the future. For `delete`.
+             */
+            at?: string;
+            /**
+             * Format: uint64
+             * @description Fires this many seconds, up to 2592000 (30 days), after the VM last started or woke from a suspend, whatever it did since; a VM that never started counts from its creation. A suspend waits while an inbound request is in flight or a caller is waiting on a run. For `{ "scale": { "suspend": true } }`, or `delete`, which also fires while the VM is suspended.
+             */
+            after_wake?: number;
+            /** @description `delete` deletes the VM, as `DELETE /v1/vms/{id}` does; `{ "scale": { "suspend": true } }` suspends it, its runs `pending` until it wakes. */
+            action: components["schemas"]["PolicyAction"];
+        };
+        /** @description A rule that acts on the VM by how much of its resources it uses. Every `above` and `below` it names must hold for it to fire, and it fires at most once per measurement, each time the host reads its VMs' CPU (every 10 seconds at most), and never on the measurement after a resize. `vcpu` is CPU time over that span, `memory_mib` the memory the guest has in use (`MemTotal - MemAvailable`), and `disk_mib` how full its root filesystem is, as `df` reports it. It has no `priority` and does not affect traffic. */
+        ResourcesRule: {
+            /**
+             * @description `resources`.
+             * @enum {string}
+             */
+            type: "resources";
+            /** @description Fires while each resource it names is used above this fraction of what the VM has. */
+            above?: components["schemas"]["ResourceFactors"];
+            /** @description Fires while each resource it names is used below this fraction of what the VM has. */
+            below?: components["schemas"]["ResourceFactors"];
+            /** @description `{ "scale": { "resource_factors": <factors> } }`, or `{ "webhook": <request> }`, which is sent when the rule starts firing: when its bounds start to hold, and again only after they have stopped holding. */
+            action: components["schemas"]["PolicyAction"];
+        };
+        /**
+         * @deprecated
+         * @description Deprecated: use a `schedule` rule. Deletes the VM at a set time, or a set number of seconds after it was created.
+         */
         LifecycleRule: {
             /**
              * @description `lifecycle`.
@@ -2873,6 +3047,420 @@ export interface components {
              * @enum {string}
              */
             action: "delete";
+        };
+        /** @description Capacity reserved for the pool, in the same units as VM resources. */
+        PoolResources: {
+            /** @description vCPUs. */
+            vcpu: number;
+            /** @description Memory in MiB. */
+            memory_mib: number;
+            /** @description Disk in MiB. */
+            disk_mib: number;
+        };
+        /** @description A period the pool is committed to, from `starts_at` up to but not including `ends_at`, lasting at least 24 hours. Commitments do not overlap, a new one may not start in the past, and one that has started cannot change. While a commitment is active the pool cannot shrink or be deleted. */
+        PoolCommitment: {
+            /**
+             * Format: date-time
+             * @description Start of the period.
+             */
+            starts_at: string;
+            /**
+             * Format: date-time
+             * @description End of the period.
+             */
+            ends_at: string;
+        };
+        /**
+         * @description `provisioning` until the pool's hosts have joined (an `aws` pool only); `ready` once it serves VMs; `deleting` from the delete request until the pool is gone. `state_detail` says what a `provisioning` pool is waiting for.
+         * @enum {string}
+         */
+        PoolState: "provisioning" | "ready" | "deleting";
+        /**
+         * @description What an `aws` pool keeps in its own AWS account instead of Arker's regional store. `vms`: VM snapshots, in a bucket of the pool's account.
+         * @enum {string}
+         */
+        PoolIsolation: "vms";
+        /** @description The one platform every VM and worker of the pool runs. Immutable. An `arker` or `aws` pool takes a platform Arker's fleet serves; a `self_hosted` pool takes a `blast-*` platform. */
+        PoolPlatform: string;
+        /** @description Pool name, unique and case-insensitive within the pool's region. */
+        PoolName: string | null;
+        /** @description Where an `aws` pool's hosts run, in the customer's AWS account. */
+        PoolAws: {
+            /** @description The AWS account the hosts run in. */
+            account_id: string;
+            /** @description Subnets the hosts launch into. Hosts need outbound internet access only: a route to a NAT gateway, or to an internet gateway with public IPv4 addresses assigned on launch. */
+            subnet_ids: string[];
+            /** @description Security groups for the hosts. No inbound rules are needed. */
+            security_group_ids: string[];
+            /** @description Instance types to launch, in order of preference. */
+            instance_types: string[];
+            /** @description The IAM role Arker assumes in the account: `ArkerPool-` and the first 8 hex digits of `pool_id`. */
+            readonly role_name: string;
+            /** @description The external id Arker presents when it assumes `role_name`. */
+            readonly external_id: string;
+            /** @description CloudFormation quick-create link that creates `role_name` with `external_id`. Open it signed in to the account; the pool stays `provisioning` until the role exists. */
+            readonly setup_url: string;
+        };
+        /** @description Where an `aws` pool's hosts run, in the customer's AWS account. */
+        CreatePoolAws: {
+            /** @description The AWS account the hosts run in. */
+            account_id: string;
+            /** @description Subnets the hosts launch into. Hosts need outbound internet access only: a route to a NAT gateway, or to an internet gateway with public IPv4 addresses assigned on launch. */
+            subnet_ids: string[];
+            /** @description Security groups for the hosts. No inbound rules are needed. */
+            security_group_ids?: string[];
+            /** @description Instance types to launch, in order of preference: bare-metal types Arker's fleet runs the pool's platform on. Defaults to the platform's preferred instance type. Several types, and subnets in several Availability Zones, let a pool find capacity sooner when AWS is short of one. */
+            instance_types?: string[];
+        };
+        /** @description A pool of capacity reserved on Arker's fleet. */
+        ArkerPool: {
+            /**
+             * Format: uuid
+             * @description Pool identifier. Pass it as `pool_id` when forking a VM.
+             */
+            pool_id: string;
+            /**
+             * @description Capacity reserved on Arker's fleet. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            type: "arker";
+            name: components["schemas"]["PoolName"];
+            /** @description Service region the pool lives in: the region of the endpoint that created it. */
+            region: string;
+            platform: components["schemas"]["PoolPlatform"];
+            state: components["schemas"]["PoolState"];
+            /** @description What the pool is waiting for, or what went wrong. */
+            state_detail: string | null;
+            /**
+             * Format: date-time
+             * @description When the pool was created.
+             */
+            created_at: string;
+            resources: components["schemas"]["PoolResources"];
+            /** @description Committed periods, oldest first. */
+            commitments: components["schemas"]["PoolCommitment"][];
+        };
+        /** @description A pool whose hosts Arker launches in the customer's AWS account; `resources` sizes the host count. */
+        AwsPool: {
+            /**
+             * Format: uuid
+             * @description Pool identifier. Pass it as `pool_id` when forking a VM.
+             */
+            pool_id: string;
+            /**
+             * @description Hosts Arker launches in the customer's AWS account. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            type: "aws";
+            name: components["schemas"]["PoolName"];
+            /** @description Service region the pool lives in: the region of the endpoint that created it. */
+            region: string;
+            platform: components["schemas"]["PoolPlatform"];
+            state: components["schemas"]["PoolState"];
+            /** @description What the pool is waiting for, or what went wrong. */
+            state_detail: string | null;
+            /**
+             * Format: date-time
+             * @description When the pool was created.
+             */
+            created_at: string;
+            resources: components["schemas"]["PoolResources"];
+            /** @description Committed periods, oldest first. */
+            commitments: components["schemas"]["PoolCommitment"][];
+            /** @description What the pool keeps in its own AWS account. Empty keeps everything in Arker's regional store. */
+            isolation: components["schemas"]["PoolIsolation"][];
+            /** @description What the pool's live workers contribute right now. */
+            capacity: components["schemas"]["PoolResources"];
+            aws: components["schemas"]["PoolAws"];
+        };
+        /** @description A pool of BLAST workers the customer runs. Workers join with a join key. */
+        SelfHostedPool: {
+            /**
+             * Format: uuid
+             * @description Pool identifier. Pass it as `pool_id` when forking a VM.
+             */
+            pool_id: string;
+            /**
+             * @description Workers the customer runs, which join with a join key. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            type: "self_hosted";
+            name: components["schemas"]["PoolName"];
+            /** @description Service region the pool lives in: the region of the endpoint that created it. */
+            region: string;
+            platform: components["schemas"]["PoolPlatform"];
+            state: components["schemas"]["PoolState"];
+            /** @description What the pool is waiting for, or what went wrong. */
+            state_detail: string | null;
+            /**
+             * Format: date-time
+             * @description When the pool was created.
+             */
+            created_at: string;
+            /** @description What the pool's live workers contribute right now. */
+            capacity: components["schemas"]["PoolResources"];
+        };
+        /** @description A regional pool: where its VMs run, and the capacity it holds. */
+        Pool: components["schemas"]["ArkerPool"] | components["schemas"]["AwsPool"] | components["schemas"]["SelfHostedPool"];
+        ListPoolsResponse: {
+            /** @description Pools owned by the organization, newest first. */
+            pools: components["schemas"]["Pool"][];
+            /** @description Cursor for the next page, or null when no further page is available. */
+            next_cursor: string | null;
+        };
+        PoolUsage: {
+            /**
+             * Format: uuid
+             * @description Pool identifier.
+             */
+            pool_id: string;
+            /** @description Resources currently allocated to member VMs. */
+            resources_allocated: components["schemas"]["PoolResources"];
+            /**
+             * Format: date-time
+             * @description When the allocation was read.
+             */
+            allocation_observed_at: string;
+        };
+        CreateArkerPoolRequest: {
+            /**
+             * @description Capacity reserved on Arker's fleet. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            type: "arker";
+            /** @description Pool name, unique and case-insensitive within the pool's region. */
+            name?: string;
+            platform: components["schemas"]["PoolPlatform"];
+            resources: components["schemas"]["PoolResources"];
+            /** @description Commitments to start with. */
+            commitments?: components["schemas"]["PoolCommitment"][];
+        };
+        CreateAwsPoolRequest: {
+            /**
+             * @description Hosts Arker launches in the customer's AWS account. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            type: "aws";
+            /** @description Pool name, unique and case-insensitive within the pool's region. */
+            name?: string;
+            platform: components["schemas"]["PoolPlatform"];
+            resources: components["schemas"]["PoolResources"];
+            /** @description Commitments to start with. */
+            commitments?: components["schemas"]["PoolCommitment"][];
+            /** @description What the pool keeps in its own AWS account. Defaults to none. */
+            isolation?: components["schemas"]["PoolIsolation"][];
+            aws: components["schemas"]["CreatePoolAws"];
+        };
+        CreateSelfHostedPoolRequest: {
+            /**
+             * @description Workers the customer runs, which join with a join key. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            type: "self_hosted";
+            /** @description Pool name, unique and case-insensitive within the pool's region. */
+            name?: string;
+            /** @description The `blast-*` platform the pool's BLAST workers run. */
+            platform: components["schemas"]["PoolPlatform"];
+        };
+        CreatePoolRequest: components["schemas"]["CreateArkerPoolRequest"] | components["schemas"]["CreateAwsPoolRequest"] | components["schemas"]["CreateSelfHostedPoolRequest"];
+        UpdatePoolRequest: {
+            /** @description New pool name, or null to remove it. */
+            name?: string | null;
+            /** @description New reserved capacity. Growing is always allowed; shrinking, including to zero, only while no commitment is active. An `aws` pool returns to `provisioning` until its new hosts have joined. Not for a `self_hosted` pool. */
+            resources?: components["schemas"]["PoolResources"];
+            /** @description The full list of commitments. A commitment that has started must be kept unchanged. Not for a `self_hosted` pool. */
+            commitments?: components["schemas"]["PoolCommitment"][];
+        };
+        PoolJoinKey: {
+            /** @description Join key identifier. */
+            join_key_id: string;
+            /**
+             * Format: date-time
+             * @description When the key was created.
+             */
+            created_at: string;
+        };
+        CreatedPoolJoinKey: {
+            /** @description Join key identifier. */
+            join_key_id: string;
+            /** @description The key. Shown only in this response. */
+            key: string;
+            /**
+             * Format: date-time
+             * @description When the key was created.
+             */
+            created_at: string;
+        };
+        ListPoolJoinKeysResponse: {
+            /** @description The pool's join keys, newest first. */
+            join_keys: components["schemas"]["PoolJoinKey"][];
+        };
+        /**
+         * @description The software the worker runs. A `self_hosted` pool takes `blast` workers only, and an `aws` pool takes `arkerd` workers only.
+         * @enum {string}
+         */
+        WorkerKind: "arkerd" | "blast";
+        /**
+         * @description `bootstrapping` is still starting and takes no VMs yet; `active` takes new VMs; `draining` keeps its VMs but takes no new ones; `left` has handed back its VMs and left the pool for good, and its id cannot rejoin. A worker that stops without leaving keeps its id and rejoins as `active`.
+         * @enum {string}
+         */
+        WorkerState: "bootstrapping" | "active" | "draining" | "left";
+        WorkerResources: {
+            /** @description vCPUs. */
+            vcpu: number;
+            /** @description Memory in MiB. */
+            memory_mib: number;
+            /** @description Disk in MiB. */
+            disk_mib: number;
+            /** @description Whole GPUs. */
+            gpu_count?: number;
+        };
+        Worker: {
+            /** @description Worker identifier. */
+            worker_id: string;
+            /**
+             * Format: uuid
+             * @description Pool the worker joined.
+             */
+            pool_id: string;
+            kind: components["schemas"]["WorkerKind"];
+            /** @description Worker software version. */
+            version: string;
+            /** @description Platform the worker serves: the pool's. */
+            platform: string;
+            state: components["schemas"]["WorkerState"];
+            /** @description Whether the worker can serve requests now: its last heartbeat is inside the liveness window and Arker holds its tunnel. VMs on a worker that is not live answer `unavailable` until it returns. */
+            live: boolean;
+            /** @description Capacity the worker contributes. */
+            resources: components["schemas"]["WorkerResources"];
+            /** @description Capacity the worker has free. */
+            free: components["schemas"]["WorkerResources"];
+            /**
+             * Format: date-time
+             * @description When the last heartbeat arrived.
+             */
+            last_heartbeat_at: string;
+        };
+        ListPoolWorkersResponse: {
+            /** @description Workers in the pool. */
+            workers: components["schemas"]["Worker"][];
+        };
+        /** @description A worker joins the pool in the path with its first heartbeat and stays in it until it reports `left`; a stopped worker rejoins under the same id. Fields Arker does not know are ignored, so a newer worker heartbeats to an older Arker. */
+        WorkerHeartbeat: {
+            kind: components["schemas"]["WorkerKind"];
+            /** @description Worker software version. */
+            version: string;
+            /** @description The platform the worker serves. It must be the pool's. */
+            platform: components["schemas"]["PoolPlatform"];
+            state: components["schemas"]["WorkerState"];
+            /** @description Capacity the worker contributes. */
+            resources: components["schemas"]["WorkerResources"];
+            /** @description Capacity the worker has free. */
+            free: components["schemas"]["WorkerResources"];
+            /** @description For an `aws` pool's arkerd worker: the golden and hypervisor selection it runs with, which decides the golden generations it serves. Arker upgrades a worker running with other values than the region's in place. */
+            golden_env?: {
+                [key: string]: string;
+            };
+            /** @description For an `aws` pool's arkerd worker: the goldens it cannot serve current. Absent while it serves each of its goldens from a generation baked for it. */
+            goldens?: components["schemas"]["WorkerGoldens"];
+        };
+        /** @description The goldens a worker cannot serve current, by name. */
+        WorkerGoldens: {
+            /** @description Goldens it serves from a generation baked for another host fingerprint: a fork of one by name runs that older generation. */
+            stale: string[];
+            /** @description Goldens it is to serve and serves no generation of: none is published for its platform, or none could be adopted. A fork of one by name fails. */
+            missing: string[];
+        };
+        /** @description Short-lived AWS credentials for `prefix` of `bucket`; every heartbeat answer carries ones that are still fresh. */
+        WorkerStorageCredentials: {
+            /** @description AWS access key id. */
+            access_key_id: string;
+            /** @description AWS secret access key. */
+            secret_access_key: string;
+            /** @description AWS session token. */
+            session_token: string;
+            /**
+             * Format: date-time
+             * @description When the credentials stop working.
+             */
+            expires_at: string;
+        };
+        /** @description Where the worker keeps VM snapshots: the pool's own bucket for an `aws` pool that isolates `vms`, else the pool's prefix of Arker's regional bucket. */
+        WorkerStorage: {
+            /** @description S3 bucket. */
+            bucket: string;
+            /** @description The bucket's AWS region. */
+            region: string;
+            /** @description Key prefix the credentials may read and write under; empty for the whole bucket. */
+            prefix: string;
+            credentials: components["schemas"]["WorkerStorageCredentials"];
+        };
+        /** @description A worker ignores fields it does not know, so an older worker heartbeats to a newer Arker. */
+        WorkerHeartbeatResponse: {
+            /** @description The worker identifier from the path. */
+            worker_id: string;
+            /** @description Send the next heartbeat after this long. */
+            heartbeat_interval_ms: number;
+            /** @description The state Arker wants the worker in. `left` once the pool is deleting. */
+            desired_state: components["schemas"]["WorkerState"];
+            /** @description WebSocket URL the worker keeps open so Arker can reach it; a path is relative to the endpoint the heartbeat went to. */
+            tunnel_url: string;
+            storage: components["schemas"]["WorkerStorage"];
+            /** @description Present while Arker upgrades an `aws` pool's arkerd worker in place: the release it is to run next. Its VMs keep running across the upgrade. */
+            upgrade_release_id?: string;
+            /** @description For an `aws` pool's arkerd worker: the region's golden and hypervisor selection, which decides the golden generations it serves. A worker running with other values is upgraded onto these in place; its VMs keep running. */
+            golden_env?: {
+                [key: string]: string;
+            };
+        };
+        /** @description A VM a BLAST worker holds, as it reports it. The VM runs the pool's platform. */
+        WorkerVmRecord: {
+            /**
+             * @description `running` executes; `paused` keeps its memory but no CPU; `suspended` is a snapshot in storage.
+             * @enum {string}
+             */
+            state: "running" | "paused" | "suspended";
+            resources: components["schemas"]["WorkerResources"];
+            /** @description Image the VM was created from, if any. */
+            image: string | null;
+            /** @description VM this one was forked from, if any: a VM in the same pool. */
+            parent_vm_id: string | null;
+            /**
+             * Format: date-time
+             * @description When the VM was created.
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description When the VM last ran a command or was synced.
+             */
+            last_active_at: string | null;
+        };
+        /** @description A run on a BLAST worker's VM, as the worker reports it when the run starts and again when it ends. */
+        WorkerRunRecord: {
+            /**
+             * @description `running` until the command ends; then `completed` (it exited), `failed` (the worker could not run or finish it) or `cancelled`.
+             * @enum {string}
+             */
+            state: "running" | "completed" | "failed" | "cancelled";
+            /** @description The command the run executes. */
+            command: string;
+            /** @description The command's exit status once it has one. */
+            exit_code: number | null;
+            /**
+             * Format: date-time
+             * @description When the run started.
+             */
+            started_at: string;
+            /**
+             * Format: date-time
+             * @description When the run ended; null while it runs.
+             */
+            finished_at: string | null;
+            /** @description Standard output. */
+            stdout: string | null;
+            /** @description Standard error. */
+            stderr: string | null;
         };
     };
     responses: {
@@ -3166,14 +3754,14 @@ export interface components {
                 "application/json": components["schemas"]["AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse"];
             };
         };
-        /** @description HTTP 409: already_exists, invalid_state. The code selects the required details. */
-        AlreadyExistsOrInvalidStateError: {
+        /** @description HTTP 409: already_exists, invalid_state, resource_busy. The code selects the required details. */
+        AlreadyExistsOrInvalidStateOrResourceBusyError: {
             headers: {
                 "Retry-After": components["headers"]["RetryAfter"];
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["AlreadyExistsOrInvalidStateErrorResponse"];
+                "application/json": components["schemas"]["AlreadyExistsOrInvalidStateOrResourceBusyErrorResponse"];
             };
         };
         /** @description HTTP 409: conflict, idempotency_conflict, invalid_state, resource_busy. The code selects the required details. */
@@ -3194,6 +3782,16 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["ConflictOrInvalidStateErrorResponse"];
+            };
+        };
+        /** @description HTTP 409: already_exists, invalid_state. The code selects the required details. */
+        AlreadyExistsOrInvalidStateError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["AlreadyExistsOrInvalidStateErrorResponse"];
             };
         };
         /** @description HTTP 409: conflict, invalid_state, resource_busy. The code selects the required details. */
@@ -3266,26 +3864,6 @@ export interface components {
                 "application/json": components["schemas"]["HealthUnavailableResponse"];
             };
         };
-        /** @description HTTP 403: action_required, forbidden. The code selects the required details. */
-        ActionRequiredOrForbiddenError: {
-            headers: {
-                "Retry-After": components["headers"]["RetryAfter"];
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["ActionRequiredOrForbiddenErrorResponse"];
-            };
-        };
-        /** @description HTTP 409: conflict, idempotency_conflict, invalid_state. The code selects the required details. */
-        ConflictOrIdempotencyConflictOrInvalidStateError: {
-            headers: {
-                "Retry-After": components["headers"]["RetryAfter"];
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["ConflictOrIdempotencyConflictOrInvalidStateErrorResponse"];
-            };
-        };
     };
     parameters: {
         /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result — the same run, or the same VM for a fork — instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
@@ -3306,8 +3884,12 @@ export interface components {
         Limit: number;
         /** @description Pool identifier returned as `pool_id`. */
         PoolId: string;
-        /** @description Required. Makes the purchase safely retryable. Reusing a key with the same request returns the original pool instead of buying another; reusing it with a different request returns idempotency_conflict. */
-        RequiredIdempotencyKey: string;
+        /** @description Worker identifier: a ULID the worker generates once and keeps. */
+        WorkerId: string;
+        /** @description Join key identifier returned as `join_key_id`. */
+        JoinKeyId: string;
+        /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+        WorkerVmId: string;
     };
     requestBodies: never;
     headers: {
@@ -3637,7 +4219,7 @@ export interface operations {
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
-            409: components["responses"]["AlreadyExistsOrInvalidStateError"];
+            409: components["responses"]["AlreadyExistsOrInvalidStateOrResourceBusyError"];
             413: components["responses"]["PayloadTooLargeError"];
             422: components["responses"]["UnsupportedOperationError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
@@ -4470,10 +5052,7 @@ export interface operations {
     createPool: {
         parameters: {
             query?: never;
-            header: {
-                /** @description Required. Makes the purchase safely retryable. Reusing a key with the same request returns the original pool instead of buying another; reusing it with a different request returns idempotency_conflict. */
-                "Idempotency-Key": components["parameters"]["RequiredIdempotencyKey"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -4483,8 +5062,8 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The purchased pool, or the original pool when the idempotency key is replayed. */
-            200: {
+            /** @description The new pool. */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4494,42 +5073,11 @@ export interface operations {
             };
             400: components["responses"]["BadRequestError"];
             401: components["responses"]["UnauthorizedError"];
-            403: components["responses"]["ActionRequiredOrForbiddenError"];
-            404: components["responses"]["NotFoundError"];
-            409: components["responses"]["ConflictOrIdempotencyConflictOrInvalidStateError"];
-            429: components["responses"]["RateLimitedError"];
-            500: components["responses"]["InternalError"];
-            503: components["responses"]["CapacityUnavailableOrUnavailableError"];
-        };
-    };
-    quotePool: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PoolQuoteRequest"];
-            };
-        };
-        responses: {
-            /** @description The current price for the requested pool. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PoolQuote"];
-                };
-            };
-            400: components["responses"]["BadRequestError"];
-            401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
-            409: components["responses"]["InvalidStateError"];
-            429: components["responses"]["RateLimitedError"];
+            409: components["responses"]["AlreadyExistsError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
         };
@@ -4546,7 +5094,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Pool details. */
+            /** @description The pool. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4555,10 +5103,39 @@ export interface operations {
                     "application/json": components["schemas"]["Pool"];
                 };
             };
-            400: components["responses"]["BadRequestError"];
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    deletePool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pool, now `deleting`. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pool"];
+                };
+            };
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4593,8 +5170,9 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
-            409: components["responses"]["ConflictError"];
-            429: components["responses"]["RateLimitedError"];
+            409: components["responses"]["AlreadyExistsOrInvalidStateError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
         };
@@ -4624,6 +5202,307 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    listPoolJoinKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pool's join keys. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListPoolJoinKeysResponse"];
+                };
+            };
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    createPoolJoinKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The new join key. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedPoolJoinKey"];
+                };
+            };
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    deletePoolJoinKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Join key identifier returned as `join_key_id`. */
+                join_key_id: components["parameters"]["JoinKeyId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key is revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    listPoolWorkers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pool's workers. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListPoolWorkersResponse"];
+                };
+            };
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    heartbeatWorker: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkerHeartbeat"];
+            };
+        };
+        responses: {
+            /** @description The worker is in the pool. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerHeartbeatResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["ConflictError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    openWorkerTunnel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Switching to the tunnel. */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    putWorkerVm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: components["parameters"]["WorkerVmId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkerVmRecord"];
+            };
+        };
+        responses: {
+            /** @description The VM is recorded. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    deleteWorkerVm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: components["parameters"]["WorkerVmId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The VM is recorded as deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    putWorkerRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: components["parameters"]["WorkerVmId"];
+                /** @description Run identifier the worker chose. */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkerRunRecord"];
+            };
+        };
+        responses: {
+            /** @description The run is recorded. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];

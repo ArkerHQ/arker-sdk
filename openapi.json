@@ -51,7 +51,7 @@
     },
     {
       "name": "Pools",
-      "description": "Buy and manage prepaid regional resource pools."
+      "description": "Create and manage regional pools of capacity, and the workers that serve them."
     }
   ],
   "paths": {
@@ -683,7 +683,7 @@
           "VMs"
         ],
         "summary": "Update a VM",
-        "description": "Update a VM's resources, SSH keys, or network policy.",
+        "description": "Update a VM's resources, SSH keys, or network policy, or make it immutable.",
         "requestBody": {
           "required": true,
           "content": {
@@ -721,7 +721,7 @@
             "$ref": "#/components/responses/NotFoundError"
           },
           "409": {
-            "$ref": "#/components/responses/AlreadyExistsOrInvalidStateError"
+            "$ref": "#/components/responses/AlreadyExistsOrInvalidStateOrResourceBusyError"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLargeError"
@@ -2142,7 +2142,7 @@
           "Pools"
         ],
         "summary": "List pools",
-        "description": "List the organization's pools, newest first. Any API key in the organization can read pools. Returns 404 when pools are not enabled for the organization.",
+        "description": "List the organization's pools in this region, newest first; at https://arker.ai/api without a `region` query parameter, in every region. A pool being deleted is listed until it is gone. Returns 404 when pools are not enabled for the organization.",
         "parameters": [
           {
             "$ref": "#/components/parameters/Cursor"
@@ -2198,13 +2198,8 @@
         "tags": [
           "Pools"
         ],
-        "summary": "Buy a pool",
-        "description": "Buy prepaid capacity in one provider and region for a fixed term. The pool is billed on the organization's next invoice. `amount_cents` must match the current price for the same request; get it from the quote operation. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/RequiredIdempotencyKey"
-          }
-        ],
+        "summary": "Create a pool",
+        "description": "Create a pool in the region of the endpoint you call. `arker` and `self_hosted` pools start `ready`; an `aws` pool starts `provisioning` until its hosts have joined. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization. Returns 429 `quota_exceeded` when the organization already has as many pools in the region as its `pools` quota allows, or when an `arker` pool would take the organization's `arker` pools in the region past its `vcpus`, `ram_mib` or `disk_mib` quota.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2216,68 +2211,12 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "The purchased pool, or the original pool when the idempotency key is replayed.",
+          "201": {
+            "description": "The new pool.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Pool"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequestError"
-          },
-          "401": {
-            "$ref": "#/components/responses/UnauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/ActionRequiredOrForbiddenError"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFoundError"
-          },
-          "409": {
-            "$ref": "#/components/responses/ConflictOrIdempotencyConflictOrInvalidStateError"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimitedError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "503": {
-            "$ref": "#/components/responses/CapacityUnavailableOrUnavailableError"
-          }
-        }
-      }
-    },
-    "/v1/pools/quote": {
-      "post": {
-        "operationId": "quotePool",
-        "tags": [
-          "Pools"
-        ],
-        "summary": "Quote a pool",
-        "description": "Price a pool without buying it. Any API key in the organization can request a quote. Returns 404 when pools are not enabled for the organization.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PoolQuoteRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The current price for the requested pool.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PoolQuote"
                 }
               }
             }
@@ -2295,10 +2234,13 @@
             "$ref": "#/components/responses/NotFoundError"
           },
           "409": {
-            "$ref": "#/components/responses/InvalidStateError"
+            "$ref": "#/components/responses/AlreadyExistsError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
           },
           "429": {
-            "$ref": "#/components/responses/RateLimitedError"
+            "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -2321,10 +2263,10 @@
           "Pools"
         ],
         "summary": "Get a pool",
-        "description": "Return one pool owned by the organization. Returns 404 when pools are not enabled for the organization.",
+        "description": "Return one of the organization's pools, including while it is `deleting`. Returns 404 when pools are not enabled for the organization.",
         "responses": {
           "200": {
-            "description": "Pool details.",
+            "description": "The pool.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2332,9 +2274,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequestError"
           },
           "401": {
             "$ref": "#/components/responses/UnauthorizedError"
@@ -2361,8 +2300,8 @@
         "tags": [
           "Pools"
         ],
-        "summary": "Rename a pool",
-        "description": "Set or remove a pool's name. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.",
+        "summary": "Update a pool",
+        "description": "Rename a pool, resize it, or change its commitments. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization. Growing an `arker` pool returns 429 `quota_exceeded` when the organization's `arker` pools in the region would reserve more than its `vcpus`, `ram_mib` or `disk_mib` quota.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2397,7 +2336,51 @@
             "$ref": "#/components/responses/NotFoundError"
           },
           "409": {
-            "$ref": "#/components/responses/ConflictError"
+            "$ref": "#/components/responses/AlreadyExistsOrInvalidStateError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deletePool",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Delete a pool",
+        "description": "Start deleting the pool: it turns `deleting`, its workers are told to leave (`desired_state: left`), and every VM in it is deleted. Forks into it are refused from then on. Its join keys are revoked once the pool is gone. Refused while a commitment is active; to stop paying for a pool you mean to keep, resize it to zero instead. Deleting a pool that is already deleting answers the same way. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.",
+        "responses": {
+          "202": {
+            "description": "The pool, now `deleting`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pool"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/InvalidStateError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -2446,6 +2429,477 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/pools/{pool_id}/join-keys": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/PoolId"
+        }
+      ],
+      "get": {
+        "operationId": "listPoolJoinKeys",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "List a pool's join keys",
+        "description": "List the join keys of a `self_hosted` pool. Unsupported on other pools. Returns 404 when pools are not enabled for the organization.",
+        "responses": {
+          "200": {
+            "description": "The pool's join keys.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPoolJoinKeysResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createPoolJoinKey",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Create a join key",
+        "description": "Create a key that lets workers join this `self_hosted` pool. The key is returned only once. Unsupported on other pools. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization. Returns 429 `quota_exceeded` when the pool has as many unrevoked join keys as its `pool_join_keys` quota allows.",
+        "responses": {
+          "201": {
+            "description": "The new join key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedPoolJoinKey"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/InvalidStateError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/pools/{pool_id}/join-keys/{join_key_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/PoolId"
+        },
+        {
+          "$ref": "#/components/parameters/JoinKeyId"
+        }
+      ],
+      "delete": {
+        "operationId": "deletePoolJoinKey",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Delete a join key",
+        "description": "Revoke a join key. Workers using it can no longer heartbeat. Unsupported on pools other than `self_hosted`. Requires an admin API key that is not limited to specific VMs. Returns 404 when pools are not enabled for the organization.",
+        "responses": {
+          "204": {
+            "description": "The key is revoked."
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/pools/{pool_id}/workers": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/PoolId"
+        }
+      ],
+      "get": {
+        "operationId": "listPoolWorkers",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "List a pool's workers",
+        "description": "List the workers of an `aws` or `self_hosted` pool. Unsupported on an `arker` pool. Returns 404 when pools are not enabled for the organization.",
+        "responses": {
+          "200": {
+            "description": "The pool's workers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPoolWorkersResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/pools/{pool_id}/workers/{worker_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/PoolId"
+        },
+        {
+          "$ref": "#/components/parameters/WorkerId"
+        }
+      ],
+      "put": {
+        "operationId": "heartbeatWorker",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Join a pool or heartbeat",
+        "description": "Join the pool, or keep the worker in it. The heartbeat's `platform` must be the pool's and its `kind` one the pool takes; a retired worker id is refused. Authenticate with a join key of this pool. A worker id the pool has not seen gets 429 `quota_exceeded` while the pool has as many workers as its `pool_workers` quota allows; it joins once another leaves.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerHeartbeat"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The worker is in the pool.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerHeartbeatResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ConflictError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/pools/{pool_id}/workers/{worker_id}/tunnel": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/PoolId"
+        },
+        {
+          "$ref": "#/components/parameters/WorkerId"
+        }
+      ],
+      "get": {
+        "operationId": "openWorkerTunnel",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Open the worker tunnel",
+        "description": "Upgrade to a WebSocket with subprotocol `worker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API; a fork names the VM id to use in header `x-vm-id`. Requires the worker to have joined. Authenticate with a join key of this pool.",
+        "responses": {
+          "101": {
+            "description": "Switching to the tunnel."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/InvalidStateError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/PoolId"
+        },
+        {
+          "$ref": "#/components/parameters/WorkerId"
+        },
+        {
+          "$ref": "#/components/parameters/WorkerVmId"
+        }
+      ],
+      "put": {
+        "operationId": "putWorkerVm",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Record a worker's VM",
+        "description": "Record the VM as it is now; send it again on every change. Arker lists the VM from this record. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with a join key of this pool.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerVmRecord"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "The VM is recorded."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/InvalidStateError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteWorkerVm",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Forget a worker's VM",
+        "description": "Record that the VM is gone. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with a join key of this pool.",
+        "responses": {
+          "204": {
+            "description": "The VM is recorded as deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
+    "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}/runs/{run_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/PoolId"
+        },
+        {
+          "$ref": "#/components/parameters/WorkerId"
+        },
+        {
+          "$ref": "#/components/parameters/WorkerVmId"
+        },
+        {
+          "name": "run_id",
+          "in": "path",
+          "required": true,
+          "description": "Run identifier the worker chose.",
+          "schema": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      ],
+      "put": {
+        "operationId": "putWorkerRun",
+        "tags": [
+          "Pools"
+        ],
+        "summary": "Record a run",
+        "description": "Record a run when it starts and again when it ends. Arker answers `listRuns` and `getRun` for the VM from these records. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with a join key of this pool.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerRunRecord"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "The run is recorded."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/InvalidStateError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -2565,16 +3019,35 @@
           "format": "uuid"
         }
       },
-      "RequiredIdempotencyKey": {
-        "name": "Idempotency-Key",
-        "in": "header",
+      "WorkerId": {
+        "name": "worker_id",
+        "in": "path",
         "required": true,
-        "description": "Required. Makes the purchase safely retryable. Reusing a key with the same request returns the original pool instead of buying another; reusing it with a different request returns idempotency_conflict.",
+        "description": "Worker identifier: a ULID the worker generates once and keeps.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        }
+      },
+      "JoinKeyId": {
+        "name": "join_key_id",
+        "in": "path",
+        "required": true,
+        "description": "Join key identifier returned as `join_key_id`.",
         "schema": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 64,
-          "pattern": "^[ -~]+$"
+          "maxLength": 64
+        }
+      },
+      "WorkerVmId": {
+        "name": "vm_id",
+        "in": "path",
+        "required": true,
+        "description": "VM identifier Arker handed the worker with the fork (`x-vm-id`).",
+        "schema": {
+          "type": "string",
+          "maxLength": 64
         }
       }
     },
@@ -3609,8 +4082,8 @@
           }
         }
       },
-      "AlreadyExistsOrInvalidStateError": {
-        "description": "HTTP 409: already_exists, invalid_state. The code selects the required details.",
+      "AlreadyExistsOrInvalidStateOrResourceBusyError": {
+        "description": "HTTP 409: already_exists, invalid_state, resource_busy. The code selects the required details.",
         "x-http-status": 409,
         "headers": {
           "Retry-After": {
@@ -3620,7 +4093,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/AlreadyExistsOrInvalidStateErrorResponse"
+              "$ref": "#/components/schemas/AlreadyExistsOrInvalidStateOrResourceBusyErrorResponse"
             },
             "examples": {
               "already_exists": {
@@ -3628,6 +4101,9 @@
               },
               "invalid_state": {
                 "$ref": "#/components/responses/InvalidStateError/content/application~1json/examples/invalid_state"
+              },
+              "resource_busy": {
+                "$ref": "#/components/responses/ResourceBusyError/content/application~1json/examples/resource_busy"
               }
             }
           }
@@ -3679,6 +4155,30 @@
             "examples": {
               "conflict": {
                 "$ref": "#/components/responses/ConflictError/content/application~1json/examples/conflict"
+              },
+              "invalid_state": {
+                "$ref": "#/components/responses/InvalidStateError/content/application~1json/examples/invalid_state"
+              }
+            }
+          }
+        }
+      },
+      "AlreadyExistsOrInvalidStateError": {
+        "description": "HTTP 409: already_exists, invalid_state. The code selects the required details.",
+        "x-http-status": 409,
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AlreadyExistsOrInvalidStateErrorResponse"
+            },
+            "examples": {
+              "already_exists": {
+                "$ref": "#/components/responses/AlreadyExistsError/content/application~1json/examples/already_exists"
               },
               "invalid_state": {
                 "$ref": "#/components/responses/InvalidStateError/content/application~1json/examples/invalid_state"
@@ -3870,57 +4370,6 @@
                     }
                   }
                 }
-              }
-            }
-          }
-        }
-      },
-      "ActionRequiredOrForbiddenError": {
-        "description": "HTTP 403: action_required, forbidden. The code selects the required details.",
-        "x-http-status": 403,
-        "headers": {
-          "Retry-After": {
-            "$ref": "#/components/headers/RetryAfter"
-          }
-        },
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/ActionRequiredOrForbiddenErrorResponse"
-            },
-            "examples": {
-              "action_required": {
-                "$ref": "#/components/responses/ActionRequiredError/content/application~1json/examples/action_required"
-              },
-              "forbidden": {
-                "$ref": "#/components/responses/ForbiddenError/content/application~1json/examples/forbidden"
-              }
-            }
-          }
-        }
-      },
-      "ConflictOrIdempotencyConflictOrInvalidStateError": {
-        "description": "HTTP 409: conflict, idempotency_conflict, invalid_state. The code selects the required details.",
-        "x-http-status": 409,
-        "headers": {
-          "Retry-After": {
-            "$ref": "#/components/headers/RetryAfter"
-          }
-        },
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/ConflictOrIdempotencyConflictOrInvalidStateErrorResponse"
-            },
-            "examples": {
-              "conflict": {
-                "$ref": "#/components/responses/ConflictError/content/application~1json/examples/conflict"
-              },
-              "idempotency_conflict": {
-                "$ref": "#/components/responses/IdempotencyConflictError/content/application~1json/examples/idempotency_conflict"
-              },
-              "invalid_state": {
-                "$ref": "#/components/responses/InvalidStateError/content/application~1json/examples/invalid_state"
               }
             }
           }
@@ -4187,7 +4636,7 @@
           "failed",
           "cancelled"
         ],
-        "description": "Lifecycle state for a run. `pending` means the run was accepted but has not started yet because an earlier run on the same session is still in flight; it is not terminal, and a client should keep polling. `running` means the command is in progress. `completed` means the command finished; `exit_code` reports its result. `failed` means the service could not start or finish the command, with a client-safe explanation in `fail_reason`. `cancelled` means the client cancelled the run."
+        "description": "Lifecycle state for a run. `pending` means the run was accepted but is not running: it has not started yet because an earlier run on the same session is still in flight, or its VM is suspended and it continues when the VM wakes. It is not terminal, and a client should keep polling. `running` means the command is in progress. `completed` means the command finished; `exit_code` reports its result. `failed` means the service could not start or finish the command, with a client-safe explanation in `fail_reason`. `cancelled` means the client cancelled the run."
       },
       "Provider": {
         "type": "string",
@@ -4312,14 +4761,14 @@
               "open",
               "arker"
             ],
-            "description": "Authentication for an inbound rule that exposes a port \u2014 `allow`, or a scaling-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges."
+            "description": "Authentication for an inbound rule that exposes a port \u2014 `allow`, or a `scale`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges."
           }
         }
       },
       "PolicyMatch": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Match criteria: present fields are combined with AND; list items are combined with OR. `ips` and `hosts` are mutually exclusive, and inbound rules cannot use `hosts`. Port, IP, and host rules operate at the connection layer. Method, path, header, and body rules operate at the request layer.",
+        "description": "Match criteria: present fields are combined with AND; list items are combined with OR. `ips` and `hosts` are mutually exclusive, and inbound rules cannot use `hosts`. Port, IP, and host rules operate at the connection layer. Method, path, header, query parameter, and body rules operate at the request layer.",
         "properties": {
           "ports": {
             "type": "array",
@@ -4388,7 +4837,17 @@
                 "type": "string"
               }
             },
-            "description": "Header name \u2192 any-of values (names AND'd, a name's values OR'd)."
+            "description": "Header name \u2192 any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, `\"authorization\": [\"Bearer $arker_api_key\"]` or `\"x-api-key\": [\"$arker_api_key\"]` matches an API key of the VM's organization."
+          },
+          "query_params": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Query parameter name \u2192 any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, parameters named `arker_*` are removed from a `GET` request's URL by a redirect that keeps them in a cookie, so the rest of a browsing session carries them without the URL showing them."
           },
           "body_contains": {
             "description": "Substrings that must appear in the request body.",
@@ -4406,13 +4865,14 @@
             "type": "string",
             "enum": [
               "allow",
-              "deny"
+              "deny",
+              "delete"
             ]
           },
           {
             "type": "object",
             "additionalProperties": false,
-            "description": "The object action: at least one of `rewrite` / `gate` / `scaling` must be present. The request is forwarded upstream (applying `rewrite` if present); a `gate` blocks it until an outbound HTTP check allows it; a `scaling` key lets the platform suspend the machine while it waits on the response. The three compose freely on one action.",
+            "description": "The object action: at least one of `rewrite` / `gate` / `scale` / `webhook` must be present. The request is forwarded upstream (applying `rewrite` if present); a `gate` blocks it until an outbound HTTP check allows it; `scale` suspends or wakes the VM around it. The three compose freely on one action. `webhook` is for `resources` rules.",
             "properties": {
               "rewrite": {
                 "$ref": "#/components/schemas/Rewrite"
@@ -4420,18 +4880,26 @@
               "gate": {
                 "$ref": "#/components/schemas/Gate"
               },
+              "scale": {
+                "$ref": "#/components/schemas/ScaleAction"
+              },
               "scaling": {
-                "$ref": "#/components/schemas/ScalingAction"
+                "$ref": "#/components/schemas/ScaleAction",
+                "deprecated": true,
+                "description": "Deprecated spelling of `scale`."
+              },
+              "webhook": {
+                "$ref": "#/components/schemas/Webhook"
               }
             }
           }
         ],
-        "description": "allow / deny, or an object with any combination of `rewrite`, `gate`, and `scaling` (at least one)."
+        "description": "allow / deny, `delete` (schedule rules), or an object with any combination of `rewrite`, `gate`, and `scale` (at least one)."
       },
-      "ScalingAction": {
+      "ScaleAction": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Auto-scaling behavior for matched traffic. On an `outbound` rule it brackets the time the VM is blocked awaiting an upstream response; on an `inbound` rule it brackets the time the VM is idle between requests (scale to zero). Outbound rules may be narrowed by L7 criteria (`methods`/`paths`/`headers`/`body_contains`), for example to suspend only on `POST /v1/messages`, and compose with `rewrite` / `gate` siblings. For outbound, prefer a `match.hosts` scope: a host-less scaling rule matches every flow it can see, which breaks certificate-pinning clients. Where each is enforced differs and explains the asymmetry: an `outbound` rule runs on the MITM (TLS-terminating) data path, which is why it can match L7 fields and carry `rewrite`/`gate` siblings; an `inbound` rule is enforced host-side on the plaintext request the worker already holds, so no MITM is involved and no TLS is terminated.",
+        "description": "Scales the VM when the rule matches or fires. On an `outbound` rule `suspend` brackets the time the VM is blocked awaiting an upstream response; on an `inbound` rule it suspends the VM once a matched request has been answered, and `wake` decides whether a matched request wakes a suspended VM. Outbound rules may be narrowed by request fields (`methods`/`paths`/`headers`/`body_contains`), for example to suspend only on `POST /v1/messages`, and compose with `rewrite` / `gate` siblings. For outbound, prefer a `match.hosts` scope: a host-less rule matches every flow it can see, which breaks certificate-pinning clients.",
         "properties": {
           "suspend": {
             "type": "boolean",
@@ -4441,6 +4909,36 @@
           "wake": {
             "type": "boolean",
             "description": "Whether a matched inbound request may wake a suspended VM. Omit this field to allow waking. Set it to `false` so a request that would need to start the VM fails with `503 vm_suspended`; requests received while the VM is running are served normally. This field is not valid on outbound rules."
+          },
+          "resource_factors": {
+            "$ref": "#/components/schemas/ResourceFactors",
+            "description": "`resources` rules only. Multiplies each resource it names by its factor, within the VM's supported range: `{ \"vcpu\": 2 }` doubles the vCPUs."
+          }
+        }
+      },
+      "ResourceFactors": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "description": "A number for each resource it names: `vcpu`, `memory_mib`, `disk_mib`.",
+        "properties": {
+          "vcpu": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "format": "double",
+            "description": "For vCPUs."
+          },
+          "memory_mib": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "format": "double",
+            "description": "For memory."
+          },
+          "disk_mib": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "format": "double",
+            "description": "For disk. A disk only grows, so a factor for it is at least 1."
           }
         }
       },
@@ -4466,6 +4964,13 @@
           },
           "remove_headers": {
             "description": "Request header names to remove before forwarding.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "remove_query_params": {
+            "description": "Query parameter names to remove from the URL before forwarding.",
             "type": "array",
             "items": {
               "type": "string"
@@ -4529,6 +5034,44 @@
             "minimum": 0,
             "format": "uint64",
             "description": "Max wall-clock for the gate call before it is abandoned (then deny_on_timeout applies). Default ~30000."
+          }
+        }
+      },
+      "Webhook": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "host"
+        ],
+        "description": "An HTTP request Arker sends, from outside the VM, when a `resources` rule starts firing. It does not wait on or act on the response. `path`, header values and string leaves of `body` take `$vm_id` and `${secret:NAME}`, and `$$` for a literal `$`. `host` is not interpolated, and private, link-local and internal destinations are refused.",
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "Target endpoint including scheme, e.g. `https://aws-us-west-2.arker.ai`."
+          },
+          "path": {
+            "type": "string",
+            "description": "Request path. Default `/`."
+          },
+          "method": {
+            "type": "string",
+            "description": "HTTP method. Default `POST`."
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Request headers. Stored credentials are encrypted at rest and masked in policy responses."
+          },
+          "body": {
+            "description": "JSON request body. Absent = no body."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "uint64",
+            "description": "Max wall-clock for the request before it is abandoned. Default ~30000."
           }
         }
       },
@@ -4858,12 +5401,17 @@
           "pool_id": {
             "type": "string",
             "format": "uuid",
-            "description": "Optionally join an active pool in the same organization and provider/region. Membership can be changed with VM PATCH and is never inherited from the source VM."
+            "description": "Fork the VM into this pool of the caller's organization; it runs on the pool's machines. `platforms`, if given, must include the pool's platform. A pool that is deleting refuses the fork with invalid_state. A fork of a VM in an `aws` or `self_hosted` pool always stays in that pool: naming another pool, or forking a VM from outside such a pool into it, is unsupported_operation. Membership of an `arker` pool is not inherited. Mutually exclusive with pool_name."
           },
           "pool_name": {
             "type": "string",
             "minLength": 1,
-            "description": "Optionally join an active pool by its unique name in the caller organization. Names are normalized and case-insensitive. Mutually exclusive with pool_id. Membership uses the resolved pool ID, can be changed with VM PATCH, and is never inherited from the source VM."
+            "description": "Fork the VM into the pool with this name in the caller's organization. Names are case-insensitive and unique within a region; at https://arker.ai/api without a region, a name used in more than one region is a conflict (pool_name). Mutually exclusive with pool_id; otherwise the same as pool_id."
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A command to start on the new VM once it is forked, as a background run on its default session: the response is the VM, and the run is listed with `GET /v1/vms/{id}/runs`."
           }
         },
         "not": {
@@ -5038,6 +5586,10 @@
             "type": "boolean",
             "description": "When `true`, other orgs can fork this VM (but cannot run on it)."
           },
+          "immutable": {
+            "type": "boolean",
+            "description": "When `true`, the VM never changes again: it can be viewed, listed, forked, and deleted, and requests that would change it or start it are refused. Its forks are mutable. Set with `PATCH /vms/{id}`; goldens are immutable. Not every listing reports it."
+          },
           "root_source_vm_id": {
             "type": [
               "string",
@@ -5184,12 +5736,9 @@
             "description": "Source-compatible platforms structurally offered in this region. This is not a live-capacity signal."
           },
           "pool_id": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": "string",
             "format": "uuid",
-            "description": "Current pool membership. Expired pools bill subsequent usage at normal rates."
+            "description": "The pool the VM belongs to. Absent when the VM is in no pool."
           }
         }
       },
@@ -5306,7 +5855,7 @@
             "format": "uint32"
           },
           "command": {
-            "description": "Command submitted for execution. Omit it only for a signal request.",
+            "description": "Command submitted for execution. Omit it only for a signal request, or in a request naming nothing at all, which wakes the VM: it returns once the VM is running, and every run it was suspended or forked with is `running` again.",
             "type": "string"
           },
           "timeout": {
@@ -7022,6 +7571,10 @@
             "maxLength": 1024,
             "description": "Replace the VM description. Null or a blank string clears it; omit this field to leave it unchanged."
           },
+          "immutable": {
+            "type": "boolean",
+            "description": "Make the VM immutable. Only `true` is accepted, and it must be the only field in its request: an immutable VM cannot be made mutable again. An immutable VM can be viewed, listed, forked, and deleted, and every request that would change it or start it is refused. A running VM is refused with `resource_busy`; retry once it is idle. Repeating the request for an immutable VM changes nothing."
+          },
           "resources": {
             "description": "CPU, memory, and disk configuration.",
             "anyOf": [
@@ -7061,14 +7614,17 @@
             ]
           },
           "pool_id": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uuid",
-            "description": "Move the VM to an active pool in the same organization and provider/region. Mutually exclusive with pool_name. Omit both fields to keep its current pool."
+            "description": "Move the VM to another `arker` pool of the organization, or null to take it out of its pool. A VM cannot move into or out of an `aws` or `self_hosted` pool (unsupported_operation). Mutually exclusive with pool_name. Omit both fields to keep the current pool."
           },
           "pool_name": {
             "type": "string",
             "minLength": 1,
-            "description": "Move the VM to a pool by its unique, case-insensitive name in the caller organization. Only the resolved pool ID is stored. Mutually exclusive with pool_id."
+            "description": "Move the VM to the `arker` pool with this name in the VM's region. Names are case-insensitive. Mutually exclusive with pool_id; otherwise the same as pool_id."
           }
         },
         "not": {
@@ -7284,10 +7840,19 @@
           "deleteFilesystem",
           "listPools",
           "createPool",
-          "quotePool",
           "getPool",
           "updatePool",
-          "getPoolUsage"
+          "deletePool",
+          "getPoolUsage",
+          "listPoolJoinKeys",
+          "createPoolJoinKey",
+          "deletePoolJoinKey",
+          "listPoolWorkers",
+          "heartbeatWorker",
+          "openWorkerTunnel",
+          "putWorkerVm",
+          "deleteWorkerVm",
+          "putWorkerRun"
         ],
         "description": "Exact operationId values declared by this API. Refresh this enum when operations are added or removed."
       },
@@ -7348,8 +7913,9 @@
           "webhook",
           "resource",
           "pool",
-          "pool_quote",
-          "pool_name"
+          "pool_name",
+          "join_key",
+          "worker"
         ],
         "description": "Use resource only when the actual kind cannot be identified safely."
       },
@@ -7374,10 +7940,8 @@
           "running",
           "mutable",
           "unclaimed",
-          "active",
-          "same_location",
-          "pool_purchases_enabled",
-          "pool_pricing_configured"
+          "uncommitted",
+          "not_deleting"
         ]
       },
       "UnsupportedReason": {
@@ -8208,6 +8772,66 @@
         ],
         "additionalProperties": false
       },
+      "PoolCountLimit": {
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string",
+            "const": "pools",
+            "description": "Identifies this metric as `pools`."
+          },
+          "unit": {
+            "type": "string",
+            "const": "pools",
+            "description": "Identifies this unit as `pools`."
+          }
+        },
+        "required": [
+          "metric",
+          "unit"
+        ],
+        "additionalProperties": false
+      },
+      "PoolWorkerLimit": {
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string",
+            "const": "pool_workers",
+            "description": "Identifies this metric as `pool_workers`."
+          },
+          "unit": {
+            "type": "string",
+            "const": "workers",
+            "description": "Identifies this unit as `workers`."
+          }
+        },
+        "required": [
+          "metric",
+          "unit"
+        ],
+        "additionalProperties": false
+      },
+      "PoolJoinKeyLimit": {
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string",
+            "const": "pool_join_keys",
+            "description": "Identifies this metric as `pool_join_keys`."
+          },
+          "unit": {
+            "type": "string",
+            "const": "join_keys",
+            "description": "Identifies this unit as `join_keys`."
+          }
+        },
+        "required": [
+          "metric",
+          "unit"
+        ],
+        "additionalProperties": false
+      },
       "BudgetLimit": {
         "type": "object",
         "properties": {
@@ -8259,6 +8883,15 @@
             "$ref": "#/components/schemas/PtySessionLimit"
           },
           {
+            "$ref": "#/components/schemas/PoolCountLimit"
+          },
+          {
+            "$ref": "#/components/schemas/PoolWorkerLimit"
+          },
+          {
+            "$ref": "#/components/schemas/PoolJoinKeyLimit"
+          },
+          {
             "$ref": "#/components/schemas/BudgetLimit"
           }
         ],
@@ -8271,6 +8904,9 @@
             "gpu_vram_mib": "#/components/schemas/GpuVramLimit",
             "gpu_sms": "#/components/schemas/GpuSmLimit",
             "pty_sessions": "#/components/schemas/PtySessionLimit",
+            "pools": "#/components/schemas/PoolCountLimit",
+            "pool_workers": "#/components/schemas/PoolWorkerLimit",
+            "pool_join_keys": "#/components/schemas/PoolJoinKeyLimit",
             "budget": "#/components/schemas/BudgetLimit"
           }
         }
@@ -10035,7 +10671,7 @@
           }
         }
       },
-      "AlreadyExistsOrInvalidStateErrorResponse": {
+      "AlreadyExistsOrInvalidStateOrResourceBusyErrorResponse": {
         "type": "object",
         "required": [
           "error"
@@ -10049,13 +10685,17 @@
               },
               {
                 "$ref": "#/components/schemas/InvalidState"
+              },
+              {
+                "$ref": "#/components/schemas/ResourceBusy"
               }
             ],
             "discriminator": {
               "propertyName": "code",
               "mapping": {
                 "already_exists": "#/components/schemas/AlreadyExists",
-                "invalid_state": "#/components/schemas/InvalidState"
+                "invalid_state": "#/components/schemas/InvalidState",
+                "resource_busy": "#/components/schemas/ResourceBusy"
               }
             },
             "description": "The error category and its details, request metadata, and recovery context."
@@ -10117,6 +10757,33 @@
               "propertyName": "code",
               "mapping": {
                 "conflict": "#/components/schemas/Conflict",
+                "invalid_state": "#/components/schemas/InvalidState"
+              }
+            },
+            "description": "The error category and its details, request metadata, and recovery context."
+          }
+        }
+      },
+      "AlreadyExistsOrInvalidStateErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AlreadyExists"
+              },
+              {
+                "$ref": "#/components/schemas/InvalidState"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "already_exists": "#/components/schemas/AlreadyExists",
                 "invalid_state": "#/components/schemas/InvalidState"
               }
             },
@@ -10302,398 +10969,6 @@
         ],
         "description": "Encoding of command output bytes."
       },
-      "PoolResources": {
-        "type": "object",
-        "additionalProperties": false,
-        "minProperties": 1,
-        "description": "Reserved capacity. At least one quantity must be positive.",
-        "properties": {
-          "vcpu": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "Reserved vCPUs."
-          },
-          "memory_mib": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "Reserved memory in MiB."
-          },
-          "disk_mib": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "Reserved disk in MiB."
-          }
-        }
-      },
-      "PoolStatus": {
-        "type": "string",
-        "enum": [
-          "active",
-          "expired"
-        ],
-        "description": "`expired` once `ends_at` has passed. Usage by member VMs after that bills at normal rates."
-      },
-      "PoolQuoteRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "provider",
-          "region",
-          "resources",
-          "duration_seconds"
-        ],
-        "properties": {
-          "provider": {
-            "$ref": "#/components/schemas/Provider"
-          },
-          "region": {
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
-            "description": "Customer-facing service region, for example `us-west`."
-          },
-          "resources": {
-            "$ref": "#/components/schemas/PoolResources"
-          },
-          "duration_seconds": {
-            "type": "integer",
-            "minimum": 2592000,
-            "maximum": 3153600000,
-            "description": "Term length in seconds. The minimum is 30 days (2592000)."
-          },
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "maxLength": 64,
-            "description": "Optional name, unique within the organization and case-insensitive. VMs can join the pool by this name."
-          }
-        }
-      },
-      "CreatePoolRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "provider",
-          "region",
-          "resources",
-          "duration_seconds",
-          "amount_cents"
-        ],
-        "properties": {
-          "provider": {
-            "$ref": "#/components/schemas/Provider"
-          },
-          "region": {
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
-            "description": "Customer-facing service region, for example `us-west`."
-          },
-          "resources": {
-            "$ref": "#/components/schemas/PoolResources"
-          },
-          "duration_seconds": {
-            "type": "integer",
-            "minimum": 2592000,
-            "maximum": 3153600000,
-            "description": "Term length in seconds. The minimum is 30 days (2592000)."
-          },
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "maxLength": 64,
-            "description": "Optional name, unique within the organization and case-insensitive. VMs can join the pool by this name."
-          },
-          "amount_cents": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "The price you agree to pay, from a quote for the same request. The purchase fails with a pool_quote conflict if the current price differs."
-          }
-        }
-      },
-      "UpdatePoolRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "name"
-        ],
-        "properties": {
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "maxLength": 64,
-            "description": "New pool name, or null to remove it."
-          }
-        }
-      },
-      "PoolQuote": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "name",
-          "catalog_version",
-          "baseline_cents",
-          "discount_percent",
-          "provider",
-          "region",
-          "resources",
-          "duration_seconds",
-          "currency",
-          "amount_cents"
-        ],
-        "properties": {
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Normalized pool name, if one was given."
-          },
-          "catalog_version": {
-            "type": "string",
-            "description": "Price catalog used for this quote."
-          },
-          "baseline_cents": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "Price of the same resources and term at on-demand rates, in cents."
-          },
-          "discount_percent": {
-            "type": "number",
-            "minimum": 0,
-            "description": "Discount applied to the baseline, as a percentage."
-          },
-          "provider": {
-            "$ref": "#/components/schemas/Provider"
-          },
-          "region": {
-            "type": "string",
-            "description": "Customer-facing service region."
-          },
-          "resources": {
-            "$ref": "#/components/schemas/PoolResources"
-          },
-          "duration_seconds": {
-            "type": "integer",
-            "description": "Term length in seconds."
-          },
-          "currency": {
-            "type": "string",
-            "enum": [
-              "usd"
-            ],
-            "description": "Price currency."
-          },
-          "amount_cents": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Price to pay, in cents. Send this as `amount_cents` to buy."
-          }
-        }
-      },
-      "Pool": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "pool_id",
-          "name",
-          "provider",
-          "region",
-          "resources",
-          "duration_seconds",
-          "status",
-          "created_at",
-          "starts_at",
-          "ends_at",
-          "currency",
-          "amount_cents",
-          "invoice_id"
-        ],
-        "properties": {
-          "pool_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Pool identifier. Pass it as `pool_id` when forking or updating a VM."
-          },
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Pool name, if set."
-          },
-          "provider": {
-            "$ref": "#/components/schemas/Provider"
-          },
-          "region": {
-            "type": "string",
-            "description": "Customer-facing service region. Only VMs in this provider and region can join."
-          },
-          "resources": {
-            "$ref": "#/components/schemas/PoolResources"
-          },
-          "duration_seconds": {
-            "type": "integer",
-            "description": "Term length in seconds."
-          },
-          "status": {
-            "$ref": "#/components/schemas/PoolStatus"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When the pool was bought."
-          },
-          "starts_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Start of the term."
-          },
-          "ends_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "End of the term."
-          },
-          "currency": {
-            "type": "string",
-            "enum": [
-              "usd"
-            ],
-            "description": "Price currency."
-          },
-          "amount_cents": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Price paid, in cents."
-          },
-          "invoice_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Invoice that bills this pool, once one exists."
-          }
-        }
-      },
-      "ListPoolsResponse": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "pools",
-          "purchases_enabled",
-          "next_cursor"
-        ],
-        "properties": {
-          "pools": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Pool"
-            },
-            "description": "Pools owned by the organization, newest first."
-          },
-          "purchases_enabled": {
-            "type": "boolean",
-            "description": "Whether the organization can buy new pools."
-          },
-          "next_cursor": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Cursor for the next page, or null when no further page is available."
-          }
-        }
-      },
-      "PoolUsage": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "pool_id",
-          "resources_allocated",
-          "allocation_observed_at"
-        ],
-        "properties": {
-          "pool_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Pool identifier."
-          },
-          "resources_allocated": {
-            "$ref": "#/components/schemas/PoolResources",
-            "description": "Resources currently allocated to member VMs."
-          },
-          "allocation_observed_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When the allocation was last measured, or null if no measurement exists yet."
-          }
-        }
-      },
-      "ActionRequiredOrForbiddenErrorResponse": {
-        "type": "object",
-        "required": [
-          "error"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "error": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ActionRequired"
-              },
-              {
-                "$ref": "#/components/schemas/Forbidden"
-              }
-            ],
-            "discriminator": {
-              "propertyName": "code",
-              "mapping": {
-                "action_required": "#/components/schemas/ActionRequired",
-                "forbidden": "#/components/schemas/Forbidden"
-              }
-            },
-            "description": "The error category and its details, request metadata, and recovery context."
-          }
-        }
-      },
-      "ConflictOrIdempotencyConflictOrInvalidStateErrorResponse": {
-        "type": "object",
-        "required": [
-          "error"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "error": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/Conflict"
-              },
-              {
-                "$ref": "#/components/schemas/IdempotencyConflict"
-              },
-              {
-                "$ref": "#/components/schemas/InvalidState"
-              }
-            ],
-            "discriminator": {
-              "propertyName": "code",
-              "mapping": {
-                "conflict": "#/components/schemas/Conflict",
-                "idempotency_conflict": "#/components/schemas/IdempotencyConflict",
-                "invalid_state": "#/components/schemas/InvalidState"
-              }
-            },
-            "description": "The error category and its details, request metadata, and recovery context."
-          }
-        }
-      },
       "PolicyRule": {
         "type": "object",
         "required": [
@@ -10726,7 +11001,7 @@
             "$ref": "#/components/schemas/PolicyAction"
           },
           "auth": {
-            "description": "For inbound `allow` rules. `arker` requires an API key for the VM's organization, `open` requires none, and `{\"token\": ...}` accepts the token or an API key. A token is at least 32 letters, digits, `-`, `_`, `.` or `~`. Defaults to `arker`.",
+            "description": "Deprecated: put the credential a request must carry in `match`. For inbound `allow` rules. `arker` requires an API key for the VM's organization, `open` requires none, and `{\"token\": ...}` accepts the token in the `arker_token` query parameter or cookie, or an API key. Omitted, the rule's `match` alone decides.",
             "oneOf": [
               {
                 "type": "string",
@@ -10748,7 +11023,8 @@
                   }
                 }
               }
-            ]
+            ],
+            "deprecated": true
           },
           "expires_at": {
             "type": "string",
@@ -10771,6 +11047,12 @@
               "oneOf": [
                 {
                   "$ref": "#/components/schemas/PolicyRule"
+                },
+                {
+                  "$ref": "#/components/schemas/ScheduleRule"
+                },
+                {
+                  "$ref": "#/components/schemas/ResourcesRule"
                 },
                 {
                   "$ref": "#/components/schemas/LifecycleRule"
@@ -10850,6 +11132,12 @@
               "$ref": "#/components/schemas/PolicyRule"
             },
             {
+              "$ref": "#/components/schemas/ScheduleRule"
+            },
+            {
+              "$ref": "#/components/schemas/ResourcesRule"
+            },
+            {
               "$ref": "#/components/schemas/LifecycleRule"
             }
           ]
@@ -10896,6 +11184,70 @@
         },
         "description": "SSH keys to write, keyed by key id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). A key replaces any key with the same id; `null` removes the key with that id. Keys not named here are kept, so `{}` changes nothing. The resulting set must not hold one public key under two ids."
       },
+      "ScheduleRule": {
+        "type": "object",
+        "required": [
+          "type",
+          "action"
+        ],
+        "additionalProperties": false,
+        "description": "A rule that acts on the VM itself when its trigger fires: `delete` it `at` a time, or suspend it with `scale` or `delete` it `after_wake` seconds after it last started or woke. It has no `priority` and does not affect traffic. It names exactly one of `at` and `after_wake`.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "schedule"
+            ],
+            "description": "`schedule`."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the rule fires: an RFC 3339 time in the future. For `delete`."
+          },
+          "after_wake": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2592000,
+            "format": "uint64",
+            "description": "Fires this many seconds, up to 2592000 (30 days), after the VM last started or woke from a suspend, whatever it did since; a VM that never started counts from its creation. A suspend waits while an inbound request is in flight or a caller is waiting on a run. For `{ \"scale\": { \"suspend\": true } }`, or `delete`, which also fires while the VM is suspended."
+          },
+          "action": {
+            "$ref": "#/components/schemas/PolicyAction",
+            "description": "`delete` deletes the VM, as `DELETE /v1/vms/{id}` does; `{ \"scale\": { \"suspend\": true } }` suspends it, its runs `pending` until it wakes."
+          }
+        }
+      },
+      "ResourcesRule": {
+        "type": "object",
+        "required": [
+          "type",
+          "action"
+        ],
+        "additionalProperties": false,
+        "description": "A rule that acts on the VM by how much of its resources it uses. Every `above` and `below` it names must hold for it to fire, and it fires at most once per measurement, each time the host reads its VMs' CPU (every 10 seconds at most), and never on the measurement after a resize. `vcpu` is CPU time over that span, `memory_mib` the memory the guest has in use (`MemTotal - MemAvailable`), and `disk_mib` how full its root filesystem is, as `df` reports it. It has no `priority` and does not affect traffic.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "resources"
+            ],
+            "description": "`resources`."
+          },
+          "above": {
+            "$ref": "#/components/schemas/ResourceFactors",
+            "description": "Fires while each resource it names is used above this fraction of what the VM has."
+          },
+          "below": {
+            "$ref": "#/components/schemas/ResourceFactors",
+            "description": "Fires while each resource it names is used below this fraction of what the VM has."
+          },
+          "action": {
+            "$ref": "#/components/schemas/PolicyAction",
+            "description": "`{ \"scale\": { \"resource_factors\": <factors> } }`, or `{ \"webhook\": <request> }`, which is sent when the rule starts firing: when its bounds start to hold, and again only after they have stopped holding."
+          }
+        }
+      },
       "LifecycleRule": {
         "type": "object",
         "required": [
@@ -10904,7 +11256,7 @@
           "action"
         ],
         "additionalProperties": false,
-        "description": "A rule that deletes the VM at a set time, or a set number of seconds after it was created. It has no `priority` and does not affect traffic. A fork inherits it, and an `after` deadline counts from the fork's own creation.",
+        "description": "Deprecated: use a `schedule` rule. Deletes the VM at a set time, or a set number of seconds after it was created.",
         "properties": {
           "type": {
             "type": "string",
@@ -10939,6 +11291,1104 @@
               "delete"
             ],
             "description": "`delete`: deletes the VM, as `DELETE /v1/vms/{id}` does."
+          }
+        },
+        "deprecated": true
+      },
+      "PoolResources": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "vcpu",
+          "memory_mib",
+          "disk_mib"
+        ],
+        "description": "Capacity reserved for the pool, in the same units as VM resources.",
+        "properties": {
+          "vcpu": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "vCPUs."
+          },
+          "memory_mib": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Memory in MiB."
+          },
+          "disk_mib": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Disk in MiB."
+          }
+        }
+      },
+      "PoolCommitment": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "starts_at",
+          "ends_at"
+        ],
+        "description": "A period the pool is committed to, from `starts_at` up to but not including `ends_at`, lasting at least 24 hours. Commitments do not overlap, a new one may not start in the past, and one that has started cannot change. While a commitment is active the pool cannot shrink or be deleted.",
+        "properties": {
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Start of the period."
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "End of the period."
+          }
+        }
+      },
+      "PoolState": {
+        "type": "string",
+        "enum": [
+          "provisioning",
+          "ready",
+          "deleting"
+        ],
+        "description": "`provisioning` until the pool's hosts have joined (an `aws` pool only); `ready` once it serves VMs; `deleting` from the delete request until the pool is gone. `state_detail` says what a `provisioning` pool is waiting for."
+      },
+      "PoolIsolation": {
+        "type": "string",
+        "enum": [
+          "vms"
+        ],
+        "description": "What an `aws` pool keeps in its own AWS account instead of Arker's regional store. `vms`: VM snapshots, in a bucket of the pool's account."
+      },
+      "PoolPlatform": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$",
+        "description": "The one platform every VM and worker of the pool runs. Immutable. An `arker` or `aws` pool takes a platform Arker's fleet serves; a `self_hosted` pool takes a `blast-*` platform."
+      },
+      "PoolName": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 64,
+        "description": "Pool name, unique and case-insensitive within the pool's region."
+      },
+      "PoolAws": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account_id",
+          "subnet_ids",
+          "security_group_ids",
+          "instance_types",
+          "role_name",
+          "external_id",
+          "setup_url"
+        ],
+        "description": "Where an `aws` pool's hosts run, in the customer's AWS account.",
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "pattern": "^[0-9]{12}$",
+            "description": "The AWS account the hosts run in."
+          },
+          "subnet_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "Subnets the hosts launch into. Hosts need outbound internet access only: a route to a NAT gateway, or to an internet gateway with public IPv4 addresses assigned on launch."
+          },
+          "security_group_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Security groups for the hosts. No inbound rules are needed."
+          },
+          "instance_types": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "Instance types to launch, in order of preference."
+          },
+          "role_name": {
+            "type": "string",
+            "readOnly": true,
+            "description": "The IAM role Arker assumes in the account: `ArkerPool-` and the first 8 hex digits of `pool_id`."
+          },
+          "external_id": {
+            "type": "string",
+            "readOnly": true,
+            "description": "The external id Arker presents when it assumes `role_name`."
+          },
+          "setup_url": {
+            "type": "string",
+            "readOnly": true,
+            "description": "CloudFormation quick-create link that creates `role_name` with `external_id`. Open it signed in to the account; the pool stays `provisioning` until the role exists."
+          }
+        }
+      },
+      "CreatePoolAws": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account_id",
+          "subnet_ids"
+        ],
+        "description": "Where an `aws` pool's hosts run, in the customer's AWS account.",
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "pattern": "^[0-9]{12}$",
+            "description": "The AWS account the hosts run in."
+          },
+          "subnet_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "Subnets the hosts launch into. Hosts need outbound internet access only: a route to a NAT gateway, or to an internet gateway with public IPv4 addresses assigned on launch."
+          },
+          "security_group_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Security groups for the hosts. No inbound rules are needed."
+          },
+          "instance_types": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "Instance types to launch, in order of preference: bare-metal types Arker's fleet runs the pool's platform on. Defaults to the platform's preferred instance type. Several types, and subnets in several Availability Zones, let a pool find capacity sooner when AWS is short of one."
+          }
+        }
+      },
+      "ArkerPool": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pool_id",
+          "type",
+          "name",
+          "region",
+          "platform",
+          "state",
+          "state_detail",
+          "created_at",
+          "resources",
+          "commitments"
+        ],
+        "description": "A pool of capacity reserved on Arker's fleet.",
+        "properties": {
+          "pool_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pool identifier. Pass it as `pool_id` when forking a VM."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "arker"
+            ],
+            "description": "Capacity reserved on Arker's fleet."
+          },
+          "name": {
+            "$ref": "#/components/schemas/PoolName"
+          },
+          "region": {
+            "type": "string",
+            "description": "Service region the pool lives in: the region of the endpoint that created it."
+          },
+          "platform": {
+            "$ref": "#/components/schemas/PoolPlatform"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PoolState"
+          },
+          "state_detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the pool is waiting for, or what went wrong."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the pool was created."
+          },
+          "resources": {
+            "$ref": "#/components/schemas/PoolResources"
+          },
+          "commitments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PoolCommitment"
+            },
+            "description": "Committed periods, oldest first."
+          }
+        }
+      },
+      "AwsPool": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pool_id",
+          "type",
+          "name",
+          "region",
+          "platform",
+          "state",
+          "state_detail",
+          "created_at",
+          "resources",
+          "commitments",
+          "isolation",
+          "capacity",
+          "aws"
+        ],
+        "description": "A pool whose hosts Arker launches in the customer's AWS account; `resources` sizes the host count.",
+        "properties": {
+          "pool_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pool identifier. Pass it as `pool_id` when forking a VM."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "aws"
+            ],
+            "description": "Hosts Arker launches in the customer's AWS account."
+          },
+          "name": {
+            "$ref": "#/components/schemas/PoolName"
+          },
+          "region": {
+            "type": "string",
+            "description": "Service region the pool lives in: the region of the endpoint that created it."
+          },
+          "platform": {
+            "$ref": "#/components/schemas/PoolPlatform"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PoolState"
+          },
+          "state_detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the pool is waiting for, or what went wrong."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the pool was created."
+          },
+          "resources": {
+            "$ref": "#/components/schemas/PoolResources"
+          },
+          "commitments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PoolCommitment"
+            },
+            "description": "Committed periods, oldest first."
+          },
+          "isolation": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/PoolIsolation"
+            },
+            "description": "What the pool keeps in its own AWS account. Empty keeps everything in Arker's regional store."
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/PoolResources",
+            "description": "What the pool's live workers contribute right now."
+          },
+          "aws": {
+            "$ref": "#/components/schemas/PoolAws"
+          }
+        }
+      },
+      "SelfHostedPool": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pool_id",
+          "type",
+          "name",
+          "region",
+          "platform",
+          "state",
+          "state_detail",
+          "created_at",
+          "capacity"
+        ],
+        "description": "A pool of BLAST workers the customer runs. Workers join with a join key.",
+        "properties": {
+          "pool_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pool identifier. Pass it as `pool_id` when forking a VM."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "self_hosted"
+            ],
+            "description": "Workers the customer runs, which join with a join key."
+          },
+          "name": {
+            "$ref": "#/components/schemas/PoolName"
+          },
+          "region": {
+            "type": "string",
+            "description": "Service region the pool lives in: the region of the endpoint that created it."
+          },
+          "platform": {
+            "$ref": "#/components/schemas/PoolPlatform"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PoolState"
+          },
+          "state_detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the pool is waiting for, or what went wrong."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the pool was created."
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/PoolResources",
+            "description": "What the pool's live workers contribute right now."
+          }
+        }
+      },
+      "Pool": {
+        "description": "A regional pool: where its VMs run, and the capacity it holds.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ArkerPool"
+          },
+          {
+            "$ref": "#/components/schemas/AwsPool"
+          },
+          {
+            "$ref": "#/components/schemas/SelfHostedPool"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "arker": "#/components/schemas/ArkerPool",
+            "aws": "#/components/schemas/AwsPool",
+            "self_hosted": "#/components/schemas/SelfHostedPool"
+          }
+        }
+      },
+      "ListPoolsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pools",
+          "next_cursor"
+        ],
+        "properties": {
+          "pools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Pool"
+            },
+            "description": "Pools owned by the organization, newest first."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor for the next page, or null when no further page is available."
+          }
+        }
+      },
+      "PoolUsage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pool_id",
+          "resources_allocated",
+          "allocation_observed_at"
+        ],
+        "properties": {
+          "pool_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pool identifier."
+          },
+          "resources_allocated": {
+            "$ref": "#/components/schemas/PoolResources",
+            "description": "Resources currently allocated to member VMs."
+          },
+          "allocation_observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the allocation was read."
+          }
+        }
+      },
+      "CreateArkerPoolRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "platform",
+          "resources"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "arker"
+            ],
+            "description": "Capacity reserved on Arker's fleet."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Pool name, unique and case-insensitive within the pool's region.",
+            "minLength": 1
+          },
+          "platform": {
+            "$ref": "#/components/schemas/PoolPlatform"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/PoolResources"
+          },
+          "commitments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PoolCommitment"
+            },
+            "description": "Commitments to start with."
+          }
+        }
+      },
+      "CreateAwsPoolRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "platform",
+          "resources",
+          "aws"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "aws"
+            ],
+            "description": "Hosts Arker launches in the customer's AWS account."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Pool name, unique and case-insensitive within the pool's region.",
+            "minLength": 1
+          },
+          "platform": {
+            "$ref": "#/components/schemas/PoolPlatform"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/PoolResources"
+          },
+          "commitments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PoolCommitment"
+            },
+            "description": "Commitments to start with."
+          },
+          "isolation": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/PoolIsolation"
+            },
+            "description": "What the pool keeps in its own AWS account. Defaults to none."
+          },
+          "aws": {
+            "$ref": "#/components/schemas/CreatePoolAws"
+          }
+        }
+      },
+      "CreateSelfHostedPoolRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "platform"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "self_hosted"
+            ],
+            "description": "Workers the customer runs, which join with a join key."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Pool name, unique and case-insensitive within the pool's region.",
+            "minLength": 1
+          },
+          "platform": {
+            "$ref": "#/components/schemas/PoolPlatform",
+            "description": "The `blast-*` platform the pool's BLAST workers run."
+          }
+        }
+      },
+      "CreatePoolRequest": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/CreateArkerPoolRequest"
+          },
+          {
+            "$ref": "#/components/schemas/CreateAwsPoolRequest"
+          },
+          {
+            "$ref": "#/components/schemas/CreateSelfHostedPoolRequest"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "arker": "#/components/schemas/CreateArkerPoolRequest",
+            "aws": "#/components/schemas/CreateAwsPoolRequest",
+            "self_hosted": "#/components/schemas/CreateSelfHostedPoolRequest"
+          }
+        }
+      },
+      "UpdatePoolRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64,
+            "description": "New pool name, or null to remove it.",
+            "minLength": 1
+          },
+          "resources": {
+            "$ref": "#/components/schemas/PoolResources",
+            "description": "New reserved capacity. Growing is always allowed; shrinking, including to zero, only while no commitment is active. An `aws` pool returns to `provisioning` until its new hosts have joined. Not for a `self_hosted` pool."
+          },
+          "commitments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PoolCommitment"
+            },
+            "description": "The full list of commitments. A commitment that has started must be kept unchanged. Not for a `self_hosted` pool."
+          }
+        }
+      },
+      "PoolJoinKey": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "join_key_id",
+          "created_at"
+        ],
+        "properties": {
+          "join_key_id": {
+            "type": "string",
+            "description": "Join key identifier."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the key was created."
+          }
+        }
+      },
+      "CreatedPoolJoinKey": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "join_key_id",
+          "key",
+          "created_at"
+        ],
+        "properties": {
+          "join_key_id": {
+            "type": "string",
+            "description": "Join key identifier."
+          },
+          "key": {
+            "type": "string",
+            "description": "The key. Shown only in this response."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the key was created."
+          }
+        }
+      },
+      "ListPoolJoinKeysResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "join_keys"
+        ],
+        "properties": {
+          "join_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PoolJoinKey"
+            },
+            "description": "The pool's join keys, newest first."
+          }
+        }
+      },
+      "WorkerKind": {
+        "type": "string",
+        "enum": [
+          "arkerd",
+          "blast"
+        ],
+        "description": "The software the worker runs. A `self_hosted` pool takes `blast` workers only, and an `aws` pool takes `arkerd` workers only."
+      },
+      "WorkerState": {
+        "type": "string",
+        "enum": [
+          "bootstrapping",
+          "active",
+          "draining",
+          "left"
+        ],
+        "description": "`bootstrapping` is still starting and takes no VMs yet; `active` takes new VMs; `draining` keeps its VMs but takes no new ones; `left` has handed back its VMs and left the pool for good, and its id cannot rejoin. A worker that stops without leaving keeps its id and rejoins as `active`."
+      },
+      "WorkerResources": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "vcpu",
+          "memory_mib",
+          "disk_mib"
+        ],
+        "properties": {
+          "vcpu": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "vCPUs."
+          },
+          "memory_mib": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Memory in MiB."
+          },
+          "disk_mib": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Disk in MiB."
+          },
+          "gpu_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Whole GPUs."
+          }
+        }
+      },
+      "Worker": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "worker_id",
+          "pool_id",
+          "kind",
+          "version",
+          "platform",
+          "state",
+          "live",
+          "resources",
+          "free",
+          "last_heartbeat_at"
+        ],
+        "properties": {
+          "worker_id": {
+            "type": "string",
+            "description": "Worker identifier."
+          },
+          "pool_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pool the worker joined."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorkerKind"
+          },
+          "version": {
+            "type": "string",
+            "description": "Worker software version."
+          },
+          "platform": {
+            "type": "string",
+            "description": "Platform the worker serves: the pool's."
+          },
+          "state": {
+            "$ref": "#/components/schemas/WorkerState"
+          },
+          "live": {
+            "type": "boolean",
+            "description": "Whether the worker can serve requests now: its last heartbeat is inside the liveness window and Arker holds its tunnel. VMs on a worker that is not live answer `unavailable` until it returns."
+          },
+          "resources": {
+            "$ref": "#/components/schemas/WorkerResources",
+            "description": "Capacity the worker contributes."
+          },
+          "free": {
+            "$ref": "#/components/schemas/WorkerResources",
+            "description": "Capacity the worker has free."
+          },
+          "last_heartbeat_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the last heartbeat arrived."
+          }
+        }
+      },
+      "ListPoolWorkersResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workers"
+        ],
+        "properties": {
+          "workers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Worker"
+            },
+            "description": "Workers in the pool."
+          }
+        }
+      },
+      "WorkerHeartbeat": {
+        "type": "object",
+        "required": [
+          "kind",
+          "version",
+          "platform",
+          "state",
+          "resources",
+          "free"
+        ],
+        "description": "A worker joins the pool in the path with its first heartbeat and stays in it until it reports `left`; a stopped worker rejoins under the same id. Fields Arker does not know are ignored, so a newer worker heartbeats to an older Arker.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/WorkerKind"
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Worker software version."
+          },
+          "platform": {
+            "$ref": "#/components/schemas/PoolPlatform",
+            "description": "The platform the worker serves. It must be the pool's."
+          },
+          "state": {
+            "$ref": "#/components/schemas/WorkerState"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/WorkerResources",
+            "description": "Capacity the worker contributes."
+          },
+          "free": {
+            "$ref": "#/components/schemas/WorkerResources",
+            "description": "Capacity the worker has free."
+          },
+          "golden_env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "For an `aws` pool's arkerd worker: the golden and hypervisor selection it runs with, which decides the golden generations it serves. Arker upgrades a worker running with other values than the region's in place."
+          },
+          "goldens": {
+            "$ref": "#/components/schemas/WorkerGoldens",
+            "description": "For an `aws` pool's arkerd worker: the goldens it cannot serve current. Absent while it serves each of its goldens from a generation baked for it."
+          }
+        }
+      },
+      "WorkerGoldens": {
+        "type": "object",
+        "required": [
+          "stale",
+          "missing"
+        ],
+        "description": "The goldens a worker cannot serve current, by name.",
+        "properties": {
+          "stale": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "string"
+            },
+            "description": "Goldens it serves from a generation baked for another host fingerprint: a fork of one by name runs that older generation."
+          },
+          "missing": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "string"
+            },
+            "description": "Goldens it is to serve and serves no generation of: none is published for its platform, or none could be adopted. A fork of one by name fails."
+          }
+        }
+      },
+      "WorkerStorageCredentials": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "access_key_id",
+          "secret_access_key",
+          "session_token",
+          "expires_at"
+        ],
+        "description": "Short-lived AWS credentials for `prefix` of `bucket`; every heartbeat answer carries ones that are still fresh.",
+        "properties": {
+          "access_key_id": {
+            "type": "string",
+            "description": "AWS access key id."
+          },
+          "secret_access_key": {
+            "type": "string",
+            "description": "AWS secret access key."
+          },
+          "session_token": {
+            "type": "string",
+            "description": "AWS session token."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the credentials stop working."
+          }
+        }
+      },
+      "WorkerStorage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bucket",
+          "region",
+          "prefix",
+          "credentials"
+        ],
+        "description": "Where the worker keeps VM snapshots: the pool's own bucket for an `aws` pool that isolates `vms`, else the pool's prefix of Arker's regional bucket.",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "S3 bucket."
+          },
+          "region": {
+            "type": "string",
+            "description": "The bucket's AWS region."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Key prefix the credentials may read and write under; empty for the whole bucket."
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/WorkerStorageCredentials"
+          }
+        }
+      },
+      "WorkerHeartbeatResponse": {
+        "type": "object",
+        "required": [
+          "worker_id",
+          "heartbeat_interval_ms",
+          "desired_state",
+          "tunnel_url",
+          "storage"
+        ],
+        "description": "A worker ignores fields it does not know, so an older worker heartbeats to a newer Arker.",
+        "properties": {
+          "worker_id": {
+            "type": "string",
+            "description": "The worker identifier from the path."
+          },
+          "heartbeat_interval_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "description": "Send the next heartbeat after this long."
+          },
+          "desired_state": {
+            "$ref": "#/components/schemas/WorkerState",
+            "description": "The state Arker wants the worker in. `left` once the pool is deleting."
+          },
+          "tunnel_url": {
+            "type": "string",
+            "description": "WebSocket URL the worker keeps open so Arker can reach it; a path is relative to the endpoint the heartbeat went to."
+          },
+          "storage": {
+            "$ref": "#/components/schemas/WorkerStorage"
+          },
+          "upgrade_release_id": {
+            "type": "string",
+            "description": "Present while Arker upgrades an `aws` pool's arkerd worker in place: the release it is to run next. Its VMs keep running across the upgrade."
+          },
+          "golden_env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "For an `aws` pool's arkerd worker: the region's golden and hypervisor selection, which decides the golden generations it serves. A worker running with other values is upgraded onto these in place; its VMs keep running."
+          }
+        }
+      },
+      "WorkerVmRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "resources",
+          "image",
+          "parent_vm_id",
+          "created_at",
+          "last_active_at"
+        ],
+        "description": "A VM a BLAST worker holds, as it reports it. The VM runs the pool's platform.",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "paused",
+              "suspended"
+            ],
+            "description": "`running` executes; `paused` keeps its memory but no CPU; `suspended` is a snapshot in storage."
+          },
+          "resources": {
+            "$ref": "#/components/schemas/WorkerResources"
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 255,
+            "description": "Image the VM was created from, if any."
+          },
+          "parent_vm_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64,
+            "description": "VM this one was forked from, if any: a VM in the same pool."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the VM was created."
+          },
+          "last_active_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the VM last ran a command or was synced."
+          }
+        }
+      },
+      "WorkerRunRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "command",
+          "exit_code",
+          "started_at",
+          "finished_at",
+          "stdout",
+          "stderr"
+        ],
+        "description": "A run on a BLAST worker's VM, as the worker reports it when the run starts and again when it ends.",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "description": "`running` until the command ends; then `completed` (it exited), `failed` (the worker could not run or finish it) or `cancelled`."
+          },
+          "command": {
+            "type": "string",
+            "maxLength": 65535,
+            "description": "The command the run executes."
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The command's exit status once it has one."
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the run started."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the run ended; null while it runs."
+          },
+          "stdout": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 65536,
+            "description": "Standard output."
+          },
+          "stderr": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 65536,
+            "description": "Standard error."
           }
         }
       }

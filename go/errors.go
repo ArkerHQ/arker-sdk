@@ -1,6 +1,7 @@
 package arker
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 // often absent -- absent means unspecified, not false. Branch on Code, never
 // on Message.
 type Error struct {
+	Details    json.RawMessage
 	Code       string
 	Message    string
 	StatusCode int
