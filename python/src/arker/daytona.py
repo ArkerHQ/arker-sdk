@@ -174,11 +174,7 @@ class Daytona(UnsupportedMixin):
             self._arker_config,
             {
                 "arker": lambda: arker_get(sandbox, self._arker_config),
-                "daytona": lambda: (
-                    native.get(sandbox)
-                    if native is not None and hasattr(native, "get")
-                    else None
-                ),
+                "daytona": lambda: native.get(sandbox) if native is not None and hasattr(native, "get") else None,
             },
         )
         if found is None:

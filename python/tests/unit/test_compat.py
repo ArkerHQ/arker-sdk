@@ -216,9 +216,7 @@ def test_e2b_official_surface(monkeypatch) -> None:
 
     with use_transport(t):
         sandbox = E2BSandbox.create()
-        result = sandbox.commands.run(
-            'echo "Hello from E2B Sandbox!"', cwd="/workspace", env={"FOO": "bar"}, timeout=8
-        )
+        result = sandbox.commands.run('echo "Hello from E2B Sandbox!"', cwd="/workspace", env={"FOO": "bar"}, timeout=8)
         assert result.stdout == "Hello from E2B Sandbox!\n"
         assert result.exit_code == 0
         sandbox.kill()
