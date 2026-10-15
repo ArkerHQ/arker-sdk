@@ -110,15 +110,38 @@ class Daytona(UnsupportedMixin):
                 raise RuntimeError("Native Daytona SDK is not installed")
             return native.create(*args, **kwargs)
 
+        def create_arker() -> VM:
+            if args:
+                raise TypeError("Daytona.create positional arguments are not supported when routing to Arker")
+            supported = {"image", "snapshot", "name", "resources", "envVars", "language"}
+            unknown = sorted(set(kwargs) - supported)
+            if unknown:
+                raise TypeError(f"Daytona.create received unsupported option(s) for Arker: {', '.join(unknown)}")
+            unsupported = [key for key in ("envVars", "language") if kwargs.get(key) is not None]
+            if unsupported:
+                raise TypeError(f"Daytona.create option(s) are not supported by Arker: {', '.join(unsupported)}")
+            raw_resources = kwargs.get("resources") or {}
+            resources = {
+                **({"vcpu": raw_resources["cpu"]} if "cpu" in raw_resources else {}),
+                **({"vcpu": raw_resources["vcpu"]} if "vcpu" in raw_resources else {}),
+                **({"memory_mib": raw_resources["memory"]} if "memory" in raw_resources else {}),
+                **({"memory_mib": raw_resources["memory_mib"]} if "memory_mib" in raw_resources else {}),
+                **({"disk_mib": raw_resources["disk"]} if "disk" in raw_resources else {}),
+                **({"disk_mib": raw_resources["disk_mib"]} if "disk_mib" in raw_resources else {}),
+            }
+            return arker_create(
+                self._arker_config,
+                name=kwargs.get("name"),
+                template_id=kwargs.get("snapshot"),
+                image=kwargs.get("image"),
+                resources=resources or None,
+            )
+
         provider, result = routed_create(
             "daytona",
             self._arker_config,
             {
-                "arker": lambda: arker_create(
-                    self._arker_config,
-                    name=kwargs.get("name") if kwargs else None,
-                    template_id=kwargs.get("snapshot") if kwargs else None,
-                ),
+                "arker": create_arker,
                 "daytona": create_native,
             },
         )

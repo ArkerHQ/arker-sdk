@@ -62,13 +62,18 @@ def arker_create(
     *,
     name: str | None = None,
     template_id: str | None = None,
+    image: str | None = None,
+    resources: dict[str, Any] | None = None,
 ) -> VM:
     cfg = config or {}
-    source = template_id or arker_source(config)
-    return arker_client(config).fork(
-        source_vm_name=source,
-        name=name or cfg.get("name"),
-    )
+    request: dict[str, Any] = {"name": name or cfg.get("name")}
+    if image:
+        request["image"] = image
+    else:
+        request["source_vm_name"] = template_id or arker_source(config)
+    if resources:
+        request["resources"] = resources
+    return arker_client(config).fork(**request)
 
 
 def arker_get(vm_id: str, config: dict[str, Any] | None = None) -> VM | None:
@@ -154,6 +159,8 @@ def _cache_set(cache: JsonRouteCache | None, identifier: str, provider: str) -> 
 
 
 def _is_retryable(error: Exception) -> bool:
+    if isinstance(error, (TypeError, ValueError, NotImplementedError)):
+        return False
     current: BaseException | None = error
     for _ in range(5):
         if current is None:

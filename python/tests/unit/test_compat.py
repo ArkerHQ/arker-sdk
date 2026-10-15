@@ -175,6 +175,39 @@ def test_arker_shim_config_customizes_source_without_forwarding_to_client(
     assert body["name"] == "custom-name"
 
 
+def test_python_shims_translate_or_reject_arker_create_options(monkeypatch) -> None:
+    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
+    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+    t = FakeTransport()
+    for vm_id in ("vm_daytona_image", "vm_blaxel_image"):
+        t.add_json(
+            lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/fork",
+            200,
+            vm_payload(vm_id),
+        )
+
+    with use_transport(t):
+        Daytona().create(image="ubuntu:24.04", name="daytona", resources={"cpu": 4, "memory": 8192})
+        BlaxelSandbox.create({"image": "ubuntu:24.04", "name": "blaxel", "memory": 4096})
+        with pytest.raises(TypeError, match="envVars"):
+            Daytona().create(envVars={"A": "b"})
+        with pytest.raises(TypeError, match="ttl"):
+            BlaxelSandbox.create({"ttl": "5m"})
+
+    daytona = json.loads(t.calls[0]["body"])
+    assert daytona == {
+        "image": "ubuntu:24.04",
+        "name": "daytona",
+        "resources": {"vcpu": 4, "memory_mib": 8192},
+    }
+    blaxel = json.loads(t.calls[1]["body"])
+    assert blaxel == {
+        "image": "ubuntu:24.04",
+        "name": "blaxel",
+        "resources": {"memory_mib": 4096},
+    }
+
+
 def test_e2b_official_surface(monkeypatch) -> None:
     monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
     monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")

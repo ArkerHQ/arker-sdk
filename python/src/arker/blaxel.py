@@ -122,13 +122,30 @@ class SandboxInstance(UnsupportedMixin):
                 raise RuntimeError("Native Blaxel SDK is not installed")
             return native.create(sandbox, **kwargs)
 
-        name = sandbox.get("name") if isinstance(sandbox, dict) else getattr(sandbox, "name", None)
-        image = sandbox.get("image") if isinstance(sandbox, dict) else getattr(sandbox, "image", None)
+        values = sandbox if isinstance(sandbox, dict) else vars(sandbox) if sandbox is not None else {}
+
+        def create_arker() -> VM:
+            supported = {"name", "image", "memory", "ttl", "envs", "runtime"}
+            unknown = sorted(set(values) - supported)
+            if kwargs or unknown:
+                names = [*sorted(kwargs), *unknown]
+                raise TypeError(f"SandboxInstance.create received unsupported option(s) for Arker: {', '.join(names)}")
+            unsupported = [key for key in ("ttl", "envs", "runtime") if values.get(key) is not None]
+            if unsupported:
+                names = ", ".join(unsupported)
+                raise TypeError(f"SandboxInstance.create option(s) are not supported by Arker: {names}")
+            memory = values.get("memory")
+            return arker_create(
+                arker_config,
+                name=values.get("name"),
+                image=values.get("image"),
+                resources={"memory_mib": memory} if memory is not None else None,
+            )
         provider, result = routed_create(
             "blaxel",
             arker_config,
             {
-                "arker": lambda: arker_create(arker_config, name=name, template_id=image),
+                "arker": create_arker,
                 "blaxel": create_native,
             },
         )
