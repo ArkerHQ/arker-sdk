@@ -46,6 +46,11 @@ instrumented API counts above.
   a method's presence or a single successful call.
 - Close the remaining Arker-side APIs exposed as missing/unverified by inventory,
   including provider-specific services, lifecycle options, and streaming APIs.
+- Establish atomic named get-or-create semantics. Python currently performs a
+  lookup followed by creation; concurrent callers can race. TypeScript's
+  Blaxel `createIfNotExists` forwards `createIfNotExist`, which the Arker
+  provider currently rejects. Arker permits multiple VM rows under one name,
+  so a local shim lock is not a distributed correctness fix.
 - Release the ComputeSDK provider fixes before the migration SDK release.
 - Validate the worker ingress fix in arker-app #4260: a live request with an
   Arker key in `x-api-key` lost the application's unrelated Authorization
