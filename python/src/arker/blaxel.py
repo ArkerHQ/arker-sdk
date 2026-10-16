@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import math
 import re
 import shlex
+from dataclasses import dataclass
 from typing import Any
 
 from ._compat import (
@@ -21,13 +24,47 @@ from ._compat import (
 from .computer import VM
 
 
+@dataclass(frozen=True)
+class DirectoryEntry:
+    name: str
+    path: str
+
+
+@dataclass(frozen=True)
+class Directory:
+    name: str
+    path: str
+    files: list[DirectoryEntry]
+    subdirectories: list[DirectoryEntry]
+
+
+@dataclass(frozen=True)
+class SandboxMetadata:
+    name: str
+
+
+def _request_values(request: Any) -> dict[str, Any]:
+    if isinstance(request, dict):
+        return dict(request)
+    if hasattr(request, "to_dict"):
+        values = request.to_dict()
+        for key in ("on_log", "on_stdout", "on_stderr"):
+            callback = getattr(request, key, None)
+            if callback is not None:
+                values[key] = callback
+        return values
+    return {key: value for key, value in vars(request).items() if value is not None}
+
+
 class Process:
     def __init__(self, vm: VM | None = None, native: Any | None = None) -> None:
         self._vm = vm
         self._native = native
 
-    def exec(self, request: str | dict[str, Any]) -> CommandResult | Any:
+    def exec(self, request: Any) -> CommandResult | Any:
         if self._vm is None:
+            if not isinstance(request, (str, dict)):
+                return self._native.exec(request)
             module = import_optional("blaxel.core.sandbox")
             request_type = getattr(module, "ProcessRequestWithLog", None) if module is not None else None
             if request_type is None:
@@ -43,6 +80,21 @@ class Process:
             command = f"mkdir -p /blaxel && cd /blaxel && {request}"
             timeout = None
         else:
+            request = _request_values(request)
+            if "waitForCompletion" in request:
+                request["wait_for_completion"] = request.pop("waitForCompletion")
+            supported = {"command", "cmd", "workingDir", "working_dir", "env", "envs", "timeout", "wait_for_completion"}
+            unknown = sorted(set(request) - supported)
+            if unknown or request.get("wait_for_completion") is False:
+                raise UnsupportedCompatibilityOption(
+                    "Arker process.exec cannot represent option(s): "
+                    + ", ".join(
+                        [
+                            *unknown,
+                            *(["wait_for_completion=False"] if request.get("wait_for_completion") is False else []),
+                        ]
+                    )
+                )
             command = request.get("command") or request.get("cmd")
             if isinstance(command, list):
                 command = " ".join(shlex.quote(str(value)) for value in command)
@@ -63,10 +115,11 @@ class Process:
                 if invalid is not None:
                     raise ValueError(f"invalid environment variable name: {invalid}")
                 prefix += (
-                    "env " + " ".join(f"{key}={shlex.quote(str(value))}" for key, value in environment.items()) + " "
+                    " ".join(f"export {key}={shlex.quote(str(value))};" for key, value in environment.items()) + " "
                 )
             command = prefix + command
-            timeout = request.get("timeout")
+            timeout_ms = request.get("timeout")
+            timeout = math.ceil(timeout_ms / 1000) if timeout_ms is not None else None
         return run_command(self._vm, command, timeout=timeout)
 
     def __getattr__(self, name: str) -> Any:
@@ -109,13 +162,15 @@ class FileSystem:
         )
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"list failed with exit {result.exit_code}")
-        files: list[dict[str, str]] = []
-        subdirectories: list[dict[str, str]] = []
+        files: list[DirectoryEntry] = []
+        subdirectories: list[DirectoryEntry] = []
         for line in result.stdout.splitlines():
             kind, _, name = line.partition("\t")
-            entry = {"name": name, "path": f"{resolved.rstrip('/')}/{name}"}
+            entry = DirectoryEntry(name=name, path=f"{resolved.rstrip('/')}/{name}")
             (subdirectories if kind == "d" else files).append(entry)
-        return {"files": files, "subdirectories": subdirectories}
+        return Directory(
+            name=resolved.rstrip("/").rsplit("/", 1)[-1], path=resolved, files=files, subdirectories=subdirectories
+        )
 
     def rm(self, path: str) -> None:
         resolved = resolve_compat_path(path, "/blaxel")
@@ -129,7 +184,7 @@ class FileSystem:
         raise AttributeError(f"fs.{name} is not supported by the Arker compatibility layer for blaxel")
 
 
-class SandboxInstance(UnsupportedMixin):
+class SyncSandboxInstance(UnsupportedMixin):
     _compat_name = "blaxel"
 
     def __init__(self, vm: VM | None = None, native: Any | None = None) -> None:
@@ -142,6 +197,7 @@ class SandboxInstance(UnsupportedMixin):
             if vm is not None
             else getattr(native, "id", None) or getattr(native, "sandbox_id", None) or metadata_name
         )
+        self.metadata = SandboxMetadata(name=vm.name or vm.id) if vm is not None else metadata
         self.process = Process(vm, getattr(native, "process", None))
         self.fs = FileSystem(vm, getattr(native, "fs", getattr(native, "filesystem", None)))
 
@@ -151,7 +207,7 @@ class SandboxInstance(UnsupportedMixin):
         return getattr(module, "SyncSandboxInstance", None) if module is not None else None
 
     @classmethod
-    def create(cls, sandbox: Any = None, **kwargs: Any) -> SandboxInstance:
+    def create(cls, sandbox: Any = None, **kwargs: Any) -> SyncSandboxInstance:
         arker_config = kwargs.pop("arker", None) or {}
         router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
         if router_path:
@@ -163,7 +219,11 @@ class SandboxInstance(UnsupportedMixin):
                 raise RuntimeError("Native Blaxel SDK is not installed")
             return native.create(sandbox, **kwargs)
 
-        values = sandbox if isinstance(sandbox, dict) else vars(sandbox) if sandbox is not None else {}
+        values = (
+            {key: value for key, value in _request_values(sandbox).items() if value is not None}
+            if sandbox is not None
+            else {}
+        )
 
         def create_arker() -> VM:
             supported = {"name", "image", "memory", "ttl", "envs", "runtime"}
@@ -198,7 +258,7 @@ class SandboxInstance(UnsupportedMixin):
         return cls(vm=result if provider == "arker" else None, native=result if provider == "blaxel" else None)
 
     @classmethod
-    def get(cls, sandbox_id: str, **kwargs: Any) -> SandboxInstance:
+    def get(cls, sandbox_id: str, **kwargs: Any) -> SyncSandboxInstance:
         arker_config = kwargs.pop("arker", None) or {}
         router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
         if router_path:
@@ -221,8 +281,12 @@ class SandboxInstance(UnsupportedMixin):
         return cls(vm=result if provider == "arker" else None, native=result if provider == "blaxel" else None)
 
     @classmethod
-    def create_if_not_exists(cls, sandbox: Any = None, **kwargs: Any) -> SandboxInstance:
-        values = sandbox if isinstance(sandbox, dict) else vars(sandbox) if sandbox is not None else {}
+    def create_if_not_exists(cls, sandbox: Any = None, **kwargs: Any) -> SyncSandboxInstance:
+        values = (
+            {key: value for key, value in _request_values(sandbox).items() if value is not None}
+            if sandbox is not None
+            else {}
+        )
         name = values.get("name")
         if not isinstance(name, str) or not name:
             raise ValueError("create_if_not_exists requires a Blaxel sandbox name")
@@ -247,4 +311,55 @@ class SandboxInstance(UnsupportedMixin):
         raise AttributeError("Native Blaxel sandbox does not expose delete().")
 
 
-SyncSandboxInstance = SandboxInstance
+class _AsyncComponent:
+    def __init__(self, component: Any) -> None:
+        self._component = component
+
+    def __getattr__(self, name: str) -> Any:
+        member = getattr(self._component, name)
+        if not callable(member):
+            return member
+
+        async def call(*args: Any, **kwargs: Any) -> Any:
+            return await asyncio.to_thread(member, *args, **kwargs)
+
+        return call
+
+
+class SandboxInstance:
+    """Awaitable Blaxel surface using the same router and adapters as sync calls."""
+
+    def __init__(self, sandbox: SyncSandboxInstance, native: Any = None) -> None:
+        self._sandbox = sandbox
+        self._native = native
+        self.id = sandbox.id
+        self.process = native.process if native is not None else _AsyncComponent(sandbox.process)
+        self.fs = native.fs if native is not None else _AsyncComponent(sandbox.fs)
+
+    @classmethod
+    async def _wrap(cls, sandbox: SyncSandboxInstance) -> SandboxInstance:
+        native = None
+        if sandbox._vm is None:
+            module = import_optional("blaxel.core.sandbox")
+            native = await module.SandboxInstance.get(sandbox.id)
+        return cls(sandbox, native)
+
+    @classmethod
+    async def create(cls, sandbox: Any = None, **kwargs: Any) -> SandboxInstance:
+        return await cls._wrap(await asyncio.to_thread(SyncSandboxInstance.create, sandbox, **kwargs))
+
+    @classmethod
+    async def create_if_not_exists(cls, sandbox: Any = None, **kwargs: Any) -> SandboxInstance:
+        return await cls._wrap(await asyncio.to_thread(SyncSandboxInstance.create_if_not_exists, sandbox, **kwargs))
+
+    @classmethod
+    async def get(cls, sandbox_id: str, **kwargs: Any) -> SandboxInstance:
+        return await cls._wrap(await asyncio.to_thread(SyncSandboxInstance.get, sandbox_id, **kwargs))
+
+    async def delete(self) -> None:
+        await asyncio.to_thread(self._sandbox.delete)
+
+    def __getattr__(self, name: str) -> Any:
+        if self._native is not None:
+            return getattr(self._native, name)
+        return getattr(_AsyncComponent(self._sandbox), name)

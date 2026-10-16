@@ -72,6 +72,17 @@ async function testWeightedFallbackAndNonRetryableErrors(): Promise<void> {
     assert.equal((await routed.create()).provider, "blaxel");
     assert.equal(fallbackCreates, 1);
 
+    Math.random = () => 0.25;
+    const largeWeightsPath = await config(directory, {
+      version: 1,
+      existing: { strategy: "priority", order: ["blaxel", "arker"] },
+      create: { strategy: "weighted", weights: { blaxel: 1e308, arker: 1e308 } },
+    });
+    const largeWeights = createRoutedProvider([provider("blaxel"), provider("arker")], largeWeightsPath).instances!;
+    assert.equal((await largeWeights.create()).provider, "blaxel");
+    Math.random = () => 0.75;
+    assert.equal((await largeWeights.create()).provider, "arker");
+
     const auth = createRoutedProvider([
       provider("blaxel", { create: async () => { throw Object.assign(new Error("invalid API key"), { status: 401 }); } }),
       provider("arker", { create: async () => { throw new Error("must not run"); } }),

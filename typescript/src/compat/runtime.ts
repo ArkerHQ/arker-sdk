@@ -22,7 +22,7 @@ export function createCompatSdk(options: CreateCompatSdkOptions): CompatSdk {
   const routed = createRoutedProvider([
     ...(hasArker ? [createArkerComputeProvider(options.arker)] : []),
     options.fallbackProvider as any,
-  ], options.routerConfigPath);
+  ], options.routerConfigPath ?? globalThis.process?.env?.COMPUTESDK_ROUTER_CONFIG);
   return computeFactory({
     providers: [routed],
   });

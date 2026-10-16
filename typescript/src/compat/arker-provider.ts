@@ -166,7 +166,8 @@ class ArkerComputeSandbox implements SandboxInterface {
       runOptions.timeout = options.timeout === 0 ? 0 : Math.ceil(options.timeout / 1_000);
     }
 
-    const result = await this.vm.run(fullCommand, runOptions);
+    // Vendor exec calls start a fresh shell; Arker's default session persists.
+    const result = await this.vm.run(`(\n${fullCommand}\n)`, runOptions);
     if (result.type !== "completed") {
       throw new Error(`Arker run did not complete synchronously (type=${result.type}). runCommand requires a foreground command.`);
     }

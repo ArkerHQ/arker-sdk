@@ -45,6 +45,19 @@ def test_loads_same_versioned_schema_as_typescript(router_file: Path) -> None:
     assert config.create.weights == {"e2b": 90, "arker": 10}
 
 
+def test_rejects_boolean_schema_version(router_file: Path) -> None:
+    raw = json.loads(router_file.read_text())
+    raw["version"] = True
+    with pytest.raises(ValueError, match="unsupported router config version"):
+        RouterConfig.from_dict(raw)
+
+
+def test_large_weights_do_not_overflow() -> None:
+    weights = {"blaxel": 1e308, "arker": 1e308}
+    assert select_weighted_provider(weights, random_value=0.25) == "blaxel"
+    assert select_weighted_provider(weights, random_value=0.75) == "arker"
+
+
 def test_default_router_uses_native_only_without_arker_credentials(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ARKER_API_KEY", raising=False)

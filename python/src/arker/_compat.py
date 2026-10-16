@@ -161,7 +161,8 @@ def resolve_compat_path(path: str, default_directory: str) -> str:
 
 
 def run_command(vm: VM, command: str, *, timeout: int | None = None) -> CommandResult:
-    result = vm.run(command, timeout=timeout)
+    # Vendor exec calls start a fresh shell; Arker's default session persists.
+    result = vm.run(f"(\n{command}\n)", timeout=timeout)
     if not isinstance(result, CompletedRunResult):
         raise RuntimeError(f"Arker run did not complete synchronously (type={result.type}).")
     return CommandResult(

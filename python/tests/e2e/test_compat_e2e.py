@@ -13,7 +13,7 @@ import urllib.request
 
 import pytest
 
-from arker.blaxel import SandboxInstance as BlaxelSandbox
+from arker.blaxel import SyncSandboxInstance as BlaxelSandbox
 from arker.daytona import Daytona
 from arker.e2b import Sandbox as E2BSandbox
 from arker.modal import Sandbox as ModalSandbox

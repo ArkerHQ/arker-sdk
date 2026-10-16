@@ -47,7 +47,7 @@ class RouterConfig:
         unknown = set(raw) - {"version", "existing", "create", "cache"}
         if unknown:
             raise ValueError(f"router config has unknown field {sorted(unknown)[0]}")
-        if raw.get("version") != 1:
+        if type(raw.get("version")) is not int or raw.get("version") != 1:
             raise ValueError(f"unsupported router config version {raw.get('version')}")
         existing_raw = _mapping(raw.get("existing"), "existing")
         _reject_unknown(existing_raw, {"strategy", "order"}, "existing")
@@ -125,8 +125,10 @@ def load_router_config(path: str | Path = "computesdk_router.json") -> RouterCon
 
 def select_weighted_provider(weights: Mapping[str, float], *, random_value: float | None = None) -> str:
     sample = random.random() if random_value is None else random_value
-    point = min(max(sample, 0.0), math.nextafter(1.0, 0.0)) * sum(weights.values())
-    for provider, weight in weights.items():
+    scale = max(weights.values())
+    scaled = {provider: weight / scale for provider, weight in weights.items()}
+    point = min(max(sample, 0.0), math.nextafter(1.0, 0.0)) * sum(scaled.values())
+    for provider, weight in scaled.items():
         if point < weight:
             return provider
         point -= weight

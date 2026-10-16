@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 import types
@@ -11,7 +12,7 @@ import pytest
 
 import arker.computer as sdk
 from arker._compat import arker_source
-from arker.blaxel import SandboxInstance as BlaxelSandbox
+from arker.blaxel import SyncSandboxInstance as BlaxelSandbox
 from arker.daytona import Daytona
 from arker.e2b import Sandbox as E2BSandbox
 from arker.modal import Sandbox as ModalSandbox
@@ -194,10 +195,10 @@ def test_daytona_official_surface(monkeypatch) -> None:
 
     assert json.loads(t.calls[0]["body"])["source_vm_name"] == "catalog-template"
     first_run = json.loads(t.calls[1]["body"])
-    assert first_run["command"] == "export FOO=bar; cd /workspace && echo 'Hello, World!'"
+    assert first_run["command"] == "(\nexport FOO=bar; cd /workspace && echo 'Hello, World!'\n)"
     assert first_run["timeout"] == 7
     alias_run = json.loads(t.calls[2]["body"])
-    assert alias_run["command"] == "export ALIAS=yes; cd /workspace && echo 'Hello, World!'"
+    assert alias_run["command"] == "(\nexport ALIAS=yes; cd /workspace && echo 'Hello, World!'\n)"
     assert alias_run["timeout"] == 9
 
 
@@ -286,11 +287,11 @@ def test_e2b_official_surface(monkeypatch) -> None:
         sandbox.kill()
 
     run = json.loads(t.calls[1]["body"])
-    assert run["command"] == 'export FOO=bar; cd /workspace && echo "Hello from E2B Sandbox!"'
+    assert run["command"] == '(\nexport FOO=bar; cd /workspace && echo "Hello from E2B Sandbox!"\n)'
     assert run["timeout"] == 8
     background_run = json.loads(t.calls[2]["body"])
     assert background_run["command"] == (
-        "nohup sh -lc 'cd /home/user && python3 -m http.server 8080' > /dev/null 2>&1 &"
+        "(\nnohup sh -lc 'cd /home/user && python3 -m http.server 8080' > /dev/null 2>&1 &\n)"
     )
 
 
@@ -324,7 +325,7 @@ def test_modal_official_surface(monkeypatch) -> None:
         sandbox.terminate()
 
     run = json.loads(t.calls[1]["body"])
-    assert run["command"] == "export FOO=bar; cd /workspace && echo hello"
+    assert run["command"] == "(\nexport FOO=bar; cd /workspace && echo hello\n)"
     assert run["timeout"] == 2
 
 
@@ -365,6 +366,64 @@ def test_blaxel_native_surface_delegates_without_losing_provider_features() -> N
     assert sandbox.process.list() == ["pid-1"]
     assert sandbox.drives.list() == ["drive-1"]
     assert sandbox.snapshot("checkpoint") == "snapshot:checkpoint"
+
+
+def test_blaxel_typed_request_and_directory_attributes(monkeypatch) -> None:
+    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
+    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+
+    class TypedRequest:
+        def to_dict(self):
+            return {"command": "printf typed", "workingDir": "/tmp", "waitForCompletion": True, "timeout": 1500}
+
+    t = FakeTransport()
+    add_create_run_delete(t, "vm_blaxel_typed", "typed")
+    t.add_json(
+        lambda method, url: method == "POST" and url.endswith("/vm_blaxel_typed/runs"),
+        200,
+        completed("f\tprobe.txt\nd\tnested\n"),
+    )
+    with use_transport(t):
+        sandbox = BlaxelSandbox.create()
+        assert sandbox.process.exec(TypedRequest()).stdout == "typed"
+        listing = sandbox.fs.ls("/blaxel")
+        assert listing.path == "/blaxel"
+        assert listing.files[0].name == "probe.txt"
+        assert listing.files[0].path == "/blaxel/probe.txt"
+        assert listing.subdirectories[0].name == "nested"
+        with pytest.raises(TypeError, match="wait_for_completion=False"):
+            sandbox.process.exec({"command": "sleep 10", "waitForCompletion": False})
+        sandbox.delete()
+    wire = json.loads(t.calls[1]["body"])
+    assert wire["command"] == "(\ncd /tmp && printf typed\n)"
+    assert wire["timeout"] == 2
+
+
+def test_blaxel_native_typed_requests_are_passed_through() -> None:
+    request = object()
+    native = types.SimpleNamespace(process=types.SimpleNamespace(exec=lambda value: value))
+    sandbox = BlaxelSandbox(native=native)
+    assert sandbox.process.exec(request) is request
+
+
+def test_blaxel_async_surface_uses_shared_router(monkeypatch) -> None:
+    from arker.blaxel import SandboxInstance
+
+    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
+    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+    t = FakeTransport()
+    add_create_run_delete(t, "vm_blaxel_async", "async")
+
+    async def program():
+        sandbox = await SandboxInstance.create()
+        try:
+            assert (await sandbox.process.exec({"command": "printf async"})).stdout == "async"
+            assert sandbox.metadata.name == "vm_blaxel_async"
+        finally:
+            await sandbox.delete()
+
+    with use_transport(t):
+        asyncio.run(program())
 
 
 def test_unsupported_calls_fail_fast(monkeypatch) -> None:

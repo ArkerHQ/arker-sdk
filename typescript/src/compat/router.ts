@@ -129,7 +129,8 @@ export function parseRouterConfig(value: unknown, providers: Iterable<string>): 
 }
 
 function selectWeighted(weights: Record<string, number>): string {
-  const entries = Object.entries(weights);
+  const scale = Math.max(...Object.values(weights));
+  const entries = Object.entries(weights).map(([provider, weight]) => [provider, weight / scale] as const);
   let point = Math.min(Math.max(Math.random(), 0), 1 - Number.EPSILON)
     * entries.reduce((total, [, weight]) => total + weight, 0);
   for (const [provider, weight] of entries) {

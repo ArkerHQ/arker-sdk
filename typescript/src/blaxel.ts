@@ -1,7 +1,7 @@
 import { blaxel as createBlaxelProvider } from "@computesdk/blaxel";
 import { SandboxInstance as NativeBlaxelSandbox } from "@blaxel/core";
 
-import { guardUnsupported, resolveCompatPath, type UniversalSandbox } from "./compat/common.js";
+import { assertSupportedObjectKeys, guardUnsupported, resolveCompatPath, type UniversalSandbox } from "./compat/common.js";
 import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
 
@@ -32,8 +32,14 @@ export interface BlaxelCreateCallOptions extends BlaxelCompatConfig {
   timeout?: number;
 }
 
+type BlaxelProcessRequest = Omit<Parameters<NativeBlaxelSandbox["process"]["exec"]>[0], "command"> & {
+  command: string | string[];
+  working_dir?: string;
+  envs?: Record<string, string>;
+};
+
 type BlaxelCompatProcess = Omit<NativeBlaxelSandbox["process"], "exec"> & {
-  exec(request: string | { command: string | string[]; workingDir?: string; working_dir?: string; env?: Record<string, string>; envs?: Record<string, string>; timeout?: number }): Promise<any>;
+  exec(request: string | BlaxelProcessRequest): Promise<any>;
 };
 
 type BlaxelCompatFileSystem = Omit<NativeBlaxelSandbox["fs"], "write" | "mkdir" | "rm"> & {
@@ -105,6 +111,10 @@ export class SandboxInstance {
     this.process = (native?.process ?? {
       exec: async (request) => {
         const value = typeof request === "string" ? { command: request } : request;
+        assertSupportedObjectKeys(value, ["command", "workingDir", "working_dir", "env", "envs", "timeout", "waitForCompletion"], "blaxel", "process.exec");
+        if (value.waitForCompletion === false) {
+          throw new Error("Arker process.exec does not support waitForCompletion=false");
+        }
         const command = Array.isArray(value.command)
           ? value.command.map((part) => `'${part.replaceAll("'", "'\\''")}'`).join(" ")
           : value.command;
