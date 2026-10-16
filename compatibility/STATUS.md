@@ -24,6 +24,12 @@ observation without killing the command, and process kill. Local protocol tests
 also cover execution timeout, duplicate-name rejection, nonzero exit, callbacks,
 and cancellation. These local tests do not grant differential coverage.
 
+A separate live cross-language program passed on native Blaxel, the shim on
+Blaxel, and the shim on Arker. It verifies that Python and TypeScript can control
+the same process in both directions, keep the same PID, and share the persisted
+provider-ownership cache. It is additional validation, not an increase in the
+instrumented API counts above.
+
 ## Open release requirements
 
 - Remove the guest process agent's Python 3 dependency or provide an

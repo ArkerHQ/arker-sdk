@@ -4,6 +4,7 @@ import json
 import multiprocessing
 import threading
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -68,6 +69,68 @@ def test_lookup_does_not_hide_http_failures_containing_not_found(status) -> None
 
     with pytest.raises(RuntimeError, match="API key not found"):
         get_or_none(fail)
+
+
+@pytest.mark.parametrize(
+    "native,identifier",
+    [
+        (types.SimpleNamespace(metadata=types.SimpleNamespace(name="blaxel-name")), "blaxel-name"),
+        (types.SimpleNamespace(object_id="modal-id"), "modal-id"),
+    ],
+)
+def test_creation_caches_native_identifier_shapes(tmp_path, native, identifier):
+    path = tmp_path / "router.json"
+    cache_path = tmp_path / "cache.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "existing": {"strategy": "priority", "order": ["blaxel", "arker"]},
+                "create": {"strategy": "priority", "order": ["blaxel", "arker"]},
+                "cache": {"path": str(cache_path)},
+            }
+        )
+    )
+    routed_create("blaxel", {"router_config_path": str(path)}, {"blaxel": lambda: native, "arker": lambda: None})
+    assert JsonRouteCache(cache_path).get(identifier) == "blaxel"
+
+
+def test_successful_creation_never_falls_through_on_metadata_failure(tmp_path):
+    class Created:
+        @property
+        def id(self):
+            raise RuntimeError("metadata unavailable")
+
+    path = tmp_path / "router.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "existing": {"strategy": "priority", "order": ["blaxel", "arker"]},
+                "create": {"strategy": "priority", "order": ["blaxel", "arker"]},
+            }
+        )
+    )
+    created = Created()
+
+    def duplicate():
+        raise AssertionError("must not create another sandbox")
+
+    provider, returned = routed_create(
+        "blaxel", {"router_config_path": str(path)}, {"blaxel": lambda: created, "arker": duplicate}
+    )
+    assert provider == "blaxel"
+    assert returned is created
+
+
+def test_cache_lru_is_stable_when_clock_does_not_advance(tmp_path):
+    cache = JsonRouteCache(tmp_path / "cache.json", max_entries=2, now=lambda: 0)
+    cache.set("old", "arker")
+    cache.set("cold", "blaxel")
+    assert cache.get("old") == "arker"
+    cache.set("new", "arker")
+    assert cache.get("cold") is None
+    assert cache.get("old") == "arker"
 
 
 def test_default_router_uses_native_only_without_arker_credentials(tmp_path: Path, monkeypatch) -> None:

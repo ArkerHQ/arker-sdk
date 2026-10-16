@@ -96,6 +96,13 @@ async function testWeightedFallbackAndNonRetryableErrors(): Promise<void> {
     ]).instances!;
     await assert.rejects(ambiguous.create(), /outcome is unknown/);
     assert.equal(duplicateCreates, 0, "ambiguous creation outcomes must never fall through and create a duplicate");
+
+    const created = { get instanceId(): string { throw new Error("metadata unavailable"); } };
+    const metadataFailure = createRoutedProvider([
+      provider("blaxel", { create: async () => created }),
+      provider("arker", { create: async () => { throw new Error("must not create another sandbox"); } }),
+    ]).instances!;
+    assert.equal(await metadataFailure.create(), created);
   } finally {
     Math.random = originalRandom;
   }
@@ -151,11 +158,65 @@ async function testConfigAndCacheValidation(): Promise<void> {
   assert.equal(await cache.get("hot"), null);
   assert.equal(await cache.get("old"), "blaxel");
   assert.equal(await cache.get("new"), "arker");
+
+  const sameClock = new JsonRouteCache(join(directory, "same-clock.json"), 2, 4096, () => 0);
+  await sameClock.set("old", "arker");
+  await sameClock.set("cold", "blaxel");
+  assert.equal(await sameClock.get("old"), "arker");
+  await sameClock.set("new", "arker");
+  assert.equal(await sameClock.get("cold"), null);
+  assert.equal(await sameClock.get("old"), "arker");
+}
+
+async function testMemoryCacheIsBoundedAndPromotesReads(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "arker-memory-cache-"));
+  const path = await config(directory, {
+    version: 1,
+    existing: { strategy: "priority", order: ["arker", "blaxel"] },
+    create: { strategy: "priority", order: ["blaxel"] },
+    cache: { maxEntries: 2, maxBytes: 4096 },
+  });
+  const ids = ["old", "cold", "new"];
+  let misses = 0;
+  const routed = createRoutedProvider([
+    provider("arker", { getById: async () => { misses += 1; return null; } }),
+    provider("blaxel", {
+      create: async () => sandbox(ids.shift()!, "blaxel"),
+      getById: async (id) => sandbox(id, "blaxel"),
+    }),
+  ], path).instances!;
+  await routed.create();
+  await routed.create();
+  await routed.getById("old");
+  assert.equal(misses, 0);
+  await routed.create();
+  await routed.getById("cold");
+  assert.equal(misses, 1, "least-recently-used ownership must be evicted without an unbounded shadow map");
+}
+
+async function testDestroyRevalidatesStaleOwnership(): Promise<void> {
+  let destroyed = "";
+  const routed = createRoutedProvider([
+    provider("blaxel", {
+      create: async () => sandbox("moved", "blaxel"),
+      getById: async () => null,
+      destroy: async () => { destroyed = "wrong-provider"; },
+    }),
+    provider("arker", {
+      getById: async (id) => sandbox(id, "arker"),
+      destroy: async () => { destroyed = "arker"; },
+    }),
+  ]).instances!;
+  await routed.create();
+  await routed.destroy("moved");
+  assert.equal(destroyed, "arker");
 }
 
 await testPriorityAndRaceRouting();
 await testWeightedFallbackAndNonRetryableErrors();
 await testPersistentCacheAndDestroyOwnership();
 await testConfigAndCacheValidation();
+await testMemoryCacheIsBoundedAndPromotesReads();
+await testDestroyRevalidatesStaleOwnership();
 
 console.log("PASS compat router");

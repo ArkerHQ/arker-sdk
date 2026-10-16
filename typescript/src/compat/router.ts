@@ -142,9 +142,30 @@ function selectWeighted(weights: Record<string, number>): string {
 
 class MemoryRouteCache implements RouteCache {
   private readonly entries = new Map<string, string>();
-  async get(id: string) { return this.entries.get(id) ?? null; }
-  async set(id: string, provider: string) { this.entries.set(id, provider); }
-  async delete(id: string) { this.entries.delete(id); }
+  private bytes = 0;
+  constructor(private readonly maxEntries = DEFAULT_CACHE_ENTRIES, private readonly maxBytes = DEFAULT_CACHE_BYTES) {}
+  private size(id: string, provider: string): number { return Buffer.byteLength(JSON.stringify([id, provider])); }
+  async get(id: string) {
+    const provider = this.entries.get(id);
+    if (provider === undefined) return null;
+    this.entries.delete(id);
+    this.entries.set(id, provider);
+    return provider;
+  }
+  async set(id: string, provider: string) {
+    this.remove(id);
+    this.entries.set(id, provider);
+    this.bytes += this.size(id, provider);
+    while (this.entries.size > this.maxEntries || this.bytes > this.maxBytes) {
+      this.remove(this.entries.keys().next().value!);
+    }
+  }
+  private remove(id: string) {
+    const provider = this.entries.get(id);
+    if (provider !== undefined) this.bytes -= this.size(id, provider);
+    this.entries.delete(id);
+  }
+  async delete(id: string) { this.remove(id); }
 }
 
 export class JsonRouteCache implements RouteCache {
@@ -220,12 +241,17 @@ export class JsonRouteCache implements RouteCache {
     return this.locked((payload) => {
       const entry = payload.entries[id];
       if (!entry) return null;
-      entry.accessedAt = this.now();
+      entry.accessedAt = this.nextAccess(payload);
       return entry.provider;
     });
   }
   async set(id: string, provider: string) {
-    await this.locked((payload) => { payload.entries[id] = { provider, accessedAt: this.now() }; });
+    await this.locked((payload) => { payload.entries[id] = { provider, accessedAt: this.nextAccess(payload) }; });
+  }
+  private nextAccess(payload: CachePayload): number {
+    let latest = this.now();
+    for (const entry of Object.values(payload.entries)) latest = Math.max(latest, entry.accessedAt + 1);
+    return latest;
   }
   async delete(id: string) {
     await this.locked((payload) => { delete payload.entries[id]; });
@@ -268,14 +294,15 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
       create: { strategy: "priority", order: providers.map((provider) => provider.name!) },
     });
   const configured = ready.then((router) => {
-    if (router.cache?.path) cache = new JsonRouteCache(router.cache.path, router.cache.maxEntries, router.cache.maxBytes);
+    cache = router.cache?.path
+      ? new JsonRouteCache(router.cache.path, router.cache.maxEntries, router.cache.maxBytes)
+      : new MemoryRouteCache(router.cache?.maxEntries, router.cache?.maxBytes);
     return router;
   });
-  const owned = new Map<string, Provider>();
   const remember = async (instance: any, provider: Provider) => {
-    const id = instanceId(instance);
+    let id: string | undefined;
+    try { id = instanceId(instance); } catch { return instance; }
     if (id) {
-      owned.set(id, provider);
       await cache.set(id, provider.name!).catch(() => undefined);
     }
     return instance;
@@ -355,10 +382,9 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
       },
       async getById(id: string) { return (await find(id))?.instance ?? null; },
       async destroy(id: string) {
-        const known = owned.get(id) ?? (await find(id))?.provider;
+        const known = (await find(id))?.provider;
         if (!known) return;
         await manager(known).destroy(id);
-        owned.delete(id);
         await cache.delete(id).catch(() => undefined);
       },
     },

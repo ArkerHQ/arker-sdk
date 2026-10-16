@@ -219,20 +219,24 @@ class JsonRouteCache:
             with suppress(FileNotFoundError):
                 os.unlink(temporary)
 
+    def _next_access(self, payload):
+        latest = max((entry["accessedAt"] for entry in payload["entries"].values()), default=-1)
+        return max(self.now(), latest + 1)
+
     def get(self, identifier: str) -> str | None:
         with self._locked():
             payload = self._read()
             entry = payload["entries"].get(identifier)
             if not isinstance(entry, dict) or not isinstance(entry.get("provider"), str):
                 return None
-            entry["accessedAt"] = self.now()
+            entry["accessedAt"] = self._next_access(payload)
             self._write(payload)
             return entry["provider"]
 
     def set(self, identifier: str, provider: str) -> None:
         with self._locked():
             payload = self._read()
-            payload["entries"][identifier] = {"provider": provider, "accessedAt": self.now()}
+            payload["entries"][identifier] = {"provider": provider, "accessedAt": self._next_access(payload)}
             self._write(payload)
 
     def delete(self, identifier: str) -> None:

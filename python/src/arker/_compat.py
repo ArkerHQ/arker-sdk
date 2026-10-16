@@ -253,6 +253,13 @@ def _cache_set(cache: JsonRouteCache | None, identifier: str, provider: str) -> 
             cache.set(identifier, provider)
 
 
+def _instance_identifiers(instance: Any) -> list[str]:
+    values = [getattr(instance, key, None) for key in ("id", "sandbox_id", "object_id", "name")]
+    metadata = getattr(instance, "metadata", None)
+    values.append(metadata.get("name") if isinstance(metadata, dict) else getattr(metadata, "name", None))
+    return list(dict.fromkeys(value for value in values if isinstance(value, str) and value))
+
+
 def _is_retryable(error: Exception) -> bool:
     if isinstance(error, UnsupportedCompatibilityOption):
         return False
@@ -308,15 +315,18 @@ def routed_create(
     for name in order:
         try:
             result = creators[name]()
-            identifier = getattr(result, "id", getattr(result, "sandbox_id", None))
-            cache = _cache(router)
-            if identifier:
-                _cache_set(cache, str(identifier), name)
-            return name, result
         except Exception as error:
             last_error = error
             if not _is_retryable(error):
                 raise
+            continue
+        # A cache/metadata failure after successful creation must never send
+        # the same request to a second provider.
+        with suppress(Exception):
+            cache = _cache(router)
+            for identifier in _instance_identifiers(result):
+                _cache_set(cache, identifier, name)
+        return name, result
     if last_error:
         raise last_error
     raise ValueError(f"router config contains neither arker nor {native_provider}")
