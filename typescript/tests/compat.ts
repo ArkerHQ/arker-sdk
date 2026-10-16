@@ -16,15 +16,18 @@ type CapturedComputeConfig = {
 class FakeSandbox implements SandboxInterface {
   readonly instanceId: string;
   readonly sandboxId: string;
-  readonly provider = "arker";
+  readonly provider: string;
   readonly runCalls: Array<{ command: string; options?: RunCommandOptions }> = [];
   readonly createOptions: unknown[] = [];
   destroyed = false;
 
-  constructor(sandboxId = "fake-arker-vm") {
+  constructor(sandboxId = "fake-arker-vm", provider = "arker", private readonly native?: object) {
     this.sandboxId = sandboxId;
     this.instanceId = sandboxId;
+    this.provider = provider;
   }
+
+  getInstance(): object { return this.native ?? this; }
 
   async runCommand(command: string, options?: RunCommandOptions): Promise<CommandResult> {
     this.runCalls.push({ command, options });
@@ -144,6 +147,23 @@ async function testDaytonaSurface(): Promise<void> {
     );
   } finally {
     fake.cleanup();
+  }
+}
+
+async function testNativeProviderExtensionsAreDelegated(): Promise<void> {
+  for (const [provider, create, extension] of [
+    ["e2b", async () => E2BSandbox.create(), "getHost"],
+    ["daytona", async () => new Daytona().create(), "getPreviewLink"],
+    ["modal", async () => new ModalClient().sandboxes.create(), "tunnels"],
+  ] as const) {
+    const native = { [extension]: function () { return `${provider}:${this === native}`; } };
+    const fake = installFakeCompute(new FakeSandbox(`${provider}-box`, provider, native));
+    try {
+      const sandbox = await create() as any;
+      assert.equal(sandbox[extension](), `${provider}:true`);
+    } finally {
+      fake.cleanup();
+    }
   }
 }
 
@@ -291,6 +311,7 @@ async function testInternalArkerProvider(): Promise<void> {
       created_at: "2026-01-01T00:00:00Z",
       public: false,
       state: "idle",
+      hostname: "vm-created.aws-us-east-1.arker.app",
       sessions: [],
       tunnels: [],
     },
@@ -325,6 +346,10 @@ async function testInternalArkerProvider(): Promise<void> {
   assert.equal(sandbox.sandboxId, "vm_created");
   assert.equal((JSON.parse(fetch.calls[0]!.body!) as Record<string, unknown>).source_vm_name, "catalog-template");
   assert.equal((JSON.parse(fetch.calls[0]!.body!) as Record<string, unknown>).name, "created");
+  assert.equal(await sandbox.getUrl({ port: 8080 }), "https://vm-created.aws-us-east-1.arker.app");
+  assert.equal(await sandbox.getUrl({ port: 3000 }), "https://vm-created-3000.aws-us-east-1.arker.app");
+  await assert.rejects(() => sandbox.getUrl({ port: 3000, protocol: "http" }), /use HTTPS/);
+  await assert.rejects(() => sandbox.getUrl({ port: 0 }), /port must be an integer/);
 
   const missing = await provider.sandbox.getById("missing");
   assert.equal(missing, null);
@@ -450,6 +475,7 @@ async function testInternalArkerProviderRequiresSource(): Promise<void> {
 }
 
 await testDaytonaSurface();
+await testNativeProviderExtensionsAreDelegated();
 await testDaytonaGetNotFound();
 await testE2BSurface();
 await testModalSurface();

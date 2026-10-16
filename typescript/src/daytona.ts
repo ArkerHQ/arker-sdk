@@ -1,6 +1,6 @@
 import { daytona as createDaytonaProvider } from "@computesdk/daytona";
 
-import { assertSupportedObjectKeys, guardUnsupported, type UniversalSandbox } from "./compat/common.js";
+import { assertSupportedObjectKeys, guardUnsupported, nativeInstance, type UniversalSandbox } from "./compat/common.js";
 import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
 
@@ -100,13 +100,13 @@ export class Daytona {
       ...(typeof source.domainAllowList === "string" ? { domainAllowList: source.domainAllowList } : {}),
     });
     if (box.provider === "arker") await box.filesystem.mkdir("/home/daytona");
-    return guardUnsupported(new Sandbox(box), "daytona");
+    return guardUnsupported(new Sandbox(box), "daytona", nativeInstance(box));
   }
 
   async get(sandboxId: string): Promise<Sandbox> {
     const box = await this.#sdk.sandbox.getById(sandboxId);
     if (!box) throw new Error(`Sandbox ${sandboxId} not found`);
-    return guardUnsupported(new Sandbox(box), "daytona");
+    return guardUnsupported(new Sandbox(box), "daytona", nativeInstance(box));
   }
 
   async delete(sandbox: string | Sandbox): Promise<void> {

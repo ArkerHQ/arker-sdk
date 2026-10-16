@@ -6,6 +6,7 @@ import {
   assertSupportedObjectKeys,
   guardUnsupported,
   isStringRecord,
+  nativeInstance,
   type UniversalSandbox,
 } from "./compat/common.js";
 import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
@@ -165,12 +166,12 @@ export class ModalClient {
         ...(Array.isArray(options?.outboundCidrAllowlist) ? { outboundCidrAllowlist: options.outboundCidrAllowlist } : {}),
         ...(Array.isArray(options?.outboundDomainAllowlist) ? { outboundDomainAllowlist: options.outboundDomainAllowlist } : {}),
       });
-      return guardUnsupported(new Sandbox(box), "modal");
+      return guardUnsupported(new Sandbox(box), "modal", nativeInstance(box));
     },
     fromId: async (sandboxId: string): Promise<Sandbox> => {
       const box = await this.#sdk.sandbox.getById(sandboxId);
       if (!box) throw new Error(`Sandbox ${sandboxId} not found`);
-      return guardUnsupported(new Sandbox(box), "modal");
+      return guardUnsupported(new Sandbox(box), "modal", nativeInstance(box));
     },
   };
 }

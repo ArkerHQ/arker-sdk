@@ -2,6 +2,13 @@ import type { CommandResult, RunCommandOptions, SandboxInterface } from "compute
 
 export type UniversalSandbox = SandboxInterface;
 
+export function nativeInstance(box: UniversalSandbox): object | undefined {
+  if (box.provider === "arker") return undefined;
+  const getter = (box as UniversalSandbox & { getInstance?: () => unknown }).getInstance;
+  const native = typeof getter === "function" ? getter.call(box) : undefined;
+  return native && typeof native === "object" ? native : undefined;
+}
+
 export interface CreateOptions {
   timeout?: number;
   timeoutMs?: number;

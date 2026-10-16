@@ -20,7 +20,7 @@ await writeFile(routerConfigPath, JSON.stringify({
 
 const name = `arker-blaxel-${crypto.randomUUID().slice(0, 12)}`;
 const sandbox = await SandboxInstance.createIfNotExists(
-  { name, image: "blaxel/base-image:latest", memory: 4096, region: "us-pdx-1", labels: { suite: "arker-shim" } },
+  { name, image: "blaxel/base-image:latest", memory: 4096, region: "us-pdx-1", ports: [{ target: 8080, protocol: "HTTP" }], labels: { suite: "arker-shim" } },
   { timeout: 50, routerConfigPath },
 );
 try {
@@ -36,6 +36,23 @@ try {
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /\/blaxel/);
   assert.match(result.stdout, /native-ok/);
+
+  await sandbox.process.exec({ command: "python3 -m http.server 8080 --bind 0.0.0.0", waitForCompletion: false } as any);
+  const inboundDeadline = Date.now() + 120_000;
+  let inboundReached = false;
+  while (Date.now() < inboundDeadline) {
+    try {
+      const response = await sandbox.fetch(8080, "/", { signal: AbortSignal.timeout(10_000) });
+      if (response.ok) {
+        inboundReached = true;
+        break;
+      }
+    } catch {
+      // The proxy can become ready shortly after the guest listener.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  assert.equal(inboundReached, true, "Blaxel native fetch did not reach the background daemon");
 
   await sandbox.fs.mkdir("/blaxel/arker-shim");
   await sandbox.fs.write("/blaxel/arker-shim/probe.txt", "persistent");

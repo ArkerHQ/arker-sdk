@@ -4,6 +4,7 @@ import type { RunCommandOptions } from "computesdk";
 import {
   assertSupportedObjectKeys,
   guardUnsupported,
+  nativeInstance,
   resolveTimeout,
   type CreateOptions,
   type UniversalSandbox,
@@ -91,14 +92,14 @@ export class Sandbox {
       ...((opts as any)?.metadata ? { metadata: (opts as any).metadata } : {}),
       ...((opts as any)?.allowInternetAccess !== undefined ? { allowInternetAccess: (opts as any).allowInternetAccess } : {}),
     });
-    return guardUnsupported(new Sandbox(box), "e2b");
+    return guardUnsupported(new Sandbox(box), "e2b", nativeInstance(box));
   }
 
   static async connect(sandboxId: string, opts?: Pick<CreateOptions, "routerConfigPath">): Promise<Sandbox> {
     assertSupportedObjectKeys(opts, ["routerConfigPath"], "e2b", "Sandbox.connect");
     const box = await sdk(opts?.routerConfigPath).sandbox.getById(sandboxId);
     if (!box) throw new Error(`Sandbox ${sandboxId} not found`);
-    return guardUnsupported(new Sandbox(box), "e2b");
+    return guardUnsupported(new Sandbox(box), "e2b", nativeInstance(box));
   }
 
   async kill(): Promise<void> {

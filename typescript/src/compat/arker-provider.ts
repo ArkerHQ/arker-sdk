@@ -9,6 +9,7 @@ import type {
   StartProcessOptions,
   ProcessHandle,
 } from "computesdk";
+import { randomUUID } from "node:crypto";
 
 import {
   Arker,
@@ -194,24 +195,38 @@ class ArkerComputeSandbox implements SandboxInterface {
       fullCommand = `${envPrefix} ${fullCommand}`;
     }
     if (options?.cwd) fullCommand = `cd ${shellQuote(options.cwd)} && ${fullCommand}`;
-    const background = await this.vm.run(fullCommand, { time_to_background: 0 });
-    const runId = background.runId;
+    const jobId = randomUUID();
+    const jobDirectory = `/tmp/arker-computesdk/${jobId}`;
+    const stderrMarker = `__ARKER_STDERR_${jobId}__`;
+    const launcher =
+      `mkdir -p ${shellQuote(jobDirectory)}; ` +
+      `nohup sh -lc ${shellQuote(`( ${fullCommand}\n); code=$?; printf '%s' "$code" > ${shellQuote(`${jobDirectory}/exit`)}`)} ` +
+      `> ${shellQuote(`${jobDirectory}/stdout`)} 2> ${shellQuote(`${jobDirectory}/stderr`)} < /dev/null & ` +
+      `printf '%s' "$!" > ${shellQuote(`${jobDirectory}/pid`)}`;
+    const launched = await this.runCommand(launcher);
+    if (launched.exitCode !== 0) throw new Error(`Failed to start Arker process: ${launched.stderr || `exit ${launched.exitCode}`}`);
 
     const snapshot = async () => {
-      const run = await this.vm.getRun(runId) as any;
-      const running = run.state === "running" || run.status === "running";
+      const result = await this.runCommand(
+        `d=${shellQuote(jobDirectory)}; ` +
+        `if [ -f "$d/exit" ]; then state=exited; code=$(cat "$d/exit"); else state=running; code=; fi; ` +
+        `printf '%s\\n%s\\n' "$state" "$code"; cat "$d/stdout" 2>/dev/null; printf '\\n${stderrMarker}\\n'; cat "$d/stderr" 2>/dev/null`,
+      );
+      const [header, stderr = ""] = result.stdout.split(`\n${stderrMarker}\n`, 2);
+      const [state = "running", code = "", ...stdoutLines] = header.split("\n");
+      const running = state === "running";
       return {
         status: running ? "running" as const : "exited" as const,
-        exitCode: running ? null : (run.exitCode ?? run.exit_code ?? null),
+        exitCode: running ? null : Number.parseInt(code, 10),
         signal: null,
-        stdout: run.stdout ?? "",
-        stderr: run.stderr ?? "",
+        stdout: stdoutLines.join("\n"),
+        stderr,
       };
     };
 
     return {
       pid: null,
-      jobId: runId,
+      jobId,
       write: async () => { throw new Error("Process stdin was not enabled"); },
       closeStdin: async () => undefined,
       status: snapshot,
@@ -225,11 +240,16 @@ class ArkerComputeSandbox implements SandboxInterface {
             options?.onExit?.({ exitCode: state.exitCode, signal: null });
             return { ...state, exitCode: state.exitCode ?? -1, durationMs: 0 };
           }
-          if (deadline !== undefined && Date.now() >= deadline) throw new Error(`daemond: wait timed out for ${runId}`);
+          if (deadline !== undefined && Date.now() >= deadline) throw new Error(`daemond: wait timed out for ${jobId}`);
           await new Promise((resolve) => setTimeout(resolve, options?.pollIntervalMs ?? 500));
         }
       },
-      kill: async () => { await this.vm.cancelRun(runId); },
+      kill: async () => {
+        const result = await this.runCommand(
+          `d=${shellQuote(jobDirectory)}; pid=$(cat "$d/pid"); kill "$pid" 2>/dev/null || true; printf 143 > "$d/exit"`,
+        );
+        if (result.exitCode !== 0) throw new Error(`Failed to kill Arker process: ${result.stderr || `exit ${result.exitCode}`}`);
+      },
     };
   }
 
@@ -242,21 +262,28 @@ class ArkerComputeSandbox implements SandboxInterface {
       timeout: 0,
       metadata: {
         name: this.vm.name,
+        hostname: this.vm.hostname,
         region: this.vm.region,
         provider: this.vm.provider,
       },
     };
   }
 
-  async getUrl(_options: { port: number; protocol?: string }): Promise<string> {
-    // arkerd does not expose tunnel/ingress URLs; the public VM API has no
-    // tunnels surface. Inbound reachability is configured via the VM network
-    // settings instead.
-    throw new ArkerError(
-      "unsupported_operation",
-      "getUrl is not supported: the Arker VM API does not expose tunnel URLs",
-      422,
-    );
+  async getUrl(options: { port: number; protocol?: string }): Promise<string> {
+    if (options.protocol !== undefined && options.protocol !== "https") {
+      throw new ArkerError("unsupported_operation", "Arker inbound services use HTTPS", 422);
+    }
+    if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65_535) {
+      throw new ArkerError("invalid_request", "port must be an integer from 1 through 65535", 422);
+    }
+    const vm = this.vm.hostname ? this.vm : await this.vm.refresh();
+    if (!vm.hostname) {
+      throw new ArkerError("unsupported_operation", "Arker did not return an inbound hostname for this VM", 422);
+    }
+    const hostname = options.port === 8080
+      ? vm.hostname
+      : vm.hostname.replace(/^([^.]+)/, `$1-${options.port}`);
+    return `https://${hostname}`;
   }
 
   async destroy(): Promise<void> {

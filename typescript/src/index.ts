@@ -1033,6 +1033,7 @@ export class VM {
   readonly vm_id?: Vm["vm_id"];
   readonly pool_id?: Vm["pool_id"];
   readonly name?: Vm["name"];
+  readonly hostname?: Vm["hostname"];
   readonly state?: Vm["state"];
   readonly owner_org_id?: Vm["owner_org_id"];
   readonly created_at?: Vm["created_at"];
@@ -1049,6 +1050,7 @@ export class VM {
   readonly root_source_vm_name?: Vm["root_source_vm_name"];
   readonly worker_id?: string | null;
   readonly sessions?: Vm["sessions"];
+  readonly policies?: Vm["policies"];
 
   constructor(client: Arker, vmId: string, baseUrl = client._baseUrlFor(vmId), data?: Vm) {
     this._client = client;
