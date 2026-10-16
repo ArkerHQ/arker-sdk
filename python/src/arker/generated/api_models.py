@@ -66,7 +66,7 @@ ErrorCode: TypeAlias = Literal[
 VmState: TypeAlias = Literal['idle', 'running']
 
 
-SessionState: TypeAlias = Literal['idle', 'running']
+SessionState: TypeAlias = Literal['idle', 'pending', 'running']
 
 
 RunState: TypeAlias = Literal['pending', 'running', 'completed', 'failed', 'cancelled']
@@ -88,13 +88,13 @@ class PolicyMatch:
     headers: dict[str, list[str]] | None = None
     query_params: dict[str, list[str]] | None = None
     body_contains: list[str] | None = None
+    vm_state: Literal['idle', 'running'] | None = None
 
 
 @dataclass(frozen=True)
-class ResourceFactors:
-    vcpu: float | None = None
-    memory_mib: float | None = None
-    disk_mib: float | None = None
+class ScaleAction:
+    suspend: bool | None = False
+    wake: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -116,16 +116,6 @@ class Gate:
     headers: dict[str, str] | None = None
     body: Any | None = None
     deny_on_timeout: bool | None = True
-    timeout_ms: int | None = None
-
-
-@dataclass(frozen=True)
-class Webhook:
-    host: str
-    path: str | None = None
-    method: str | None = None
-    headers: dict[str, str] | None = None
-    body: Any | None = None
     timeout_ms: int | None = None
 
 
@@ -516,16 +506,15 @@ OpenApiOperationId: TypeAlias = Literal[
     'getPool',
     'updatePool',
     'deletePool',
-    'getPoolUsage',
-    'listPoolJoinKeys',
-    'createPoolJoinKey',
-    'deletePoolJoinKey',
     'listPoolWorkers',
     'heartbeatWorker',
     'openWorkerTunnel',
     'putWorkerVm',
     'deleteWorkerVm',
     'putWorkerRun',
+    'listApiKeys',
+    'createApiKey',
+    'revokeApiKey',
 ]
 
 
@@ -568,7 +557,6 @@ ResourceKind: TypeAlias = Literal[
     'resource',
     'pool',
     'pool_name',
-    'join_key',
     'worker',
 ]
 
@@ -844,12 +832,6 @@ class PoolWorkerLimit:
 
 
 @dataclass(frozen=True)
-class PoolJoinKeyLimit:
-    metric: Literal['pool_join_keys']
-    unit: Literal['join_keys']
-
-
-@dataclass(frozen=True)
 class BudgetLimit:
     metric: Literal['budget']
     unit: Literal['minor_currency_units']
@@ -866,7 +848,6 @@ LimitDescriptor: TypeAlias = (
     | PtySessionLimit
     | PoolCountLimit
     | PoolWorkerLimit
-    | PoolJoinKeyLimit
     | BudgetLimit
 )
 
@@ -1427,7 +1408,7 @@ class PoolCommitment:
     ends_at: str
 
 
-PoolState: TypeAlias = Literal['provisioning', 'ready', 'deleting']
+PoolState: TypeAlias = Literal['creating', 'active', 'deleting']
 
 
 PoolIsolation: TypeAlias = Literal['vms']
@@ -1439,8 +1420,11 @@ PoolPlatform: TypeAlias = str
 PoolName: TypeAlias = str | None
 
 
+ByocProvider: TypeAlias = Literal['aws']
+
+
 @dataclass(frozen=True)
-class PoolAws:
+class PoolByoc:
     account_id: str
     subnet_ids: list[str]
     security_group_ids: list[str]
@@ -1451,7 +1435,7 @@ class PoolAws:
 
 
 @dataclass(frozen=True)
-class CreatePoolAws:
+class CreatePoolByoc:
     account_id: str
     subnet_ids: list[str]
     security_group_ids: list[str] | None = None
@@ -1459,34 +1443,38 @@ class CreatePoolAws:
 
 
 @dataclass(frozen=True)
-class ArkerPool:
+class ManagedPool:
     pool_id: str
-    type: Literal['arker']
+    type: Literal['managed']
     name: PoolName
     region: str
+    provider: Provider
     platform: PoolPlatform
     state: PoolState
-    state_detail: str | None
+    reason: str | None
     created_at: str
     resources: PoolResources
+    resources_reserved: PoolResources
+    resources_provisioned: PoolResources
     commitments: list[PoolCommitment]
 
 
 @dataclass(frozen=True)
-class AwsPool:
+class ByocPool:
     pool_id: str
-    type: Literal['aws']
+    type: Literal['byoc']
     name: PoolName
     region: str
+    provider: ByocProvider
     platform: PoolPlatform
     state: PoolState
-    state_detail: str | None
+    reason: str | None
     created_at: str
     resources: PoolResources
-    commitments: list[PoolCommitment]
+    resources_reserved: PoolResources
+    resources_provisioned: PoolResources
     isolation: list[PoolIsolation]
-    capacity: PoolResources
-    aws: PoolAws
+    byoc: PoolByoc
 
 
 @dataclass(frozen=True)
@@ -1495,14 +1483,16 @@ class SelfHostedPool:
     type: Literal['self_hosted']
     name: PoolName
     region: str
-    platform: PoolPlatform
+    platform: PoolPlatform | None
     state: PoolState
-    state_detail: str | None
+    reason: str | None
     created_at: str
-    capacity: PoolResources
+    resources_reserved: PoolResources
+    resources_provisioned: PoolResources
+    resources: PoolResources | None = None
 
 
-Pool: TypeAlias = ArkerPool | AwsPool | SelfHostedPool
+Pool: TypeAlias = ManagedPool | ByocPool | SelfHostedPool
 
 
 @dataclass(frozen=True)
@@ -1512,15 +1502,8 @@ class ListPoolsResponse:
 
 
 @dataclass(frozen=True)
-class PoolUsage:
-    pool_id: str
-    resources_allocated: PoolResources
-    allocation_observed_at: str
-
-
-@dataclass(frozen=True)
-class CreateArkerPoolRequest:
-    type: Literal['arker']
+class CreateManagedPoolRequest:
+    type: Literal['managed']
     platform: PoolPlatform
     resources: PoolResources
     name: str | None = None
@@ -1528,25 +1511,25 @@ class CreateArkerPoolRequest:
 
 
 @dataclass(frozen=True)
-class CreateAwsPoolRequest:
-    type: Literal['aws']
+class CreateByocPoolRequest:
+    type: Literal['byoc']
+    provider: ByocProvider
     platform: PoolPlatform
     resources: PoolResources
-    aws: CreatePoolAws
+    byoc: CreatePoolByoc
     name: str | None = None
-    commitments: list[PoolCommitment] | None = None
     isolation: list[PoolIsolation] | None = None
 
 
 @dataclass(frozen=True)
 class CreateSelfHostedPoolRequest:
     type: Literal['self_hosted']
-    platform: PoolPlatform
     name: str | None = None
+    resources: PoolResources | None = None
 
 
 CreatePoolRequest: TypeAlias = (
-    CreateArkerPoolRequest | CreateAwsPoolRequest | CreateSelfHostedPoolRequest
+    CreateManagedPoolRequest | CreateByocPoolRequest | CreateSelfHostedPoolRequest
 )
 
 
@@ -1557,28 +1540,15 @@ class UpdatePoolRequest:
     commitments: list[PoolCommitment] | None = None
 
 
-@dataclass(frozen=True)
-class PoolJoinKey:
-    join_key_id: str
-    created_at: str
-
-
-@dataclass(frozen=True)
-class CreatedPoolJoinKey:
-    join_key_id: str
-    key: str
-    created_at: str
-
-
-@dataclass(frozen=True)
-class ListPoolJoinKeysResponse:
-    join_keys: list[PoolJoinKey]
-
-
 WorkerKind: TypeAlias = Literal['arkerd', 'blast']
 
 
 WorkerState: TypeAlias = Literal['bootstrapping', 'active', 'draining', 'left']
+
+
+WorkerStatus: TypeAlias = Literal[
+    'bootstrapping', 'running', 'draining', 'unreachable', 'left'
+]
 
 
 @dataclass(frozen=True)
@@ -1592,15 +1562,10 @@ class WorkerResources:
 @dataclass(frozen=True)
 class Worker:
     worker_id: str
-    pool_id: str
-    kind: WorkerKind
-    version: str
-    platform: str
-    state: WorkerState
-    live: bool
-    resources: WorkerResources
-    free: WorkerResources
-    last_heartbeat_at: str
+    status: WorkerStatus
+    resources_provisioned: PoolResources
+    resources_reserved: PoolResources
+    last_seen_at: str
 
 
 @dataclass(frozen=True)
@@ -1660,6 +1625,47 @@ class WorkerRunRecord:
     finished_at: str | None
     stdout: str | None
     stderr: str | None
+
+
+ApiKeyRole: TypeAlias = Literal['admin', 'developer', 'member', 'viewer']
+
+
+ApiKeyAction: TypeAlias = Literal['join']
+
+
+@dataclass(frozen=True)
+class ApiKey:
+    api_key_id: str
+    role: ApiKeyRole
+    vm_id: str | None
+    pool_id: str | None
+    action: ApiKeyAction | None
+    created_at: str
+
+
+@dataclass(frozen=True)
+class CreatedApiKey:
+    api_key_id: str
+    role: ApiKeyRole
+    vm_id: str | None
+    pool_id: str | None
+    action: ApiKeyAction | None
+    created_at: str
+    key: str
+
+
+@dataclass(frozen=True)
+class CreateApiKeyRequest:
+    name: str | None = None
+    role: ApiKeyRole | None = None
+    vm_id: str | None = None
+    pool_id: str | None = None
+    action: ApiKeyAction | None = None
+
+
+@dataclass(frozen=True)
+class ListApiKeysResponse:
+    api_keys: list[ApiKey]
 
 
 @dataclass(frozen=True)
@@ -1865,27 +1871,6 @@ class DeletePoolParameters:
 
 
 @dataclass(frozen=True)
-class GetPoolUsageParameters:
-    pool_id: str
-
-
-@dataclass(frozen=True)
-class ListPoolJoinKeysParameters:
-    pool_id: str
-
-
-@dataclass(frozen=True)
-class CreatePoolJoinKeyParameters:
-    pool_id: str
-
-
-@dataclass(frozen=True)
-class DeletePoolJoinKeyParameters:
-    pool_id: str
-    join_key_id: str
-
-
-@dataclass(frozen=True)
 class ListPoolWorkersParameters:
     pool_id: str
 
@@ -1924,6 +1909,11 @@ class PutWorkerRunParameters:
     run_id: str
 
 
+@dataclass(frozen=True)
+class RevokeApiKeyParameters:
+    api_key_id: str
+
+
 ErrorBody: TypeAlias = (
     BadRequest
     | InsufficientResources
@@ -1958,10 +1948,13 @@ class ErrorResponse:
 
 
 @dataclass(frozen=True)
-class ScaleAction:
-    suspend: bool | None = False
-    wake: bool | None = None
-    resource_factors: ResourceFactors | None = None
+class PolicyAction1:
+    rewrite: Rewrite | None = None
+    gate: Gate | None = None
+    scaling: ScaleAction | None = None
+
+
+PolicyAction: TypeAlias = Literal['allow', 'deny', 'delete', 'suspend'] | PolicyAction1
 
 
 @dataclass(frozen=True)
@@ -2041,6 +2034,25 @@ HealthUnavailableResponse: TypeAlias = (
 
 
 @dataclass(frozen=True)
+class PolicyRule:
+    type: Literal['outbound', 'inbound']
+    priority: int
+    action: PolicyAction
+    match: PolicyMatch | None = None
+    auth: Literal['open', 'arker'] | Auth | None = None
+    expires_at: str | None = None
+
+
+@dataclass(frozen=True)
+class ScheduleRule:
+    type: Literal['schedule']
+    action: PolicyAction
+    at: str | None = None
+    after_created: int | None = None
+    after_last_running_start: int | None = None
+
+
+@dataclass(frozen=True)
 class WorkerHeartbeat:
     kind: WorkerKind
     version: str
@@ -2053,15 +2065,11 @@ class WorkerHeartbeat:
 
 
 @dataclass(frozen=True)
-class PolicyAction1:
-    rewrite: Rewrite | None = None
-    gate: Gate | None = None
-    scale: ScaleAction | None = None
-    scaling: ScaleAction | None = None
-    webhook: Webhook | None = None
-
-
-PolicyAction: TypeAlias = Literal['allow', 'deny', 'delete'] | PolicyAction1
+class PolicyEntry:
+    type: Literal['outbound', 'inbound']
+    action: PolicyAction
+    match: PolicyMatch | None = None
+    auth: Literal['open', 'arker'] | None = None
 
 
 RunResponse: TypeAlias = CompletedRunResponse | BackgroundRunResponse
@@ -2112,57 +2120,13 @@ class SyncCommitWriteResult:
 
 
 @dataclass(frozen=True)
-class PolicyRule:
-    type: Literal['outbound', 'inbound']
-    priority: int
-    action: PolicyAction
-    match: PolicyMatch | None = None
-    auth: Literal['open', 'arker'] | Auth | None = None
-    expires_at: str | None = None
-
-
-@dataclass(frozen=True)
-class ScheduleRule:
-    type: Literal['schedule']
-    action: PolicyAction
-    at: str | None = None
-    after_wake: int | None = None
-
-
-@dataclass(frozen=True)
-class ResourcesRule:
-    type: Literal['resources']
-    action: PolicyAction
-    above: ResourceFactors | None = None
-    below: ResourceFactors | None = None
-
-
-@dataclass(frozen=True)
-class PolicyEntry:
-    type: Literal['outbound', 'inbound']
-    action: PolicyAction
-    match: PolicyMatch | None = None
-    auth: Literal['open', 'arker'] | None = None
-
-
-SyncWriteResult: TypeAlias = (
-    SyncChunkWriteResult | SyncPresignedWriteRequestResult | SyncCommitWriteResult
-)
-
-
-@dataclass(frozen=True)
 class PolicyUpdate:
-    rules: (
-        dict[str, PolicyRule | ScheduleRule | ResourcesRule | LifecycleRule | None]
-        | None
-    ) = None
+    rules: dict[str, PolicyRule | ScheduleRule | LifecycleRule | None] | None = None
     secrets: dict[str, str | None] | None = None
     policies: list[PolicyEntry] | None = None
 
 
-PolicyRules: TypeAlias = dict[
-    str, PolicyRule | ScheduleRule | ResourcesRule | LifecycleRule
-]
+PolicyRules: TypeAlias = dict[str, PolicyRule | ScheduleRule | LifecycleRule]
 
 
 @dataclass(frozen=True)
@@ -2363,11 +2327,9 @@ class RunRequest:
     policies: PolicyUpdate | None = None
 
 
-@dataclass(frozen=True)
-class SyncWriteResponse:
-    ok: bool
-    op: Literal['write']
-    results: list[SyncWriteResult]
+SyncWriteResult: TypeAlias = (
+    SyncChunkWriteResult | SyncPresignedWriteRequestResult | SyncCommitWriteResult
+)
 
 
 @dataclass(frozen=True)
@@ -2425,6 +2387,13 @@ class Vm:
 class ListVmsResponse:
     vms: list[Vm]
     next_cursor: str | None = None
+
+
+@dataclass(frozen=True)
+class SyncWriteResponse:
+    ok: bool
+    op: Literal['write']
+    results: list[SyncWriteResult]
 
 
 SyncResponse: TypeAlias = SyncReadResponse | SyncWriteResponse | SyncManifestResponse
