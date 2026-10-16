@@ -1,12 +1,10 @@
 import { compute } from "computesdk";
 
 import { createArkerComputeProvider, type ArkerComputeProviderConfig } from "./arker-provider.js";
+import { createRoutedProvider } from "./router.js";
 
 type ComputeFactory = (config: {
   providers: unknown[];
-  providerStrategy: "priority";
-  fallbackOnError: true;
-  routerConfigPath?: string;
 }) => ReturnType<typeof compute>;
 
 let computeFactory: ComputeFactory = compute as ComputeFactory;
@@ -20,14 +18,13 @@ export interface CreateCompatSdkOptions {
 }
 
 export function createCompatSdk(options: CreateCompatSdkOptions): CompatSdk {
+  const hasArker = !!(options.arker?.apiKey || globalThis.process?.env?.ARKER_API_KEY?.trim());
+  const routed = createRoutedProvider([
+    ...(hasArker ? [createArkerComputeProvider(options.arker)] : []),
+    options.fallbackProvider as any,
+  ], options.routerConfigPath);
   return computeFactory({
-    providers: [
-      createArkerComputeProvider(options.arker),
-      options.fallbackProvider,
-    ],
-    providerStrategy: "priority",
-    fallbackOnError: true,
-    ...(options.routerConfigPath ? { routerConfigPath: options.routerConfigPath } : {}),
+    providers: [routed],
   });
 }
 

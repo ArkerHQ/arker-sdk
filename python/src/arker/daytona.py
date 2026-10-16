@@ -120,9 +120,8 @@ class Daytona(UnsupportedMixin):
         return self._native
 
     def create(self, *args: Any, **kwargs: Any) -> Sandbox:
-        native = self._native_client()
-
         def create_native() -> Any:
+            native = self._native_client()
             if native is None:
                 raise RuntimeError("Native Daytona SDK is not installed")
             return native.create(*args, **kwargs)
@@ -189,42 +188,39 @@ class Daytona(UnsupportedMixin):
         return Sandbox(vm=result if provider == "arker" else None, native=result if provider == "daytona" else None)
 
     def get(self, sandbox_id: str) -> Sandbox:
-        native = self._native_client()
         found = routed_get(
             sandbox_id,
             "daytona",
             self._arker_config,
             {
                 "arker": lambda: arker_get(sandbox_id, self._arker_config),
-                "daytona": lambda: (
-                    get_or_none(lambda: native.get(sandbox_id))
-                    if native is not None and hasattr(native, "get")
-                    else None
-                ),
+                "daytona": lambda: self._native_get(sandbox_id),
             },
         )
-        if found is not None:
-            provider, result = found
-            return Sandbox(vm=result if provider == "arker" else None, native=result if provider == "daytona" else None)
-        raise format_not_found("Sandbox", sandbox_id)
+        if found is None:
+            raise format_not_found("Sandbox", sandbox_id)
+        provider, result = found
+        return Sandbox(vm=result if provider == "arker" else None, native=result if provider == "daytona" else None)
+
+    def _native_get(self, sandbox_id: str) -> Any | None:
+        native = self._native_client()
+        return get_or_none(lambda: native.get(sandbox_id)) if native is not None and hasattr(native, "get") else None
 
     def delete(self, sandbox: str | Sandbox) -> None:
         if not isinstance(sandbox, str):
             sandbox.delete()
             return
-        native = self._native_client()
         found = routed_get(
             sandbox,
             "daytona",
             self._arker_config,
             {
                 "arker": lambda: arker_get(sandbox, self._arker_config),
-                "daytona": lambda: (
-                    get_or_none(lambda: native.get(sandbox)) if native is not None and hasattr(native, "get") else None
-                ),
+                "daytona": lambda: self._native_get(sandbox),
             },
         )
         if found is None:
+            native = self._native_client()
             if native is not None and hasattr(native, "delete"):
                 native.delete(sandbox)
                 return

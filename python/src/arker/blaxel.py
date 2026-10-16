@@ -69,6 +69,11 @@ class Process:
             timeout = request.get("timeout")
         return run_command(self._vm, command, timeout=timeout)
 
+    def __getattr__(self, name: str) -> Any:
+        if self._native is not None:
+            return getattr(self._native, name)
+        raise AttributeError(f"process.{name} is not supported by the Arker compatibility layer for blaxel")
+
 
 class FileSystem:
     def __init__(self, vm: VM | None = None, native: Any | None = None) -> None:
@@ -94,11 +99,34 @@ class FileSystem:
         if isinstance(result, CommandResult) and result.exit_code != 0:
             raise RuntimeError(result.stderr or f"mkdir failed with exit {result.exit_code}")
 
+    def ls(self, path: str) -> Any:
+        if self._vm is None:
+            return self._native.ls(path)
+        resolved = resolve_compat_path(path, "/blaxel")
+        result = run_command(
+            self._vm,
+            f"find {shlex.quote(resolved)} -mindepth 1 -maxdepth 1 -printf '%y\\t%f\\n'",
+        )
+        if result.exit_code != 0:
+            raise RuntimeError(result.stderr or f"list failed with exit {result.exit_code}")
+        files: list[dict[str, str]] = []
+        subdirectories: list[dict[str, str]] = []
+        for line in result.stdout.splitlines():
+            kind, _, name = line.partition("\t")
+            entry = {"name": name, "path": f"{resolved.rstrip('/')}/{name}"}
+            (subdirectories if kind == "d" else files).append(entry)
+        return {"files": files, "subdirectories": subdirectories}
+
     def rm(self, path: str) -> None:
         resolved = resolve_compat_path(path, "/blaxel")
         result = self._native.rm(path) if self._vm is None else run_command(self._vm, f"rm -rf {shlex.quote(resolved)}")
         if isinstance(result, CommandResult) and result.exit_code != 0:
             raise RuntimeError(result.stderr or f"remove failed with exit {result.exit_code}")
+
+    def __getattr__(self, name: str) -> Any:
+        if self._native is not None:
+            return getattr(self._native, name)
+        raise AttributeError(f"fs.{name} is not supported by the Arker compatibility layer for blaxel")
 
 
 class SandboxInstance(UnsupportedMixin):
@@ -194,10 +222,19 @@ class SandboxInstance(UnsupportedMixin):
 
     @classmethod
     def create_if_not_exists(cls, sandbox: Any = None, **kwargs: Any) -> SandboxInstance:
-        raise NotImplementedError(
-            "create_if_not_exists cannot be implemented atomically across routed providers; "
-            "use create(), or the native Blaxel SDK when atomic name creation is required"
-        )
+        values = sandbox if isinstance(sandbox, dict) else vars(sandbox) if sandbox is not None else {}
+        name = values.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError("create_if_not_exists requires a Blaxel sandbox name")
+        lookup_kwargs = {
+            key: value for key, value in kwargs.items() if key in {"arker", "router_config_path", "routerConfigPath"}
+        }
+        try:
+            return cls.get(name, **lookup_kwargs)
+        except Exception as error:
+            if "not found" not in str(error).lower():
+                raise
+        return cls.create(sandbox, **kwargs)
 
     def delete(self) -> None:
         if self._vm is not None:

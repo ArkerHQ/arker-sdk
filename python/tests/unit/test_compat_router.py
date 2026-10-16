@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from arker._compat import get_or_none, routed_create, routed_get
+from arker._compat import get_or_none, routed_create, routed_get, router_config
 from arker._router import JsonRouteCache, RouterConfig, load_router_config, select_weighted_provider
 
 
@@ -42,6 +42,14 @@ def test_loads_same_versioned_schema_as_typescript(router_file: Path) -> None:
     assert config == RouterConfig.from_dict(json.loads(router_file.read_text()))
     assert config.existing.order == ("e2b", "arker")
     assert config.create.weights == {"e2b": 90, "arker": 10}
+
+
+def test_default_router_uses_native_only_without_arker_credentials(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ARKER_API_KEY", raising=False)
+    config = router_config({}, "blaxel")
+    assert config.existing.order == ("blaxel",)
+    assert config.create.order == ("blaxel",)
 
 
 def test_rejects_unknown_fields_and_credentials(tmp_path: Path) -> None:

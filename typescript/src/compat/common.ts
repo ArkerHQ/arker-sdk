@@ -14,7 +14,7 @@ export function shouldGuardNested(value: unknown): value is object {
   return !!value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
 }
 
-export function guardUnsupported<T extends object>(instance: T, shimName: string): T {
+export function guardUnsupported<T extends object>(instance: T, shimName: string, native?: object): T {
   const passthrough = new Set<PropertyKey>([
     "then",
     "catch",
@@ -38,6 +38,11 @@ export function guardUnsupported<T extends object>(instance: T, shimName: string
           return (value as (...args: unknown[]) => unknown).bind(target);
         }
         return shouldGuardNested(value) ? guardUnsupported(value, shimName) : value;
+      }
+
+      if (native && prop in native) {
+        const value = Reflect.get(native, prop, native);
+        return typeof value === "function" ? value.bind(native) : value;
       }
 
       throw new Error(

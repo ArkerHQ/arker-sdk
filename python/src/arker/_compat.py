@@ -42,6 +42,9 @@ class UnsupportedMixin:
     _compat_name = "provider"
 
     def __getattr__(self, name: str) -> Any:
+        native = self.__dict__.get("_native")
+        if native is not None:
+            return getattr(native, name)
         raise AttributeError(
             f"'{name}' is not supported by the Arker compatibility layer for {self._compat_name}. "
             f"The compatibility layer covers create/connect/get, command execution, and core filesystem operations. "
@@ -212,11 +215,13 @@ def router_config(config: dict[str, Any] | None, native_provider: str) -> Router
     default_path = Path("computesdk_router.json")
     if default_path.exists():
         return load_router_config(default_path)
+    has_arker = bool(cfg.get("api_key") or os.environ.get("ARKER_API_KEY"))
+    order = ["arker", native_provider] if has_arker else [native_provider]
     return RouterConfig.from_dict(
         {
             "version": 1,
-            "existing": {"strategy": "priority", "order": ["arker", native_provider]},
-            "create": {"strategy": "priority", "order": ["arker", native_provider]},
+            "existing": {"strategy": "priority", "order": order},
+            "create": {"strategy": "priority", "order": order},
         }
     )
 

@@ -285,8 +285,13 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
       create: async (options?: CreateSandboxOptions): Promise<SandboxInterface> => {
         const client = makeClient(config);
         const values = (options ?? {}) as Record<string, unknown>;
-        const unsupported = ["envs", "metadata", "timeout", "runtime", "directory", "egress", "ephemeral", "namespace"]
-          .filter((key) => values[key] !== undefined);
+        const supported = new Set([
+          "name", "image", "memory", "memoryMiB", "cpu", "vcpus", "diskMiB", "snapshotId", "templateId",
+          "networkPolicy", "networkPolicies", "internetAccess", "autoStopInterval", "allowInternetAccess",
+          "networkBlockAll", "blockNetwork", "domainAllowList", "outboundDomainAllowlist", "networkAllowList",
+          "outboundCidrAllowlist",
+        ]);
+        const unsupported = Object.keys(values).filter((key) => !supported.has(key) && values[key] !== undefined);
         if (unsupported.length > 0) {
           throw new ArkerError(
             "unsupported_operation",

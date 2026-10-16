@@ -312,6 +312,31 @@ def test_blaxel_official_surface(monkeypatch) -> None:
         sandbox.delete()
 
 
+def test_blaxel_native_surface_delegates_without_losing_provider_features() -> None:
+    class NativeFileSystem:
+        def find(self, path: str, options: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+            return path, options
+
+    class NativeProcess:
+        def list(self) -> list[str]:
+            return ["pid-1"]
+
+    native = types.SimpleNamespace(
+        id="native-box",
+        metadata={"name": "native-box"},
+        fs=NativeFileSystem(),
+        process=NativeProcess(),
+        drives=types.SimpleNamespace(list=lambda: ["drive-1"]),
+        snapshot=lambda name=None: f"snapshot:{name}",
+    )
+    sandbox = BlaxelSandbox(native=native)
+
+    assert sandbox.fs.find("/app", {"patterns": ["*.md"]}) == ("/app", {"patterns": ["*.md"]})
+    assert sandbox.process.list() == ["pid-1"]
+    assert sandbox.drives.list() == ["drive-1"]
+    assert sandbox.snapshot("checkpoint") == "snapshot:checkpoint"
+
+
 def test_unsupported_calls_fail_fast(monkeypatch) -> None:
     monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
     monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")

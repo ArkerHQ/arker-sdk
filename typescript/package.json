@@ -60,6 +60,7 @@
     "test:compat-fallback-live": "bun tests/compat-fallback-live.ts",
     "test:compat-equivalence-live": "bun tests/compat-equivalence-live.ts",
     "test:compat-policy-live": "bun tests/compat-policy-live.ts",
+    "test:compat-blaxel-live": "bun tests/compat-blaxel-live.ts",
     "typecheck": "bun run generate:validators && tsc -p tsconfig.test.json",
     "prepublishOnly": "bun run build",
     "generate:validators": "bun scripts/generate-error-validators.ts"
@@ -80,6 +81,7 @@
   },
   "bugs": "https://github.com/ArkerHQ/arker-sdk/issues",
   "devDependencies": {
+    "@blaxel/core": "^0.3.30",
     "@computesdk/daytona": "^1.7.43",
     "@computesdk/e2b": "^1.7.62",
     "@computesdk/modal": "^1.9.19",
@@ -94,6 +96,7 @@
     "ajv-formats": "^3.0.1"
   },
   "peerDependencies": {
+    "@blaxel/core": "^0.3.30",
     "@computesdk/daytona": "^1.7.43",
     "@computesdk/e2b": "^1.7.62",
     "@computesdk/modal": "^1.9.19",
@@ -101,6 +104,9 @@
     "computesdk": "^4.1.12"
   },
   "peerDependenciesMeta": {
+    "@blaxel/core": {
+      "optional": true
+    },
     "@computesdk/daytona": {
       "optional": true
     },

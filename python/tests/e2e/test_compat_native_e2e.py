@@ -72,8 +72,9 @@ def test_native_provider_surfaces(tmp_path: Path) -> None:
     finally:
         modal.terminate()
 
-    blaxel = SyncSandboxInstance.create(
+    blaxel = SyncSandboxInstance.create_if_not_exists(
         {"name": f"arker-shim-{uuid.uuid4().hex[:12]}", "region": "us-pdx-1"},
+        timeout=50,
         router_config_path=_router("blaxel", tmp_path),
     )
     try:
@@ -81,5 +82,10 @@ def test_native_provider_surfaces(tmp_path: Path) -> None:
         assert result.exit_code == 0
         assert "/blaxel" in result.stdout
         assert "python-blaxel" in result.stdout
+        blaxel.fs.mkdir("/blaxel/arker-shim")
+        blaxel.fs.write("/blaxel/arker-shim/probe.txt", "persistent")
+        assert blaxel.fs.read("/blaxel/arker-shim/probe.txt") == "persistent"
+        assert any(file.name == "probe.txt" for file in blaxel.fs.ls("/blaxel/arker-shim").files)
+        assert callable(blaxel.fetch)
     finally:
         blaxel.delete()

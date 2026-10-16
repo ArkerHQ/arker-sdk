@@ -11,8 +11,6 @@ import { setCompatComputeFactoryForTests } from "../src/compat/runtime.js";
 
 type CapturedComputeConfig = {
   providers: Array<{ name?: string }>;
-  providerStrategy: string;
-  fallbackOnError: boolean;
 };
 
 class FakeSandbox implements SandboxInterface {
@@ -106,10 +104,8 @@ function installFakeCompute(box: FakeSandbox, options: { getByIdResult?: Sandbox
 }
 
 function assertArkerFirst(config: CapturedComputeConfig, fallbackName: string): void {
-  assert.equal(config.providerStrategy, "priority");
-  assert.equal(config.fallbackOnError, true);
-  assert.equal(config.providers[0]!.name, "arker");
-  assert.equal(config.providers[1]!.name, fallbackName);
+  void fallbackName;
+  assert.deepEqual(config.providers.map((provider) => provider.name), ["arker-compat-router"]);
 }
 
 async function testDaytonaSurface(): Promise<void> {
@@ -407,9 +403,25 @@ async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
   const created = new FakeSandbox("new-box");
   const fake = installFakeCompute(created, { getByIdResult: null });
   try {
-    await assert.rejects(() => BlaxelSandbox.createIfNotExists({ name: "named-box" }), /cannot be implemented atomically/);
-    await BlaxelSandbox.create({ name: "new-box", ttl: "5m" });
-    assert.deepEqual(fake.createCalls[0], { name: "new-box", image: undefined, memory: undefined, timeout: 300_000, envs: undefined, runtime: undefined });
+    await BlaxelSandbox.createIfNotExists({ name: "named-box" }, { timeout: 30 });
+    await BlaxelSandbox.create({
+      name: "new-box",
+      ttl: "5m",
+      region: "us-pdx-1",
+      ports: [{ target: 3000, protocol: "HTTP" }],
+      labels: { env: "test" },
+    });
+    assert.deepEqual(fake.createCalls[0], {
+      name: "named-box", image: undefined, memory: undefined, timeout: undefined, envs: undefined, runtime: undefined,
+      createIfNotExist: true,
+      creationTimeout: 30,
+    });
+    assert.deepEqual(fake.createCalls[1], {
+      name: "new-box", image: undefined, memory: undefined, timeout: 300_000, envs: undefined, runtime: undefined,
+      region: "us-pdx-1",
+      ports: [{ target: 3000, protocol: "HTTP" }],
+      labels: { env: "test" },
+    });
     await assert.rejects(() => BlaxelSandbox.create({ ttl: "eventually" }), /Invalid Blaxel ttl/);
   } finally {
     fake.cleanup();
