@@ -1951,6 +1951,7 @@ class ErrorResponse:
 class PolicyAction1:
     rewrite: Rewrite | None = None
     gate: Gate | None = None
+    suspend: bool | None = None
     scaling: ScaleAction | None = None
 
 

@@ -3094,7 +3094,7 @@
                     }
                   }
                 },
-                "description": "The file operation stopped after checksum rejection. The VM may remain running; prior wake, directory creation or staging writes are not promised to be rolled back."
+                "description": "The file operation stopped after checksum rejection. The VM may remain running; prior VM start, directory creation or staging writes are not promised to be rolled back."
               }
             }
           }
@@ -3322,7 +3322,7 @@
         }
       },
       "InvalidStateError": {
-        "description": "HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy requiring a separate wake uses running; established wake progress uses unavailable.",
+        "description": "HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses unavailable.",
         "x-http-status": 409,
         "headers": {
           "Retry-After": {
@@ -4566,7 +4566,7 @@
           "idle",
           "running"
         ],
-        "description": "Whether the VM is billed for compute. `running` means its guest is running. `idle` means it is not: never started, suspended, paused, or released while a suspending outbound request awaits its response."
+        "description": "`running` while the VM is billed for compute. `idle` while it is not."
       },
       "SessionState": {
         "type": "string",
@@ -4575,7 +4575,7 @@
           "pending",
           "running"
         ],
-        "description": "`running`: a run is executing or a terminal is attached. `pending`: runs are waiting for the machine to start. `idle`: neither."
+        "description": "`running`: a run is executing or a terminal is attached. `pending`: runs are waiting for the VM to start. `idle`: neither."
       },
       "RunState": {
         "type": "string",
@@ -4813,7 +4813,7 @@
               "idle",
               "running"
             ],
-            "description": "`inbound` only. The VM's state, as `VmState`: `running` matches while the VM is billed for compute; `idle` matches while it is not, so serving the request would start it. Pair `idle` with `deny` to keep requests from starting the VM: it answers `403` while the VM is idle, and serves the request once something else starts it."
+            "description": "`inbound` only. The VM's state (`VmState`) when the request arrives: `idle` or `running`."
           }
         }
       },
@@ -4831,7 +4831,7 @@
           {
             "type": "object",
             "additionalProperties": false,
-            "description": "The object action: at least one of `rewrite` / `gate` / `scaling` must be present. The request is forwarded upstream (applying `rewrite` if present); a `gate` blocks it until an outbound HTTP check allows it; `scaling` suspends the VM around it. The three compose freely on one action.",
+            "description": "The object action: at least one of `rewrite` / `gate` / `suspend` must be present. The request is forwarded upstream (applying `rewrite` if present); a `gate` blocks it until an outbound HTTP check allows it; `suspend` suspends the VM until its response arrives. The three compose freely on one action.",
             "properties": {
               "rewrite": {
                 "$ref": "#/components/schemas/Rewrite"
@@ -4839,15 +4839,19 @@
               "gate": {
                 "$ref": "#/components/schemas/Gate"
               },
+              "suspend": {
+                "type": "boolean",
+                "description": "`outbound` only. `true` does what the `suspend` action does, alongside `rewrite` or `gate`: allows the request and suspends the VM until its response arrives."
+              },
               "scaling": {
                 "$ref": "#/components/schemas/ScaleAction",
                 "deprecated": true,
-                "description": "Deprecated: use the `suspend` action. Suspends the VM around the request, as `suspend` does, alongside `rewrite` or `gate`."
+                "description": "Deprecated: use `suspend`. Not with `suspend`."
               }
             }
           }
         ],
-        "description": "allow / deny, `delete` (schedule rules), `suspend` (schedule and outbound rules: suspends the VM; on outbound, allows the request and suspends the VM until its response arrives), or an object with any combination of `rewrite`, `gate`, and `scaling` (at least one)."
+        "description": "allow / deny, `delete` (schedule rules), `suspend` (schedule and outbound rules: suspends the VM; on outbound, allows the request and suspends the VM until its response arrives), or an object with any combination of `rewrite`, `gate`, and `suspend` (at least one)."
       },
       "ScaleAction": {
         "type": "object",
@@ -4857,7 +4861,7 @@
           "suspend": {
             "type": "boolean",
             "default": false,
-            "description": "Suspend the VM (snapshot and free CPU/RAM). On an `outbound` rule: while a matched upstream request is blocked, resuming when the response arrives. On an `inbound` rule (deprecated): once a matched request's response has been fully delivered and nothing else is in flight, so the next matched request starts it again. The suspended window remains part of the VM's Running interval until the VM is paused or stopped. On an `outbound` rule, matched responses are delivered only once the upstream response is COMPLETE: a suspended VM has no running guest to receive bytes, so the proxy holds the whole body and hands it over at the end. Total latency is unchanged, but a response whose fragments are individually usable \u2014 an SSE token stream, for example \u2014 stops arriving incrementally, so a client rendering tokens as they arrive will see nothing until the response finishes. Enabling this is a deliberate trade of incremental delivery for the memory saving."
+            "description": "Suspend the VM (snapshot and free CPU/RAM). On an `outbound` rule: while a matched upstream request is blocked, resuming when the response arrives. On an `inbound` rule (deprecated): once a matched request's response has been fully delivered and nothing else is in flight, so the next matched request starts it again. On an `outbound` rule, matched responses are delivered only once the upstream response is COMPLETE: a suspended VM has no running guest to receive bytes, so the proxy holds the whole body and hands it over at the end. Total latency is unchanged, but a response whose fragments are individually usable \u2014 an SSE token stream, for example \u2014 stops arriving incrementally, so a client rendering tokens as they arrive will see nothing until the response finishes. Enabling this is a deliberate trade of incremental delivery for the memory saving."
           },
           "wake": {
             "type": "boolean",
@@ -9366,7 +9370,7 @@
         "unevaluatedProperties": false
       },
       "InvalidState": {
-        "description": "The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy requiring a separate wake uses running; established wake progress uses unavailable.",
+        "description": "The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses unavailable.",
         "x-http-status": 409,
         "allOf": [
           {
@@ -11071,7 +11075,7 @@
             "minimum": 1,
             "maximum": 2592000,
             "format": "uint64",
-            "description": "Fires this many seconds, up to 2592000 (30 days), after the VM last became `running`, from a cold start or from a pause, and again each time it starts running; a VM that never ran counts from its creation."
+            "description": "Fires this many seconds, up to 2592000 (30 days), after the VM last became `running`, and again each time it starts running; a VM that never ran counts from its creation."
           },
           "action": {
             "$ref": "#/components/schemas/PolicyAction",

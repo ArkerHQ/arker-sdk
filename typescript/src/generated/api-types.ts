@@ -776,12 +776,12 @@ export interface components {
             error: components["schemas"]["ErrorBody"];
         };
         /**
-         * @description Whether the VM is billed for compute. `running` means its guest is running. `idle` means it is not: never started, suspended, paused, or released while a suspending outbound request awaits its response.
+         * @description `running` while the VM is billed for compute. `idle` while it is not.
          * @enum {string}
          */
         VmState: "idle" | "running";
         /**
-         * @description `running`: a run is executing or a terminal is attached. `pending`: runs are waiting for the machine to start. `idle`: neither.
+         * @description `running`: a run is executing or a terminal is attached. `pending`: runs are waiting for the VM to start. `idle`: neither.
          * @enum {string}
          */
         SessionState: "idle" | "pending" | "running";
@@ -860,25 +860,27 @@ export interface components {
             /** @description Substrings that must appear in the request body. */
             body_contains?: string[];
             /**
-             * @description `inbound` only. The VM's state, as `VmState`: `running` matches while the VM is billed for compute; `idle` matches while it is not, so serving the request would start it. Pair `idle` with `deny` to keep requests from starting the VM: it answers `403` while the VM is idle, and serves the request once something else starts it.
+             * @description `inbound` only. The VM's state (`VmState`) when the request arrives: `idle` or `running`.
              * @enum {string}
              */
             vm_state?: "idle" | "running";
         };
-        /** @description allow / deny, `delete` (schedule rules), `suspend` (schedule and outbound rules: suspends the VM; on outbound, allows the request and suspends the VM until its response arrives), or an object with any combination of `rewrite`, `gate`, and `scaling` (at least one). */
+        /** @description allow / deny, `delete` (schedule rules), `suspend` (schedule and outbound rules: suspends the VM; on outbound, allows the request and suspends the VM until its response arrives), or an object with any combination of `rewrite`, `gate`, and `suspend` (at least one). */
         PolicyAction: ("allow" | "deny" | "delete" | "suspend") | {
             rewrite?: components["schemas"]["Rewrite"];
             gate?: components["schemas"]["Gate"];
+            /** @description `outbound` only. `true` does what the `suspend` action does, alongside `rewrite` or `gate`: allows the request and suspends the VM until its response arrives. */
+            suspend?: boolean;
             /**
              * @deprecated
-             * @description Deprecated: use the `suspend` action. Suspends the VM around the request, as `suspend` does, alongside `rewrite` or `gate`.
+             * @description Deprecated: use `suspend`. Not with `suspend`.
              */
             scaling?: components["schemas"]["ScaleAction"];
         };
         /** @description Scales the VM when the rule matches or fires. On an `outbound` rule `suspend` brackets the time the VM is blocked awaiting an upstream response; on an `inbound` rule it suspends the VM once a matched request has been answered. Outbound rules may be narrowed by request fields (`methods`/`paths`/`headers`/`body_contains`), for example to suspend only on `POST /v1/messages`, and compose with `rewrite` / `gate` siblings. For outbound, prefer a `match.hosts` scope: a host-less rule matches every flow it can see, which breaks certificate-pinning clients. */
         ScaleAction: {
             /**
-             * @description Suspend the VM (snapshot and free CPU/RAM). On an `outbound` rule: while a matched upstream request is blocked, resuming when the response arrives. On an `inbound` rule (deprecated): once a matched request's response has been fully delivered and nothing else is in flight, so the next matched request starts it again. The suspended window remains part of the VM's Running interval until the VM is paused or stopped. On an `outbound` rule, matched responses are delivered only once the upstream response is COMPLETE: a suspended VM has no running guest to receive bytes, so the proxy holds the whole body and hands it over at the end. Total latency is unchanged, but a response whose fragments are individually usable — an SSE token stream, for example — stops arriving incrementally, so a client rendering tokens as they arrive will see nothing until the response finishes. Enabling this is a deliberate trade of incremental delivery for the memory saving.
+             * @description Suspend the VM (snapshot and free CPU/RAM). On an `outbound` rule: while a matched upstream request is blocked, resuming when the response arrives. On an `inbound` rule (deprecated): once a matched request's response has been fully delivered and nothing else is in flight, so the next matched request starts it again. On an `outbound` rule, matched responses are delivered only once the upstream response is COMPLETE: a suspended VM has no running guest to receive bytes, so the proxy holds the whole body and hands it over at the end. Total latency is unchanged, but a response whose fragments are individually usable — an SSE token stream, for example — stops arriving incrementally, so a client rendering tokens as they arrive will see nothing until the response finishes. Enabling this is a deliberate trade of incremental delivery for the memory saving.
              * @default false
              */
             suspend?: boolean;
@@ -2340,7 +2342,7 @@ export interface components {
              */
             code: "resource_busy";
         };
-        /** @description The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy requiring a separate wake uses running; established wake progress uses unavailable. */
+        /** @description The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses unavailable. */
         InvalidState: components["schemas"]["ErrorMetadata"] & {
             /** @constant */
             code: "invalid_state";
@@ -2933,7 +2935,7 @@ export interface components {
             after_created?: number;
             /**
              * Format: uint64
-             * @description Fires this many seconds, up to 2592000 (30 days), after the VM last became `running`, from a cold start or from a pause, and again each time it starts running; a VM that never ran counts from its creation.
+             * @description Fires this many seconds, up to 2592000 (30 days), after the VM last became `running`, and again each time it starts running; a VM that never ran counts from its creation.
              */
             after_last_running_start?: number;
             /** @description `delete` deletes the VM, as `DELETE /v1/vms/{id}` does, also while it is suspended. `suspend` suspends the VM if it is running when the rule fires, its runs `pending` until something starts it; a VM that is idle then is left alone. */
@@ -3528,7 +3530,7 @@ export interface components {
                 "application/json": components["schemas"]["ResourceBusyErrorResponse"];
             };
         };
-        /** @description HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy requiring a separate wake uses running; established wake progress uses unavailable. */
+        /** @description HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses unavailable. */
         InvalidStateError: {
             headers: {
                 "Retry-After": components["headers"]["RetryAfter"];
