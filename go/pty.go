@@ -73,6 +73,9 @@ type PTY struct {
 // The connection outlives ctx: ctx bounds the dial only, so cancelling it after
 // ConnectPTY returns does not tear the terminal down. Use Close for that.
 func (v *VM) ConnectPTY(ctx context.Context, opts PTYOptions) (*PTY, error) {
+	if v.Info != nil && v.Info.PoolID != nil && *v.Info.PoolID != "" {
+		return nil, errors.New("arker: pool VMs do not support interactive shells; use Run instead")
+	}
 	sessionID := opts.SessionID
 	if sessionID == "" {
 		env := map[string]string{}

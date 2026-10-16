@@ -14,10 +14,14 @@ type PolicyMatch struct {
 	Paths        []string       `json:"paths,omitempty"`
 	Headers      map[string]any `json:"headers,omitempty"`
 	BodyContains []string       `json:"body_contains,omitempty"`
+	// VMState is inbound only: "running" or "idle". Pair "idle" with "deny" to
+	// keep requests from starting the VM.
+	VMState string `json:"vm_state,omitempty"`
 }
 
-// PolicyEntry is one rule. Type is "outbound" or "inbound"; Action is "allow"
-// or "deny".
+// PolicyEntry is one rule. Type is "outbound" or "inbound"; Action is "allow",
+// "deny", or "suspend" (suspend the VM until a matched outbound response
+// arrives, or once a matched inbound request has been answered).
 type PolicyEntry struct {
 	Type   string       `json:"type"`
 	Match  *PolicyMatch `json:"match,omitempty"`

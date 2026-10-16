@@ -257,88 +257,67 @@ def test_whoami_uses_authenticated_control_plane() -> None:
     assert identity.org_name == "ArkerHQ"
 
 
-POOL_ID = "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61"
-POOL_TERMS = {"resources": {"vcpu": 8, "memory_mib": 32768}, "duration_seconds": 2_592_000}
+POOL_REQUEST = {
+    "type": "managed",
+    "platform": "icelake",
+    "resources": {"vcpu": 8, "memory_mib": 32768, "disk_mib": 0},
+}
 POOL = {
-    "pool_id": POOL_ID,
+    **POOL_REQUEST,
+    "pool_id": "pool-1",
     "name": None,
+    "region": "aws-us-west-2",
     "provider": "aws",
-    "region": "us-west-2",
-    **POOL_TERMS,
-    "status": "active",
-    "created_at": "2026-09-25T00:00:00Z",
-    "starts_at": "2026-09-25T00:00:00Z",
-    "ends_at": "2026-10-25T00:00:00Z",
-    "currency": "usd",
-    "amount_cents": 12_345,
-    "invoice_id": None,
+    "state": "active",
+    "reason": None,
+    "created_at": "2026-10-15T00:00:00Z",
+    "resources_reserved": POOL_REQUEST["resources"],
+    "resources_provisioned": {"vcpu": 0, "memory_mib": 0, "disk_mib": 0},
+    "commitments": [{"starts_at": "2026-10-01T00:00:00Z", "ends_at": "2026-10-02T00:00:00Z"}],
 }
-POOL_QUOTE = {
-    "name": None,
-    "catalog_version": "v1",
-    "baseline_cents": 15_000,
-    "discount_percent": 17.7,
-    "provider": "aws",
-    "region": "us-west-2",
-    **POOL_TERMS,
-    "currency": "usd",
-    "amount_cents": 12_345,
-}
-CONTROL = "https://control.invalid/api"
 
 
-def pool_client(attempts: int = 1) -> sdk.Arker:
-    return sdk.Arker(
-        api_key="ark_live_test",
-        provider="aws",
-        region="us-west-2",
-        control_base_url=CONTROL,
-        retry={"attempts": attempts, "base_delay_s": 0.001, "max_delay_s": 0.001, "jitter_s": 0}
-        if attempts > 1
-        else False,
-    )
-
-
-def is_quote(method: str, url: str) -> bool:
-    return method == "POST" and url == f"{CONTROL}/v1/pools/quote"
-
-
-def is_buy(method: str, url: str) -> bool:
-    return method == "POST" and url == f"{CONTROL}/v1/pools"
-
-
-def test_create_pool_buys_at_the_quoted_price() -> None:
+def test_pools_v2() -> None:
     t = FakeTransport()
-    t.add_json(is_quote, 200, POOL_QUOTE)
-    t.add_json(is_buy, 200, POOL)
 
+    def route(method, path):
+        return lambda m, u: m == method and u == f"https://test.invalid/api/v1/pools{path}"
+
+    for method, path, response in [
+        ("POST", "", POOL),
+        ("GET", "/pool-1", POOL),
+        ("PATCH", "/pool-1", POOL),
+        ("PATCH", "/pool-1", POOL),
+        ("GET", "/pool-1/workers", {"workers": []}),
+        ("DELETE", "/pool-1", {**POOL, "state": "deleting"}),
+    ]:
+        t.add_json(route(method, path), 200, response)
+    commitment = sdk.PoolCommitment(starts_at="2027-01-01T00:00:00Z", ends_at="2027-01-02T00:00:00Z")
     with use_transport(t):
-        pool = pool_client().create_pool(**POOL_TERMS, name="ci")
+        client = sdk.Arker(api_key="k", base_url="https://test.invalid/api", retry=False)
+        assert client.create_pool(POOL_REQUEST).pool_id == "pool-1"
+        client.add_pool_commitment("pool-1", commitment)
+        client.rename_pool("pool-1", None)
+        client.list_pool_workers("pool-1")
+        assert client.delete_pool("pool-1").state == "deleting"
+    assert json.loads(t.calls[0]["body"]) == POOL_REQUEST
+    assert json.loads(t.calls[2]["body"]) == {
+        "commitments": [*POOL["commitments"], {"starts_at": commitment.starts_at, "ends_at": commitment.ends_at}]
+    }
+    assert json.loads(t.calls[3]["body"]) == {"name": None}
 
-    assert pool.pool_id == POOL_ID
-    quote, buy = t.calls
-    # Placement comes from the client when the caller does not give one.
-    terms = {"provider": "aws", "region": "us-west-2", **POOL_TERMS, "name": "ci"}
-    assert json.loads(quote["body"]) == terms
-    assert json.loads(buy["body"]) == {**terms, "amount_cents": 12_345}
-    assert buy["headers"]["idempotency-key"].startswith("sdk-pool-")
-    assert "idempotency-key" not in quote["headers"]
 
-
-def test_create_pool_retry_replays_the_same_purchase() -> None:
-    # A purchase whose response was lost must be retried with the same key and
-    # price, so the service returns the original pool instead of a second one.
+def test_pool_quota_is_not_retried() -> None:
     t = FakeTransport()
-    t.add_json(is_quote, 200, POOL_QUOTE)
-    t.add_network_error(is_buy)
-    t.add_json(is_buy, 200, POOL)
-
+    t.add_json(lambda m, u: True, 429, {"error": {"code": "quota_exceeded", "message": "pool quota reached"}})
     with use_transport(t):
-        pool_client(attempts=2).create_pool(**POOL_TERMS, idempotency_key="buy-1")
-
-    buys = [call for call in t.calls if is_buy(call["method"], call["url"])]
-    assert [call["headers"]["idempotency-key"] for call in buys] == ["buy-1", "buy-1"]
-    assert buys[0]["body"] == buys[1]["body"]
+        client = sdk.Arker(
+            api_key="k", base_url="https://test.invalid/api", retry={"attempts": 3, "base_delay_s": 0.001}
+        )
+        with pytest.raises(sdk.ArkerError) as caught:
+            client.create_pool(POOL_REQUEST)
+    assert caught.value.code == "quota_exceeded"
+    assert len(t.calls) == 1
 
 
 def test_fork_posts_directly_to_source_vm() -> None:
@@ -2950,3 +2929,73 @@ def test_update_preserves_pool_selector(selector, description) -> None:
     with use_transport(t):
         client().vm("vm_1").update(**selector, **description)
     assert json.loads(t.calls[0]["body"]) == {**selector, **description}
+
+
+@pytest.mark.parametrize("pool_type", ["byoc", "self_hosted"])
+def test_pool_variants_decode_and_preserve_setup(pool_type: str) -> None:
+    from arker import ByocPool, SelfHostedPool
+
+    response = {**POOL, "type": pool_type}
+    response.pop("commitments")
+    if pool_type == "byoc":
+        response.update(
+            isolation=["vms"],
+            byoc={
+                "account_id": "123456789012",
+                "subnet_ids": ["subnet-1"],
+                "security_group_ids": [],
+                "instance_types": ["m6i.metal"],
+                "role_name": "role",
+                "external_id": "external",
+                "setup_url": "https://console.aws.amazon.com/setup",
+            },
+        )
+    else:
+        response.pop("resources")
+        response.pop("provider")
+        response["platform"] = None
+    t = FakeTransport()
+    t.add_json(lambda m, u: m == "GET", 200, response)
+    with use_transport(t):
+        c = sdk.Arker(api_key="k", base_url="https://test.invalid/api", retry=False)
+        pool = c.get_pool("pool-1")
+    assert isinstance(pool, ByocPool if pool_type == "byoc" else SelfHostedPool)
+    if isinstance(pool, ByocPool):
+        assert pool.byoc.setup_url == "https://console.aws.amazon.com/setup"
+
+
+def test_self_hosted_commitment_is_refused_without_patch() -> None:
+    t = FakeTransport()
+    response = {**POOL, "type": "self_hosted"}
+    for field in ("resources", "provider", "commitments"):
+        response.pop(field)
+    t.add_json(lambda m, u: m == "GET", 200, response)
+    with use_transport(t):
+        c = sdk.Arker(api_key="k", base_url="https://test.invalid/api", retry=False)
+        with pytest.raises(ValueError, match="self_hosted"):
+            c.add_pool_commitment("pool-1", sdk.PoolCommitment(starts_at="future", ends_at="later"))
+    assert len(t.calls) == 1
+
+
+@pytest.mark.parametrize("code,status", [("capacity_unavailable", 503), ("unsupported_operation", 422)])
+def test_pool_fork_refusals_preserve_server_error(code: str, status: int) -> None:
+    t = FakeTransport()
+    t.add_json(lambda m, u: m == "POST", status, {"error": {"code": code, "message": "pool refusal"}})
+    with use_transport(t):
+        c = sdk.Arker(api_key="k", base_url="https://test.invalid/api", retry=False)
+        with pytest.raises(sdk.ArkerError) as caught:
+            c.fork(source_vm_id="fleet-vm", pool_id="pool-1")
+    assert caught.value.code == code
+    assert len(t.calls) == 1
+    assert json.loads(t.calls[0]["body"])["pool_id"] == "pool-1"
+
+
+def test_pool_shell_is_refused_before_creating_session() -> None:
+    t = FakeTransport()
+    with use_transport(t):
+        c = sdk.Arker(api_key="k", base_url="https://test.invalid/api", retry=False)
+        vm = c.vm("vm-1")
+        vm.pool_id = "pool-1"
+        with pytest.raises(ValueError, match="interactive shells"):
+            vm.connect_pty()
+    assert t.calls == []

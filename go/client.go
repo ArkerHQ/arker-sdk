@@ -118,8 +118,7 @@ type call struct {
 	out     any
 	// retryNetwork overrides the method-based rule. A few endpoints are reads
 	// carried over POST (the sync `read` and `manifest` ops), and there is no
-	// outcome to be unknown about on a read. A pool purchase is also replayable,
-	// because its Idempotency-Key returns the original pool.
+	// outcome to be unknown about on a read.
 	retryNetwork bool
 }
 
@@ -238,6 +237,9 @@ func drain(resp *http.Response) (int, []byte, error) {
 // retryable resolves the server's intent; the status is only the fallback,
 // because `retryable` is frequently absent.
 func retryable(err *Error) bool {
+	if err.Code == "quota_exceeded" {
+		return false
+	}
 	switch {
 	case err.Retryable != nil:
 		return *err.Retryable
@@ -280,13 +282,15 @@ func decodeError(status int, raw []byte) *Error {
 	out := &Error{StatusCode: status, Code: "internal"}
 	var envelope struct {
 		Error struct {
-			Code       string   `json:"code"`
-			Message    string   `json:"message"`
-			Retryable  *bool    `json:"retryable"`
-			RetryAfter *float64 `json:"retry_after"`
+			Details    json.RawMessage `json:"details"`
+			Code       string          `json:"code"`
+			Message    string          `json:"message"`
+			Retryable  *bool           `json:"retryable"`
+			RetryAfter *float64        `json:"retry_after"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(raw, &envelope) == nil && envelope.Error.Code != "" {
+		out.Details = envelope.Error.Details
 		out.Code = envelope.Error.Code
 		out.Message = envelope.Error.Message
 		out.Retryable = envelope.Error.Retryable
