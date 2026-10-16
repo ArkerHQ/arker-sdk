@@ -401,3 +401,33 @@ def test_native_not_found_errors_become_route_misses() -> None:
 def test_native_lookup_errors_are_not_hidden() -> None:
     with pytest.raises(RuntimeError, match="provider unavailable"):
         get_or_none(lambda: (_ for _ in ()).throw(RuntimeError("provider unavailable")))
+
+
+def test_cache_cannot_override_configured_providers(tmp_path: Path) -> None:
+    cache_path = tmp_path / "ownership.json"
+    JsonRouteCache(cache_path).set("existing", "arker")
+    config_path = tmp_path / "computesdk_router.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "existing": {"strategy": "priority", "order": ["e2b"]},
+                "create": {"strategy": "priority", "order": ["e2b"]},
+                "cache": {"path": str(cache_path)},
+            }
+        )
+    )
+
+    def excluded() -> None:
+        raise AssertionError("excluded provider queried")
+
+    found = routed_get(
+        "existing",
+        "e2b",
+        {"router_config_path": config_path},
+        {
+            "arker": excluded,
+            "e2b": lambda: "native",
+        },
+    )
+    assert found == ("e2b", "native")

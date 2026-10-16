@@ -219,4 +219,23 @@ await testConfigAndCacheValidation();
 await testMemoryCacheIsBoundedAndPromotesReads();
 await testDestroyRevalidatesStaleOwnership();
 
+async function testCacheCannotOverrideConfiguredProviders(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "arker-router-disabled-"));
+  const cachePath = join(directory, "ownership.json");
+  await new JsonRouteCache(cachePath).set("existing", "arker");
+  const path = await config(directory, {
+    version: 1,
+    existing: { strategy: "priority", order: ["blaxel"] },
+    create: { strategy: "priority", order: ["blaxel"] },
+    cache: { path: cachePath },
+  });
+  const routed = createRoutedProvider([
+    provider("arker", { getById: async () => { throw new Error("excluded provider queried"); } }),
+    provider("blaxel", { getById: async (id) => sandbox(id, "blaxel") }),
+  ], path).instances!;
+  assert.equal((await routed.getById("existing"))?.provider, "blaxel");
+}
+
+await testCacheCannotOverrideConfiguredProviders();
+
 console.log("PASS compat router");

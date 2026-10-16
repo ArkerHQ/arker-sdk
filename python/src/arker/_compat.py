@@ -345,7 +345,7 @@ def routed_get(
         cached = cache.get(identifier) if cache is not None else None
     except Exception:
         cached = None
-    if cached is not None and cached not in getters:
+    if cached is not None and (cached not in getters or cached not in router.existing.order):
         if cache is not None:
             with suppress(Exception):
                 cache.delete(identifier)

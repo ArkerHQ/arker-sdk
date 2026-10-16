@@ -310,7 +310,7 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
   const find = async (id: string): Promise<{ instance: any; provider: Provider } | null> => {
     const router = await configured;
     const cachedName = await cache.get(id).catch(() => null);
-    if (cachedName && byName.has(cachedName)) {
+    if (cachedName && byName.has(cachedName) && router.existing.order.includes(cachedName)) {
       const provider = byName.get(cachedName)!;
       const instance = await manager(provider).getById(id);
       if (instance) return { instance: await remember(instance, provider), provider };
