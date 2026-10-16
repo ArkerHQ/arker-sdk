@@ -9,6 +9,7 @@ import os
 import uuid
 
 import pytest
+from compat_evidence import record
 
 PROGRAM = """
 from blaxel.core.sandbox import SyncSandboxInstance
@@ -41,6 +42,30 @@ try:
     assert any(entry.name == "probe.txt" for entry in listing.files)
     reconnected = SyncSandboxInstance.get(sandbox_name)
     assert reconnected.fs.read("/blaxel/import-only/probe.txt") == "second"
+    started = sandbox.process.exec(ProcessRequestWithLog(
+        command="cat; printf stdin-error >&2", name="stdin-probe", stdin=True, wait_for_completion=False,
+    ))
+    assert started.status == "running", started.status
+    assert reconnected.process.get("stdin-probe").pid == started.pid
+    reconnected.process.write_stdin("stdin-probe", "hello λ\\n")
+    reconnected.process.close_stdin("stdin-probe")
+    finished = reconnected.process.wait("stdin-probe", max_wait=10000, interval=100)
+    assert finished.status == "completed", finished.status
+    assert finished.stdout == "hello λ\\n", finished.stdout
+    assert finished.stderr == "stdin-error", finished.stderr
+    assert reconnected.process.logs("stdin-probe", "stdout") == "hello λ\\n"
+    assert any(item.name == "stdin-probe" for item in reconnected.process.list())
+    sandbox.process.exec(ProcessRequestWithLog(command="sleep 30", name="kill-probe", wait_for_completion=False))
+    timed_out = False
+    try:
+        reconnected.process.wait("kill-probe", max_wait=1, interval=1)
+    except Exception as error:
+        assert "tim" in str(error).lower(), str(error)
+        timed_out = True
+    assert timed_out
+    assert reconnected.process.get("kill-probe").status == "running"
+    reconnected.process.kill("kill-probe")
+    assert reconnected.process.wait("kill-probe", max_wait=10000, interval=100).status == "killed"
 finally:
     SyncSandboxInstance.delete(sandbox_name)
 """
@@ -59,6 +84,35 @@ def _async_program(source: str) -> str:
 
     tree = AwaitSandboxCalls().visit(ast.parse(source.replace("SyncSandboxInstance", "SandboxInstance")))
     return "async def program():\n" + "\n".join("    " + line for line in ast.unparse(tree).splitlines())
+
+
+def _trace_program(source: str) -> str:
+    class TraceCalls(ast.NodeTransformer):
+        def visit_Call(self, node):
+            node = self.generic_visit(node)
+            target = node.func
+            parts = []
+            while isinstance(target, ast.Attribute):
+                parts.append(target.attr)
+                target = target.value
+            if isinstance(target, ast.Name) and target.id in {
+                "SandboxInstance",
+                "SyncSandboxInstance",
+                "sandbox",
+                "reconnected",
+            }:
+                api = ".".join(["SandboxInstance", *reversed(parts)])
+                return ast.copy_location(
+                    ast.Call(
+                        func=ast.Name(id="__compat_trace__", ctx=ast.Load()),
+                        args=[ast.Constant(value=api), node],
+                        keywords=[],
+                    ),
+                    node,
+                )
+            return node
+
+    return ast.unparse(ast.fix_missing_locations(TraceCalls().visit(ast.parse(source))))
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
@@ -85,8 +139,28 @@ def test_import_only(provider, shim, asynchronous, tmp_path, monkeypatch) -> Non
             "from arker.blaxel import SyncSandboxInstance",
         )
     namespace = {"sandbox_name": f"arker-import-{uuid.uuid4().hex[:12]}"}
+    called = set()
+
+    def trace(api, result):
+        called.add(api)
+        return result
+
+    namespace["__compat_trace__"] = trace
+    source = _trace_program(source)
     if asynchronous:
         source = _async_program(source)
-    exec(compile(source, "blaxel_import_only.py", "exec"), namespace)
-    if asynchronous:
-        asyncio.run(namespace["program"]())
+    outcome = "failed"
+    try:
+        exec(compile(source, "blaxel_import_only.py", "exec"), namespace)
+        if asynchronous:
+            asyncio.run(namespace["program"]())
+        outcome = "passed"
+    finally:
+        record(
+            "blaxel",
+            "async" if asynchronous else "sync",
+            "reference" if not shim else provider if provider == "arker" else "native",
+            "import-only-files-and-command-isolation",
+            sorted(called),
+            outcome,
+        )

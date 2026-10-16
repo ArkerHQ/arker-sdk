@@ -24,6 +24,13 @@ from ._compat import (
 from .computer import VM
 
 
+def __getattr__(name: str) -> Any:
+    module = import_optional("modal")
+    if module is not None:
+        return getattr(module, name)
+    raise AttributeError(name)
+
+
 class _Stream:
     def __init__(self, text: str) -> None:
         self._text = text

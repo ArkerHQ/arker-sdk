@@ -125,3 +125,4 @@ export class Sandbox {
     await this.#box.destroy();
   }
 }
+export * from "e2b";

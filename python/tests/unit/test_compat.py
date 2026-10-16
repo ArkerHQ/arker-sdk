@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import sys
 import types
@@ -369,6 +370,8 @@ def test_blaxel_native_surface_delegates_without_losing_provider_features() -> N
 
 
 def test_blaxel_typed_request_and_directory_attributes(monkeypatch) -> None:
+    from arker._compat_process import GuestProcesses
+
     monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
     monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
 
@@ -376,13 +379,15 @@ def test_blaxel_typed_request_and_directory_attributes(monkeypatch) -> None:
         def to_dict(self):
             return {"command": "printf typed", "workingDir": "/tmp", "waitForCompletion": True, "timeout": 1500}
 
+    captured = []
+
+    def execute(self, request):
+        captured.append(request)
+        return types.SimpleNamespace(stdout="typed")
+
+    monkeypatch.setattr(GuestProcesses, "exec", execute)
     t = FakeTransport()
-    add_create_run_delete(t, "vm_blaxel_typed", "typed")
-    t.add_json(
-        lambda method, url: method == "POST" and url.endswith("/vm_blaxel_typed/runs"),
-        200,
-        completed("f\tprobe.txt\nd\tnested\n"),
-    )
+    add_create_run_delete(t, "vm_blaxel_typed", "f\tprobe.txt\nd\tnested\n")
     with use_transport(t):
         sandbox = BlaxelSandbox.create()
         assert sandbox.process.exec(TypedRequest()).stdout == "typed"
@@ -391,12 +396,10 @@ def test_blaxel_typed_request_and_directory_attributes(monkeypatch) -> None:
         assert listing.files[0].name == "probe.txt"
         assert listing.files[0].path == "/blaxel/probe.txt"
         assert listing.subdirectories[0].name == "nested"
-        with pytest.raises(TypeError, match="wait_for_completion=False"):
-            sandbox.process.exec({"command": "sleep 10", "waitForCompletion": False})
+        sandbox.process.exec({"command": "sleep 10", "waitForCompletion": False})
         sandbox.delete()
-    wire = json.loads(t.calls[1]["body"])
-    assert wire["command"] == "(\ncd /tmp && printf typed\n)"
-    assert wire["timeout"] == 2
+    assert captured[0] == {"command": "printf typed", "workingDir": "/tmp", "waitForCompletion": True, "timeout": 1500}
+    assert captured[1]["waitForCompletion"] is False
 
 
 def test_blaxel_native_typed_requests_are_passed_through() -> None:
@@ -407,23 +410,43 @@ def test_blaxel_native_typed_requests_are_passed_through() -> None:
 
 
 def test_blaxel_async_surface_uses_shared_router(monkeypatch) -> None:
+    from arker._compat_process import GuestProcesses
     from arker.blaxel import SandboxInstance
 
     monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
     monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
     t = FakeTransport()
     add_create_run_delete(t, "vm_blaxel_async", "async")
+    monkeypatch.setattr(GuestProcesses, "exec", lambda self, request: types.SimpleNamespace(stdout="async"))
 
     async def program():
         sandbox = await SandboxInstance.create()
         try:
-            assert (await sandbox.process.exec({"command": "printf async"})).stdout == "async"
+            assert (
+                await sandbox.process.exec({"command": "printf async", "wait_for_completion": False})
+            ).stdout == "async"
             assert sandbox.metadata.name == "vm_blaxel_async"
         finally:
             await sandbox.delete()
 
     with use_transport(t):
         asyncio.run(program())
+
+
+@pytest.mark.parametrize(
+    "shim_name,native_name",
+    [
+        ("arker.e2b", "e2b"),
+        ("arker.daytona", "daytona"),
+        ("arker.modal", "modal"),
+        ("arker.blaxel", "blaxel.core.sandbox"),
+    ],
+)
+def test_compat_imports_preserve_vendor_builders(monkeypatch, shim_name, native_name):
+    shim = importlib.import_module(shim_name)
+    builder = object()
+    monkeypatch.setitem(sys.modules, native_name, types.SimpleNamespace(CreationBuilder=builder))
+    assert shim.CreationBuilder is builder
 
 
 def test_unsupported_calls_fail_fast(monkeypatch) -> None:

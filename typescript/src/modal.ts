@@ -175,3 +175,4 @@ export class ModalClient {
     },
   };
 }
+export * from "modal";

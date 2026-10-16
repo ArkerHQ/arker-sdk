@@ -4,6 +4,7 @@ import { SandboxInstance as NativeBlaxelSandbox } from "@blaxel/core";
 import { assertSupportedObjectKeys, CompatibilityNotFoundError, guardUnsupported, resolveCompatPath, type UniversalSandbox } from "./compat/common.js";
 import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
+import { GuestProcesses } from "./compat/guest-process.js";
 
 export interface BlaxelCompatConfig {
   apiKey?: string;
@@ -108,23 +109,31 @@ export class SandboxInstance {
     this.id = box.sandboxId;
     this.provider = box.provider;
     this.metadata = (native?.metadata ?? { name: box.sandboxId }) as NativeBlaxelSandbox["metadata"];
+    const guest = new GuestProcesses(box);
     this.process = (native?.process ?? {
       exec: async (request) => {
         const value = typeof request === "string" ? { command: request } : request;
-        assertSupportedObjectKeys(value, ["command", "workingDir", "working_dir", "env", "envs", "timeout", "waitForCompletion"], "blaxel", "process.exec");
-        if (value.waitForCompletion === false) {
-          throw new Error("Arker process.exec does not support waitForCompletion=false");
-        }
+        assertSupportedObjectKeys(value, ["command", "workingDir", "working_dir", "env", "envs", "timeout", "waitForCompletion", "name", "stdin", "onStdout", "onStderr", "onLog"], "blaxel", "process.exec");
         const command = Array.isArray(value.command)
           ? value.command.map((part) => `'${part.replaceAll("'", "'\\''")}'`).join(" ")
           : value.command;
-        const result = await box.runCommand(command, {
-          ...(value.workingDir || value.working_dir ? { cwd: value.workingDir ?? value.working_dir } : this.provider === "arker" ? { cwd: "/blaxel" } : {}),
-          ...(value.env || value.envs ? { env: value.env ?? value.envs } : {}),
-          ...(value.timeout ? { timeout: value.timeout } : {}),
+        const { working_dir, envs, ...options } = value;
+        return guest.exec({
+          ...options,
+          command,
+          workingDir: value.workingDir ?? working_dir,
+          env: value.env ?? envs,
+          waitForCompletion: typeof request === "string" ? true : value.waitForCompletion,
         });
-        return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
       },
+      get: guest.get.bind(guest),
+      list: guest.list.bind(guest),
+      wait: guest.wait.bind(guest),
+      kill: guest.kill.bind(guest),
+      stop: guest.stop.bind(guest),
+      logs: guest.logs.bind(guest),
+      writeStdin: guest.writeStdin.bind(guest),
+      closeStdin: guest.closeStdin.bind(guest),
     }) as BlaxelCompatProcess;
     this.fs = (native?.fs ?? {
       read: (path) => box.filesystem.readFile(this.provider === "arker" ? resolveCompatPath(path, "/blaxel") : path),
@@ -205,3 +214,4 @@ export class Blaxel {
   get(id: string) { return SandboxInstance.get(id, this.config); }
   delete(id: string) { return SandboxInstance.delete(id, this.config); }
 }
+export * from "@blaxel/core";

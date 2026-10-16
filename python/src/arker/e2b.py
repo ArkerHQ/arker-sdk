@@ -22,6 +22,13 @@ from ._compat import (
 from .computer import VM
 
 
+def __getattr__(name: str) -> Any:
+    module = import_optional("e2b")
+    if module is not None:
+        return getattr(module, name)
+    raise AttributeError(name)
+
+
 class Commands(UnsupportedMixin):
     _compat_name = "e2b"
 

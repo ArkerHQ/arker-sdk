@@ -53,7 +53,8 @@
     "example:ios-qa": "bun examples/ios-qa.ts",
     "generate:api-types": "openapi-typescript ../openapi.json --default-non-nullable false -o src/generated/api-types.ts",
     "smoke": "bun tests/conformance/fork-run-sync.ts",
-    "test": "bun run generate:validators && bun test tests/typed-errors.test.ts && bun tests/unit.ts && bun tests/compat.ts && bun tests/compat-router.ts && bun run build && bun tests/http2.ts",
+    "test": "bun run generate:validators && bun test tests/typed-errors.test.ts && bun tests/unit.ts && bun tests/compat.ts && bun tests/compat-router.ts && bun tests/compat-coverage.ts && bun run build && bun tests/http2.ts",
+    "coverage:compat": "bun scripts/compat-coverage.ts",
     "test:compat": "bun tests/compat.ts",
     "test:router": "bun tests/compat-router.ts",
     "test:compat-live": "bun tests/compat-live.ts",
@@ -63,7 +64,7 @@
     "test:compat-blaxel-live": "bun tests/compat-blaxel-live.ts",
     "typecheck": "bun run generate:validators && tsc -p tsconfig.test.json",
     "prepublishOnly": "bun run build",
-    "generate:validators": "bun scripts/generate-error-validators.ts"
+    "generate:validators": "bun scripts/generate-compat-process.ts && bun scripts/generate-error-validators.ts"
   },
   "keywords": [
     "arker",
@@ -81,6 +82,9 @@
   },
   "bugs": "https://github.com/ArkerHQ/arker-sdk/issues",
   "devDependencies": {
+    "e2b": "2.56.0",
+    "@daytona/sdk": "0.224.1",
+    "modal": "0.11.1",
     "@blaxel/core": "^0.3.30",
     "@computesdk/daytona": "^1.7.43",
     "@computesdk/e2b": "^1.7.62",
@@ -96,6 +100,9 @@
     "ajv-formats": "^3.0.1"
   },
   "peerDependencies": {
+    "e2b": "^2.56.0",
+    "@daytona/sdk": "^0.224.1",
+    "modal": "^0.11.1",
     "@blaxel/core": "^0.3.30",
     "@computesdk/daytona": "^1.7.43",
     "@computesdk/e2b": "^1.7.62",
@@ -104,6 +111,9 @@
     "computesdk": "^4.1.12"
   },
   "peerDependenciesMeta": {
+    "e2b": { "optional": true },
+    "@daytona/sdk": { "optional": true },
+    "modal": { "optional": true },
     "@blaxel/core": {
       "optional": true
     },

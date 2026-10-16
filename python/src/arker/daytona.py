@@ -21,6 +21,13 @@ from ._compat import (
 from .computer import VM
 
 
+def __getattr__(name: str) -> Any:
+    module = import_optional("daytona")
+    if module is not None:
+        return getattr(module, name)
+    raise AttributeError(name)
+
+
 class ExecuteResponse:
     def __init__(self, result: CommandResult) -> None:
         self.exit_code = result.exit_code

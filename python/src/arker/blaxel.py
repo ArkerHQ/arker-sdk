@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import math
-import re
 import shlex
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,7 +21,15 @@ from ._compat import (
     routed_get,
     run_command,
 )
+from ._compat_process import GuestProcesses
 from .computer import VM
+
+
+def __getattr__(name: str) -> Any:
+    module = import_optional("blaxel.core.sandbox")
+    if module is not None:
+        return getattr(module, name)
+    raise AttributeError(name)
 
 
 @dataclass(frozen=True)
@@ -61,6 +68,7 @@ class Process:
     def __init__(self, vm: VM | None = None, native: Any | None = None) -> None:
         self._vm = vm
         self._native = native
+        self._guest = GuestProcesses(vm) if vm is not None else None
 
     def exec(self, request: Any) -> CommandResult | Any:
         if self._vm is None:
@@ -75,57 +83,51 @@ class Process:
                 values["working_dir"] = values.pop("workingDir")
             if "envs" in values:
                 values["env"] = values.pop("envs")
-            values.setdefault("wait_for_completion", True)
+            if isinstance(request, str):
+                values.setdefault("wait_for_completion", True)
             return self._native.exec(request_type(**values))
         if isinstance(request, str):
             command = f"mkdir -p /blaxel && cd /blaxel && {request}"
             timeout = None
         else:
             request = _request_values(request)
-            if "waitForCompletion" in request:
-                request["wait_for_completion"] = request.pop("waitForCompletion")
-            supported = {"command", "cmd", "workingDir", "working_dir", "env", "envs", "timeout", "wait_for_completion"}
+            aliases = {"working_dir": "workingDir", "envs": "env", "wait_for_completion": "waitForCompletion"}
+            for key, alias in aliases.items():
+                if key in request:
+                    request[alias] = request.pop(key)
+            supported = {
+                "command",
+                "cmd",
+                "workingDir",
+                "env",
+                "timeout",
+                "waitForCompletion",
+                "name",
+                "stdin",
+                "on_log",
+                "on_stdout",
+                "on_stderr",
+            }
             unknown = sorted(set(request) - supported)
-            if unknown or request.get("wait_for_completion") is False:
+            if unknown:
                 raise UnsupportedCompatibilityOption(
-                    "Arker process.exec cannot represent option(s): "
-                    + ", ".join(
-                        [
-                            *unknown,
-                            *(["wait_for_completion=False"] if request.get("wait_for_completion") is False else []),
-                        ]
-                    )
+                    "Arker process.exec cannot represent option(s): " + ", ".join(unknown)
                 )
             command = request.get("command") or request.get("cmd")
             if isinstance(command, list):
                 command = " ".join(shlex.quote(str(value)) for value in command)
             if not isinstance(command, str):
                 raise TypeError("process.exec requires a command string or list")
-            working_dir = request.get("workingDir") or request.get("working_dir")
-            environment = request.get("env") or request.get("envs")
-            prefix = ""
-            if working_dir:
-                prefix += f"cd {shlex.quote(str(working_dir))} && "
-            else:
-                prefix += "mkdir -p /blaxel && cd /blaxel && "
-            if environment:
-                invalid = next(
-                    (key for key in environment if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key))),
-                    None,
-                )
-                if invalid is not None:
-                    raise ValueError(f"invalid environment variable name: {invalid}")
-                prefix += (
-                    " ".join(f"export {key}={shlex.quote(str(value))};" for key, value in environment.items()) + " "
-                )
-            command = prefix + command
-            timeout_ms = request.get("timeout")
-            timeout = math.ceil(timeout_ms / 1000) if timeout_ms is not None else None
+            request["command"] = command
+            request.pop("cmd", None)
+            return self._guest.exec(request)
         return run_command(self._vm, command, timeout=timeout)
 
     def __getattr__(self, name: str) -> Any:
         if self._native is not None:
             return getattr(self._native, name)
+        if self._guest is not None and hasattr(self._guest, name):
+            return getattr(self._guest, name)
         raise AttributeError(f"process.{name} is not supported by the Arker compatibility layer for blaxel")
 
 
@@ -329,6 +331,44 @@ class _AsyncComponent:
         return call
 
 
+class _AsyncProcess(_AsyncComponent):
+    async def exec(self, request: Any) -> Any:
+        values = (
+            {"command": request, "wait_for_completion": True} if isinstance(request, str) else _request_values(request)
+        )
+        waiting = values.pop("wait_for_completion", values.pop("waitForCompletion", False))
+        callbacks = {key: values.pop(key, None) for key in ("on_stdout", "on_stderr", "on_log")}
+        values["waitForCompletion"] = False
+        current = await asyncio.to_thread(self._component.exec, values)
+        return await self._wait(current.name, -1, 50, callbacks) if waiting else current
+
+    async def _wait(self, identifier, max_wait, interval, callbacks=None):
+        if max_wait < -1 or interval <= 0:
+            raise ValueError("max_wait must be -1 or nonnegative; interval must be positive")
+        deadline = None if max_wait == -1 else time.monotonic() + max_wait / 1000
+        offsets = {"stdout": 0, "stderr": 0}
+        while True:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError(f"Timed out waiting for process {identifier}")
+            current = await asyncio.to_thread(self._component.get, identifier)
+            if deadline is not None and time.monotonic() > deadline:
+                raise TimeoutError(f"Timed out waiting for process {identifier}")
+            for stream in offsets:
+                data = getattr(current, stream)[offsets[stream] :]
+                offsets[stream] += len(data)
+                for key in (f"on_{stream}", "on_log"):
+                    callback = (callbacks or {}).get(key)
+                    if data and callback:
+                        callback(data)
+            if current.status != "running":
+                return current
+            delay = interval / 1000 if deadline is None else max(0, min(interval / 1000, deadline - time.monotonic()))
+            await asyncio.sleep(delay)
+
+    async def wait(self, identifier: str, max_wait: int = 60000, interval: int = 1000) -> Any:
+        return await self._wait(identifier, max_wait, interval)
+
+
 class SandboxInstance:
     """Awaitable Blaxel surface using the same router and adapters as sync calls."""
 
@@ -336,7 +376,7 @@ class SandboxInstance:
         self._sandbox = sandbox
         self._native = native
         self.id = sandbox.id
-        self.process = native.process if native is not None else _AsyncComponent(sandbox.process)
+        self.process = native.process if native is not None else _AsyncProcess(sandbox.process)
         self.fs = native.fs if native is not None else _AsyncComponent(sandbox.fs)
 
     @classmethod
