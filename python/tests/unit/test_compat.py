@@ -138,10 +138,36 @@ def test_provider_block_network_options_translate_to_arker_policy(monkeypatch, c
         create()
 
     body = json.loads(t.calls[0]["body"])
-    assert body["policies"]["rules"]["compat-deny-rest"] == {
-        "type": "outbound",
-        "priority": 1_000_000,
-        "action": "deny",
+    assert body["policies"] == {"policies": [{"type": "outbound", "action": "deny"}]}
+
+
+def test_allowlist_policies_replace_inherited_rules_and_preserve_order(monkeypatch) -> None:
+    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
+    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, vm_payload("vm_policy"))
+
+    with use_transport(t):
+        ModalSandbox.create(
+            outbound_domain_allowlist=["api.example.com"],
+            outbound_cidr_allowlist=["203.0.113.0/24"],
+        )
+
+    body = json.loads(t.calls[0]["body"])
+    assert body["policies"] == {
+        "policies": [
+            {
+                "type": "outbound",
+                "match": {"hosts": ["api.example.com"], "ports": [443]},
+                "action": "allow",
+            },
+            {
+                "type": "outbound",
+                "match": {"ips": ["203.0.113.0/24"]},
+                "action": "allow",
+            },
+            {"type": "outbound", "action": "deny"},
+        ]
     }
 
 
@@ -160,7 +186,7 @@ def test_daytona_official_surface(monkeypatch) -> None:
         daytona = Daytona()
         sandbox = daytona.create()
         response = sandbox.process.exec("echo 'Hello, World!'", cwd="/workspace", env={"FOO": "bar"}, timeout=7)
-        alias = sandbox.process.execute_command("echo 'Hello, World!'")
+        alias = sandbox.process.execute_command("echo 'Hello, World!'", "/workspace", {"ALIAS": "yes"}, 9)
         assert response.result == "Hello, World!\n"
         assert alias.result == "Hello, World!\n"
         sandbox.delete()
@@ -169,6 +195,9 @@ def test_daytona_official_surface(monkeypatch) -> None:
     first_run = json.loads(t.calls[1]["body"])
     assert first_run["command"] == "export FOO=bar; cd /workspace && echo 'Hello, World!'"
     assert first_run["timeout"] == 7
+    alias_run = json.loads(t.calls[2]["body"])
+    assert alias_run["command"] == "export ALIAS=yes; cd /workspace && echo 'Hello, World!'"
+    assert alias_run["timeout"] == 9
 
 
 def test_compat_requires_source(monkeypatch) -> None:
@@ -300,7 +329,7 @@ def test_unsupported_calls_fail_fast(monkeypatch) -> None:
             match="not supported by the Arker compatibility layer for e2b",
         ):
             sandbox.files.rename  # noqa: B018
-        with pytest.raises(TypeError, match="only supports create"):
+        with pytest.raises(TypeError, match="not supported by Arker: image"):
             ModalSandbox.create(image="alpine")
 
 

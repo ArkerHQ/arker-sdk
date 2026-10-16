@@ -189,3 +189,4 @@ for (const [provider, createNative, createArker] of pairs) {
 }
 
 console.log("PASS compatibility equivalence matrix");
+process.exit(0);

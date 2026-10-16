@@ -6,11 +6,13 @@ from typing import Any
 
 from ._compat import (
     CommandResult,
+    UnsupportedCompatibilityOption,
     UnsupportedMixin,
     arker_create,
     arker_get,
     compat_network_policies,
     format_not_found,
+    get_or_none,
     import_optional,
     resolve_compat_path,
     routed_create,
@@ -143,15 +145,12 @@ class Sandbox(UnsupportedMixin):
         router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
         if router_path:
             arker_config = {**arker_config, "router_config_path": router_path}
-        if kwargs:
-            unsupported = ", ".join(sorted(kwargs))
-            raise TypeError(f"Sandbox.create received unsupported option(s): {unsupported}")
         native = cls._native_sandbox()
 
         def create_native() -> Any:
             if native is None:
                 raise RuntimeError("Native E2B SDK is not installed")
-            native_options = {"allow_internet_access": allow_internet_access}
+            native_options = {**kwargs, "allow_internet_access": allow_internet_access}
             if timeout is not None:
                 native_options["timeout"] = timeout
             if template_id is not None:
@@ -162,15 +161,36 @@ class Sandbox(UnsupportedMixin):
             "e2b",
             arker_config,
             {
-                "arker": lambda: arker_create(
+                "arker": lambda: cls._create_arker(
                     arker_config,
-                    template_id=template_id,
-                    policies=compat_network_policies(block_all=allow_internet_access is False),
+                    template_id,
+                    timeout,
+                    allow_internet_access,
+                    kwargs,
                 ),
                 "e2b": create_native,
             },
         )
         return cls(vm=result if provider == "arker" else None, native=result if provider == "e2b" else None)
+
+    @staticmethod
+    def _create_arker(
+        arker_config: dict[str, Any],
+        template_id: str | None,
+        timeout: int | None,
+        allow_internet_access: bool,
+        native_options: dict[str, Any],
+    ) -> VM:
+        unsupported = [*([] if timeout is None else ["timeout"]), *sorted(native_options)]
+        if unsupported:
+            raise UnsupportedCompatibilityOption(
+                f"Sandbox.create option(s) are not supported by Arker: {', '.join(unsupported)}"
+            )
+        return arker_create(
+            arker_config,
+            template_id=template_id,
+            policies=compat_network_policies(block_all=allow_internet_access is False),
+        )
 
     @classmethod
     def connect(cls, sandbox_id: str, **kwargs: Any) -> Sandbox:
@@ -189,7 +209,9 @@ class Sandbox(UnsupportedMixin):
             {
                 "arker": lambda: arker_get(sandbox_id, arker_config),
                 "e2b": lambda: (
-                    native.connect(sandbox_id) if native is not None and hasattr(native, "connect") else None
+                    get_or_none(lambda: native.connect(sandbox_id))
+                    if native is not None and hasattr(native, "connect")
+                    else None
                 ),
             },
         )

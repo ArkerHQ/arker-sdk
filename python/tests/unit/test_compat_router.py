@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from arker._compat import routed_create, routed_get
+from arker._compat import get_or_none, routed_create, routed_get
 from arker._router import JsonRouteCache, RouterConfig, load_router_config, select_weighted_provider
 
 
@@ -260,3 +260,15 @@ def test_missing_arker_source_falls_back_to_native_provider(tmp_path: Path) -> N
 
     assert provider == "e2b"
     assert result.sandbox_id == "native-e2b"
+
+
+def test_native_not_found_errors_become_route_misses() -> None:
+    class MissingError(Exception):
+        status_code = 404
+
+    assert get_or_none(lambda: (_ for _ in ()).throw(MissingError("missing"))) is None
+
+
+def test_native_lookup_errors_are_not_hidden() -> None:
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        get_or_none(lambda: (_ for _ in ()).throw(RuntimeError("provider unavailable")))

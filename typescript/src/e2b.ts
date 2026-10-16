@@ -77,13 +77,11 @@ export class Sandbox {
     };
   }
 
-  static async create(templateId?: string, opts?: CreateOptions): Promise<Sandbox> {
-    if (templateId !== undefined && typeof templateId !== "string") {
-      throw new Error(
-        `Sandbox.create only supports create() or create(templateId, { timeoutMs }) in the Arker compatibility layer for e2b. ` +
-          `Use the native e2b SDK for unsupported create signatures.`,
-      );
-    }
+  static async create(opts?: CreateOptions): Promise<Sandbox>;
+  static async create(templateId: string | undefined, opts?: CreateOptions): Promise<Sandbox>;
+  static async create(templateOrOptions?: string | CreateOptions, options?: CreateOptions): Promise<Sandbox> {
+    const templateId = typeof templateOrOptions === "string" ? templateOrOptions : undefined;
+    const opts = typeof templateOrOptions === "string" ? options : templateOrOptions ?? options;
     assertSupportedObjectKeys(opts, E2B_CREATE_OPTION_KEYS, "e2b", "Sandbox.create");
     const timeout = resolveTimeout(opts);
     const box = await sdk((opts as any)?.routerConfigPath).sandbox.create({

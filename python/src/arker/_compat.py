@@ -4,6 +4,7 @@ import dataclasses
 import importlib
 import os
 import shlex
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from pathlib import Path
@@ -84,7 +85,11 @@ def arker_create(
 
 
 def compat_network_policies(
-    *, block_all: bool = False, domains: str | list[str] | None = None, cidrs: str | list[str] | None = None
+    *,
+    block_all: bool = False,
+    domains: str | list[str] | None = None,
+    cidrs: str | list[str] | None = None,
+    domain_ports: list[int] | None = None,
 ) -> dict[str, Any] | None:
     def values(value: str | list[str] | None) -> list[str]:
         if isinstance(value, str):
@@ -97,23 +102,26 @@ def compat_network_policies(
         raise ValueError("block-all network policy cannot be combined with outbound allowlists")
     if not block_all and not domain_values and not cidr_values:
         return None
-    rules: dict[str, Any] = {}
+    policies: list[dict[str, Any]] = []
     if domain_values:
-        rules["compat-allow-domains"] = {
+        match: dict[str, Any] = {"hosts": domain_values}
+        if domain_ports:
+            match["ports"] = domain_ports
+        policies.append({
             "type": "outbound",
-            "priority": 100,
-            "match": {"hosts": domain_values},
+            "match": match,
             "action": "allow",
-        }
+        })
     if cidr_values:
-        rules["compat-allow-cidrs"] = {
+        policies.append({
             "type": "outbound",
-            "priority": 200,
             "match": {"ips": cidr_values},
             "action": "allow",
-        }
-    rules["compat-deny-rest"] = {"type": "outbound", "priority": 1_000_000, "action": "deny"}
-    return {"rules": rules}
+        })
+    policies.append({"type": "outbound", "action": "deny"})
+    # The ordered form replaces the source VM's inherited policy. A keyed
+    # update would merge and could let an inherited rule override the shim.
+    return {"policies": policies}
 
 
 def arker_get(vm_id: str, config: dict[str, Any] | None = None) -> VM | None:
@@ -177,6 +185,23 @@ def format_not_found(kind: str, sandbox_id: str) -> RuntimeError:
     return RuntimeError(f"{kind} {sandbox_id} not found")
 
 
+def get_or_none(getter: Callable[[], Any]) -> Any | None:
+    try:
+        return getter()
+    except Exception as error:
+        response = getattr(error, "response", None)
+        status = (
+            getattr(error, "status_code", None)
+            or vars(error).get("status")
+            or getattr(response, "status_code", None)
+        )
+        code = str(getattr(error, "code", "")).lower()
+        message = str(error).lower()
+        if status == 404 or code in {"not_found", "notfound"} or "not found" in message:
+            return None
+        raise
+
+
 def router_config(config: dict[str, Any] | None, native_provider: str) -> RouterConfig:
     cfg = config or {}
     path = cfg.get("router_config_path") or cfg.get("routerConfigPath") or os.environ.get("COMPUTESDK_ROUTER_CONFIG")
@@ -222,8 +247,8 @@ def _is_retryable(error: Exception) -> bool:
             break
         response = getattr(current, "response", None)
         status = (
-            getattr(current, "status", None)
-            or getattr(current, "status_code", None)
+            getattr(current, "status_code", None)
+            or vars(current).get("status")
             or getattr(response, "status_code", None)
         )
         if status in {400, 401, 403, 422}:

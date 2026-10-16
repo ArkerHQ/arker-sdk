@@ -11,6 +11,7 @@ from ._compat import (
     arker_create,
     arker_get,
     format_not_found,
+    get_or_none,
     import_optional,
     resolve_compat_path,
     routed_create,
@@ -106,7 +107,17 @@ class SandboxInstance(UnsupportedMixin):
     def __init__(self, vm: VM | None = None, native: Any | None = None) -> None:
         self._vm = vm
         self._native = native
-        self.id = vm.id if vm is not None else getattr(native, "id", getattr(native, "sandbox_id", None))
+        metadata = getattr(native, "metadata", None)
+        metadata_name = (
+            metadata.get("name")
+            if isinstance(metadata, dict)
+            else getattr(metadata, "name", None)
+        )
+        self.id = (
+            vm.id
+            if vm is not None
+            else getattr(native, "id", None) or getattr(native, "sandbox_id", None) or metadata_name
+        )
         self.process = Process(vm, getattr(native, "process", None))
         self.fs = FileSystem(vm, getattr(native, "fs", getattr(native, "filesystem", None)))
 
@@ -177,7 +188,7 @@ class SandboxInstance(UnsupportedMixin):
             arker_config,
             {
                 "arker": lambda: arker_get(sandbox_id, arker_config),
-                "blaxel": lambda: native.get(sandbox_id) if native is not None else None,
+                "blaxel": lambda: get_or_none(lambda: native.get(sandbox_id)) if native is not None else None,
             },
         )
         if found is None:

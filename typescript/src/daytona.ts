@@ -36,7 +36,12 @@ export class Sandbox {
 
   readonly process: {
     exec: (command: string, options?: ExecuteCommandOptions) => Promise<ExecuteResponse>;
-    executeCommand: (command: string, options?: ExecuteCommandOptions) => Promise<ExecuteResponse>;
+    executeCommand: (
+      command: string,
+      cwd?: string,
+      env?: Record<string, string>,
+      timeout?: number,
+    ) => Promise<ExecuteResponse>;
   };
 
   constructor(box: UniversalSandbox) {
@@ -46,6 +51,7 @@ export class Sandbox {
     const run = async (command: string, options?: ExecuteCommandOptions): Promise<ExecuteResponse> => {
       const result = await this.#box.runCommand(command, {
         ...options,
+        ...(options?.timeout !== undefined ? { timeout: options.timeout * 1_000 } : {}),
         ...(this.provider === "arker" && options?.cwd === undefined ? { cwd: "/home/daytona" } : {}),
       });
       return {
@@ -57,7 +63,7 @@ export class Sandbox {
     };
     this.process = {
       exec: run,
-      executeCommand: run,
+      executeCommand: (command, cwd, env, timeout) => run(command, { cwd, env, timeout }),
     };
   }
 

@@ -126,9 +126,10 @@ async function testDaytonaSurface(): Promise<void> {
     assert.equal(result.result, "stdout:echo hi");
     assert.equal(result.stdout, "stdout:echo hi");
     assert.equal(result.stderr, "stderr:echo hi");
-    assert.deepEqual(box.runCalls[0]!.options, { cwd: "/workspace", env: { A: "b" }, timeout: 100 });
-    const executeCommandResult = await sandbox.process.executeCommand("echo compat");
+    assert.deepEqual(box.runCalls[0]!.options, { cwd: "/workspace", env: { A: "b" }, timeout: 100_000 });
+    const executeCommandResult = await sandbox.process.executeCommand("echo compat", "/official", { OFFICIAL: "yes" }, 12);
     assert.equal(executeCommandResult.result, "stdout:echo compat");
+    assert.deepEqual(box.runCalls[1]!.options, { cwd: "/official", env: { OFFICIAL: "yes" }, timeout: 12_000 });
 
     await daytona.delete(sandbox);
     assert.equal(box.destroyed, true);
@@ -192,8 +193,10 @@ async function testE2BSurface(): Promise<void> {
     );
     await assert.rejects(
       () => E2BSandbox.create({ template: "bad" } as any),
-      /only supports create\(\) or create\(templateId/,
+      /unsupported option\(s\) 'template'/,
     );
+    await E2BSandbox.create({ timeoutMs: 321 });
+    assert.deepEqual(fake.createCalls.at(-1), { timeout: 321 });
     await assert.rejects(
       () => E2BSandbox.create("template", { envVars: { A: "B" } } as any),
       /unsupported option\(s\) 'envVars'/,
@@ -372,6 +375,34 @@ async function testInternalArkerProviderSourceProvenance(): Promise<void> {
   assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), { source_vm_id: "snapshot-without-vm-prefix" });
 }
 
+async function testInternalArkerProviderPolicyReplacement(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson(
+    (method, url) => method === "POST" && url === "https://arker.invalid/api/v1/fork",
+    200,
+    { vm_id: "vm_policy", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] },
+  );
+  const provider = createArkerComputeProvider({
+    apiKey: "ark-key",
+    baseUrl: "https://arker.invalid/api",
+    source: "catalog-template",
+    fetch: fetch.fetch,
+    retry: false,
+  });
+  await provider.sandbox.create({
+    outboundDomainAllowlist: ["api.example.com"],
+    outboundCidrAllowlist: ["203.0.113.0/24"],
+  } as any);
+  const body = JSON.parse(fetch.calls[0]!.body!);
+  assert.deepEqual(body.policies, {
+    policies: [
+      { type: "outbound", match: { hosts: ["api.example.com"], ports: [443] }, action: "allow" },
+      { type: "outbound", match: { ips: ["203.0.113.0/24"] }, action: "allow" },
+      { type: "outbound", action: "deny" },
+    ],
+  });
+}
+
 async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
   const created = new FakeSandbox("new-box");
   const fake = installFakeCompute(created, { getByIdResult: null });
@@ -413,6 +444,7 @@ await testModalSurface();
 await testInternalArkerProvider();
 await testInternalArkerProviderImageAndResources();
 await testInternalArkerProviderSourceProvenance();
+await testInternalArkerProviderPolicyReplacement();
 await testInternalArkerProviderRequiresSource();
 await testBlaxelCreateIfNotExistsAndTtl();
 

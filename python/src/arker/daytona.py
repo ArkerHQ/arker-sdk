@@ -12,6 +12,7 @@ from ._compat import (
     arker_get,
     compat_network_policies,
     format_not_found,
+    get_or_none,
     import_optional,
     routed_create,
     routed_get,
@@ -55,11 +56,23 @@ class Process:
             prefix += "mkdir -p /home/daytona && cd /home/daytona && "
         return ExecuteResponse(run_command(self._vm, prefix + command, timeout=timeout))
 
-    def execute_command(self, command: str, **kwargs: Any) -> ExecuteResponse:
-        return self.exec(command, **kwargs)
+    def execute_command(
+        self,
+        command: str,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> ExecuteResponse:
+        return self.exec(command, cwd=cwd, env=env, timeout=timeout)
 
-    def executeCommand(self, command: str, **kwargs: Any) -> ExecuteResponse:
-        return self.exec(command, **kwargs)
+    def executeCommand(
+        self,
+        command: str,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> ExecuteResponse:
+        return self.exec(command, cwd=cwd, env=env, timeout=timeout)
 
 
 class Sandbox(UnsupportedMixin):
@@ -183,7 +196,9 @@ class Daytona(UnsupportedMixin):
             self._arker_config,
             {
                 "arker": lambda: arker_get(sandbox_id, self._arker_config),
-                "daytona": lambda: native.get(sandbox_id) if native is not None and hasattr(native, "get") else None,
+                "daytona": lambda: get_or_none(lambda: native.get(sandbox_id))
+                if native is not None and hasattr(native, "get")
+                else None,
             },
         )
         if found is not None:
@@ -202,7 +217,9 @@ class Daytona(UnsupportedMixin):
             self._arker_config,
             {
                 "arker": lambda: arker_get(sandbox, self._arker_config),
-                "daytona": lambda: native.get(sandbox) if native is not None and hasattr(native, "get") else None,
+                "daytona": lambda: get_or_none(lambda: native.get(sandbox))
+                if native is not None and hasattr(native, "get")
+                else None,
             },
         )
         if found is None:

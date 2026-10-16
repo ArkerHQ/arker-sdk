@@ -65,15 +65,22 @@ function networkPolicies(values: Record<string, unknown>): ForkOptions["policies
     throw new ArkerError("bad_request", "block-all network policy cannot be combined with outbound allowlists", 400);
   }
   if (!blockAll && domains.length === 0 && cidrs.length === 0) return undefined;
-  const rules: Record<string, unknown> = {};
+  const policies: Array<Record<string, unknown>> = [];
   if (domains.length > 0) {
-    rules["compat-allow-domains"] = { type: "outbound", priority: 100, match: { hosts: domains }, action: "allow" };
+    const modalDomainPolicy = values.outboundDomainAllowlist !== undefined;
+    policies.push({
+      type: "outbound",
+      match: { hosts: domains, ...(modalDomainPolicy ? { ports: [443] } : {}) },
+      action: "allow",
+    });
   }
   if (cidrs.length > 0) {
-    rules["compat-allow-cidrs"] = { type: "outbound", priority: 200, match: { ips: cidrs }, action: "allow" };
+    policies.push({ type: "outbound", match: { ips: cidrs }, action: "allow" });
   }
-  rules["compat-deny-rest"] = { type: "outbound", priority: 1_000_000, action: "deny" };
-  return { rules } as ForkOptions["policies"];
+  policies.push({ type: "outbound", action: "deny" });
+  // Fork policy updates normally merge with the source VM. The ordered form
+  // replaces inherited rules so provider allowlists cannot be bypassed.
+  return { policies } as ForkOptions["policies"];
 }
 
 function toFileEntries(stdout: string): FileEntry[] {
@@ -304,11 +311,12 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
           : sourceVmId
             ? { source_vm_id: sourceVmId }
             : { source_vm_name: sourceVmName! };
+        const policies = networkPolicies(values);
         const request: ForkOptions = {
           ...sourceRequest,
           ...(options?.name ? { name: options.name } : {}),
           ...(resources ? { resources } : {}),
-          ...(networkPolicies(values) ? { policies: networkPolicies(values) } : {}),
+          ...(policies ? { policies } : {}),
         };
         const vm = await client.fork(request);
         return wrap(vm);

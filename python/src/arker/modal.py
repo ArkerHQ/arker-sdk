@@ -3,15 +3,18 @@ from __future__ import annotations
 import math
 import re
 import shlex
+from functools import partial
 from typing import Any
 
 from ._compat import (
     CommandResult,
+    UnsupportedCompatibilityOption,
     UnsupportedMixin,
     arker_create,
     arker_get,
     compat_network_policies,
     format_not_found,
+    get_or_none,
     import_optional,
     routed_create,
     routed_get,
@@ -70,36 +73,53 @@ class Sandbox(UnsupportedMixin):
 
     @classmethod
     def create(cls, *args: Any, **kwargs: Any) -> Sandbox:
+        native_kwargs = dict(kwargs)
         arker_config = kwargs.pop("arker", None) or {}
         router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
+        native_kwargs.pop("arker", None)
+        native_kwargs.pop("router_config_path", None)
+        native_kwargs.pop("routerConfigPath", None)
         block_network = kwargs.pop("block_network", kwargs.pop("blockNetwork", False))
         outbound_cidrs = kwargs.pop("outbound_cidr_allowlist", kwargs.pop("outboundCidrAllowlist", None))
         outbound_domains = kwargs.pop("outbound_domain_allowlist", kwargs.pop("outboundDomainAllowlist", None))
+        for camel, snake, value in (
+            ("blockNetwork", "block_network", block_network),
+            ("outboundCidrAllowlist", "outbound_cidr_allowlist", outbound_cidrs),
+            ("outboundDomainAllowlist", "outbound_domain_allowlist", outbound_domains),
+        ):
+            if camel in native_kwargs:
+                native_kwargs.pop(camel)
+                native_kwargs[snake] = value
         if router_path:
             arker_config = {**arker_config, "router_config_path": router_path}
-        if args or kwargs:
-            raise TypeError("Sandbox.create only supports create() in the Arker compatibility layer for modal.")
         native = cls._native_sandbox()
 
         def create_native() -> Any:
             if native is None or not hasattr(native, "create"):
                 raise RuntimeError("Native Modal SDK is not installed")
-            return native.create(
-                block_network=block_network,
-                **({"outbound_cidr_allowlist": outbound_cidrs} if outbound_cidrs is not None else {}),
-                **({"outbound_domain_allowlist": outbound_domains} if outbound_domains is not None else {}),
+            return native.create(*args, **native_kwargs)
+
+        def create_arker() -> VM:
+            if args or kwargs:
+                names = [*(f"positional[{index}]" for index in range(len(args))), *sorted(kwargs)]
+                raise UnsupportedCompatibilityOption(
+                    f"Sandbox.create option(s) are not supported by Arker: {', '.join(names)}"
+                )
+            return arker_create(
+                arker_config,
+                policies=compat_network_policies(
+                    block_all=bool(block_network),
+                    domains=outbound_domains,
+                    cidrs=outbound_cidrs,
+                    domain_ports=[443],
+                ),
             )
 
         provider, result = routed_create(
             "modal",
             arker_config,
             {
-                "arker": lambda: arker_create(
-                    arker_config,
-                    policies=compat_network_policies(
-                        block_all=bool(block_network), domains=outbound_domains, cidrs=outbound_cidrs
-                    ),
-                ),
+                "arker": create_arker,
                 "modal": create_native,
             },
         )
@@ -119,7 +139,8 @@ class Sandbox(UnsupportedMixin):
         def get_native() -> Any | None:
             for method_name in ("from_id", "fromId", "connect"):
                 if native is not None and hasattr(native, method_name):
-                    return getattr(native, method_name)(sandbox_id)
+                    method = getattr(native, method_name)
+                    return get_or_none(partial(method, sandbox_id))
             return None
 
         found = routed_get(
