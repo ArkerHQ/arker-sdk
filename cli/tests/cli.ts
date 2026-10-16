@@ -1062,6 +1062,39 @@ async function testSignalForwardsSignalAndSession(): Promise<void> {
   });
 }
 
+async function testStateFiltersMatchTheContract(): Promise<void> {
+  const sessions = { sessions: [{ session_id: "s_1", state: "pending", cwd: "/" }] };
+  await withCapturedServer((_request, res) => jsonResponse(res, sessions), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["sessions", "ls", "vm_1", "--state", "pending"]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(requests[0]?.url, "/api/v1/vms/vm_1/sessions?state=pending");
+    assert.equal(stdoutText(result), "s_1\tpending\t/\n");
+  });
+  await withCapturedServer((_request, res) => jsonResponse(res, { vms: [] }), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["ls", "--state", "pending"]);
+    assert.equal(result.code, 1, "a VM is never pending");
+    assert.equal(requests.length, 0);
+  });
+}
+
+async function testSignalOnAStoppedVmShowsInvalidState(): Promise<void> {
+  await withCapturedServer((_request, res) => jsonResponse(res, {
+    error: {
+      code: "invalid_state",
+      message: "The VM is not running.",
+      timestamp: "2026-10-16T00:00:00Z",
+      request_id: "req_1",
+      request: { kind: "matched", operation_id: "createRun" },
+      details: { resource: { kind: "vm" }, requirement: "running" },
+    },
+  }, 409), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["signal", "vm_1", "SIGINT"]);
+    assert.equal(result.code, 1);
+    assert.equal(result.stderr, "arker: invalid_state: The VM is not running.\n");
+    assert.equal(requests.length, 1);
+  });
+}
+
 async function testSessionsUpdateForwardsPatch(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, { ok: true, session_id: "s_1" }), async (baseUrl, requests) => {
     const result = await runCli(baseUrl, ["sessions", "update", "vm_1", "s_1", "--cols", "120", "--timeout-secs", "600"]);
@@ -1464,6 +1497,8 @@ await testSyncReadFlagIgnoresPipedStdin();
 await testSyncReadFlagRejectsDataArgument();
 await testSignalValidatesNameBeforeRequest();
 await testSignalForwardsSignalAndSession();
+await testStateFiltersMatchTheContract();
+await testSignalOnAStoppedVmShowsInvalidState();
 await testSessionsUpdateForwardsPatch();
 await testSessionsUpdateRequiresAField();
 await testNoPipeReadsFileBytes();

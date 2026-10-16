@@ -30,6 +30,7 @@ from typing import (
     Any,
     Literal,
     TypeVar,
+    Union,
     get_args,
     get_origin,
     get_type_hints,
@@ -74,6 +75,7 @@ from .generated.api_models import (
     PatchSessionResponse,
     PatchVmRequest,
     PolicyDoc,
+    PolicyUpdate,
     Pool,
     PoolCommitment,
     PtyTicketResponse,
@@ -882,7 +884,7 @@ class VM:
         pool_id: str | None = None,
         pool_name: str | None = None,
         ssh_public_keys: list[str] | None = None,
-        policies: PolicyDoc | dict[str, Any] | None = None,
+        policies: PolicyUpdate | PolicyDoc | dict[str, Any] | None = None,
     ) -> Vm:
         """Update this VM's description, resources, pool, SSH keys, or network
         policy via ``PATCH /v1/vms/{id}``.
@@ -892,10 +894,17 @@ class VM:
         Pass ``None`` or an empty description to clear it. Omit
         ``description`` to leave it unchanged.
 
-        ``policies`` is a complete replacement for the VM's network policy:
-        the same document :meth:`set_policies` accepts. An empty doc (``{}``
-        or ``{"policies": []}``) clears it to allow-all. Omit it to leave the
-        current policy unchanged.
+        ``policies`` changes the VM's network policy: ``rules`` writes each
+        rule by id (``None`` removes one) and keeps the rules it does not
+        name; ``secrets`` works the same way. An ordered ``policies`` list
+        instead replaces the whole policy, and ``{"policies": []}`` clears it
+        to allow-all. Omit it to leave the current policy unchanged::
+
+            vm.update(policies={"rules": {
+                "nap": {"type": "schedule", "after_last_running_start": 600,
+                        "action": "suspend"},
+                "old": None,
+            }})
 
         Returns the updated :class:`Vm`."""
         resources: ResourcesInput | None = None
@@ -913,7 +922,7 @@ class VM:
                 pool_id=pool_id,
                 pool_name=pool_name,
                 ssh_public_keys=ssh_public_keys,
-                policies=policies,
+                policies=_policy_update(policies),
             )
         else:
             body = {
@@ -922,7 +931,7 @@ class VM:
                 "pool_id": pool_id,
                 "pool_name": pool_name,
                 "ssh_public_keys": ssh_public_keys,
-                "policies": policies,
+                "policies": _policy_update(policies),
             }
         payload = self._client._request("PATCH", _vm_path(self.id), body, base_url=self.base_url)
         return _vm_info(payload)
@@ -1872,6 +1881,21 @@ def _build_pty_ws_url(base_url: str, vm_id: str, session_id: str, params: dict[s
     return urllib.parse.urlunsplit((scheme, parsed.netloc, parsed.path, query, ""))
 
 
+def _policy_update(policies: Any) -> Any:
+    """A ``None`` rule or secret in a policy update removes it, so it must reach
+    the wire as ``null`` rather than be pruned like an unset field."""
+    if dataclasses.is_dataclass(policies) and not isinstance(policies, type):
+        policies = {field.name: getattr(policies, field.name) for field in dataclasses.fields(policies)}
+    if not isinstance(policies, dict):
+        return policies
+    return {
+        key: {name: _EXPLICIT_NULL if item is None else item for name, item in value.items()}
+        if key in ("rules", "secrets") and isinstance(value, dict)
+        else value
+        for key, value in policies.items()
+    }
+
+
 def _drop_none(value: Any) -> Any:
     if value is _EXPLICIT_NULL:
         return None
@@ -1909,7 +1933,9 @@ def _decode_value(annotation: Any, value: Any) -> Any:
     if origin is dict:
         _, value_type = get_args(annotation)
         return {key: _decode_value(value_type, item) for key, item in value.items()}
-    if origin is types.UnionType:
+    # A union with a Literal member (PolicyAction: a verb or an object) is a
+    # typing.Union, not a types.UnionType.
+    if origin in (types.UnionType, Union):
         args = get_args(annotation)
         model_types = [member for member in args if isinstance(member, type) and dataclasses.is_dataclass(member)]
         if isinstance(value, dict):

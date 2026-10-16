@@ -8,8 +8,10 @@ import (
 // Session is one shell in a VM. Sessions are tabs: each keeps its own working
 // directory, environment and history, and each handles one run at a time.
 type Session struct {
-	SessionID   string            `json:"session_id"`
-	SessionIdx  int               `json:"session_idx,omitempty"`
+	SessionID  string `json:"session_id"`
+	SessionIdx int    `json:"session_idx,omitempty"`
+	// State is "running" (a run is executing or a terminal is attached),
+	// "pending" (runs are waiting for the VM to start), or "idle".
 	State       string            `json:"state,omitempty"`
 	CWD         string            `json:"cwd,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`

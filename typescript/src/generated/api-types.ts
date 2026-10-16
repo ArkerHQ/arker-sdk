@@ -776,7 +776,7 @@ export interface components {
             error: components["schemas"]["ErrorBody"];
         };
         /**
-         * @description `running` while the VM is billed for compute. `idle` while it is not.
+         * @description `running` while a run, a terminal, or an inbound request is using the VM. `idle` otherwise.
          * @enum {string}
          */
         VmState: "idle" | "running";
@@ -860,7 +860,7 @@ export interface components {
             /** @description Substrings that must appear in the request body. */
             body_contains?: string[];
             /**
-             * @description `inbound` only. The VM's state (`VmState`) when the request arrives: `idle` or `running`.
+             * @description `inbound` only. The VM's state (`VmState`) when the request arrives: `idle` or `running`. A request a `deny` rule refuses because of `vm_state` receives `409 invalid_state` (requirement `running`); other refused requests receive `403`.
              * @enum {string}
              */
             vm_state?: "idle" | "running";
@@ -1189,7 +1189,7 @@ export interface components {
              */
             end_symbol?: string | null;
             /**
-             * @description Deliver a signal to the selected persistent session's foreground process group: the run holding the session or, with no run in flight, an interpreter waiting between turns or an attached terminal's foreground job. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. When nothing is running in the session, the request fails with 404 and nothing is signalled. A run made only of shell builtins starts no process of its own, so it may have nothing to signal; the request then fails with 404 as well. Use `session_id` or `session_idx` to select the session. A signal is not a run, is not queued, and will resume a VM if needed.
+             * @description Deliver a signal to the selected persistent session's foreground process group: the run holding the session or, with no run in flight, an interpreter waiting between turns or an attached terminal's foreground job. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. When nothing is running in the session, the request fails with 404 and nothing is signalled. A run made only of shell builtins starts no process of its own, so it may have nothing to signal; the request then fails with 404 as well. Use `session_id` or `session_idx` to select the session. A signal is not a run and is not queued; a VM that is not running answers `409 invalid_state`.
              * @enum {string|null}
              */
             signal?: "SIGINT" | "SIGTERM" | "SIGKILL" | "SIGHUP" | null;
