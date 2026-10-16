@@ -107,17 +107,21 @@ def compat_network_policies(
         match: dict[str, Any] = {"hosts": domain_values}
         if domain_ports:
             match["ports"] = domain_ports
-        policies.append({
-            "type": "outbound",
-            "match": match,
-            "action": "allow",
-        })
+        policies.append(
+            {
+                "type": "outbound",
+                "match": match,
+                "action": "allow",
+            }
+        )
     if cidr_values:
-        policies.append({
-            "type": "outbound",
-            "match": {"ips": cidr_values},
-            "action": "allow",
-        })
+        policies.append(
+            {
+                "type": "outbound",
+                "match": {"ips": cidr_values},
+                "action": "allow",
+            }
+        )
     policies.append({"type": "outbound", "action": "deny"})
     # The ordered form replaces the source VM's inherited policy. A keyed
     # update would merge and could let an inherited rule override the shim.
@@ -191,9 +195,7 @@ def get_or_none(getter: Callable[[], Any]) -> Any | None:
     except Exception as error:
         response = getattr(error, "response", None)
         status = (
-            getattr(error, "status_code", None)
-            or vars(error).get("status")
-            or getattr(response, "status_code", None)
+            getattr(error, "status_code", None) or vars(error).get("status") or getattr(response, "status_code", None)
         )
         code = str(getattr(error, "code", "")).lower()
         message = str(error).lower()

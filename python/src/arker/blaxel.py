@@ -108,11 +108,7 @@ class SandboxInstance(UnsupportedMixin):
         self._vm = vm
         self._native = native
         metadata = getattr(native, "metadata", None)
-        metadata_name = (
-            metadata.get("name")
-            if isinstance(metadata, dict)
-            else getattr(metadata, "name", None)
-        )
+        metadata_name = metadata.get("name") if isinstance(metadata, dict) else getattr(metadata, "name", None)
         self.id = (
             vm.id
             if vm is not None
