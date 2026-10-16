@@ -12,6 +12,7 @@ import { traceVendor } from "./compat-trace.js";
 async function program(SandboxInstance: typeof Native | typeof Shim): Promise<void> {
   const sandbox = await SandboxInstance.create();
   try {
+    assert.ok(Array.isArray((await sandbox.fs.ls("/blaxel")).files));
     const result = await sandbox.process.exec({
       command: "printf '%s:%s' \"$PWD\" \"$IMPORT_ONLY\"; printf diagnostic >&2",
       workingDir: "/tmp",

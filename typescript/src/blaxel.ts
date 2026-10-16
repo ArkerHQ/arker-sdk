@@ -176,7 +176,13 @@ export class SandboxInstance {
         ? { creationTimeout: callOptions.timeout ?? options.timeout }
         : {}),
     });
-    if (box.provider === "arker") await box.filesystem.mkdir("/blaxel");
+    if (box.provider === "arker") {
+      try { await box.filesystem.mkdir("/blaxel"); }
+      catch (error) {
+        await box.destroy();
+        throw error;
+      }
+    }
     return SandboxInstance.wrap(box);
   }
 

@@ -464,6 +464,17 @@ async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
   }
 }
 
+async function testBlaxelInitializationFailureDeletesCreatedVm(): Promise<void> {
+  const created = new FakeSandbox("failed-initialization");
+  created.filesystem.mkdir = async () => { throw new Error("initialization failed"); };
+  const fake = installFakeCompute(created);
+  try {
+    await assert.rejects(BlaxelSandbox.create(), /initialization failed/);
+    assert.equal(created.destroyed, true);
+    assert.equal(fake.createCalls.length, 1);
+  } finally { fake.cleanup(); }
+}
+
 async function testInternalArkerProviderRequiresSource(): Promise<void> {
   const previousSource = process.env.ARKER_SOURCE;
   const previousSourceVm = process.env.ARKER_SOURCE_VM;
@@ -496,5 +507,6 @@ await testInternalArkerProviderSourceProvenance();
 await testInternalArkerProviderPolicyReplacement();
 await testInternalArkerProviderRequiresSource();
 await testBlaxelCreateIfNotExistsAndTtl();
+await testBlaxelInitializationFailureDeletesCreatedVm();
 
 console.log("PASS compat");

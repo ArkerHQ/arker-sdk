@@ -258,6 +258,14 @@ class SyncSandboxInstance(UnsupportedMixin):
                 "blaxel": create_native,
             },
         )
+        if provider == "arker":
+            try:
+                initialized = run_command(result, "mkdir -p /blaxel")
+                if initialized.exit_code != 0:
+                    raise RuntimeError(initialized.stderr or "could not initialize /blaxel")
+            except Exception:
+                result.delete()
+                raise
         return cls(vm=result if provider == "arker" else None, native=result if provider == "blaxel" else None)
 
     @classmethod

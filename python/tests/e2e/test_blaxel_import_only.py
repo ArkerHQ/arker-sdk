@@ -19,6 +19,7 @@ from blaxel.core.sandbox.client.models import ProcessRequestEnv
 
 sandbox = SyncSandboxInstance.create_if_not_exists(SandboxCreateConfiguration(name=sandbox_name))
 try:
+    assert sandbox.fs.ls("/blaxel").path == "/blaxel"
     response = sandbox.process.exec(ProcessRequestWithLog(
         command="printf '%s:%s' \\"$PWD\\" \\"$IMPORT_ONLY\\"; printf diagnostic >&2",
         working_dir="/tmp",

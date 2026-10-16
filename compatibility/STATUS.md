@@ -24,6 +24,11 @@ observation without killing the command, and process kill. Local protocol tests
 also cover execution timeout, duplicate-name rejection, nonzero exit, callbacks,
 and cancellation. These local tests do not grant differential coverage.
 
+The program lists `/blaxel` immediately after creation, before running any
+command. This exposed a missing Python initialization step; both languages now
+initialize that directory at creation and delete a newly created VM if
+initialization fails.
+
 A separate live cross-language program passed on native Blaxel, the shim on
 Blaxel, and the shim on Arker. It verifies that Python and TypeScript can control
 the same process in both directions, keep the same PID, and share the persisted
@@ -42,5 +47,10 @@ instrumented API counts above.
 - Close the remaining Arker-side APIs exposed as missing/unverified by inventory,
   including provider-specific services, lifecycle options, and streaming APIs.
 - Release the ComputeSDK provider fixes before the migration SDK release.
+- Validate the worker ingress fix in arker-app #4260: a live request with an
+  Arker key in `x-api-key` lost the application's unrelated Authorization
+  header. Arker-backed Blaxel fetch is not yet implemented; supporting both
+  application auth headers simultaneously also needs a non-conflicting
+  platform-authentication channel.
 
 Full API equivalence has not been established. The three PRs remain drafts.

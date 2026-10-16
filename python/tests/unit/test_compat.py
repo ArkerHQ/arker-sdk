@@ -97,6 +97,12 @@ def add_create_run_delete(t: FakeTransport, vm_id: str, stdout: str) -> None:
         200,
         vm_payload(vm_id),
     )
+    if vm_id.startswith("vm_blaxel"):
+        t.add_json(
+            lambda method, url: method == "POST" and url == f"https://test.invalid/api/v1/vms/{vm_id}/runs",
+            200,
+            completed(""),
+        )
     t.add_json(
         lambda method, url: method == "POST" and url == f"https://test.invalid/api/v1/vms/{vm_id}/runs",
         200,
@@ -242,6 +248,11 @@ def test_python_shims_translate_or_reject_arker_create_options(monkeypatch) -> N
             200,
             vm_payload(vm_id),
         )
+    t.add_json(
+        lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/vms/vm_blaxel_image/runs",
+        200,
+        completed(""),
+    )
 
     with use_transport(t):
         Daytona().create(image="ubuntu:24.04", name="daytona", resources={"cpu": 4, "memory": 8192})
@@ -342,6 +353,24 @@ def test_blaxel_official_surface(monkeypatch) -> None:
         assert result.stdout == "hello from blaxel\n"
         assert result.exit_code == 0
         sandbox.delete()
+
+
+@pytest.mark.parametrize("transport_failure", [False, True])
+def test_blaxel_initialization_failure_deletes_created_vm(monkeypatch, transport_failure) -> None:
+    module = importlib.import_module("arker.blaxel")
+    deleted = []
+    vm = types.SimpleNamespace(delete=lambda: deleted.append(True))
+    monkeypatch.setattr(module, "routed_create", lambda *args: ("arker", vm))
+
+    def initialize(*args):
+        if transport_failure:
+            raise RuntimeError("initialization failed")
+        return module.CommandResult(stdout="", stderr="initialization failed", exit_code=1)
+
+    monkeypatch.setattr(module, "run_command", initialize)
+    with pytest.raises(RuntimeError, match="initialization failed"):
+        module.SyncSandboxInstance.create()
+    assert deleted == [True]
 
 
 def test_blaxel_native_surface_delegates_without_losing_provider_features() -> None:
