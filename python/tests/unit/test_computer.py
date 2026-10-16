@@ -258,7 +258,7 @@ def test_whoami_uses_authenticated_control_plane() -> None:
 
 
 POOL_REQUEST = {
-    "type": "arker",
+    "type": "managed",
     "platform": "icelake",
     "resources": {"vcpu": 8, "memory_mib": 32768, "disk_mib": 0},
 }
@@ -267,9 +267,12 @@ POOL = {
     "pool_id": "pool-1",
     "name": None,
     "region": "aws-us-west-2",
-    "state": "ready",
-    "state_detail": None,
+    "provider": "aws",
+    "state": "active",
+    "reason": None,
     "created_at": "2026-10-15T00:00:00Z",
+    "resources_reserved": POOL_REQUEST["resources"],
+    "resources_provisioned": {"vcpu": 0, "memory_mib": 0, "disk_mib": 0},
     "commitments": [{"starts_at": "2026-10-01T00:00:00Z", "ends_at": "2026-10-02T00:00:00Z"}],
 }
 
@@ -285,15 +288,7 @@ def test_pools_v2() -> None:
         ("GET", "/pool-1", POOL),
         ("PATCH", "/pool-1", POOL),
         ("PATCH", "/pool-1", POOL),
-        (
-            "GET",
-            "/pool-1/usage",
-            {"pool_id": "pool-1", "resources_allocated": POOL_REQUEST["resources"], "allocation_observed_at": "now"},
-        ),
         ("GET", "/pool-1/workers", {"workers": []}),
-        ("GET", "/pool-1/join-keys", {"join_keys": []}),
-        ("POST", "/pool-1/join-keys", {"join_key_id": "key-1", "key": "secret", "created_at": "now"}),
-        ("DELETE", "/pool-1/join-keys/key-1", {}),
         ("DELETE", "/pool-1", {**POOL, "state": "deleting"}),
     ]:
         t.add_json(route(method, path), 200, response)
@@ -303,11 +298,7 @@ def test_pools_v2() -> None:
         assert client.create_pool(POOL_REQUEST).pool_id == "pool-1"
         client.add_pool_commitment("pool-1", commitment)
         client.rename_pool("pool-1", None)
-        client.get_pool_usage("pool-1")
         client.list_pool_workers("pool-1")
-        client.list_pool_join_keys("pool-1")
-        assert client.create_pool_join_key("pool-1").key == "secret"
-        client.delete_pool_join_key("pool-1", "key-1")
         assert client.delete_pool("pool-1").state == "deleting"
     assert json.loads(t.calls[0]["body"]) == POOL_REQUEST
     assert json.loads(t.calls[2]["body"]) == {
@@ -2940,15 +2931,16 @@ def test_update_preserves_pool_selector(selector, description) -> None:
     assert json.loads(t.calls[0]["body"]) == {**selector, **description}
 
 
-@pytest.mark.parametrize("pool_type", ["aws", "self_hosted"])
+@pytest.mark.parametrize("pool_type", ["byoc", "self_hosted"])
 def test_pool_variants_decode_and_preserve_setup(pool_type: str) -> None:
-    from arker import AwsPool, SelfHostedPool
+    from arker import ByocPool, SelfHostedPool
 
-    response = {**POOL, "type": pool_type, "capacity": POOL_REQUEST["resources"]}
-    if pool_type == "aws":
+    response = {**POOL, "type": pool_type}
+    response.pop("commitments")
+    if pool_type == "byoc":
         response.update(
-            isolation=[],
-            aws={
+            isolation=["vms"],
+            byoc={
                 "account_id": "123456789012",
                 "subnet_ids": ["subnet-1"],
                 "security_group_ids": [],
@@ -2960,22 +2952,23 @@ def test_pool_variants_decode_and_preserve_setup(pool_type: str) -> None:
         )
     else:
         response.pop("resources")
-        response.pop("commitments")
+        response.pop("provider")
+        response["platform"] = None
     t = FakeTransport()
     t.add_json(lambda m, u: m == "GET", 200, response)
     with use_transport(t):
         c = sdk.Arker(api_key="k", base_url="https://test.invalid/api", retry=False)
         pool = c.get_pool("pool-1")
-    assert isinstance(pool, AwsPool if pool_type == "aws" else SelfHostedPool)
-    if isinstance(pool, AwsPool):
-        assert pool.aws.setup_url == "https://console.aws.amazon.com/setup"
+    assert isinstance(pool, ByocPool if pool_type == "byoc" else SelfHostedPool)
+    if isinstance(pool, ByocPool):
+        assert pool.byoc.setup_url == "https://console.aws.amazon.com/setup"
 
 
 def test_self_hosted_commitment_is_refused_without_patch() -> None:
     t = FakeTransport()
-    response = {**POOL, "type": "self_hosted", "capacity": POOL_REQUEST["resources"]}
-    response.pop("resources")
-    response.pop("commitments")
+    response = {**POOL, "type": "self_hosted"}
+    for field in ("resources", "provider", "commitments"):
+        response.pop(field)
     t.add_json(lambda m, u: m == "GET", 200, response)
     with use_transport(t):
         c = sdk.Arker(api_key="k", base_url="https://test.invalid/api", retry=False)

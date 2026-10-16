@@ -319,24 +319,20 @@ export type FilesystemCreateRequest = ApiSchema<"FilesystemCreateRequest">;
 
 // ── Pools ──────────────────────────────────────────────────────────
 export type Pool = ApiSchema<"Pool">;
-export type ArkerPool = ApiSchema<"ArkerPool">;
-export type AwsPool = ApiSchema<"AwsPool">;
+export type ManagedPool = ApiSchema<"ManagedPool">;
+export type ByocPool = ApiSchema<"ByocPool">;
 export type SelfHostedPool = ApiSchema<"SelfHostedPool">;
 export type PoolResources = ApiSchema<"PoolResources">;
 export type PoolState = ApiSchema<"PoolState">;
-export type PoolUsage = ApiSchema<"PoolUsage">;
 export type PoolCommitment = ApiSchema<"PoolCommitment">;
-export type PoolAws = ApiSchema<"PoolAws">;
-export type CreatePoolAws = ApiSchema<"CreatePoolAws">;
+export type PoolByoc = ApiSchema<"PoolByoc">;
+export type CreatePoolByoc = ApiSchema<"CreatePoolByoc">;
 export type CreatePoolRequest = ApiSchema<"CreatePoolRequest">;
-export type CreateArkerPoolRequest = ApiSchema<"CreateArkerPoolRequest">;
-export type CreateAwsPoolRequest = ApiSchema<"CreateAwsPoolRequest">;
+export type CreateManagedPoolRequest = ApiSchema<"CreateManagedPoolRequest">;
+export type CreateByocPoolRequest = ApiSchema<"CreateByocPoolRequest">;
 export type CreateSelfHostedPoolRequest = ApiSchema<"CreateSelfHostedPoolRequest">;
 export type UpdatePoolRequest = ApiSchema<"UpdatePoolRequest">;
 export type ListPoolsResponse = ApiSchema<"ListPoolsResponse">;
-export type PoolJoinKey = ApiSchema<"PoolJoinKey">;
-export type CreatedPoolJoinKey = ApiSchema<"CreatedPoolJoinKey">;
-export type ListPoolJoinKeysResponse = ApiSchema<"ListPoolJoinKeysResponse">;
 export type ListPoolWorkersResponse = ApiSchema<"ListPoolWorkersResponse">;
 export type Worker = ApiSchema<"Worker">;
 export type CreatePoolOptions = CreatePoolRequest;
@@ -874,11 +870,7 @@ export class Arker {
     return this._request("GET", `/v1/pools/${pathSegment(poolId)}`);
   }
 
-  async getPoolUsage(poolId: string): Promise<PoolUsage> {
-    return this._request("GET", `/v1/pools/${pathSegment(poolId)}/usage`);
-  }
-
-  /** Create in the client's region. For AWS, open the returned aws.setup_url. */
+  /** Create in the client's region. For BYOC, open the returned byoc.setup_url. */
   async createPool(request: CreatePoolRequest): Promise<Pool> {
     return this._request("POST", "/v1/pools", request);
   }
@@ -899,21 +891,8 @@ export class Arker {
   /** Read then replace commitments. Serialize concurrent commitment edits. */
   async addPoolCommitment(poolId: string, commitment: PoolCommitment): Promise<Pool> {
     const pool = await this.getPool(poolId);
-    if (pool.type === "self_hosted") throw new Error("self_hosted pools do not support commitments");
+    if (pool.type !== "managed") throw new Error(`${pool.type} pools do not support commitments`);
     return this.updatePool(poolId, { commitments: [...pool.commitments, commitment] });
-  }
-
-  async listPoolJoinKeys(poolId: string): Promise<ListPoolJoinKeysResponse> {
-    return this._request("GET", `/v1/pools/${pathSegment(poolId)}/join-keys`);
-  }
-
-  /** The secret key is returned only once. */
-  async createPoolJoinKey(poolId: string): Promise<CreatedPoolJoinKey> {
-    return this._request("POST", `/v1/pools/${pathSegment(poolId)}/join-keys`);
-  }
-
-  async deletePoolJoinKey(poolId: string, joinKeyId: string): Promise<void> {
-    return this._request("DELETE", `/v1/pools/${pathSegment(poolId)}/join-keys/${pathSegment(joinKeyId)}`);
   }
 
   async listPoolWorkers(poolId: string): Promise<ListPoolWorkersResponse> {

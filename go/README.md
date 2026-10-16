@@ -43,9 +43,8 @@ and work with no placement at all; everything else needs a regional endpoint.
 | `ListRuns` `ListRegions` `Whoami` | `Run` `ListRuns` `GetRun` `CancelRun` |
 | `ListFilesystems` `CreateFilesystem` | `ListSessions` `CreateSession` `GetSession` |
 | `GetFilesystem` `DeleteFilesystem` | `UpdateSession` `DeleteSession` |
-| `ListPools` `GetPool` `GetPoolUsage` | |
+| `ListPools` `GetPool` `ListPoolWorkers` | |
 | `CreatePool` `UpdatePool` `RenamePool` `DeletePool` `AddPoolCommitment` | |
-| `ListPoolJoinKeys` `CreatePoolJoinKey` `DeletePoolJoinKey` `ListPoolWorkers` | |
 | `BaseURL` `ControlBaseURL` `Provider` `Region` | `GetPolicies` `SetPolicies` |
 | package-level `DiscoverRegions` | `ReadFile` `WriteFile` `SyncDir` |
 | | `ListMounts` `CreateMount` `DeleteMount` `ConnectPTY` |
@@ -160,9 +159,10 @@ and stripping escape sequences after the fact is lossy. Pass
 ## Pools v2
 
 Pools require the per-organization pools flag; a disabled organization receives
-`404 not_found`. The three pool types are `arker` (reserved fleet capacity),
-`aws` (hosts in your AWS account), and `self_hosted` (your BLAST workers).
-This replaces pools v1 and BYOC: quotes, fixed purchase terms, prices, and the
+`404 not_found`. The three pool types are `managed` (Arker's multi-cloud
+compute), `byoc` (workers Arker launches in your cloud account), and
+`self_hosted` (BLAST workers you run).
+This replaces pools v1 and the earlier BYOC API: quotes, fixed purchase terms, prices, and the
 purchase idempotency key are removed with no compatibility layer.
 
 Configure a regional endpoint (or provider and region) for pool operations.
@@ -172,13 +172,16 @@ region for subsequent operations. Fork with exactly one of `pool_id` or
 forked into a pool: use a supported image source instead. Pool VMs do not support
 interactive shells; use `run` for commands.
 
-`arker` and `aws` pools have reserved `resources` with all three quantities
-(`vcpu`, `memory_mib`, `disk_mib`), including zeros. Self-hosted pools derive
-capacity from workers and take no resource reservation or commitments. AWS pools
-start `provisioning`: open `aws.setup_url` in the specified AWS account, create
-the CloudFormation stack, then inspect `state` and `state_detail` until ready.
-Join keys are for self-hosted pools only. Save the secret returned at creation;
-it is never returned by listing. Worker listing is for AWS and self-hosted pools.
+`managed` and `byoc` pools request `resources` with all three quantities
+(`vcpu`, `memory_mib`, `disk_mib`), including zeros; a `self_hosted` pool's
+`resources` is an optional cap. Every pool reports `resources_reserved` (what
+its workers contribute) and `resources_provisioned` (what its VMs use). A pool
+is `creating` until `resources_reserved` first reaches `resources`, then
+`active`; `reason` says what needs attention. A `byoc` pool (provider `aws`)
+needs setup: open `byoc.setup_url` in the specified AWS account and create the
+CloudFormation stack. A `self_hosted` pool's platform is set by its first
+worker; workers join with an API key of the pool with action `join`. Only
+`managed` pools take commitments.
 
 Commitments last at least 24 hours, cannot overlap, and new commitments cannot
 start in the past. Started commitments must remain unchanged, including expired
@@ -190,16 +193,16 @@ the reservation. Deleting a pool deletes every VM in it.
 
 API errors retain their code, status, message, and server details. A
 `429 quota_exceeded` is returned immediately; adjust the reservation/quota or
-remove unused pools/keys instead of retrying. Ordinary rate limits keep the
+remove unused pools instead of retrying. Ordinary rate limits keep the
 SDK's retry policy. `capacity_unavailable` means placement has no capacity;
-inspect the pool's capacity, workers, and provisioning state. Fleet-to-pool fork
+inspect the pool's reserved resources, workers, and state. Fleet-to-pool fork
 and unsupported shell refusals are surfaced without a fallback placement.
 Creation has no documented idempotency guarantee: after an ambiguous transport
 failure, inspect the pool list before creating again.
 
 ```go
 pool, err := client.CreatePool(ctx, arker.CreatePoolRequest{
-    Type: "arker", Platform: "icelake",
+    Type: "managed", Platform: "icelake",
     Resources: &arker.PoolResources{VCPU: 8, MemoryMiB: 32768, DiskMiB: 102400},
 })
 if err != nil { return err }

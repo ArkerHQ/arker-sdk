@@ -198,7 +198,7 @@ const POOL_OPTIONS: Record<string, OptionSpecs> = {
   create: {
     ...GLOBAL_OPTIONS, ...RESOURCE_OPTIONS,
     vcpu: { type: "integer", min: 0 },
-    type: { type: "string", values: ["arker", "aws", "self_hosted"] },
+    type: { type: "string", values: ["managed", "byoc", "self_hosted"] },
     platform: { type: "string" }, name: { type: "string" },
     file: { type: "string" },
     "account-id": { type: "string" },
@@ -441,7 +441,7 @@ const POSITIONAL_LIMITS: Record<string, number | Record<string, number>> = {
   sessions: { ls: 1, list: 1, get: 2, create: 1, rm: 2, delete: 2, update: 2 },
   shell: 1,
   policies: { get: 1, set: 1 },
-  pools: { ls: 0, list: 0, get: 1, usage: 1, rename: 2, create: 0, update: 1, rm: 1, delete: 1, "add-commitment": 1, "join-keys": 3, workers: 1 },
+  pools: { ls: 0, list: 0, get: 1, rename: 2, create: 0, update: 1, rm: 1, delete: 1, "add-commitment": 1, workers: 1 },
   regions: 0,
   whoami: 0,
   signal: 2,
@@ -1567,7 +1567,6 @@ async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
       return;
     }
     case "get": return out(await client.getPool(poolId()));
-    case "usage": return out(await client.getPoolUsage(poolId()));
     case "workers": return out(await client.listPoolWorkers(poolId()));
     case "rm":
     case "delete": return out(await client.deletePool(poolId()));
@@ -1583,27 +1582,15 @@ async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
       starts_at: args.flags["starts-at"] as string | undefined ?? die("--starts-at is required"),
       ends_at: args.flags["ends-at"] as string | undefined ?? die("--ends-at is required"),
     }));
-    case "join-keys": {
-      const [, keyAction, keyPoolId, keyId] = args.positional;
-      const target = keyPoolId ?? die("a pool ID is required");
-      switch (keyAction) {
-        case "ls": case "list": return out(await client.listPoolJoinKeys(target));
-        case "create": return out(await client.createPoolJoinKey(target));
-        case "rm": case "delete":
-          await client.deletePoolJoinKey(target, keyId ?? die("a join key ID is required"));
-          return;
-        default: die("usage: arker pools join-keys <ls|create|rm> <pool_id> [join_key_id]");
-      }
-    }
     case "create": {
       const pool = await client.createPool(poolRequestFromArgs(args));
       out(pool);
-      if (pool.type === "aws" && !args.flags.json) {
-        out(`Open ${pool.aws.setup_url} signed in to AWS account ${pool.aws.account_id} and create the stack. Then run arker pools get ${pool.pool_id} until state is ready.`);
+      if (pool.type === "byoc" && !args.flags.json) {
+        out(`Open ${pool.byoc.setup_url} signed in to AWS account ${pool.byoc.account_id} and create the stack. Then run arker pools get ${pool.pool_id} until state is active.`);
       }
       return;
     }
-    default: die("usage: arker pools <ls|get|usage|create|update|rename|rm|add-commitment|join-keys|workers> ...");
+    default: die("usage: arker pools <ls|get|create|update|rename|rm|add-commitment|workers> ...");
   }
 }
 
@@ -1615,23 +1602,25 @@ function poolRequestFromArgs(args: ParsedArgs): CreatePoolRequest {
     return readJsonObject(file, "pool request") as CreatePoolRequest;
   }
   const type = args.flags.type as CreatePoolRequest["type"] | undefined ?? die("--type is required");
-  const platform = args.flags.platform as string | undefined ?? die("--platform is required");
   const name = args.flags.name as string | undefined;
-  const awsFields = ["account-id", "subnet-id", "security-group-id", "instance-type", "isolation"];
-  if (type !== "aws" && awsFields.some(key => args.flags[key] !== undefined)) die("AWS fields require --type aws");
-  if (type === "self_hosted") {
-    if (["vcpu", "memory-mib", "disk-mib"].some(key => args.flags[key] !== undefined)) die("self_hosted pools take capacity from their workers");
-    return { type, platform, name };
-  }
-  const resources: PoolResources = {
+  const byocFields = ["account-id", "subnet-id", "security-group-id", "instance-type", "isolation"];
+  if (type !== "byoc" && byocFields.some(key => args.flags[key] !== undefined)) die("BYOC fields require --type byoc");
+  const resourceFlags = ["vcpu", "memory-mib", "disk-mib"];
+  const resources = (): PoolResources => ({
     vcpu: numFlag(args, "vcpu") ?? die("--vcpu is required"),
     memory_mib: numFlag(args, "memory-mib") ?? die("--memory-mib is required"),
     disk_mib: numFlag(args, "disk-mib") ?? die("--disk-mib is required"),
-  };
-  if (type === "arker") return { type, platform, name, resources };
-  return { type, platform, name, resources,
+  });
+  if (type === "self_hosted") {
+    if (args.flags.platform !== undefined) die("a self_hosted pool's platform is set by its first worker");
+    const capped = resourceFlags.some(key => args.flags[key] !== undefined);
+    return { type, name, resources: capped ? resources() : undefined };
+  }
+  const platform = args.flags.platform as string | undefined ?? die("--platform is required");
+  if (type === "managed") return { type, platform, name, resources: resources() };
+  return { type, provider: "aws", platform, name, resources: resources(),
     isolation: args.flags.isolation as "vms"[] | undefined,
-    aws: {
+    byoc: {
       account_id: args.flags["account-id"] as string | undefined ?? die("--account-id is required"),
       subnet_ids: args.flags["subnet-id"] as string[] | undefined ?? die("--subnet-id is required"),
       security_group_ids: args.flags["security-group-id"] as string[] | undefined,
@@ -1860,14 +1849,14 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   help: { desc: "show help without connecting" },
   image: { placeholder: "<reference>", desc: "fork from an OCI image" },
   "idempotency-key": { placeholder: "<key>", desc: "deduplicate retries of this run request" },
-  "account-id": { placeholder: "<id>", desc: "AWS account in which the pool launches hosts" },
-  "subnet-id": { placeholder: "<id>", desc: "AWS host subnet; repeatable" },
-  "security-group-id": { placeholder: "<id>", desc: "AWS host security group; repeatable" },
+  "account-id": { placeholder: "<id>", desc: "AWS account in which the pool launches workers" },
+  "subnet-id": { placeholder: "<id>", desc: "AWS worker subnet; repeatable" },
+  "security-group-id": { placeholder: "<id>", desc: "AWS worker security group; repeatable" },
   "instance-type": { placeholder: "<type>", desc: "AWS bare-metal instance type; repeat in preference order" },
   isolation: { placeholder: "<vms>", desc: "store VM snapshots in the pool's AWS account" },
   "starts-at": { placeholder: "<RFC3339>", desc: "commitment start (not in the past)" },
   "ends-at": { placeholder: "<RFC3339>", desc: "commitment end (at least 24 hours after start)" },
-  type: { placeholder: "<arker|aws|self_hosted>", desc: "pool type" },
+  type: { placeholder: "<managed|byoc|self_hosted>", desc: "pool type" },
   clear: { desc: "remove the pool's name" },
   yes: { desc: "buy without asking for confirmation" },
   json: { desc: "emit JSON instead of tabular output" },
@@ -1980,21 +1969,20 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   pools: {
     synopsis: [
-      "arker pools <ls|get|usage|rename|rm|workers> [args] [flags]",
-      "arker pools create --type <arker|aws|self_hosted> --platform <platform> [flags]",
+      "arker pools <ls|get|rename|rm|workers> [args] [flags]",
+      "arker pools create --type <managed|byoc|self_hosted> [--platform <platform>] [flags]",
       "arker pools create --file <request.json>",
       "arker pools update <pool_id> --file <update.json>",
       "arker pools add-commitment <pool_id> --starts-at <RFC3339> --ends-at <RFC3339>",
-      "arker pools join-keys <ls|create|rm> <pool_id> [join_key_id]",
     ],
     summary: "Manage regional pools and their capacity.",
-    subs: { ls: "list pools", get: "show a pool", usage: "show allocated resources", create: "create a pool", update: "update capacity or commitments", rename: "rename, or --clear", rm: "delete the pool and all its VMs", workers: "list workers", "join-keys": "manage self-hosted join keys", "add-commitment": "append a committed period" },
+    subs: { ls: "list pools", get: "show a pool", create: "create a pool", update: "update capacity or commitments", rename: "rename, or --clear", rm: "delete the pool and all its VMs", workers: "list workers", "add-commitment": "append a committed period" },
     notes: [
       "Mutations need an admin key and a regional placement (--provider/--region).",
-      "AWS create prints setup_url: open it in the customer's account and create the stack.",
-      "Commitments last at least 24 hours. Serialize concurrent commitment edits.",
+      "BYOC create (AWS) prints setup_url: open it in the customer's account and create the stack.",
+      "Commitments are for managed pools and last at least 24 hours. Serialize concurrent commitment edits.",
       "Active commitments prevent shrinking and deletion. rm deletes every VM in the pool.",
-      "Pool VMs do not support shells. Join key secrets are shown only when created.",
+      "Pool VMs do not support shells.",
     ],
   },
   regions: {
@@ -2179,7 +2167,7 @@ function usage(command?: string, positional: string[] = []): void {
       "  arker sessions    <ls|get|create|rm|update> <vm_id> ...",
       "  arker mounts       <ls|create|rm> <vm_id> ...",
       "  arker filesystems <ls|create|get|rm> ...   (alias: fs)",
-      "  arker pools <ls|get|usage|create|update|rename|rm|workers|join-keys|add-commitment> ...",
+      "  arker pools <ls|get|create|update|rename|rm|workers|add-commitment> ...",
       "                                              buy and manage prepaid capacity",
       "  arker sync <vm_id> <path> [data|-]          read a file, or write data/stdin",
       "  arker sync <vm_id> <path> --read            read a file, ignoring stdin",

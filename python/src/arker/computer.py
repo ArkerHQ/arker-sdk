@@ -44,7 +44,6 @@ from .generated.api_models import (
     BackgroundRunResponse,
     CancelRunResponse,
     CompletedRunResponse,
-    CreatedPoolJoinKey,
     CreatePoolRequest,
     CreateSessionRequest,
     DeleteFilesystemResponse,
@@ -60,7 +59,6 @@ from .generated.api_models import (
     ListMountsResponse,
     ListOrgRunsParameters,
     ListOrgRunsResponse,
-    ListPoolJoinKeysResponse,
     ListPoolsParameters,
     ListPoolsResponse,
     ListPoolWorkersResponse,
@@ -78,7 +76,6 @@ from .generated.api_models import (
     PolicyDoc,
     Pool,
     PoolCommitment,
-    PoolUsage,
     PtyTicketResponse,
     ResourcesInput,
     Run,
@@ -601,11 +598,8 @@ class Arker:
     def get_pool(self, pool_id: str) -> Pool:
         return _decode_value(Pool, self._request("GET", f"/v1/pools/{_segment(pool_id)}"))
 
-    def get_pool_usage(self, pool_id: str) -> PoolUsage:
-        return _decode_model(PoolUsage, self._request("GET", f"/v1/pools/{_segment(pool_id)}/usage"))
-
     def create_pool(self, request: CreatePoolRequest | dict[str, Any]) -> Pool:
-        """Create in this client's region. For AWS, open the returned aws.setup_url."""
+        """Create in this client's region. For BYOC, open the returned byoc.setup_url."""
         return _decode_value(Pool, self._request("POST", "/v1/pools", request))
 
     def update_pool(self, pool_id: str, request: UpdatePoolRequest | dict[str, Any]) -> Pool:
@@ -631,31 +625,9 @@ class Arker:
     def add_pool_commitment(self, pool_id: str, commitment: PoolCommitment) -> Pool:
         """Read then replace commitments. Serialize concurrent commitment edits."""
         pool = self.get_pool(pool_id)
-        if pool.type == "self_hosted":
-            raise ValueError("self_hosted pools do not support commitments")
+        if pool.type != "managed":
+            raise ValueError(f"{pool.type} pools do not support commitments")
         return self.update_pool(pool_id, UpdatePoolRequest(commitments=[*pool.commitments, commitment]))
-
-    def list_pool_join_keys(self, pool_id: str) -> ListPoolJoinKeysResponse:
-        return _decode_model(
-            ListPoolJoinKeysResponse,
-            self._request(
-                "GET",
-                f"/v1/pools/{_segment(pool_id)}/join-keys",
-            ),
-        )
-
-    def create_pool_join_key(self, pool_id: str) -> CreatedPoolJoinKey:
-        """The secret key is returned only once."""
-        return _decode_model(
-            CreatedPoolJoinKey,
-            self._request(
-                "POST",
-                f"/v1/pools/{_segment(pool_id)}/join-keys",
-            ),
-        )
-
-    def delete_pool_join_key(self, pool_id: str, join_key_id: str) -> None:
-        self._request("DELETE", f"/v1/pools/{_segment(pool_id)}/join-keys/{_segment(join_key_id)}")
 
     def list_pool_workers(self, pool_id: str) -> ListPoolWorkersResponse:
         return _decode_model(

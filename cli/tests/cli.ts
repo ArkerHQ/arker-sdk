@@ -653,17 +653,17 @@ async function testWhoamiUsesAuthenticatedControlPlane(): Promise<void> {
   );
 }
 
-const CLI_POOL = { pool_id: "pool-1", type: "aws", name: "ci", platform: "icelake", region: "aws-us-west-2", state: "provisioning", aws: { account_id: "123456789012", setup_url: "https://console.aws.amazon.com/setup" } };
-const POOL_ARGS = ["--type", "aws", "--platform", "icelake", "--vcpu", "8", "--memory-mib", "32768", "--disk-mib", "0", "--account-id", "123456789012", "--subnet-id", "subnet-1", "--name", "ci"];
+const CLI_POOL = { pool_id: "pool-1", type: "byoc", provider: "aws", name: "ci", platform: "icelake", region: "aws-us-west-2", state: "creating", byoc: { account_id: "123456789012", setup_url: "https://console.aws.amazon.com/setup" } };
+const POOL_ARGS = ["--type", "byoc", "--platform", "icelake", "--vcpu", "8", "--memory-mib", "32768", "--disk-mib", "0", "--account-id", "123456789012", "--subnet-id", "subnet-1", "--name", "ci"];
 async function testPoolsCreateShowsSetup(): Promise<void> {
   await withCapturedServer((_req, res) => jsonResponse(res, CLI_POOL), async (baseUrl, requests) => {
     const result = await runCli(baseUrl, ["pools", "create", ...POOL_ARGS]);
     assert.equal(result.code, 0, result.stderr);
-    assert.ok(stdoutText(result).includes(CLI_POOL.aws.setup_url));
+    assert.ok(stdoutText(result).includes(CLI_POOL.byoc.setup_url));
     assert.match(stdoutText(result), /create the stack/);
     assert.equal(requests.length, 1);
     assert.equal(requests[0]!.url, "/api/v1/pools");
-    assert.deepEqual(requests[0]!.body, { type: "aws", platform: "icelake", name: "ci", resources: { vcpu: 8, memory_mib: 32768, disk_mib: 0 }, aws: { account_id: "123456789012", subnet_ids: ["subnet-1"] } });
+    assert.deepEqual(requests[0]!.body, { type: "byoc", provider: "aws", platform: "icelake", name: "ci", resources: { vcpu: 8, memory_mib: 32768, disk_mib: 0 }, byoc: { account_id: "123456789012", subnet_ids: ["subnet-1"] } });
   });
 }
 async function testPoolsCreateJson(): Promise<void> {
@@ -677,7 +677,7 @@ async function testPoolsCreateJson(): Promise<void> {
 async function testPoolManagementCommands(): Promise<void> {
   const existing = { starts_at: "2026-01-01T00:00:00Z", ends_at: "2026-01-02T00:00:00Z" };
   const added = { starts_at: "2027-01-01T00:00:00Z", ends_at: "2027-01-02T00:00:00Z" };
-  await withCapturedServer((_req, res) => jsonResponse(res, { ...CLI_POOL, commitments: [existing] }), async (baseUrl, requests) => {
+  await withCapturedServer((_req, res) => jsonResponse(res, { ...CLI_POOL, type: "managed", commitments: [existing] }), async (baseUrl, requests) => {
     const result = await runCli(baseUrl, ["pools", "add-commitment", "pool-1", "--starts-at", added.starts_at, "--ends-at", added.ends_at]);
     assert.equal(result.code, 0, result.stderr);
     assert.deepEqual(requests.map(r => r.method), ["GET", "PATCH"]);
@@ -685,9 +685,6 @@ async function testPoolManagementCommands(): Promise<void> {
   });
   for (const [args, method, path] of [
     [["workers", "pool-1"], "GET", "/pool-1/workers"],
-    [["join-keys", "ls", "pool-1"], "GET", "/pool-1/join-keys"],
-    [["join-keys", "create", "pool-1"], "POST", "/pool-1/join-keys"],
-    [["join-keys", "rm", "pool-1", "key-1"], "DELETE", "/pool-1/join-keys/key-1"],
     [["rm", "pool-1"], "DELETE", "/pool-1"],
   ] as const) {
     await withCapturedServer((_req, res) => jsonResponse(res, {}), async (baseUrl, requests) => {

@@ -24,16 +24,10 @@ func TestPoolsV2(t *testing.T) {
 		}
 		bodies = append(bodies, body)
 		switch r.URL.Path {
-		case "/v1/pools/p/join-keys":
-			fmt.Fprint(w, `{"join_keys":[],"join_key_id":"k","key":"secret","created_at":"now"}`)
-		case "/v1/pools/p/join-keys/k":
-			w.WriteHeader(204)
 		case "/v1/pools/p/workers":
 			fmt.Fprint(w, `{"workers":[]}`)
-		case "/v1/pools/p/usage":
-			fmt.Fprint(w, `{"pool_id":"p","resources_allocated":{"vcpu":0,"memory_mib":0,"disk_mib":0},"allocation_observed_at":"now"}`)
 		default:
-			fmt.Fprint(w, `{"pool_id":"p","type":"arker","platform":"icelake","state":"ready","commitments":[{"starts_at":"2026-01-01T00:00:00Z","ends_at":"2026-01-02T00:00:00Z"}]}`)
+			fmt.Fprint(w, `{"pool_id":"p","type":"managed","provider":"aws","platform":"icelake","state":"active","reason":null,"resources_reserved":{"vcpu":8,"memory_mib":0,"disk_mib":0},"resources_provisioned":{"vcpu":0,"memory_mib":0,"disk_mib":0},"commitments":[{"starts_at":"2026-01-01T00:00:00Z","ends_at":"2026-01-02T00:00:00Z"}]}`)
 		}
 	}))
 	defer srv.Close()
@@ -42,7 +36,7 @@ func TestPoolsV2(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	req := arker.CreatePoolRequest{Type: "arker", Platform: "icelake", Resources: &arker.PoolResources{VCPU: 8}}
+	req := arker.CreatePoolRequest{Type: "managed", Platform: "icelake", Resources: &arker.PoolResources{VCPU: 8}}
 	pool, err := c.CreatePool(ctx, req)
 	if err != nil || pool.PoolID != "p" {
 		t.Fatalf("%+v %v", pool, err)
@@ -54,26 +48,13 @@ func TestPoolsV2(t *testing.T) {
 	if _, err = c.RenamePool(ctx, "p", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.GetPoolUsage(ctx, "p"); err != nil {
-		t.Fatal(err)
-	}
 	if _, err = c.ListPoolWorkers(ctx, "p"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = c.ListPoolJoinKeys(ctx, "p"); err != nil {
-		t.Fatal(err)
-	}
-	key, err := c.CreatePoolJoinKey(ctx, "p")
-	if err != nil || key.Key != "secret" {
-		t.Fatalf("%+v %v", key, err)
-	}
-	if err = c.DeletePoolJoinKey(ctx, "p", "k"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = c.DeletePool(ctx, "p"); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"POST /v1/pools", "GET /v1/pools/p", "PATCH /v1/pools/p", "PATCH /v1/pools/p", "GET /v1/pools/p/usage", "GET /v1/pools/p/workers", "GET /v1/pools/p/join-keys", "POST /v1/pools/p/join-keys", "DELETE /v1/pools/p/join-keys/k", "DELETE /v1/pools/p"}
+	want := []string{"POST /v1/pools", "GET /v1/pools/p", "PATCH /v1/pools/p", "PATCH /v1/pools/p", "GET /v1/pools/p/workers", "DELETE /v1/pools/p"}
 	if !reflect.DeepEqual(paths, want) {
 		t.Fatal(paths)
 	}
@@ -100,7 +81,7 @@ func TestPoolQuotaIsNotRetried(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = c.CreatePool(context.Background(), arker.CreatePoolRequest{Type: "self_hosted", Platform: "blast-arm"})
+	_, err = c.CreatePool(context.Background(), arker.CreatePoolRequest{Type: "self_hosted"})
 	var apiErr *arker.Error
 	if !errors.As(err, &apiErr) || apiErr.Code != "quota_exceeded" || len(apiErr.Details) == 0 || calls != 1 {
 		t.Fatalf("calls=%d err=%v", calls, err)

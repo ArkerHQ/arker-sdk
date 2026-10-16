@@ -660,8 +660,8 @@ async function testWhoamiUsesControlPlane(): Promise<void> {
 
 // ── Pools ──────────────────────────────────────────────────────────────
 
-const POOL_REQUEST = { type: "arker" as const, platform: "icelake", resources: { vcpu: 8, memory_mib: 32768, disk_mib: 0 } };
-const POOL = { ...POOL_REQUEST, pool_id: "pool-1", name: null, region: "aws-us-west-2", state: "ready", state_detail: null, created_at: "2026-10-15T00:00:00Z", commitments: [{ starts_at: "2026-10-01T00:00:00Z", ends_at: "2026-10-02T00:00:00Z" }] };
+const POOL_REQUEST = { type: "managed" as const, platform: "icelake", resources: { vcpu: 8, memory_mib: 32768, disk_mib: 0 } };
+const POOL = { ...POOL_REQUEST, pool_id: "pool-1", name: null, region: "aws-us-west-2", provider: "aws", state: "active", reason: null, created_at: "2026-10-15T00:00:00Z", resources_reserved: POOL_REQUEST.resources, resources_provisioned: { vcpu: 0, memory_mib: 0, disk_mib: 0 }, commitments: [{ starts_at: "2026-10-01T00:00:00Z", ends_at: "2026-10-02T00:00:00Z" }] };
 function poolClient(fetch: FakeFetch, attempts = 1): Arker {
   return new Arker({ apiKey: "k", baseUrl: "https://test.invalid/api", controlBaseUrl: "https://control.invalid/api", fetch: fetch.fetch, retry: { attempts, baseDelayMs: 1, maxDelayMs: 1, jitterMs: 0 } });
 }
@@ -672,11 +672,7 @@ async function testPoolsV2(): Promise<void> {
   fetch.addJson(route("GET", "/pool-1"), 200, POOL);
   fetch.addJson(route("PATCH", "/pool-1"), 200, POOL);
   fetch.addJson(route("PATCH", "/pool-1"), 200, POOL);
-  fetch.addJson(route("GET", "/pool-1/usage"), 200, { pool_id: "pool-1", resources_allocated: POOL_REQUEST.resources, allocation_observed_at: "now" });
   fetch.addJson(route("GET", "/pool-1/workers"), 200, { workers: [] });
-  fetch.addJson(route("GET", "/pool-1/join-keys"), 200, { join_keys: [] });
-  fetch.addJson(route("POST", "/pool-1/join-keys"), 201, { join_key_id: "key-1", key: "secret", created_at: "now" });
-  fetch.addJson(route("DELETE", "/pool-1/join-keys/key-1"), 204, undefined);
   fetch.addJson(route("DELETE", "/pool-1"), 202, { ...POOL, state: "deleting" });
   fetch.addJson((m,u) => m === "GET" && u === "https://control.invalid/api/v1/pools?cursor=next&limit=2", 200, { pools: [POOL], next_cursor: null });
   const client = poolClient(fetch);
@@ -684,11 +680,7 @@ async function testPoolsV2(): Promise<void> {
   const commitment = { starts_at: "2027-01-01T00:00:00Z", ends_at: "2027-01-02T00:00:00Z" };
   await client.addPoolCommitment("pool-1", commitment);
   await client.renamePool("pool-1", null);
-  await client.getPoolUsage("pool-1");
   await client.listPoolWorkers("pool-1");
-  await client.listPoolJoinKeys("pool-1");
-  assert.equal((await client.createPoolJoinKey("pool-1")).key, "secret");
-  await client.deletePoolJoinKey("pool-1", "key-1");
   assert.equal((await client.deletePool("pool-1")).state, "deleting");
   await client.listPools({ cursor: "next", limit: 2 });
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), POOL_REQUEST);
@@ -705,8 +697,8 @@ async function testPoolQuotaIsNotRetried(): Promise<void> {
 
 async function testPoolRefusals(): Promise<void> {
   const fetch = new FakeFetch();
-  const { commitments, resources, ...base } = POOL;
-  fetch.addJson(() => true, 200, { ...base, type: "self_hosted", capacity: resources });
+  const { commitments, resources, provider, ...base } = POOL;
+  fetch.addJson(() => true, 200, { ...base, type: "self_hosted" });
   await assert.rejects(poolClient(fetch).addPoolCommitment("pool-1", commitments[0]!), /self_hosted/);
   assert.equal(fetch.calls.length, 1);
   for (const [code, status] of [["capacity_unavailable", 503], ["unsupported_operation", 422]] as const) {
