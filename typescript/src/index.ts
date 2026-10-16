@@ -2053,7 +2053,10 @@ function clampPtyDimension(value: number): number {
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  const whitespaceTrimmed = baseUrl.trim();
+  let end = whitespaceTrimmed.length;
+  while (end > 0 && whitespaceTrimmed.charCodeAt(end - 1) === 47) end -= 1;
+  const trimmed = whitespaceTrimmed.slice(0, end);
   if (!trimmed) throw new Error("baseUrl must not be empty");
   return trimmed;
 }

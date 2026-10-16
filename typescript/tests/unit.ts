@@ -583,6 +583,7 @@ async function testConfiguredPlacementRoutesNamedSourcesToMainEndpoint(): Promis
 
   assert.equal(arker.baseUrl, "https://provider-one-region-one.arker.ai/api");
   assert.equal(vm.baseUrl, "https://provider-one-region-one.arker.ai/api");
+  assert.equal(new Arker({ apiKey: "k", baseUrl: `https://test.invalid/api${"/".repeat(10_000)}` }).baseUrl, "https://test.invalid/api");
 }
 
 function testArbitraryProviderBuildsEndpoint(): void {
