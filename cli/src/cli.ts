@@ -251,7 +251,7 @@ const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
     "env-file": { type: "string" },
     pty: { type: "boolean" },
     rows: { type: "integer", min: 1 },
-    state: { type: "string", values: ["idle", "running"] },
+    state: { type: "string", values: ["idle", "pending", "running"] },
     "timeout-secs": { type: "integer", min: 0 },
   },
   shell: {
@@ -1230,7 +1230,7 @@ async function cmdSessions(args: ParsedArgs, client: Arker): Promise<void> {
     case "list": {
       if (!vm) die("usage: arker sessions ls <vm_id>");
       const res = await client.vm(vm).listSessions({
-        state: args.flags.state as "idle" | "running" | undefined,
+        state: args.flags.state as "idle" | "pending" | "running" | undefined,
         cursor: args.flags.cursor as string | undefined,
         limit: numFlag(args, "limit"),
       });
