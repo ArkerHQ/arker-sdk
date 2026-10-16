@@ -12,6 +12,7 @@ from ._compat import (
     arker_get,
     format_not_found,
     import_optional,
+    resolve_compat_path,
     routed_create,
     routed_get,
     run_command,
@@ -38,7 +39,7 @@ class Process:
             values.setdefault("wait_for_completion", True)
             return self._native.exec(request_type(**values))
         if isinstance(request, str):
-            command = request
+            command = f"mkdir -p /blaxel && cd /blaxel && {request}"
             timeout = None
         else:
             command = request.get("command") or request.get("cmd")
@@ -51,6 +52,8 @@ class Process:
             prefix = ""
             if working_dir:
                 prefix += f"cd {shlex.quote(str(working_dir))} && "
+            else:
+                prefix += "mkdir -p /blaxel && cd /blaxel && "
             if environment:
                 invalid = next(
                     (key for key in environment if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key))),
@@ -74,23 +77,25 @@ class FileSystem:
     def read(self, path: str) -> str:
         if self._vm is None:
             return self._native.read(path)
-        return self._vm.sync(path).decode("utf-8", "replace")
+        return self._vm.sync(resolve_compat_path(path, "/blaxel")).decode("utf-8", "replace")
 
     def write(self, path: str, content: str | bytes) -> None:
         if self._vm is None:
             return self._native.write(path, content)
-        self._vm.sync(path, content)
+        self._vm.sync(resolve_compat_path(path, "/blaxel"), content)
         return None
 
     def mkdir(self, path: str) -> None:
+        resolved = resolve_compat_path(path, "/blaxel")
         result = (
-            self._native.mkdir(path) if self._vm is None else run_command(self._vm, f"mkdir -p {shlex.quote(path)}")
+            self._native.mkdir(path) if self._vm is None else run_command(self._vm, f"mkdir -p {shlex.quote(resolved)}")
         )
         if isinstance(result, CommandResult) and result.exit_code != 0:
             raise RuntimeError(result.stderr or f"mkdir failed with exit {result.exit_code}")
 
     def rm(self, path: str) -> None:
-        result = self._native.rm(path) if self._vm is None else run_command(self._vm, f"rm -rf {shlex.quote(path)}")
+        resolved = resolve_compat_path(path, "/blaxel")
+        result = self._native.rm(path) if self._vm is None else run_command(self._vm, f"rm -rf {shlex.quote(resolved)}")
         if isinstance(result, CommandResult) and result.exit_code != 0:
             raise RuntimeError(result.stderr or f"remove failed with exit {result.exit_code}")
 

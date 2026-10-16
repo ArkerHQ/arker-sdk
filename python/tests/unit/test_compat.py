@@ -120,6 +120,31 @@ def add_arker_not_found(t: FakeTransport, vm_id: str) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "create",
+    [
+        lambda: E2BSandbox.create(allow_internet_access=False),
+        lambda: Daytona().create(network_block_all=True),
+        lambda: ModalSandbox.create(block_network=True),
+    ],
+)
+def test_provider_block_network_options_translate_to_arker_policy(monkeypatch, create) -> None:
+    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
+    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, vm_payload("vm_policy"))
+
+    with use_transport(t):
+        create()
+
+    body = json.loads(t.calls[0]["body"])
+    assert body["policies"]["rules"]["compat-deny-rest"] == {
+        "type": "outbound",
+        "priority": 1_000_000,
+        "action": "deny",
+    }
+
+
 def test_daytona_official_surface(monkeypatch) -> None:
     monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
     monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")

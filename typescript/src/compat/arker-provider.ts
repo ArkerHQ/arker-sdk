@@ -51,6 +51,31 @@ function decode(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
 }
 
+function splitList(value: unknown): string[] {
+  if (typeof value === "string") return value.split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (Array.isArray(value) && value.every((entry) => typeof entry === "string")) return value;
+  return [];
+}
+
+function networkPolicies(values: Record<string, unknown>): ForkOptions["policies"] | undefined {
+  const blockAll = values.allowInternetAccess === false || values.networkBlockAll === true || values.blockNetwork === true;
+  const domains = splitList(values.domainAllowList ?? values.outboundDomainAllowlist);
+  const cidrs = splitList(values.networkAllowList ?? values.outboundCidrAllowlist);
+  if (blockAll && (domains.length > 0 || cidrs.length > 0)) {
+    throw new ArkerError("bad_request", "block-all network policy cannot be combined with outbound allowlists", 400);
+  }
+  if (!blockAll && domains.length === 0 && cidrs.length === 0) return undefined;
+  const rules: Record<string, unknown> = {};
+  if (domains.length > 0) {
+    rules["compat-allow-domains"] = { type: "outbound", priority: 100, match: { hosts: domains }, action: "allow" };
+  }
+  if (cidrs.length > 0) {
+    rules["compat-allow-cidrs"] = { type: "outbound", priority: 200, match: { ips: cidrs }, action: "allow" };
+  }
+  rules["compat-deny-rest"] = { type: "outbound", priority: 1_000_000, action: "deny" };
+  return { rules } as ForkOptions["policies"];
+}
+
 function toFileEntries(stdout: string): FileEntry[] {
   const entries: FileEntry[] = [];
   for (const line of stdout.split("\n")) {
@@ -283,6 +308,7 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
           ...sourceRequest,
           ...(options?.name ? { name: options.name } : {}),
           ...(resources ? { resources } : {}),
+          ...(networkPolicies(values) ? { policies: networkPolicies(values) } : {}),
         };
         const vm = await client.fork(request);
         return wrap(vm);

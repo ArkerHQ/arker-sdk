@@ -7,6 +7,7 @@ import {
   resolveTimeout,
   type CreateOptions,
   type UniversalSandbox,
+  resolveCompatPath,
 } from "./compat/common.js";
 import { createCompatSdk } from "./compat/runtime.js";
 
@@ -16,7 +17,7 @@ export interface CommandExitResult {
   exitCode: number;
 }
 
-const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata"] as const;
+const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess"] as const;
 
 function sdk(routerConfigPath?: string) {
   return createCompatSdk({
@@ -49,7 +50,10 @@ export class Sandbox {
     this.provider = box.provider;
     this.commands = {
       run: async (command, options) => {
-        const result = await this.#box.runCommand(command, options);
+        const result = await this.#box.runCommand(command, {
+          ...options,
+          ...(this.provider === "arker" && options?.cwd === undefined ? { cwd: "/home/user" } : {}),
+        });
         return {
           stdout: result.stdout,
           stderr: result.stderr,
@@ -58,17 +62,17 @@ export class Sandbox {
       },
     };
     this.files = {
-      read: (path) => this.#box.filesystem.readFile(path),
+      read: (path) => this.#box.filesystem.readFile(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path),
       write: async (path, content) => {
-        await this.#box.filesystem.writeFile(path, content);
+        await this.#box.filesystem.writeFile(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path, content);
       },
       makeDir: async (path) => {
-        await this.#box.filesystem.mkdir(path);
+        await this.#box.filesystem.mkdir(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path);
       },
-      list: (path) => this.#box.filesystem.readdir(path),
-      exists: (path) => this.#box.filesystem.exists(path),
+      list: (path) => this.#box.filesystem.readdir(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path),
+      exists: (path) => this.#box.filesystem.exists(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path),
       remove: async (path) => {
-        await this.#box.filesystem.remove(path);
+        await this.#box.filesystem.remove(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path);
       },
     };
   }
@@ -87,6 +91,7 @@ export class Sandbox {
       ...(timeout !== undefined ? { timeout } : {}),
       ...((opts as any)?.envs ? { envs: (opts as any).envs } : {}),
       ...((opts as any)?.metadata ? { metadata: (opts as any).metadata } : {}),
+      ...((opts as any)?.allowInternetAccess !== undefined ? { allowInternetAccess: (opts as any).allowInternetAccess } : {}),
     });
     return guardUnsupported(new Sandbox(box), "e2b");
   }

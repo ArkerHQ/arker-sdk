@@ -1,6 +1,6 @@
 import { blaxel as createBlaxelProvider } from "@computesdk/blaxel";
 
-import { guardUnsupported, type UniversalSandbox } from "./compat/common.js";
+import { guardUnsupported, resolveCompatPath, type UniversalSandbox } from "./compat/common.js";
 import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
 
@@ -71,7 +71,7 @@ export class SandboxInstance {
       exec: async (request) => {
         const value = typeof request === "string" ? { command: request } : request;
         const result = await box.runCommand(value.command, {
-          ...(value.workingDir ? { cwd: value.workingDir } : {}),
+          ...(value.workingDir ? { cwd: value.workingDir } : this.provider === "arker" ? { cwd: "/blaxel" } : {}),
           ...(value.env ? { env: value.env } : {}),
           ...(value.timeout ? { timeout: value.timeout } : {}),
         });
@@ -79,17 +79,17 @@ export class SandboxInstance {
       },
     };
     this.fs = {
-      read: (path) => box.filesystem.readFile(path),
-      write: (path, content) => box.filesystem.writeFile(path, content),
-      mkdir: (path) => box.filesystem.mkdir(path),
+      read: (path) => box.filesystem.readFile(this.provider === "arker" ? resolveCompatPath(path, "/blaxel") : path),
+      write: (path, content) => box.filesystem.writeFile(this.provider === "arker" ? resolveCompatPath(path, "/blaxel") : path, content),
+      mkdir: (path) => box.filesystem.mkdir(this.provider === "arker" ? resolveCompatPath(path, "/blaxel") : path),
       ls: async (path) => {
-        const entries = await box.filesystem.readdir(path);
+        const entries = await box.filesystem.readdir(this.provider === "arker" ? resolveCompatPath(path, "/blaxel") : path);
         return {
           files: entries.filter((entry: any) => entry.type === "file"),
           subdirectories: entries.filter((entry: any) => entry.type === "directory"),
         };
       },
-      rm: (path) => box.filesystem.remove(path),
+      rm: (path) => box.filesystem.remove(this.provider === "arker" ? resolveCompatPath(path, "/blaxel") : path),
     };
     return guardUnsupported(this, "blaxel");
   }
@@ -103,6 +103,7 @@ export class SandboxInstance {
       envs: options.envs,
       runtime: options.runtime,
     });
+    if (box.provider === "arker") await box.filesystem.mkdir("/blaxel");
     return new SandboxInstance(box);
   }
 

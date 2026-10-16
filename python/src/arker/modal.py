@@ -10,6 +10,7 @@ from ._compat import (
     UnsupportedMixin,
     arker_create,
     arker_get,
+    compat_network_policies,
     format_not_found,
     import_optional,
     routed_create,
@@ -71,6 +72,9 @@ class Sandbox(UnsupportedMixin):
     def create(cls, *args: Any, **kwargs: Any) -> Sandbox:
         arker_config = kwargs.pop("arker", None) or {}
         router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
+        block_network = kwargs.pop("block_network", kwargs.pop("blockNetwork", False))
+        outbound_cidrs = kwargs.pop("outbound_cidr_allowlist", kwargs.pop("outboundCidrAllowlist", None))
+        outbound_domains = kwargs.pop("outbound_domain_allowlist", kwargs.pop("outboundDomainAllowlist", None))
         if router_path:
             arker_config = {**arker_config, "router_config_path": router_path}
         if args or kwargs:
@@ -80,13 +84,22 @@ class Sandbox(UnsupportedMixin):
         def create_native() -> Any:
             if native is None or not hasattr(native, "create"):
                 raise RuntimeError("Native Modal SDK is not installed")
-            return native.create()
+            return native.create(
+                block_network=block_network,
+                **({"outbound_cidr_allowlist": outbound_cidrs} if outbound_cidrs is not None else {}),
+                **({"outbound_domain_allowlist": outbound_domains} if outbound_domains is not None else {}),
+            )
 
         provider, result = routed_create(
             "modal",
             arker_config,
             {
-                "arker": lambda: arker_create(arker_config),
+                "arker": lambda: arker_create(
+                    arker_config,
+                    policies=compat_network_policies(
+                        block_all=bool(block_network), domains=outbound_domains, cidrs=outbound_cidrs
+                    ),
+                ),
                 "modal": create_native,
             },
         )
@@ -141,8 +154,7 @@ class Sandbox(UnsupportedMixin):
                         raise ValueError(f"Invalid environment variable name: {key}")
                     exports.append(f"export {key}={shlex.quote(str(value))};")
                 prefix += " ".join(exports) + " "
-            if workdir:
-                prefix += f"cd {shlex.quote(str(workdir))} && "
+            prefix += f"cd {shlex.quote(str(workdir or '/'))} && "
             arker_timeout = timeout if timeout is not None else math.ceil(timeout_ms / 1_000) if timeout_ms else None
             return Process(run_command(self._vm, prefix + shell_command(command), timeout=arker_timeout))
         native_kwargs = {

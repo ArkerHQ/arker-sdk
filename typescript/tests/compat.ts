@@ -231,9 +231,10 @@ async function testModalSurface(): Promise<void> {
     await sandbox.terminate();
     assert.equal(box.destroyed, true);
 
+    await assert.rejects(() => client.sandboxes.create("app", "image", {}, "extra"), /at most app, image, and options/);
     await assert.rejects(
-      () => client.sandboxes.create("app", "image"),
-      /unsupported positional argument\(s\)/,
+      () => client.sandboxes.create("app", "image", { gpu: "H100" }),
+      /unsupported option\(s\) 'gpu'/,
     );
     await assert.rejects(
       () => sandbox.exec("pwd", { pty: true } as any),

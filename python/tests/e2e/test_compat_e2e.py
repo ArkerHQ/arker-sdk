@@ -30,6 +30,7 @@ def test_daytona_live() -> None:
     try:
         response = sandbox.process.exec("printf daytona-python-live")
         assert response.result == "daytona-python-live"
+        assert sandbox.process.exec("pwd").result.strip() == "/home/daytona"
     finally:
         sandbox.delete()
 
@@ -39,6 +40,7 @@ def test_e2b_live() -> None:
     try:
         result = sandbox.commands.run("printf e2b-python-live")
         assert result.stdout == "e2b-python-live"
+        assert sandbox.commands.run("pwd").stdout.strip() == "/home/user"
     finally:
         sandbox.kill()
 
@@ -48,6 +50,7 @@ def test_modal_live() -> None:
     try:
         process = sandbox.exec("printf", "modal-python-live")
         assert process.stdout.read() == "modal-python-live"
+        assert sandbox.exec("pwd").stdout.read().strip() == "/"
     finally:
         sandbox.terminate()
 
@@ -57,7 +60,38 @@ def test_blaxel_live() -> None:
     try:
         result = sandbox.process.exec("printf blaxel-python-live")
         assert result.stdout == "blaxel-python-live"
+        assert sandbox.process.exec("pwd").stdout.strip() == "/blaxel"
         sandbox.fs.write("/tmp/arker-blaxel-python-live.txt", "ok")
         assert sandbox.fs.read("/tmp/arker-blaxel-python-live.txt") == "ok"
     finally:
         sandbox.delete()
+
+
+@pytest.mark.parametrize(
+    ("create", "run", "destroy"),
+    [
+        (
+            lambda: E2BSandbox.create(allow_internet_access=False),
+            lambda sandbox, command: sandbox.commands.run(command),
+            lambda sandbox: sandbox.kill(),
+        ),
+        (
+            lambda: Daytona().create(network_block_all=True),
+            lambda sandbox, command: sandbox.process.exec(command),
+            lambda sandbox: sandbox.delete(),
+        ),
+        (
+            lambda: ModalSandbox.create(block_network=True),
+            lambda sandbox, command: sandbox.exec("sh", "-lc", command),
+            lambda sandbox: sandbox.terminate(),
+        ),
+    ],
+)
+def test_outbound_block_policy_live(create, run, destroy) -> None:
+    sandbox = create()
+    try:
+        result = run(sandbox, "curl -fsS --max-time 5 https://example.com >/dev/null")
+        exit_code = result.exit_code if hasattr(result, "exit_code") else result.wait()
+        assert exit_code != 0
+    finally:
+        destroy(sandbox)

@@ -9,8 +9,10 @@ from ._compat import (
     UnsupportedMixin,
     arker_create,
     arker_get,
+    compat_network_policies,
     format_not_found,
     import_optional,
+    resolve_compat_path,
     routed_create,
     routed_get,
     run_command,
@@ -40,8 +42,7 @@ class Commands:
                         raise ValueError(f"Invalid environment variable name: {key}")
                     exports.append(f"export {key}={shlex.quote(value)};")
                 prefix += " ".join(exports) + " "
-            if cwd:
-                prefix += f"cd {shlex.quote(cwd)} && "
+            prefix += f"cd {shlex.quote(cwd or '/home/user')} && "
             return run_command(self._vm, prefix + command, timeout=timeout)
         native_options = {
             **({"cwd": cwd} if cwd is not None else {}),
@@ -61,13 +62,13 @@ class Files(UnsupportedMixin):
     def read(self, path: str) -> str:
         if self._vm is None:
             return self._native.read(path)
-        return self._vm.sync(path).decode("utf-8", "replace")  # type: ignore[union-attr]
+        return self._vm.sync(resolve_compat_path(path, "/home/user")).decode("utf-8", "replace")  # type: ignore[union-attr]
 
     def write(self, path: str, content: str) -> None:
         if self._vm is None:
             result = self._native.write(path, content)
             return None if result is None else result
-        self._vm.sync(path, content)
+        self._vm.sync(resolve_compat_path(path, "/home/user"), content)
         return None
 
     def make_dir(self, path: str) -> None:
@@ -75,7 +76,7 @@ class Files(UnsupportedMixin):
             if hasattr(self._native, "make_dir"):
                 return self._native.make_dir(path)
             return self._native.makeDir(path)
-        result = run_command(self._vm, f"mkdir -p {shlex.quote(path)}")
+        result = run_command(self._vm, f"mkdir -p {shlex.quote(resolve_compat_path(path, '/home/user'))}")
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"mkdir failed with exit {result.exit_code}")
         return None
@@ -86,7 +87,7 @@ class Files(UnsupportedMixin):
     def list(self, path: str) -> list[Any]:
         if self._vm is None:
             return self._native.list(path)
-        quoted = shlex.quote(path)
+        quoted = shlex.quote(resolve_compat_path(path, "/home/user"))
         script = (
             f"cd {quoted} 2>/dev/null || exit 3; "
             "for e in * .*; do "
@@ -106,13 +107,13 @@ class Files(UnsupportedMixin):
     def exists(self, path: str) -> bool:
         if self._vm is None:
             return bool(self._native.exists(path))
-        return run_command(self._vm, f"test -e {shlex.quote(path)}").exit_code == 0
+        return run_command(self._vm, f"test -e {shlex.quote(resolve_compat_path(path, '/home/user'))}").exit_code == 0
 
     def remove(self, path: str) -> None:
         if self._vm is None:
             result = self._native.remove(path)
             return None if result is None else result
-        result = run_command(self._vm, f"rm -rf {shlex.quote(path)}")
+        result = run_command(self._vm, f"rm -rf {shlex.quote(resolve_compat_path(path, '/home/user'))}")
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"remove failed with exit {result.exit_code}")
         return None
@@ -137,6 +138,7 @@ class Sandbox(UnsupportedMixin):
     @classmethod
     def create(cls, template_id: str | None = None, **kwargs: Any) -> Sandbox:
         timeout = kwargs.pop("timeout", kwargs.pop("timeout_ms", kwargs.pop("timeoutMs", None)))
+        allow_internet_access = kwargs.pop("allow_internet_access", kwargs.pop("allowInternetAccess", True))
         arker_config = kwargs.pop("arker", None) or {}
         router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
         if router_path:
@@ -149,16 +151,24 @@ class Sandbox(UnsupportedMixin):
         def create_native() -> Any:
             if native is None:
                 raise RuntimeError("Native E2B SDK is not installed")
+            native_options = {"allow_internet_access": allow_internet_access}
+            if timeout is not None:
+                native_options["timeout"] = timeout
             if template_id is not None:
-                if timeout is not None:
-                    return native.create(template_id, timeout=timeout)
-                return native.create(template_id)
-            return native.create(timeout=timeout) if timeout is not None else native.create()
+                return native.create(template_id, **native_options)
+            return native.create(**native_options)
 
         provider, result = routed_create(
             "e2b",
             arker_config,
-            {"arker": lambda: arker_create(arker_config, template_id=template_id), "e2b": create_native},
+            {
+                "arker": lambda: arker_create(
+                    arker_config,
+                    template_id=template_id,
+                    policies=compat_network_policies(block_all=allow_internet_access is False),
+                ),
+                "e2b": create_native,
+            },
         )
         return cls(vm=result if provider == "arker" else None, native=result if provider == "e2b" else None)
 

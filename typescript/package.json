@@ -58,6 +58,8 @@
     "test:router": "bun tests/compat-router.ts",
     "test:compat-live": "bun tests/compat-live.ts",
     "test:compat-fallback-live": "bun tests/compat-fallback-live.ts",
+    "test:compat-equivalence-live": "bun tests/compat-equivalence-live.ts",
+    "test:compat-policy-live": "bun tests/compat-policy-live.ts",
     "typecheck": "bun run generate:validators && tsc -p tsconfig.test.json",
     "prepublishOnly": "bun run build",
     "generate:validators": "bun scripts/generate-error-validators.ts"

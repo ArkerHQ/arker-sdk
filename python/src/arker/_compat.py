@@ -68,6 +68,7 @@ def arker_create(
     template_id: str | None = None,
     image: str | None = None,
     resources: dict[str, Any] | None = None,
+    policies: dict[str, Any] | None = None,
 ) -> VM:
     cfg = config or {}
     request: dict[str, Any] = {"name": name or cfg.get("name")}
@@ -77,7 +78,42 @@ def arker_create(
         request["source_vm_name"] = template_id or arker_source(config)
     if resources:
         request["resources"] = resources
+    if policies:
+        request["policies"] = policies
     return arker_client(config).fork(**request)
+
+
+def compat_network_policies(
+    *, block_all: bool = False, domains: str | list[str] | None = None, cidrs: str | list[str] | None = None
+) -> dict[str, Any] | None:
+    def values(value: str | list[str] | None) -> list[str]:
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        return list(value or [])
+
+    domain_values = values(domains)
+    cidr_values = values(cidrs)
+    if block_all and (domain_values or cidr_values):
+        raise ValueError("block-all network policy cannot be combined with outbound allowlists")
+    if not block_all and not domain_values and not cidr_values:
+        return None
+    rules: dict[str, Any] = {}
+    if domain_values:
+        rules["compat-allow-domains"] = {
+            "type": "outbound",
+            "priority": 100,
+            "match": {"hosts": domain_values},
+            "action": "allow",
+        }
+    if cidr_values:
+        rules["compat-allow-cidrs"] = {
+            "type": "outbound",
+            "priority": 200,
+            "match": {"ips": cidr_values},
+            "action": "allow",
+        }
+    rules["compat-deny-rest"] = {"type": "outbound", "priority": 1_000_000, "action": "deny"}
+    return {"rules": rules}
 
 
 def arker_get(vm_id: str, config: dict[str, Any] | None = None) -> VM | None:
@@ -91,6 +127,21 @@ def arker_get(vm_id: str, config: dict[str, Any] | None = None) -> VM | None:
 
 def decode(data: bytes, encoding: str = "utf-8") -> str:
     return data.decode(encoding, "replace")
+
+
+def resolve_compat_path(path: str, default_directory: str) -> str:
+    if path.startswith("/"):
+        return path
+    parts: list[str] = []
+    for part in f"{default_directory}/{path}".split("/"):
+        if not part or part == ".":
+            continue
+        if part == "..":
+            if parts:
+                parts.pop()
+        else:
+            parts.append(part)
+    return "/" + "/".join(parts)
 
 
 def run_command(vm: VM, command: str, *, timeout: int | None = None) -> CommandResult:

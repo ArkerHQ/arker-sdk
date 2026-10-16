@@ -27,7 +27,7 @@ export interface ExecuteCommandOptions {
 }
 
 const DAYTONA_CONFIG_KEYS = ["apiKey", "arker", "routerConfigPath"] as const;
-const DAYTONA_CREATE_OPTION_KEYS = ["image", "snapshot", "envVars", "name", "language", "resources"] as const;
+const DAYTONA_CREATE_OPTION_KEYS = ["image", "snapshot", "envVars", "name", "language", "resources", "networkBlockAll", "networkAllowList", "domainAllowList"] as const;
 
 export class Sandbox {
   readonly id: string;
@@ -44,7 +44,10 @@ export class Sandbox {
     this.id = box.sandboxId;
     this.provider = box.provider;
     const run = async (command: string, options?: ExecuteCommandOptions): Promise<ExecuteResponse> => {
-      const result = await this.#box.runCommand(command, options);
+      const result = await this.#box.runCommand(command, {
+        ...options,
+        ...(this.provider === "arker" && options?.cwd === undefined ? { cwd: "/home/daytona" } : {}),
+      });
       return {
         exitCode: result.exitCode,
         result: result.stdout,
@@ -86,7 +89,11 @@ export class Daytona {
       ...(typeof source.name === "string" ? { name: source.name } : {}),
       ...(typeof source.language === "string" ? { runtime: source.language } : {}),
       ...(source.resources && typeof source.resources === "object" ? source.resources : {}),
+      ...(typeof source.networkBlockAll === "boolean" ? { networkBlockAll: source.networkBlockAll } : {}),
+      ...(typeof source.networkAllowList === "string" ? { networkAllowList: source.networkAllowList } : {}),
+      ...(typeof source.domainAllowList === "string" ? { domainAllowList: source.domainAllowList } : {}),
     });
+    if (box.provider === "arker") await box.filesystem.mkdir("/home/daytona");
     return guardUnsupported(new Sandbox(box), "daytona");
   }
 

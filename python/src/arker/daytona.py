@@ -10,6 +10,7 @@ from ._compat import (
     UnsupportedMixin,
     arker_create,
     arker_get,
+    compat_network_policies,
     format_not_found,
     import_optional,
     routed_create,
@@ -50,6 +51,8 @@ class Process:
             prefix += " ".join(exports) + " "
         if cwd:
             prefix += f"cd {shlex.quote(cwd)} && "
+        else:
+            prefix += "mkdir -p /home/daytona && cd /home/daytona && "
         return ExecuteResponse(run_command(self._vm, prefix + command, timeout=timeout))
 
     def execute_command(self, command: str, **kwargs: Any) -> ExecuteResponse:
@@ -116,7 +119,20 @@ class Daytona(UnsupportedMixin):
                 raise UnsupportedCompatibilityOption(
                     "Daytona.create positional arguments are not supported when routing to Arker"
                 )
-            supported = {"image", "snapshot", "name", "resources", "envVars", "language"}
+            supported = {
+                "image",
+                "snapshot",
+                "name",
+                "resources",
+                "envVars",
+                "language",
+                "networkBlockAll",
+                "network_block_all",
+                "networkAllowList",
+                "network_allow_list",
+                "domainAllowList",
+                "domain_allow_list",
+            }
             unknown = sorted(set(kwargs) - supported)
             if unknown:
                 raise UnsupportedCompatibilityOption(
@@ -142,6 +158,11 @@ class Daytona(UnsupportedMixin):
                 template_id=kwargs.get("snapshot"),
                 image=kwargs.get("image"),
                 resources=resources or None,
+                policies=compat_network_policies(
+                    block_all=bool(kwargs.get("networkBlockAll", kwargs.get("network_block_all", False))),
+                    domains=kwargs.get("domainAllowList", kwargs.get("domain_allow_list")),
+                    cidrs=kwargs.get("networkAllowList", kwargs.get("network_allow_list")),
+                ),
             )
 
         provider, result = routed_create(

@@ -108,6 +108,18 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+export function resolveCompatPath(path: string, defaultDirectory: string): string {
+  if (path.startsWith("/")) return path;
+  const parts = `${defaultDirectory}/${path}`.split("/");
+  const resolved: string[] = [];
+  for (const part of parts) {
+    if (!part || part === ".") continue;
+    if (part === "..") resolved.pop();
+    else resolved.push(part);
+  }
+  return `/${resolved.join("/")}`;
+}
+
 export function formatEnvExports(env: Record<string, string>): string {
   return Object.entries(env).map(([key, value]) => {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new Error(`Invalid environment variable name: ${key}`);

@@ -3,7 +3,6 @@ import type { RunCommandOptions } from "computesdk";
 
 import {
   argvToCommand,
-  assertNoUnsupportedArgs,
   assertSupportedObjectKeys,
   guardUnsupported,
   isStringRecord,
@@ -33,6 +32,7 @@ interface ModalExecOptions {
 
 const MODAL_CONFIG_KEYS = ["tokenId", "tokenSecret", "arker", "routerConfigPath"] as const;
 const MODAL_EXEC_OPTION_KEYS = ["workdir", "env", "timeoutMs", "stdout", "stderr", "mode"] as const;
+const MODAL_CREATE_OPTION_KEYS = ["blockNetwork", "outboundCidrAllowlist", "outboundDomainAllowlist"] as const;
 
 type ModalProvider = ReturnType<typeof createModalProvider>;
 
@@ -128,8 +128,9 @@ export class Sandbox {
 
   async exec(cmd: string[] | string, opts?: ModalExecOptions): Promise<ModalProcess> {
     const command = argvToCommand(cmd);
-    const runOptions = toRunCommandOptions(opts);
-    const result = runOptions ? await this.#box.runCommand(command, runOptions) : await this.#box.runCommand(command);
+    const runOptions = toRunCommandOptions(opts) ?? {};
+    if (this.provider === "arker" && runOptions.cwd === undefined) runOptions.cwd = "/";
+    const result = Object.keys(runOptions).length > 0 ? await this.#box.runCommand(command, runOptions) : await this.#box.runCommand(command);
     return new ModalProcess(result.stdout, result.stderr, result.exitCode);
   }
 
@@ -156,8 +157,14 @@ export class ModalClient {
 
   readonly sandboxes = {
     create: async (...args: unknown[]): Promise<Sandbox> => {
-      assertNoUnsupportedArgs(args, "modal", "ModalClient.sandboxes.create");
-      const box = await this.#sdk.sandbox.create({});
+      if (args.length > 3) throw new Error("ModalClient.sandboxes.create accepts at most app, image, and options");
+      const options = (args.length >= 3 ? args[2] : args.length === 1 ? args[0] : undefined) as Record<string, unknown> | undefined;
+      assertSupportedObjectKeys(options, MODAL_CREATE_OPTION_KEYS, "modal", "ModalClient.sandboxes.create");
+      const box = await this.#sdk.sandbox.create({
+        ...(typeof options?.blockNetwork === "boolean" ? { blockNetwork: options.blockNetwork } : {}),
+        ...(Array.isArray(options?.outboundCidrAllowlist) ? { outboundCidrAllowlist: options.outboundCidrAllowlist } : {}),
+        ...(Array.isArray(options?.outboundDomainAllowlist) ? { outboundDomainAllowlist: options.outboundDomainAllowlist } : {}),
+      });
       return guardUnsupported(new Sandbox(box), "modal");
     },
     fromId: async (sandboxId: string): Promise<Sandbox> => {
