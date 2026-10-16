@@ -52,11 +52,8 @@ instrumented API counts above.
   provider currently rejects. Arker permits multiple VM rows under one name,
   so a local shim lock is not a distributed correctness fix.
 - Release the ComputeSDK provider fixes before the migration SDK release.
-- Validate the worker ingress fix in arker-app #4260: a live request with an
-  Arker key in `x-api-key` lost the application's unrelated Authorization
-  header. Arker-backed Blaxel fetch is not yet implemented; supporting both
-  application auth headers simultaneously also needs a non-conflicting
-  platform-authentication channel.
+- Implement Arker-backed Blaxel fetch. Supporting both application auth headers
+  simultaneously also needs a non-conflicting platform-authentication channel.
 
 Full API equivalence has not been established. The three PRs remain drafts.
 
@@ -73,5 +70,7 @@ from the broader HTTP run were addressed by the separate HTTPS selection.
 
 The first ingress fix also exposed a repeated-header edge case: a later Arker
 key among application header values reached the guest. Both live regression
-cases failed before the additional worker hardening. Final post-hardening
-verification is tracked in arker-app #4260.
+cases failed before the additional worker hardening. After deployment of that
+hardening, all 49 HTTPS, HTTP/2, and WebSocket cases passed, with zero skips and
+exit code 0. This also verifies preservation of application Authorization when
+the platform key is supplied in `x-api-key`. See arker-app #4260 for artifacts.
