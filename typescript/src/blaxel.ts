@@ -1,7 +1,7 @@
 import { blaxel as createBlaxelProvider } from "@computesdk/blaxel";
 import { SandboxInstance as NativeBlaxelSandbox } from "@blaxel/core";
 
-import { assertSupportedObjectKeys, guardUnsupported, resolveCompatPath, type UniversalSandbox } from "./compat/common.js";
+import { assertSupportedObjectKeys, CompatibilityNotFoundError, guardUnsupported, resolveCompatPath, type UniversalSandbox } from "./compat/common.js";
 import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
 
@@ -179,14 +179,14 @@ export class SandboxInstance {
     try {
       return await SandboxInstance.get(options.name, callOptions);
     } catch (error) {
-      if (!(error instanceof Error) || !/not found/i.test(error.message)) throw error;
+      if (!(error instanceof CompatibilityNotFoundError)) throw error;
       return SandboxInstance.create(options, { ...callOptions, createIfNotExist: true });
     }
   }
 
   static async get(id: string, config: BlaxelCompatConfig = {}): Promise<SandboxInstance> {
     const box = await makeSdk(config).sandbox.getById(id);
-    if (!box) throw new Error(`Sandbox ${id} not found`);
+    if (!box) throw new CompatibilityNotFoundError(`Sandbox ${id} not found`);
     return SandboxInstance.wrap(box);
   }
 

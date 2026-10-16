@@ -58,6 +58,18 @@ def test_large_weights_do_not_overflow() -> None:
     assert select_weighted_provider(weights, random_value=0.75) == "arker"
 
 
+@pytest.mark.parametrize("status", [401, 403, 429, 500, 503])
+def test_lookup_does_not_hide_http_failures_containing_not_found(status) -> None:
+    error = RuntimeError("API key not found")
+    error.status_code = status
+
+    def fail():
+        raise error
+
+    with pytest.raises(RuntimeError, match="API key not found"):
+        get_or_none(fail)
+
+
 def test_default_router_uses_native_only_without_arker_credentials(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ARKER_API_KEY", raising=False)

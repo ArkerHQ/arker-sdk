@@ -9,6 +9,7 @@ from typing import Any
 
 from ._compat import (
     CommandResult,
+    CompatibilityNotFoundError,
     UnsupportedCompatibilityOption,
     UnsupportedMixin,
     arker_create,
@@ -295,12 +296,14 @@ class SyncSandboxInstance(UnsupportedMixin):
         }
         try:
             return cls.get(name, **lookup_kwargs)
-        except Exception as error:
-            if "not found" not in str(error).lower():
-                raise
+        except CompatibilityNotFoundError:
+            pass
         return cls.create(sandbox, **kwargs)
 
     def delete(self) -> None:
+        if isinstance(self, str):
+            SyncSandboxInstance.get(self).delete()
+            return
         if self._vm is not None:
             self._vm.delete()
             return
@@ -357,6 +360,9 @@ class SandboxInstance:
         return await cls._wrap(await asyncio.to_thread(SyncSandboxInstance.get, sandbox_id, **kwargs))
 
     async def delete(self) -> None:
+        if isinstance(self, str):
+            await asyncio.to_thread(SyncSandboxInstance.delete, self)
+            return
         await asyncio.to_thread(self._sandbox.delete)
 
     def __getattr__(self, name: str) -> Any:

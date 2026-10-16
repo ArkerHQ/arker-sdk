@@ -190,8 +190,12 @@ def import_optional(module_name: str) -> Any | None:
         return None
 
 
-def format_not_found(kind: str, sandbox_id: str) -> RuntimeError:
-    return RuntimeError(f"{kind} {sandbox_id} not found")
+class CompatibilityNotFoundError(RuntimeError):
+    pass
+
+
+def format_not_found(kind: str, sandbox_id: str) -> CompatibilityNotFoundError:
+    return CompatibilityNotFoundError(f"{kind} {sandbox_id} not found")
 
 
 def get_or_none(getter: Callable[[], Any]) -> Any | None:
@@ -204,6 +208,8 @@ def get_or_none(getter: Callable[[], Any]) -> Any | None:
         )
         code = str(getattr(error, "code", "")).lower()
         message = str(error).lower()
+        if status is not None and status != 404:
+            raise
         if status == 404 or code in {"not_found", "notfound"} or "not found" in message:
             return None
         raise

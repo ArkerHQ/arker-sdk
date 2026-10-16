@@ -42,7 +42,7 @@ try:
     reconnected = SyncSandboxInstance.get(sandbox_name)
     assert reconnected.fs.read("/blaxel/import-only/probe.txt") == "second"
 finally:
-    sandbox.delete()
+    SyncSandboxInstance.delete(sandbox_name)
 """
 
 

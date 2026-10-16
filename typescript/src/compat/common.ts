@@ -2,6 +2,8 @@ import type { CommandResult, RunCommandOptions, SandboxInterface } from "compute
 
 export type UniversalSandbox = SandboxInterface;
 
+export class CompatibilityNotFoundError extends Error {}
+
 export function nativeInstance(box: UniversalSandbox): object | undefined {
   if (box.provider === "arker") return undefined;
   const getter = (box as UniversalSandbox & { getInstance?: () => unknown }).getInstance;
