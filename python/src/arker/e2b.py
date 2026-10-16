@@ -22,7 +22,9 @@ from ._compat import (
 from .computer import VM
 
 
-class Commands:
+class Commands(UnsupportedMixin):
+    _compat_name = "e2b"
+
     def __init__(self, vm: VM | None = None, native: Any | None = None) -> None:
         self._vm = vm
         self._native = native

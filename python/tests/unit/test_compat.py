@@ -294,6 +294,22 @@ def test_e2b_official_surface(monkeypatch) -> None:
     )
 
 
+def test_e2b_nested_native_surface_delegates_provider_extensions() -> None:
+    native_commands = types.SimpleNamespace(list=lambda: ["command-1"])
+    native_files = types.SimpleNamespace(watch=lambda path: f"watch:{path}")
+    native = types.SimpleNamespace(
+        sandbox_id="native-e2b",
+        commands=native_commands,
+        files=native_files,
+        get_host=lambda port: f"native-{port}.example",
+    )
+    sandbox = E2BSandbox(native=native)
+
+    assert sandbox.commands.list() == ["command-1"]
+    assert sandbox.files.watch("/tmp") == "watch:/tmp"
+    assert sandbox.get_host(3000) == "native-3000.example"
+
+
 def test_modal_official_surface(monkeypatch) -> None:
     monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
     monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
