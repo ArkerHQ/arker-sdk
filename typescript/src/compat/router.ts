@@ -249,6 +249,8 @@ function retryable(error: unknown): boolean {
     if (["authentication", "authorization", "unauthorized", "forbidden", "invalid_request", "validation"]
       .includes(String(current.code ?? "").toLowerCase())) return false;
     if (/(authentication failed|unauthorized|forbidden|invalid api key|missing .*api key)/i.test(current.message ?? "")) return false;
+    if (/(outcome is unknown|may have (?:succeeded|been created)|network failure|transport error|timed? out|timeout)/i
+      .test(current.message ?? "")) return false;
   }
   return true;
 }

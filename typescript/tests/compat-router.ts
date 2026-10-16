@@ -77,6 +77,14 @@ async function testWeightedFallbackAndNonRetryableErrors(): Promise<void> {
       provider("arker", { create: async () => { throw new Error("must not run"); } }),
     ]).instances!;
     await assert.rejects(auth.create(), /invalid API key/);
+
+    let duplicateCreates = 0;
+    const ambiguous = createRoutedProvider([
+      provider("blaxel", { create: async () => { throw new Error("Network failure; operation outcome is unknown"); } }),
+      provider("arker", { create: async () => { duplicateCreates += 1; return sandbox("duplicate", "arker"); } }),
+    ]).instances!;
+    await assert.rejects(ambiguous.create(), /outcome is unknown/);
+    assert.equal(duplicateCreates, 0, "ambiguous creation outcomes must never fall through and create a duplicate");
   } finally {
     Math.random = originalRandom;
   }

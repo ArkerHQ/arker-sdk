@@ -165,6 +165,15 @@ async function testNativeProviderExtensionsAreDelegated(): Promise<void> {
       fake.cleanup();
     }
   }
+
+  const native = { process: { advanced: () => "native-process-extension" } };
+  const fake = installFakeCompute(new FakeSandbox("daytona-nested", "daytona", native));
+  try {
+    const sandbox = await new Daytona().create() as any;
+    assert.equal(sandbox.process.advanced(), "native-process-extension");
+  } finally {
+    fake.cleanup();
+  }
 }
 
 async function testDaytonaGetNotFound(): Promise<void> {
@@ -185,6 +194,8 @@ async function testE2BSurface(): Promise<void> {
     assertArkerFirst(fake.captured(), "e2b");
     assert.deepEqual(fake.createCalls[0], { templateId: "catalog-template", timeout: 123 });
     assert.equal(sandbox.sandboxId, "e2b-box");
+    assert.equal(sandbox.getHost(8080), "p8080.example.invalid");
+    assert.equal(sandbox.getHost(3000), "p8080-3000.example.invalid");
 
     const command = await sandbox.commands.run("printf e2b", { cwd: "/tmp", env: { A: "b" }, timeout: 200 });
     assert.deepEqual(command, {

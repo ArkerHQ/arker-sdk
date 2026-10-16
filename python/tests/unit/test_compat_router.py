@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import multiprocessing
+import threading
 import time
 from pathlib import Path
 
@@ -162,8 +163,10 @@ def test_race_returns_without_waiting_for_losing_provider(tmp_path: Path) -> Non
         )
     )
 
+    never_returns = threading.Event()
+
     def slow_miss() -> None:
-        time.sleep(0.5)
+        never_returns.wait()
 
     started = time.monotonic()
     found = routed_get(
@@ -268,6 +271,36 @@ def test_missing_arker_source_falls_back_to_native_provider(tmp_path: Path) -> N
 
     assert provider == "e2b"
     assert result.sandbox_id == "native-e2b"
+
+
+def test_ambiguous_create_outcome_does_not_fall_through(tmp_path: Path) -> None:
+    config_path = tmp_path / "computesdk_router.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "existing": {"strategy": "priority", "order": ["e2b", "arker"]},
+                "create": {"strategy": "priority", "order": ["e2b", "arker"]},
+            }
+        )
+    )
+    duplicate_creates = 0
+
+    def ambiguous() -> None:
+        raise RuntimeError("network failure: operation outcome is unknown")
+
+    def duplicate() -> object:
+        nonlocal duplicate_creates
+        duplicate_creates += 1
+        return object()
+
+    with pytest.raises(RuntimeError, match="outcome is unknown"):
+        routed_create(
+            "e2b",
+            {"router_config_path": config_path},
+            {"e2b": ambiguous, "arker": duplicate},
+        )
+    assert duplicate_creates == 0
 
 
 def test_native_not_found_errors_become_route_misses() -> None:

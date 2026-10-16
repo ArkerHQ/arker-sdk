@@ -97,6 +97,7 @@ from .generated.api_models import (
     SyncWriteResult,
     Vm,
     VmNetwork,
+    VmPolicies,
     VmResources,
     WhoamiResponse,
 )
@@ -742,6 +743,8 @@ class VM:
     min_memory_mib: int | None
     last_active_at: str | None
     sessions: list[Session] | None
+    hostname: str | None
+    policies: VmPolicies | None
 
     def __init__(
         self,

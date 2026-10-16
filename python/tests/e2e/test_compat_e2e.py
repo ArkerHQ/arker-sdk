@@ -8,6 +8,8 @@ Run with:
 from __future__ import annotations
 
 import os
+import time
+import urllib.request
 
 import pytest
 
@@ -41,6 +43,23 @@ def test_e2b_live() -> None:
         result = sandbox.commands.run("printf e2b-python-live")
         assert result.stdout == "e2b-python-live"
         assert sandbox.commands.run("pwd").stdout.strip() == "/home/user"
+        started = sandbox.commands.run("python3 -m http.server 8080 --bind 127.0.0.1", background=True)
+        assert started.exit_code == 0
+        host = sandbox.get_host(8080)
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                request = urllib.request.Request(
+                    f"https://{host}",
+                    headers={"Authorization": f"Bearer {os.environ['ARKER_API_KEY']}"},
+                )
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    assert response.status == 200
+                break
+            except Exception:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.5)
     finally:
         sandbox.kill()
 

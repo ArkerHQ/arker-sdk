@@ -198,27 +198,34 @@ class ArkerComputeSandbox implements SandboxInterface {
     const jobId = randomUUID();
     const jobDirectory = `/tmp/arker-computesdk/${jobId}`;
     const stderrMarker = `__ARKER_STDERR_${jobId}__`;
+    const pidPath = `${jobDirectory}/pid`;
     const launcher =
       `mkdir -p ${shellQuote(jobDirectory)}; ` +
-      `nohup sh -lc ${shellQuote(`( ${fullCommand}\n); code=$?; printf '%s' "$code" > ${shellQuote(`${jobDirectory}/exit`)}`)} ` +
+      `nohup setsid --fork --wait sh -lc ${shellQuote(`printf '%s' "$$" > ${shellQuote(pidPath)}; awk '{print $22}' /proc/$$/stat > ${shellQuote(`${jobDirectory}/start`)}; ( ${fullCommand}\n); code=$?; printf '%s' "$code" > ${shellQuote(`${jobDirectory}/exit`)}`)} ` +
       `> ${shellQuote(`${jobDirectory}/stdout`)} 2> ${shellQuote(`${jobDirectory}/stderr`)} < /dev/null & ` +
-      `printf '%s' "$!" > ${shellQuote(`${jobDirectory}/pid`)}`;
+      `launcher=$!; while [ ! -s ${shellQuote(pidPath)} ] && kill -0 "$launcher" 2>/dev/null; do sleep 0.01; done; ` +
+      `test -s ${shellQuote(pidPath)}`;
     const launched = await this.runCommand(launcher);
     if (launched.exitCode !== 0) throw new Error(`Failed to start Arker process: ${launched.stderr || `exit ${launched.exitCode}`}`);
 
     const snapshot = async () => {
       const result = await this.runCommand(
         `d=${shellQuote(jobDirectory)}; ` +
-        `if [ -f "$d/exit" ]; then state=exited; code=$(cat "$d/exit"); else state=running; code=; fi; ` +
-        `printf '%s\\n%s\\n' "$state" "$code"; cat "$d/stdout" 2>/dev/null; printf '\\n${stderrMarker}\\n'; cat "$d/stderr" 2>/dev/null`,
+        `pid=$(cat "$d/pid" 2>/dev/null || true); ` +
+        `signal=$(cat "$d/signal" 2>/dev/null || true); ` +
+        `start=$(cat "$d/start" 2>/dev/null || true); current=$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true); ` +
+        `if [ -f "$d/exit" ]; then state=exited; code=$(cat "$d/exit"); ` +
+        `elif case "$pid:$start:$current" in *[!0-9:]*|:*|*::*|*:) false;; *) [ "$start" = "$current" ] && kill -0 "$pid" 2>/dev/null;; esac; then state=running; code=; ` +
+        `else state=exited; code=-1; printf '%s' "$code" > "$d/exit"; fi; ` +
+        `printf '%s\\n%s\\n%s\\n' "$state" "$code" "$signal"; cat "$d/stdout" 2>/dev/null; printf '\\n${stderrMarker}\\n'; cat "$d/stderr" 2>/dev/null`,
       );
       const [header, stderr = ""] = result.stdout.split(`\n${stderrMarker}\n`, 2);
-      const [state = "running", code = "", ...stdoutLines] = header.split("\n");
+      const [state = "running", code = "", signal = "", ...stdoutLines] = header.split("\n");
       const running = state === "running";
       return {
         status: running ? "running" as const : "exited" as const,
         exitCode: running ? null : Number.parseInt(code, 10),
-        signal: null,
+        signal: signal || null,
         stdout: stdoutLines.join("\n"),
         stderr,
       };
@@ -237,16 +244,32 @@ class ArkerComputeSandbox implements SandboxInterface {
           if (state.status === "exited") {
             options?.onStdout?.(state.stdout);
             options?.onStderr?.(state.stderr);
-            options?.onExit?.({ exitCode: state.exitCode, signal: null });
+            options?.onExit?.({ exitCode: state.exitCode, signal: state.signal });
             return { ...state, exitCode: state.exitCode ?? -1, durationMs: 0 };
           }
           if (deadline !== undefined && Date.now() >= deadline) throw new Error(`daemond: wait timed out for ${jobId}`);
           await new Promise((resolve) => setTimeout(resolve, options?.pollIntervalMs ?? 500));
         }
       },
-      kill: async () => {
+      kill: async (requestedSignal = "SIGTERM") => {
+        const signal = requestedSignal.toUpperCase().startsWith("SIG")
+          ? requestedSignal.toUpperCase()
+          : `SIG${requestedSignal.toUpperCase()}`;
+        const signalNumber = ({
+          SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGKILL: 9, SIGTERM: 15,
+          SIGUSR1: 10, SIGUSR2: 12,
+        } as Record<string, number>)[signal];
+        if (signalNumber === undefined) throw new Error(`Invalid process signal ${requestedSignal}`);
+        const exitCode = 128 + signalNumber;
         const result = await this.runCommand(
-          `d=${shellQuote(jobDirectory)}; pid=$(cat "$d/pid"); kill "$pid" 2>/dev/null || true; printf 143 > "$d/exit"`,
+          `d=${shellQuote(jobDirectory)}; [ -f "$d/exit" ] && exit 0; pid=$(cat "$d/pid"); ` +
+          `start=$(cat "$d/start" 2>/dev/null || true); current=$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true); ` +
+          `case "$pid:$start:$current" in *[!0-9:]*|:*|*::*|*:) exit 4;; esac; ` +
+          `[ "$start" = "$current" ] || { printf '%s' -1 > "$d/exit"; exit 0; }; ` +
+          `/bin/kill -s ${shellQuote(signal.slice(3))} -- "-$pid" 2>/dev/null ` +
+          `|| /bin/kill -s ${shellQuote(signal.slice(3))} "$pid" 2>/dev/null ` +
+          `|| { kill -0 "$pid" 2>/dev/null && exit 5 || true; }; ` +
+          `printf '%s' ${shellQuote(signal)} > "$d/signal"; printf '%s' ${exitCode} > "$d/exit"`,
         );
         if (result.exitCode !== 0) throw new Error(`Failed to kill Arker process: ${result.stderr || `exit ${result.exitCode}`}`);
       },

@@ -44,7 +44,11 @@ export function guardUnsupported<T extends object>(instance: T, shimName: string
         if (typeof value === "function") {
           return (value as (...args: unknown[]) => unknown).bind(target);
         }
-        return shouldGuardNested(value) ? guardUnsupported(value, shimName) : value;
+        if (shouldGuardNested(value)) {
+          const nativeValue = native && prop in native ? Reflect.get(native, prop, native) : undefined;
+          return guardUnsupported(value, shimName, nativeValue && typeof nativeValue === "object" ? nativeValue : undefined);
+        }
+        return value;
       }
 
       if (native && prop in native) {

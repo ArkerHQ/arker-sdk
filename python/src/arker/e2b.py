@@ -34,6 +34,7 @@ class Commands:
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         timeout: int | None = None,
+        background: bool = False,
     ) -> CommandResult | Any:
         if self._vm is not None:
             prefix = ""
@@ -45,11 +46,15 @@ class Commands:
                     exports.append(f"export {key}={shlex.quote(value)};")
                 prefix += " ".join(exports) + " "
             prefix += f"cd {shlex.quote(cwd or '/home/user')} && "
-            return run_command(self._vm, prefix + command, timeout=timeout)
+            full_command = prefix + command
+            if background:
+                full_command = f"nohup sh -lc {shlex.quote(full_command)} > /dev/null 2>&1 &"
+            return run_command(self._vm, full_command, timeout=timeout)
         native_options = {
             **({"cwd": cwd} if cwd is not None else {}),
             **({"env": env} if env is not None else {}),
             **({"timeout": timeout} if timeout is not None else {}),
+            **({"background": True} if background else {}),
         }
         return self._native.run(command, **native_options)
 
@@ -131,6 +136,24 @@ class Sandbox(UnsupportedMixin):
         self.sandboxId = self.sandbox_id
         self.commands = Commands(vm, getattr(native, "commands", None) if native is not None else None)
         self.files = Files(vm, getattr(native, "files", None) if native is not None else None)
+
+    def get_host(self, port: int) -> str:
+        if self._vm is None:
+            if hasattr(self._native, "get_host"):
+                return self._native.get_host(port)
+            return self._native.getHost(port)
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            raise ValueError("port must be an integer from 1 through 65535")
+        vm = self._vm if self._vm.hostname else self._vm.refresh()
+        if not vm.hostname:
+            raise UnsupportedCompatibilityOption("Arker did not return an inbound hostname for this VM")
+        if port == 8080:
+            return vm.hostname
+        first, separator, remainder = vm.hostname.partition(".")
+        return f"{first}-{port}{separator}{remainder}"
+
+    def getHost(self, port: int) -> str:
+        return self.get_host(port)
 
     @staticmethod
     def _native_sandbox() -> Any | None:

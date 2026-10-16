@@ -31,6 +31,8 @@ export class Sandbox {
   readonly sandboxId: string;
   readonly provider: string;
   #box: UniversalSandbox;
+  #native?: { getHost?: (port: number) => string };
+  #arkerHostname?: string;
 
   readonly commands: {
     run: (command: string, options?: RunCommandOptions) => Promise<CommandExitResult>;
@@ -45,8 +47,10 @@ export class Sandbox {
     remove: (path: string) => Promise<void>;
   };
 
-  private constructor(box: UniversalSandbox) {
+  private constructor(box: UniversalSandbox, native?: object, arkerHostname?: string) {
     this.#box = box;
+    this.#native = native as { getHost?: (port: number) => string } | undefined;
+    this.#arkerHostname = arkerHostname;
     this.sandboxId = box.sandboxId;
     this.provider = box.provider;
     this.commands = {
@@ -78,6 +82,14 @@ export class Sandbox {
     };
   }
 
+  private static async wrap(box: UniversalSandbox): Promise<Sandbox> {
+    const native = nativeInstance(box);
+    const arkerHostname = box.provider === "arker"
+      ? await box.getUrl({ port: 8080 }).then((url) => new URL(url).hostname).catch(() => undefined)
+      : undefined;
+    return guardUnsupported(new Sandbox(box, native, arkerHostname), "e2b", native);
+  }
+
   static async create(opts?: CreateOptions): Promise<Sandbox>;
   static async create(templateId: string | undefined, opts?: CreateOptions): Promise<Sandbox>;
   static async create(templateOrOptions?: string | CreateOptions, options?: CreateOptions): Promise<Sandbox> {
@@ -92,14 +104,21 @@ export class Sandbox {
       ...((opts as any)?.metadata ? { metadata: (opts as any).metadata } : {}),
       ...((opts as any)?.allowInternetAccess !== undefined ? { allowInternetAccess: (opts as any).allowInternetAccess } : {}),
     });
-    return guardUnsupported(new Sandbox(box), "e2b", nativeInstance(box));
+    return Sandbox.wrap(box);
   }
 
   static async connect(sandboxId: string, opts?: Pick<CreateOptions, "routerConfigPath">): Promise<Sandbox> {
     assertSupportedObjectKeys(opts, ["routerConfigPath"], "e2b", "Sandbox.connect");
     const box = await sdk(opts?.routerConfigPath).sandbox.getById(sandboxId);
     if (!box) throw new Error(`Sandbox ${sandboxId} not found`);
-    return guardUnsupported(new Sandbox(box), "e2b", nativeInstance(box));
+    return Sandbox.wrap(box);
+  }
+
+  getHost(port: number): string {
+    if (this.#native?.getHost) return this.#native.getHost(port);
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("port must be an integer from 1 through 65535");
+    if (!this.#arkerHostname) throw new Error("Arker did not return an inbound hostname for this sandbox");
+    return port === 8080 ? this.#arkerHostname : this.#arkerHostname.replace(/^([^.]+)/, `$1-${port}`);
   }
 
   async kill(): Promise<void> {

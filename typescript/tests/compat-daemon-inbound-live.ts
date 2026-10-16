@@ -54,6 +54,8 @@ HTTPServer(("127.0.0.1", 8080), Handler).serve_forever()
   assert.equal(finiteResult.exitCode, 7);
   assert.equal(finiteResult.stdout, "/tmp:finite-out");
   assert.equal(finiteResult.stderr, "finite-err");
+  await finite.kill();
+  assert.equal((await finite.status()).status, "exited", "kill must be idempotent after natural exit");
   const daemon = await sandbox.startProcess("python3 /tmp/arker-inbound.py");
 
   await eventually(async () => {
@@ -83,8 +85,15 @@ HTTPServer(("127.0.0.1", 8080), Handler).serve_forever()
 
   const daemonState = await daemon.status();
   assert.equal(daemonState.status, "running");
-  await daemon.kill();
+  await assert.rejects(daemon.kill("SIGBANANA"), /Invalid process signal/);
+  assert.equal((await daemon.status()).status, "running", "an invalid signal must not change process state");
+  await daemon.kill("SIGKILL");
   await eventually(async () => (await daemon.status()).status === "exited" ? true : undefined, "daemon termination");
+  assert.equal((await daemon.status()).signal, "SIGKILL");
+  await eventually(async () => {
+    const result = await sandbox.runCommand("curl -fsS --max-time 1 http://127.0.0.1:8080/after-kill");
+    return result.exitCode !== 0 ? true : undefined;
+  }, "daemon process-tree termination");
 } finally {
   await sandbox.destroy();
 }

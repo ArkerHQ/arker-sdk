@@ -3,9 +3,10 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import os
+import queue
 import shlex
+import threading
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -266,6 +267,19 @@ def _is_retryable(error: Exception) -> bool:
         message = str(current).lower()
         if any(text in message for text in ("authentication failed", "unauthorized", "forbidden", "invalid api key")):
             return False
+        if any(
+            text in message
+            for text in (
+                "outcome is unknown",
+                "may have succeeded",
+                "may have been created",
+                "network failure",
+                "transport error",
+                "timed out",
+                "timeout",
+            )
+        ):
+            return False
         current = current.__cause__ or current.__context__
     return True
 
@@ -327,27 +341,27 @@ def routed_get(
             cache.delete(identifier)
     order = [name for name in router.existing.order if name in getters and name != cached]
     if router.existing.strategy == "race" and len(order) > 1:
-        executor = ThreadPoolExecutor(max_workers=len(order))
+        results: queue.Queue[tuple[str, Any, Exception | None]] = queue.Queue()
         errors: list[Exception] = []
-        try:
-            futures = {executor.submit(getters[name]): name for name in order}
-            for future in as_completed(futures):
-                try:
-                    result = future.result()
-                except Exception as error:
-                    errors.append(error)
-                    continue
-                if result is not None:
-                    name = futures[future]
-                    _cache_set(cache, identifier, name)
-                    return name, result
-            if errors:
-                raise RuntimeError(f"lookup failed for {identifier}: {errors[-1]}") from errors[-1]
-            return None
-        finally:
-            for future in futures:
-                future.cancel()
-            executor.shutdown(wait=False, cancel_futures=True)
+
+        def lookup(name: str) -> None:
+            try:
+                results.put((name, getters[name](), None))
+            except Exception as error:
+                results.put((name, None, error))
+
+        for name in order:
+            threading.Thread(target=lookup, args=(name,), daemon=True).start()
+        for _ in order:
+            name, result, error = results.get()
+            if error is not None:
+                errors.append(error)
+            elif result is not None:
+                _cache_set(cache, identifier, name)
+                return name, result
+        if errors:
+            raise RuntimeError(f"lookup failed for {identifier}: {errors[-1]}") from errors[-1]
+        return None
     for name in order:
         result = getters[name]()
         if result is not None:
