@@ -59,3 +59,19 @@ instrumented API counts above.
   platform-authentication channel.
 
 Full API equivalence has not been established. The three PRs remain drafts.
+
+## Underlying Arker policy validation
+
+An isolated feature environment passed 45 focused inbound cases and 47 HTTPS,
+HTTP/2, and WebSocket cases. A broader selection executed 270 cases: 267 passed
+and three failed. Main's recorded baseline also fails those three cases:
+outbound GET to portquiz.net:8080 times out, a subdomain TCP:853 connection
+fails, and applying an inline run policy permits an idle pause before the run.
+The latter two reproduced separately. These failures remain open; baseline
+classification does not turn them into passing behavior. TLS-only exclusions
+from the broader HTTP run were addressed by the separate HTTPS selection.
+
+The first ingress fix also exposed a repeated-header edge case: a later Arker
+key among application header values reached the guest. Both live regression
+cases failed before the additional worker hardening. Final post-hardening
+verification is tracked in arker-app #4260.
