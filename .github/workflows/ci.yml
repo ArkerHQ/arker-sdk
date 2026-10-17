@@ -53,6 +53,22 @@ jobs:
       - run: uv run --locked --group dev ruff format --check .
       - run: uv run --locked --group dev --extra test python -m pytest
 
+  python-compat:
+    name: python vendor compatibility
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install pinned vendor SDKs without credentials
+        run: uv sync --locked --python 3.12 --group dev --extra test --extra compat
+      - name: Run native compatibility unit regressions
+        run: uv run --locked --python 3.12 --group dev --extra test --extra compat python -m pytest
+
   typescript:
     name: typescript
     runs-on: ubuntu-latest

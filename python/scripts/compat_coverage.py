@@ -73,6 +73,10 @@ def runtime_info():
         "implementation": platform.python_implementation(),
         "platform": sys.platform,
         "architecture": platform.machine(),
+        "packages": sorted(
+            (distribution.metadata.get("Name", "").lower().replace("_", "-"), distribution.version)
+            for distribution in importlib.metadata.distributions()
+        ),
     }
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -117,6 +118,14 @@ def test_evidence_fingerprint_includes_measurement_and_scenario_code(monkeypatch
 def test_evidence_fingerprint_distinguishes_runtime_profiles(monkeypatch):
     before = coverage.implementation_fingerprint()
     monkeypatch.setattr(coverage, "runtime_info", lambda: {"version": "different-runtime"})
+    assert coverage.implementation_fingerprint() != before
+
+
+def test_evidence_fingerprint_includes_installed_transitive_dependencies(monkeypatch):
+    dependency = types.SimpleNamespace(metadata={"Name": "httpx"}, version="0.28.1")
+    monkeypatch.setattr(coverage.importlib.metadata, "distributions", lambda: [dependency])
+    before = coverage.implementation_fingerprint()
+    dependency.version = "0.29.0"
     assert coverage.implementation_fingerprint() != before
 
 

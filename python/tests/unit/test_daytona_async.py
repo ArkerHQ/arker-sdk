@@ -181,7 +181,7 @@ def test_closed_daytona_client_cannot_reinitialize_a_native_client():
 
 
 def test_arker_daytona_execution_returns_native_result_type_and_artifacts(monkeypatch):
-    from daytona.common.process import ExecuteResponse
+    ExecuteResponse = pytest.importorskip("daytona.common.process").ExecuteResponse
 
     monkeypatch.setattr(
         shim, "run_command", lambda *args, **kwargs: types.SimpleNamespace(stdout="output", stderr="", exit_code=17)
