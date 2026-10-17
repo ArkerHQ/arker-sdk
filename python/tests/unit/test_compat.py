@@ -354,6 +354,7 @@ def test_e2b_nested_native_surface_delegates_provider_extensions() -> None:
 
 
 def test_modal_official_surface(monkeypatch) -> None:
+    monkeypatch.setattr("arker.modal.import_optional", lambda _: None)
     monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
     monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
     t = FakeTransport()

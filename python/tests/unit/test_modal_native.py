@@ -7,6 +7,16 @@ from arker._compat import CommandResult, UnsupportedCompatibilityOption
 from arker.modal import Sandbox
 
 
+def test_arker_object_id_is_read_only():
+    class Guest:
+        id = "vm-test"
+
+    sandbox = Sandbox(vm=Guest())
+    assert sandbox.object_id == "vm-test"
+    with pytest.raises(AttributeError):
+        sandbox.object_id = "another"
+
+
 def test_native_exec_preserves_process_identity_and_options() -> None:
     process = object()
     options = {"text": False, "bufsize": 1, "pty": True, "stdout": object(), "secrets": [object()]}
@@ -41,7 +51,7 @@ def test_arker_terminate_wait_rejected_before_delete() -> None:
         Sandbox(vm=Guest()).terminate(wait=True)
 
 
-def test_arker_exec_none_environment_value_unsets_variable(monkeypatch) -> None:
+def test_arker_exec_none_environment_value_omits_override(monkeypatch) -> None:
     import subprocess
 
     class Guest:
@@ -58,11 +68,12 @@ def test_arker_exec_none_environment_value_unsets_variable(monkeypatch) -> None:
         return CommandResult(stdout=result.stdout, stderr=result.stderr, exit_code=result.returncode)
 
     monkeypatch.setattr(shim, "run_command", run)
+    monkeypatch.setattr(shim, "import_optional", lambda _: None)
     process = Sandbox(vm=Guest()).exec(
         "sh",
         "-c",
-        'printf "%s|%s" "${DROP_ME+present}" "$KEEP_ME"',
+        'printf "%s|%s" "$DROP_ME" "$KEEP_ME"',
         env={"DROP_ME": None, "KEEP_ME": "new value"},
     )
-    assert process.stdout.read() == "|new value"
+    assert process.stdout.read() == "inherited|new value"
     assert process.wait() == 0

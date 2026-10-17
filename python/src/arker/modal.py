@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import re
 import shlex
+import time
 from functools import partial
 from typing import Any
 
@@ -70,8 +71,17 @@ class Sandbox(UnsupportedMixin):
     def __init__(self, vm: VM | None = None, native: Any | None = None) -> None:
         self._vm = vm
         self._native = native
-        self.sandbox_id = vm.id if vm is not None else getattr(native, "sandbox_id", getattr(native, "id", None))
+        self._processes = None
+        self.sandbox_id = (
+            vm.id
+            if vm is not None
+            else getattr(native, "object_id", getattr(native, "sandbox_id", getattr(native, "id", None)))
+        )
         self.sandboxId = self.sandbox_id
+
+    @property
+    def object_id(self) -> str:
+        return self.sandbox_id
 
     @staticmethod
     def _native_sandbox() -> Any | None:
@@ -172,6 +182,22 @@ class Sandbox(UnsupportedMixin):
         environment = kwargs.pop("env", None)
         timeout = kwargs.pop("timeout", None)
         timeout_ms = kwargs.pop("timeout_ms", kwargs.pop("timeoutMs", None))
+        native_streams = import_optional("modal.container_process") is not None
+        stream_options = {}
+        if native_streams:
+            from modal.exception import InvalidError
+            from modal.sandbox._common import _validate_exec_args
+            from modal.stream_type import StreamType
+
+            _validate_exec_args(command)
+            if workdir is not None and not workdir.startswith("/"):
+                raise InvalidError(f"workdir must be an absolute path, got: {workdir}")
+            stream_options = {key: kwargs.pop(key) for key in ("stdout", "stderr", "text", "bufsize") if key in kwargs}
+            for key in ("stdout", "stderr"):
+                if key in stream_options and stream_options[key] not in tuple(StreamType):
+                    raise ValueError(f"Unsupported StreamType for {key}")
+            if stream_options.get("bufsize") == 1 and stream_options.get("text", True) is False:
+                raise ValueError("line-buffering is only supported when text=True")
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise TypeError(f"Sandbox.exec received unsupported option(s): {unsupported}")
@@ -179,12 +205,39 @@ class Sandbox(UnsupportedMixin):
         if environment:
             exports = []
             for key, value in environment.items():
+                if value is None:
+                    continue
                 if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)) is None:
                     raise ValueError(f"Invalid environment variable name: {key}")
-                exports.append(f"unset {key};" if value is None else f"export {key}={shlex.quote(str(value))};")
+                exports.append(f"export {key}={shlex.quote(str(value))};")
             prefix += " ".join(exports) + " "
         prefix += f"cd {shlex.quote(str(workdir or '/'))} && "
         arker_timeout = timeout if timeout is not None else math.ceil(timeout_ms / 1_000) if timeout_ms else None
+        if native_streams:
+            from ._compat_process import GuestProcesses
+            from ._modal_process import modal_process
+
+            if self._processes is None:
+                self._processes = GuestProcesses(self._vm)
+            milliseconds = timeout * 1000 if timeout is not None else timeout_ms
+            deadline = time.monotonic() + milliseconds / 1000 if milliseconds else None
+            current = self._processes.exec(
+                {
+                    "command": prefix + "exec " + " ".join(shlex.quote(part) for part in command),
+                    "workingDir": workdir or "/",
+                    "stdin": True,
+                    **({"timeout": milliseconds} if milliseconds is not None else {}),
+                }
+            )
+            return modal_process(
+                self._processes,
+                current.pid,
+                text=stream_options.get("text", True),
+                by_line=stream_options.get("bufsize") == 1,
+                stdout=stream_options.get("stdout"),
+                stderr=stream_options.get("stderr"),
+                deadline=deadline,
+            )
         return Process(run_command(self._vm, prefix + shell_command(command), timeout=arker_timeout))
 
     def terminate(self, *, wait: bool = False) -> int | None:

@@ -4,13 +4,14 @@
 
 The latest Python Modal native-route regression preserves the original process
 object, all native exec keyword arguments and terminate(wait=True)'s exit
-status. Four regression cases failed before the fix. A fifth regression found
-that Arker exported env values of None as the string "None" rather than unsetting
-the variable; this now matches Modal's Python environment contract. All 422
-Python vendor unit tests and scoped lint pass; a real Modal sandbox passed binary
+status. Four regression cases failed before the fix. An initial env=None fix
+incorrectly assumed that Modal unsets variables. Pinned native source and a
+real three-route comparison established that None omits the override instead:
+inherited HOME stays intact. Both the implementation and regression expectation
+are corrected; the earlier Arker-only unset probe was not equivalence evidence.
+A real Modal sandbox passed binary
 stdin/stdout/stderr, EOF, wait and termination. This native-only test does not
-grant Arker-route coverage. A separate real Arker VM passed unsetting inherited
-HOME while preserving another explicit environment value, and was deleted.
+grant Arker-route coverage.
 An initial manual probe omitted Modal stdin.drain()
 and blocked; the checked-in program uses the documented flush operation.
 The frozen reports below predate this source change and are not current-source
@@ -24,6 +25,19 @@ the isolated feature environment for Arker. The locked-runtime report verifies
 native-only Modal case grants no Arker parity credit. All 423 current Python
 vendor unit tests pass. This expansion does not retroactively grant coverage
 to earlier evidence. All SDK GitHub checks passed at fc72ec7.
+
+The new Python Modal Arker process bridge returns the vendor's actual
+ContainerProcess and stream classes over the shared guest supervisor. Its
+three-route import-only program passes 256 KiB binary stdin/output, EOF,
+poll/wait/returncode, repeated output reads, literal shell argv, environment
+isolation and None-override omission. Arker runs with native keys removed and
+inbound/outbound denied. Fixtures create sandboxes separately; this does not
+certify native app/image-builder creation. Unit tests also cover native .aio
+stream/wait methods and incremental Unicode decoding. This source change
+invalidates earlier Python cohort fingerprints; a fresh full cohort is needed.
+Sandbox.create.aio/exec.aio, PTY, secrets, timeout equivalence, descendants'
+late-output EOF, stdin-offset idempotence and arbitrary Python-free images
+remain unverified or unsupported.
 
 The branch includes SDK main at 2ec474e. Frozen commit e2dc4cc runtime-scoped differential
 reports verify **86/975 Python** entries on CPython 3.12.14/Linux/aarch64 and
