@@ -47,7 +47,7 @@ await assertBlocked("e2b/native", native(e2bNative));
 const e2bArker = await E2BSandbox.create(undefined, { allowInternetAccess: false } as never);
 await assertBlocked("e2b/arker", {
   run: (command) => e2bArker.commands.run(command),
-  destroy: () => e2bArker.kill(),
+  destroy: async () => { await e2bArker.kill(); },
 });
 
 const daytonaNative = await compute({ provider: createDaytonaProvider({ apiKey: process.env.DAYTONA_API_KEY }) }).instances.create({

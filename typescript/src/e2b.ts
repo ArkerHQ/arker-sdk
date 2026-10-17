@@ -43,8 +43,12 @@ interface NativeSandbox {
 const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess"] as const;
 
 function routingOptions(routerConfigPath?: string) {
+  const nativeConfig = {
+    apiKey: process.env.E2B_API_KEY,
+    nativeSdk: { Sandbox: VendorSandbox, NotFoundError, CommandExitError },
+  };
   const fallbackProvider = Object.assign(
-    createE2BProvider({ nativeSdk: { Sandbox: VendorSandbox, NotFoundError, CommandExitError } }),
+    createE2BProvider(nativeConfig),
     {
       ownershipProbe: async (id: string): Promise<boolean> => {
         try {
