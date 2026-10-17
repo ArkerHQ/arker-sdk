@@ -4,6 +4,7 @@ import asyncio
 import shlex
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ._compat import (
@@ -21,7 +22,7 @@ from ._compat import (
     routed_get,
     run_command,
 )
-from ._compat_process import GuestProcesses
+from ._compat_process import GuestProcesses, success
 from .computer import VM
 
 
@@ -141,10 +142,32 @@ class FileSystem:
             return self._native.read(path)
         return self._vm.sync(resolve_compat_path(path, "/blaxel")).decode("utf-8", "replace")
 
-    def write(self, path: str, content: str | bytes) -> None:
+    def write(self, path: str, content: str | bytes) -> Any:
         if self._vm is None:
             return self._native.write(path, content)
-        self._vm.sync(resolve_compat_path(path, "/blaxel"), content)
+        resolved = resolve_compat_path(path, "/blaxel")
+        self._vm.sync(resolved, content)
+        return success({"message": "File created/updated successfully", "path": resolved})
+
+    def write_binary(self, path: str, content: bytes | bytearray | str) -> Any:
+        if self._vm is None:
+            return self._native.write_binary(path, content)
+        raw = Path(content).read_bytes() if isinstance(content, str) else bytes(content)
+        resolved = resolve_compat_path(path, "/blaxel")
+        self._vm.sync(resolved, raw)
+        return success({"message": "Binary file uploaded successfully", "path": resolved})
+
+    def read_binary(self, path: str) -> bytes:
+        if self._vm is None:
+            return self._native.read_binary(path)
+        return self._vm.sync(resolve_compat_path(path, "/blaxel"))
+
+    def download(self, src: str, destination_path: str, mode: int = 0o644) -> None:
+        if self._vm is None:
+            return self._native.download(src, destination_path, mode=mode)
+        destination = Path(destination_path)
+        destination.write_bytes(self.read_binary(src))
+        destination.chmod(mode)
         return None
 
     def mkdir(self, path: str) -> None:
@@ -175,11 +198,22 @@ class FileSystem:
             name=resolved.rstrip("/").rsplit("/", 1)[-1], path=resolved, files=files, subdirectories=subdirectories
         )
 
-    def rm(self, path: str) -> None:
+    def rm(self, path: str, recursive: bool = False) -> Any:
+        if self._vm is None:
+            return self._native.rm(path, recursive=recursive)
         resolved = resolve_compat_path(path, "/blaxel")
-        result = self._native.rm(path) if self._vm is None else run_command(self._vm, f"rm -rf {shlex.quote(resolved)}")
-        if isinstance(result, CommandResult) and result.exit_code != 0:
+        quoted = shlex.quote(resolved)
+        directory_command = "rm -r" if recursive else "rmdir"
+        result = run_command(
+            self._vm,
+            f"if [ -d {quoted} ] && [ ! -L {quoted} ]; then "
+            f"{directory_command} -- {quoted} && printf directory; "
+            f"else rm -- {quoted} && printf file; fi",
+        )
+        if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"remove failed with exit {result.exit_code}")
+        kind = "Directory" if result.stdout == "directory" else "File"
+        return success({"message": f"{kind} deleted successfully", "path": resolved})
 
     def __getattr__(self, name: str) -> Any:
         if self._native is not None:

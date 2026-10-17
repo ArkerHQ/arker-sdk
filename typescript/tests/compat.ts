@@ -490,6 +490,43 @@ async function testBlaxelInitializationFailureDeletesCreatedVm(): Promise<void> 
   } finally { fake.cleanup(); }
 }
 
+async function testBlaxelBinaryFiles(): Promise<void> {
+  const files = new Map<string, Uint8Array>();
+  const vm = {
+    sync: async (path: string, content?: Uint8Array) => {
+      if (content === undefined) return files.get(path)!;
+      files.set(path, new Uint8Array(content));
+    },
+  };
+  const fake = installFakeCompute(new FakeSandbox("binary-vm", "arker", vm));
+  try {
+    const sandbox = await BlaxelSandbox.create();
+    const payload = Uint8Array.from({ length: 256 }, (_, i) => i);
+    await sandbox.fs.writeBinary("binary", payload);
+    assert.deepEqual(new Uint8Array(await (await sandbox.fs.readBinary("binary")).arrayBuffer()), payload);
+    await sandbox.fs.writeBinary("binary", new Blob([payload]));
+    assert.deepEqual(files.get("/blaxel/binary"), payload);
+    await sandbox.fs.writeBinary("empty", new Uint8Array());
+    assert.equal((await sandbox.fs.readBinary("empty")).size, 0);
+  } finally { fake.cleanup(); }
+}
+
+async function testBlaxelNonrecursiveRemoval(): Promise<void> {
+  const box = new FakeSandbox();
+  const fake = installFakeCompute(box);
+  box.runCommand = async (command, options) => {
+    box.runCalls.push({ command, options });
+    return { stdout: "file", stderr: "", exitCode: 0, durationMs: 0 };
+  };
+  try {
+    const sandbox = await BlaxelSandbox.create();
+    await sandbox.fs.rm("/blaxel/directory");
+    assert.ok(box.runCalls.at(-1)?.command.includes("rmdir --"));
+    await sandbox.fs.rm("/blaxel/directory", true);
+    assert.ok(box.runCalls.at(-1)?.command.includes("rm -r --"));
+  } finally { fake.cleanup(); }
+}
+
 async function testInternalArkerProviderRequiresSource(): Promise<void> {
   const previousSource = process.env.ARKER_SOURCE;
   const previousSourceVm = process.env.ARKER_SOURCE_VM;
@@ -524,5 +561,7 @@ await testInternalArkerProviderPolicyReplacement();
 await testInternalArkerProviderRequiresSource();
 await testBlaxelCreateIfNotExistsAndTtl();
 await testBlaxelInitializationFailureDeletesCreatedVm();
+await testBlaxelBinaryFiles();
+await testBlaxelNonrecursiveRemoval();
 
 console.log("PASS compat");

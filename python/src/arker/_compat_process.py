@@ -57,6 +57,7 @@ def result(value: dict[str, Any]) -> ProcessResult | Any:
 @dataclasses.dataclass(frozen=True)
 class SuccessResponse:
     message: str
+    path: str | None = None
 
 
 def success(value):

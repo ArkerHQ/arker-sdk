@@ -47,6 +47,34 @@ try:
     assert sandbox.fs.read("/blaxel/import-only/probe.txt") == "second"
     listing = sandbox.fs.ls("/blaxel/import-only")
     assert any(entry.name == "probe.txt" for entry in listing.files)
+    payload = bytes(range(256))
+    binary_path = "/blaxel/import-only/binary"
+    uploaded = sandbox.fs.write_binary(binary_path, payload)
+    assert uploaded.to_dict() == {"message": "Binary file uploaded successfully", "path": binary_path}
+    assert sandbox.fs.read_binary(binary_path) == payload
+    sandbox.fs.write_binary(binary_path, bytearray(payload))
+    assert sandbox.fs.read_binary(binary_path) == payload
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as local_directory:
+        local_source = Path(local_directory) / "input"
+        local_source.write_bytes(payload)
+        sandbox.fs.write_binary(binary_path, str(local_source))
+        local_destination = Path(local_directory) / "output"
+        sandbox.fs.download(binary_path, str(local_destination), mode=0o600)
+        assert local_destination.read_bytes() == payload
+        assert local_destination.stat().st_mode & 0o777 == 0o600
+    sandbox.fs.write_binary(binary_path, b"")
+    assert sandbox.fs.read_binary(binary_path) == b""
+    try:
+        sandbox.fs.rm("/blaxel/import-only")
+    except Exception:
+        pass
+    else:
+        raise AssertionError("nonrecursive deletion removed a nonempty directory")
+    assert sandbox.fs.read("/blaxel/import-only/probe.txt") == "second"
+    deleted = sandbox.fs.rm(binary_path)
+    assert deleted.to_dict() == {"message": "File deleted successfully", "path": binary_path}
     reconnected = SyncSandboxInstance.get(sandbox_name)
     assert reconnected.fs.read("/blaxel/import-only/probe.txt") == "second"
     started = sandbox.process.exec(ProcessRequestWithLog(

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, stat, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -38,6 +38,25 @@ async function program(SandboxInstance: typeof Native | typeof Shim): Promise<vo
     assert.equal(await sandbox.fs.read("/blaxel/import-only/probe.txt"), "second");
     const listing = await sandbox.fs.ls("/blaxel/import-only");
     assert.ok(listing.files.some((entry) => entry.name === "probe.txt"));
+    const binaryPath = "/blaxel/import-only/binary";
+    const payload = Uint8Array.from({ length: 256 }, (_, i) => i);
+    assert.deepEqual(await sandbox.fs.writeBinary(binaryPath, payload), {
+      message: "Binary file uploaded successfully", path: binaryPath,
+    });
+    assert.deepEqual(new Uint8Array(await (await sandbox.fs.readBinary(binaryPath)).arrayBuffer()), payload);
+    await sandbox.fs.writeBinary(binaryPath, new Blob([payload]));
+    const localPath = join(directory, "binary-input");
+    await writeFile(localPath, payload);
+    await sandbox.fs.writeBinary(binaryPath, localPath);
+    const downloaded = join(directory, "binary-download");
+    await sandbox.fs.download(binaryPath, downloaded, { mode: 0o600 });
+    assert.deepEqual(new Uint8Array(await readFile(downloaded)), payload);
+    assert.equal((await stat(downloaded)).mode & 0o777, 0o600);
+    await sandbox.fs.writeBinary(binaryPath, new Uint8Array());
+    assert.equal((await sandbox.fs.readBinary(binaryPath)).size, 0);
+    await assert.rejects(() => sandbox.fs.rm("/blaxel/import-only"));
+    assert.equal(await sandbox.fs.read("/blaxel/import-only/probe.txt"), "second");
+    assert.deepEqual(await sandbox.fs.rm(binaryPath), { message: "File deleted successfully", path: binaryPath });
     const reconnected = await SandboxInstance.get(sandbox.metadata.name!);
     assert.equal(await reconnected.fs.read("/blaxel/import-only/probe.txt"), "second");
     const started = await sandbox.process.exec({

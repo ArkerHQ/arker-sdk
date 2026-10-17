@@ -473,6 +473,52 @@ def test_blaxel_native_typed_requests_are_passed_through() -> None:
     assert sandbox.process.exec(request) is request
 
 
+def test_blaxel_binary_files_preserve_every_byte_and_local_path_semantics(tmp_path) -> None:
+    from arker.blaxel import FileSystem
+
+    stored = {}
+
+    def sync(path, content=None):
+        if content is None:
+            return stored[path]
+        stored[path] = content
+        return None
+
+    fs = FileSystem(vm=types.SimpleNamespace(sync=sync))
+    payload = bytes(range(256))
+    fs.write_binary("binary", payload)
+    assert fs.read_binary("binary") == payload
+    source = tmp_path / "input"
+    source.write_bytes(payload[::-1])
+    fs.write_binary("binary", str(source))
+    assert fs.read_binary("binary") == payload[::-1]
+    destination = tmp_path / "output"
+    fs.download("binary", str(destination), mode=0o600)
+    assert destination.read_bytes() == payload[::-1]
+    assert destination.stat().st_mode & 0o777 == 0o600
+    fs.write_binary("empty", bytearray())
+    assert fs.read_binary("empty") == b""
+
+
+def test_blaxel_remove_is_nonrecursive_unless_requested(monkeypatch) -> None:
+    from arker._compat import CommandResult
+    from arker.blaxel import FileSystem
+
+    calls = []
+
+    def command(vm, script):
+        calls.append(script)
+        return CommandResult(stdout="file", stderr="", exit_code=0)
+
+    monkeypatch.setattr("arker.blaxel.run_command", command)
+    fs = FileSystem(vm=object())
+    fs.rm("/blaxel/directory")
+    assert "rm -rf" not in calls[-1]
+    assert "rmdir --" in calls[-1]
+    fs.rm("/blaxel/directory", recursive=True)
+    assert "rm -r --" in calls[-1]
+
+
 def test_blaxel_async_surface_uses_shared_router(monkeypatch) -> None:
     from arker._compat_process import GuestProcesses
     from arker.blaxel import SandboxInstance
