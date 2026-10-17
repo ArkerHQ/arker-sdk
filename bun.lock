@@ -29,7 +29,9 @@
         "arker": "./dist/cli.js",
       },
       "dependencies": {
+        "@bufbuild/protobuf": "^2.15.0",
         "@computesdk/provider": "^2.1.14",
+        "@types/ws": "^8.18.1",
         "computesdk": "^4.1.12",
         "dockerfile-ast": "^0.7.1",
         "tar": "^7.5.22",
@@ -55,14 +57,12 @@
       },
       "peerDependencies": {
         "@blaxel/core": "^0.3.30",
-        "@computesdk/modal": "^1.9.19",
         "@daytona/sdk": "^0.224.1",
         "e2b": "^2.56.0",
         "modal": "^0.11.1",
       },
       "optionalPeers": [
         "@blaxel/core",
-        "@computesdk/modal",
         "@daytona/sdk",
         "e2b",
         "modal",

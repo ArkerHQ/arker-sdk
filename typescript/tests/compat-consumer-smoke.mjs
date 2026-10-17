@@ -1,40 +1,38 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { Arker } from "@arker-ai/sdk";
-import { Sandbox as NativeE2B, CommandExitError } from "e2b";
-import { Sandbox as E2B } from "@arker-ai/sdk/e2b";
-import { SandboxInstance as NativeBlaxel } from "@blaxel/core";
-import { SandboxInstance as Blaxel } from "@arker-ai/sdk/blaxel";
-import { Daytona as NativeDaytona, Image } from "@daytona/sdk";
-import { Daytona } from "@arker-ai/sdk/daytona";
 
 const require = createRequire(import.meta.url);
-for (const provider of [
-  "@computesdk/e2b",
-  "@computesdk/blaxel",
-  "@computesdk/daytona",
-])
-  assert.throws(() => require.resolve(provider), { code: "MODULE_NOT_FOUND" });
+const provider = process.argv[2];
+const vendors = {
+  e2b: "e2b",
+  blaxel: "@blaxel/core",
+  daytona: "@daytona/sdk",
+  modal: "modal",
+};
+for (const name of ["e2b", "blaxel", "daytona", "modal"]) {
+  assert.throws(() => require.resolve(`@computesdk/${name}`), {
+    code: "MODULE_NOT_FOUND",
+  });
+  if (name !== provider)
+    assert.throws(() => require.resolve(vendors[name]), {
+      code: "MODULE_NOT_FOUND",
+    });
+}
 assert.equal(typeof Arker, "function");
 assert.equal(typeof require("@arker-ai/sdk").Arker, "function");
 delete process.env.ARKER_API_KEY;
 delete process.env.COMPUTESDK_ROUTER_CONFIG;
 
-async function verify(
-  NativeE2B,
-  E2B,
-  CommandExitError,
-  NativeBlaxel,
-  Blaxel,
-  mode,
-) {
-  const failure = new CommandExitError({
+async function verifyE2B(native, shim) {
+  const previous = native.Sandbox.create;
+  const failure = new native.CommandExitError({
     stdout: "out",
     stderr: "err",
     exitCode: 17,
     error: "exit status 17",
   });
-  NativeE2B.create = async () => ({
+  native.Sandbox.create = async () => ({
     sandboxId: "consumer-e2b",
     commands: {
       run: async () => {
@@ -42,14 +40,22 @@ async function verify(
       },
     },
   });
-  const e2b = await E2B.create();
-  await assert.rejects(
-    e2b.commands.run("exit 17"),
-    (error) => error === failure,
-  );
-  let nativeOptions;
-  NativeBlaxel.create = async (options, flags) => {
-    nativeOptions = { options, flags };
+  try {
+    const sandbox = await shim.Sandbox.create();
+    await assert.rejects(
+      sandbox.commands.run("exit 17"),
+      (error) => error === failure,
+    );
+  } finally {
+    native.Sandbox.create = previous;
+  }
+}
+
+async function verifyBlaxel(native, shim) {
+  const previous = native.SandboxInstance.create;
+  let received;
+  native.SandboxInstance.create = async (options, flags) => {
+    received = { options, flags };
     return {
       metadata: { name: options.name },
       process: {
@@ -57,65 +63,103 @@ async function verify(
       },
     };
   };
-  const blaxel = await Blaxel.create({ name: "consumer-blaxel" });
-  assert.equal(blaxel.metadata.name, "consumer-blaxel");
-  assert.equal(nativeOptions.flags.createIfNotExist, false);
-  assert.equal(
-    (
-      await blaxel.process.exec({
-        command: "printf consumer",
-        waitForCompletion: true,
-      })
-    ).stdout,
-    "consumer",
-  );
-  console.log(
-    `PASS packed SDK ${mode} consumer: base/E2B/Blaxel imports, mocked native identity and creation inputs, no provider-package installs`,
-  );
+  try {
+    const sandbox = await shim.SandboxInstance.create({
+      name: "consumer-blaxel",
+    });
+    assert.equal(sandbox.metadata.name, "consumer-blaxel");
+    assert.equal(received.flags.createIfNotExist, false);
+    assert.equal(
+      (
+        await sandbox.process.exec({
+          command: "printf consumer",
+          waitForCompletion: true,
+        })
+      ).stdout,
+      "consumer",
+    );
+  } finally {
+    native.SandboxInstance.create = previous;
+  }
 }
-await verify(NativeE2B, E2B, CommandExitError, NativeBlaxel, Blaxel, "ESM");
-const cjsE2B = require("e2b");
-await verify(
-  cjsE2B.Sandbox,
-  require("@arker-ai/sdk/e2b").Sandbox,
-  cjsE2B.CommandExitError,
-  require("@blaxel/core").SandboxInstance,
-  require("@arker-ai/sdk/blaxel").SandboxInstance,
-  "CommonJS",
-);
 
-async function verifyDaytona(Native, Shim, Image, mode) {
-  const original = Native.prototype.create;
-  const image = Image.base("alpine:3.21").runCommands("echo marker");
+async function verifyDaytona(native, shim) {
+  const previous = native.Daytona.prototype.create;
+  const image = native.Image.base("alpine:3.21").runCommands("echo marker");
   const response = {
     exitCode: 17,
     result: "marker",
-    artifacts: { stdout: "marker", charts: [] },
+    artifacts: { stdout: "marker" },
   };
-  Native.prototype.create = async function (params) {
+  native.Daytona.prototype.create = async (params) => {
     assert.equal(params.image, image);
     return {
       id: "consumer-daytona",
       process: { executeCommand: async () => response },
     };
   };
-  const client = new Shim({ apiKey: "dtn-test" });
+  const client = new shim.Daytona({ apiKey: "dtn-test" });
   try {
     const sandbox = await client.create({ image });
     assert.equal(await sandbox.process.executeCommand("exit 17"), response);
   } finally {
-    Native.prototype.create = original;
+    native.Daytona.prototype.create = previous;
     await client[Symbol.asyncDispose]();
   }
+}
+
+async function verifyModal(native, shim) {
+  const previous = native.SandboxService.prototype.create;
+  const app = { appId: "ap-consumer" };
+  const image = { imageId: "im-consumer" };
+  const process = {
+    stdout: { readText: async () => "consumer" },
+    stderr: { readText: async () => "" },
+    wait: async () => 17,
+  };
+  native.SandboxService.prototype.create = async (owner, source, options) => {
+    assert.equal(owner, app);
+    assert.equal(source, image);
+    assert.deepEqual(options, { blockNetwork: true, encryptedPorts: [8443] });
+    return { sandboxId: "sb-consumer", exec: async () => process };
+  };
+  const client = new shim.ModalClient({
+    tokenId: "ak-test",
+    tokenSecret: "as-test",
+  });
+  try {
+    const sandbox = await client.sandboxes.create(app, image, {
+      blockNetwork: true,
+      encryptedPorts: [8443],
+    });
+    assert.equal(await sandbox.exec(["sh", "-c", "exit 17"]), process);
+  } finally {
+    native.SandboxService.prototype.create = previous;
+    client.close();
+  }
+}
+
+if (provider === "base") {
   console.log(
-    `PASS packed SDK ${mode} consumer: Daytona Image identity and native execution response, no provider-package install`,
+    "PASS packed SDK base consumer: ESM/CommonJS imports with no vendor SDKs installed",
+  );
+} else {
+  const verify = {
+    e2b: verifyE2B,
+    blaxel: verifyBlaxel,
+    daytona: verifyDaytona,
+    modal: verifyModal,
+  }[provider];
+  assert.ok(verify, "Unknown consumer profile");
+  await verify(
+    await import(vendors[provider]),
+    await import(`@arker-ai/sdk/${provider}`),
+  );
+  await verify(
+    require(vendors[provider]),
+    require(`@arker-ai/sdk/${provider}`),
+  );
+  console.log(
+    `PASS packed SDK ${provider} consumer: ESM/CommonJS native identity and inputs; no unrelated SDKs or vendor adapters installed`,
   );
 }
-await verifyDaytona(NativeDaytona, Daytona, Image, "ESM");
-const nativeDaytonaCjs = require("@daytona/sdk");
-await verifyDaytona(
-  nativeDaytonaCjs.Daytona,
-  require("@arker-ai/sdk/daytona").Daytona,
-  nativeDaytonaCjs.Image,
-  "CommonJS",
-);

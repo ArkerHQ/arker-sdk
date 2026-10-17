@@ -11,29 +11,24 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
     },
     "./daytona": {
-      "types": "./dist/daytona.d.ts",
-      "import": "./dist/daytona.js",
-      "require": "./dist/daytona.cjs"
+      "import": { "types": "./dist/daytona.d.ts", "default": "./dist/daytona.js" },
+      "require": { "types": "./dist/daytona.d.cts", "default": "./dist/daytona.cjs" }
     },
     "./e2b": {
-      "types": "./dist/e2b.d.ts",
-      "import": "./dist/e2b.js",
-      "require": "./dist/e2b.cjs"
+      "import": { "types": "./dist/e2b.d.ts", "default": "./dist/e2b.js" },
+      "require": { "types": "./dist/e2b.d.cts", "default": "./dist/e2b.cjs" }
     },
     "./modal": {
-      "types": "./dist/modal.d.ts",
-      "import": "./dist/modal.js",
-      "require": "./dist/modal.cjs"
+      "import": { "types": "./dist/modal.d.ts", "default": "./dist/modal.js" },
+      "require": { "types": "./dist/modal.d.cts", "default": "./dist/modal.cjs" }
     },
     "./blaxel": {
-      "types": "./dist/blaxel.d.ts",
-      "import": "./dist/blaxel.js",
-      "require": "./dist/blaxel.cjs"
+      "import": { "types": "./dist/blaxel.d.ts", "default": "./dist/blaxel.js" },
+      "require": { "types": "./dist/blaxel.d.cts", "default": "./dist/blaxel.cjs" }
     }
   },
   "files": [
@@ -56,7 +51,8 @@
     "test": "bun run generate:validators && bun test tests/typed-errors.test.ts && bun run test:port && bun tests/unit.ts && bun tests/compat.ts && bun tests/compat-router.ts && bun tests/compat-coverage.ts && bun run build && bun tests/http2.ts && bun run test:consumer",
     "test:consumer": "node scripts/test-consumer.mjs",
     "test:port": "bun build tests/port-stream.test.ts --target=node --external=ws --outfile=node_modules/.cache/port-tests.cjs --format=cjs && node node_modules/.cache/port-tests.cjs && bun test tests/port-stream.test.ts && bun run test:private-fetch && bun run test:e2b-handles",
-    "test:e2b-handles": "bun build tests/e2b-command-handle.test.ts tests/e2b-lifecycle.test.ts tests/blaxel-provider.test.ts tests/daytona-provider.test.ts --target=node --external=e2b --external=@blaxel/core --external=@daytona/sdk --outdir=node_modules/.cache/e2b-tests --format=cjs && node node_modules/.cache/e2b-tests/e2b-command-handle.test.js && node node_modules/.cache/e2b-tests/e2b-lifecycle.test.js && node node_modules/.cache/e2b-tests/blaxel-provider.test.js && node node_modules/.cache/e2b-tests/daytona-provider.test.js",
+    "test:e2b-handles": "bun run test:compat-handles",
+    "test:compat-handles": "bun build tests/e2b-command-handle.test.ts tests/e2b-lifecycle.test.ts tests/blaxel-provider.test.ts tests/daytona-provider.test.ts tests/modal-provider.test.ts tests/modal-command.test.ts tests/guest-process-input.test.ts --target=node --external=e2b --external=@blaxel/core --external=@daytona/sdk --external=modal --outdir=node_modules/.cache/compat-tests --format=cjs && node node_modules/.cache/compat-tests/e2b-command-handle.test.js && node node_modules/.cache/compat-tests/e2b-lifecycle.test.js && node node_modules/.cache/compat-tests/blaxel-provider.test.js && node node_modules/.cache/compat-tests/daytona-provider.test.js && node node_modules/.cache/compat-tests/modal-provider.test.js && node node_modules/.cache/compat-tests/modal-command.test.js && node node_modules/.cache/compat-tests/guest-process-input.test.js",
     "test:private-fetch": "bun build tests/private-fetch.test.ts --target=node --outfile=node_modules/.cache/private-fetch-tests.cjs --format=cjs && node node_modules/.cache/private-fetch-tests.cjs",
     "coverage:compat": "bun scripts/compat-coverage.ts",
     "test:compat": "bun tests/compat.ts",
@@ -107,8 +103,7 @@
     "e2b": "^2.56.0",
     "@daytona/sdk": "^0.224.1",
     "modal": "^0.11.1",
-    "@blaxel/core": "^0.3.30",
-    "@computesdk/modal": "^1.9.19"
+    "@blaxel/core": "^0.3.30"
   },
   "peerDependenciesMeta": {
     "e2b": { "optional": true },
@@ -116,13 +111,12 @@
     "modal": { "optional": true },
     "@blaxel/core": {
       "optional": true
-    },
-    "@computesdk/modal": {
-      "optional": true
     }
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.15.0",
     "@computesdk/provider": "^2.1.14",
+    "@types/ws": "^8.18.1",
     "computesdk": "^4.1.12",
     "dockerfile-ast": "^0.7.1",
     "tar": "^7.5.22",
