@@ -2,7 +2,7 @@
 
 ## Current validation
 
-The branch includes SDK main at 2ec474e. Frozen commit 947f663 runtime-scoped differential
+The branch includes SDK main at 2ec474e. Frozen commit d7af319 runtime-scoped differential
 reports verify **86/975 Python** entries on CPython 3.12.14/Linux/aarch64 and
 **41/938 TypeScript** entries on Node 22.23.3/Linux/arm64. The latest Node profile
 uses a clean install of published dependencies, with no local provider links.
@@ -38,11 +38,21 @@ run with inbound and outbound denied. They require the draft backend private
 port API, not a public ingress exception. Fresh feature tests passed all 58
 private-port/HTTPS/HTTP2/WebSocket cases with zero skips.
 
-Local validation passes 405 Python unit tests and lint, and the full TypeScript
+Local validation passes 406 Python unit tests and lint, and the full TypeScript
 test/build/typecheck pipeline. Source/vendor snapshots now reject changes during
 a scenario; runtime profiles are included in fingerprints. Existing evidence
 grouping tests also reject collisions and malformed events. These measurement
 tests do not grant vendor parity credit.
+
+The pinned-vendor Python CI lane installs all four SDKs from the lockfile and
+passes all 406 tests without skips. A separate lean environment passes 402 tests
+and skips four optional-Daytona checks. Both were verified in clean temporary
+virtualenvs; the initial CI failure from assuming an optional SDK was installed
+was fixed, not suppressed in the vendor lane. All GitHub checks pass at d7af319.
+The current 21-case Python live cohort also passes in that locked vendor
+environment. Evidence now fingerprints installed transitive dependency versions
+in addition to source, vendor roots and interpreter, preventing evidence from
+different Python environments from being combined.
 
 Python's async E2B entry point now uses the same router and ownership cache as
 the sync entry point instead of returning the native class and bypassing routing.
