@@ -1,11 +1,12 @@
-import { daytona as createDaytonaProvider } from "@computesdk/daytona";
+import type { DaytonaConfig as NativeDaytonaConfig, Sandbox as NativeSandbox } from "@daytona/sdk";
+import { createNativeDaytonaProvider } from "./compat/daytona-provider.js";
 import { ArkerError } from "./index.js";
 
 import { assertSupportedObjectKeys, guardUnsupported, nativeInstance, type UniversalSandbox } from "./compat/common.js";
 import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
 
-export interface DaytonaCompatConfig {
+export interface DaytonaCompatConfig extends NativeDaytonaConfig {
   /** Daytona API key used only for native Daytona fallback. */
   apiKey?: string;
   /** Arker provider options. Falls back to ARKER_* environment variables. */
@@ -13,7 +14,9 @@ export interface DaytonaCompatConfig {
   routerConfigPath?: string;
 }
 
-export interface ExecuteResponse {
+type NativeExecuteResponse = Awaited<ReturnType<NativeSandbox["process"]["executeCommand"]>>;
+
+export interface ExecuteResponse extends NativeExecuteResponse {
   exitCode: number;
   /** Daytona returns stdout as `result`. */
   result: string;
@@ -27,7 +30,7 @@ export interface ExecuteCommandOptions {
   timeout?: number;
 }
 
-const DAYTONA_CONFIG_KEYS = ["apiKey", "arker", "routerConfigPath"] as const;
+const DAYTONA_CONFIG_KEYS = ["apiKey", "jwtToken", "organizationId", "apiUrl", "serverUrl", "target", "otelEnabled", "useDeprecatedPolling", "requestTimeoutMs", "_experimental", "arker", "routerConfigPath"] as const;
 const DAYTONA_CREATE_OPTION_KEYS = ["image", "snapshot", "envVars", "name", "language", "resources", "networkBlockAll", "networkAllowList", "domainAllowList"] as const;
 
 function arkerCreateOptions(options: Record<string, unknown>): Record<string, unknown> {
@@ -60,7 +63,7 @@ export class Sandbox {
       cwd?: string,
       env?: Record<string, string>,
       timeout?: number,
-    ) => Promise<ExecuteResponse>;
+    ) => Promise<NativeExecuteResponse>;
   };
 
   constructor(box: UniversalSandbox) {
@@ -80,9 +83,15 @@ export class Sandbox {
         stderr: result.stderr,
       };
     };
+    const native = nativeInstance(box) as { process?: { executeCommand: (command: string, cwd?: string, env?: Record<string, string>, timeout?: number) => Promise<NativeExecuteResponse> } } | undefined;
     this.process = {
       exec: run,
-      executeCommand: (command, cwd, env, timeout) => run(command, { cwd, env, timeout }),
+      executeCommand: typeof native?.process?.executeCommand === "function"
+        ? native.process.executeCommand.bind(native.process)
+        : async (command, cwd, env, timeout) => {
+          const result = await run(command, { cwd, env, timeout });
+          return { exitCode: result.exitCode, result: result.result, artifacts: { stdout: result.result } };
+        },
     };
   }
 
@@ -93,13 +102,17 @@ export class Sandbox {
 
 export class Daytona {
   #sdk: CompatSdk;
+  #closeNative: () => Promise<void>;
 
   constructor(config?: DaytonaCompatConfig) {
     assertSupportedObjectKeys(config, DAYTONA_CONFIG_KEYS, "daytona", "new Daytona");
+    const { arker, routerConfigPath, ...native } = config ?? {};
+    const provider = createNativeDaytonaProvider(native);
+    this.#closeNative = provider.close;
     this.#sdk = createCompatSdk({
-      arker: config?.arker,
-      fallbackProvider: createDaytonaProvider({ apiKey: config?.apiKey }),
-      routerConfigPath: config?.routerConfigPath,
+      arker,
+      fallbackProvider: provider,
+      routerConfigPath,
       mapArkerCreateOptions: arkerCreateOptions,
     });
     return guardUnsupported(this, "daytona");
@@ -135,6 +148,10 @@ export class Daytona {
   async delete(sandbox: string | Sandbox): Promise<void> {
     const target = typeof sandbox === "string" ? await this.get(sandbox) : sandbox;
     await target.delete();
+  }
+
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.#closeNative();
   }
 }
 export * from "@daytona/sdk";

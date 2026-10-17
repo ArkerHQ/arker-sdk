@@ -31,7 +31,7 @@ try {
   );
   assert.equal(packed.filename, basename(packed.filename));
   const dependencies = { "@arker-ai/sdk": `file:./${packed.filename}` };
-  for (const vendor of ["e2b", "@blaxel/core"]) {
+  for (const vendor of ["e2b", "@blaxel/core", "@daytona/sdk"]) {
     dependencies[vendor] = JSON.parse(
       await readFile(
         join(root, "node_modules", vendor, "package.json"),

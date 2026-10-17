@@ -161,8 +161,8 @@ async function testDaytonaSurface(): Promise<void> {
       /not supported by the Arker compatibility layer for daytona/,
     );
     assert.throws(
-      () => new Daytona({ apiKey: "daytona-key", serverUrl: "unsupported" } as any),
-      /unsupported option\(s\) 'serverUrl'/,
+      () => new Daytona({ apiKey: "daytona-key", unknownOption: "unsupported" } as any),
+      /unsupported option\(s\) 'unknownOption'/,
     );
   } finally {
     fake.cleanup();
@@ -221,6 +221,24 @@ async function testDaytonaImageBuilderIsNotDiscarded(): Promise<void> {
   } });
   await assert.rejects(() => client.create({ image }), /Daytona Image builders.*not supported on Arker/);
   assert.equal(requests, 0);
+}
+
+async function testDaytonaNativeExecutionPreservesResponseAndInputs(): Promise<void> {
+  const response = { exitCode: 17, result: "native-output", artifacts: { stdout: "native-output", charts: [] } };
+  const calls: unknown[] = [];
+  const native = { process: {
+    async executeCommand(...args: unknown[]) {
+      assert.equal(this, native.process);
+      calls.push(args);
+      return response;
+    },
+  } };
+  const fake = installFakeCompute(new FakeSandbox("native-exec", "daytona", native));
+  try {
+    const sandbox = await new Daytona().create();
+    assert.equal(await sandbox.process.executeCommand("exit 17", "/tmp", { VALUE: "kept" }, 7), response);
+    assert.deepEqual(calls, [["exit 17", "/tmp", { VALUE: "kept" }, 7]]);
+  } finally { fake.cleanup(); }
 }
 
 async function testE2BSurface(): Promise<void> {
@@ -672,6 +690,7 @@ await testDaytonaSurface();
 await testNativeProviderExtensionsAreDelegated();
 await testDaytonaGetNotFound();
 await testDaytonaImageBuilderIsNotDiscarded();
+await testDaytonaNativeExecutionPreservesResponseAndInputs();
 await testE2BSurface();
 await testE2BNativeErrorIdentity();
 await testModalSurface();

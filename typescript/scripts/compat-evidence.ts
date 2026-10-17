@@ -116,7 +116,7 @@ export async function recordEvidence(provider: "blaxel" | "e2b" | "modal" | "day
   if (!process.env.COMPAT_COVERAGE_RUN) throw new Error("COMPAT_COVERAGE_RUN is required when recording evidence");
   const version = await vendorVersion(provider);
   if (route === "native") {
-    const providerDirectory = ["e2b", "blaxel"].includes(provider)
+    const providerDirectory = ["e2b", "blaxel", "daytona"].includes(provider)
       ? fileURLToPath(new URL("../src/compat", import.meta.url))
       : fileURLToPath(new URL(`../node_modules/@computesdk/${provider}`, import.meta.url));
     const nativeManifest = await dependencyManifest(packages[provider], providerDirectory);

@@ -5,9 +5,15 @@ import { Sandbox as NativeE2B, CommandExitError } from "e2b";
 import { Sandbox as E2B } from "@arker-ai/sdk/e2b";
 import { SandboxInstance as NativeBlaxel } from "@blaxel/core";
 import { SandboxInstance as Blaxel } from "@arker-ai/sdk/blaxel";
+import { Daytona as NativeDaytona, Image } from "@daytona/sdk";
+import { Daytona } from "@arker-ai/sdk/daytona";
 
 const require = createRequire(import.meta.url);
-for (const provider of ["@computesdk/e2b", "@computesdk/blaxel"])
+for (const provider of [
+  "@computesdk/e2b",
+  "@computesdk/blaxel",
+  "@computesdk/daytona",
+])
   assert.throws(() => require.resolve(provider), { code: "MODULE_NOT_FOUND" });
 assert.equal(typeof Arker, "function");
 assert.equal(typeof require("@arker-ai/sdk").Arker, "function");
@@ -75,5 +81,41 @@ await verify(
   cjsE2B.CommandExitError,
   require("@blaxel/core").SandboxInstance,
   require("@arker-ai/sdk/blaxel").SandboxInstance,
+  "CommonJS",
+);
+
+async function verifyDaytona(Native, Shim, Image, mode) {
+  const original = Native.prototype.create;
+  const image = Image.base("alpine:3.21").runCommands("echo marker");
+  const response = {
+    exitCode: 17,
+    result: "marker",
+    artifacts: { stdout: "marker", charts: [] },
+  };
+  Native.prototype.create = async function (params) {
+    assert.equal(params.image, image);
+    return {
+      id: "consumer-daytona",
+      process: { executeCommand: async () => response },
+    };
+  };
+  const client = new Shim({ apiKey: "dtn-test" });
+  try {
+    const sandbox = await client.create({ image });
+    assert.equal(await sandbox.process.executeCommand("exit 17"), response);
+  } finally {
+    Native.prototype.create = original;
+    await client[Symbol.asyncDispose]();
+  }
+  console.log(
+    `PASS packed SDK ${mode} consumer: Daytona Image identity and native execution response, no provider-package install`,
+  );
+}
+await verifyDaytona(NativeDaytona, Daytona, Image, "ESM");
+const nativeDaytonaCjs = require("@daytona/sdk");
+await verifyDaytona(
+  nativeDaytonaCjs.Daytona,
+  require("@arker-ai/sdk/daytona").Daytona,
+  nativeDaytonaCjs.Image,
   "CommonJS",
 );
