@@ -33,11 +33,20 @@ poll/wait/returncode, repeated output reads, literal shell argv, environment
 isolation and None-override omission. Arker runs with native keys removed and
 inbound/outbound denied. Fixtures create sandboxes separately; this does not
 certify native app/image-builder creation. Unit tests also cover native .aio
-stream/wait methods and incremental Unicode decoding. This source change
-invalidates earlier Python cohort fingerprints; a fresh full cohort is needed.
+stream/wait methods and incremental Unicode decoding. Frozen source f8717d3
+passes **25 live tests** and **428 vendor unit tests**. The lean environment
+passes 420 tests with eight optional-vendor skips. Its fresh full Python report
+verifies **100/1,013**, leaving **913 unverified**, strict exit 1; earlier Python
+fingerprints are not reused. All GitHub SDK checks pass at f8717d3.
 Sandbox.create.aio/exec.aio, PTY, secrets, timeout equivalence, descendants'
 late-output EOF, stdin-offset idempotence and arbitrary Python-free images
 remain unverified or unsupported.
+
+A separate real Modal startup-error comparison is RED. Native Modal returns
+a process with exit 128 for both a missing executable and missing working
+directory. Arker returns exit 127 for the executable and raises GuestProcessError
+for the directory, with different diagnostics. Both probe sandboxes were cleaned.
+The 25-case stream cohort does not certify these error paths.
 
 The branch includes SDK main at 2ec474e. Frozen commit e2dc4cc runtime-scoped differential
 reports verify **86/975 Python** entries on CPython 3.12.14/Linux/aarch64 and
