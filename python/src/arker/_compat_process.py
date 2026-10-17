@@ -59,6 +59,9 @@ class SuccessResponse:
     message: str
     path: str | None = None
 
+    def to_dict(self) -> dict[str, Any]:
+        return {"message": self.message, **({"path": self.path} if self.path is not None else {})}
+
 
 def success(value):
     models = import_optional("blaxel.core.sandbox.client.models")

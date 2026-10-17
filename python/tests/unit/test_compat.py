@@ -514,6 +514,17 @@ def test_blaxel_mkdir_returns_native_success_on_both_routes(monkeypatch) -> None
     }
 
 
+def test_blaxel_success_serialization_without_optional_sdk(monkeypatch) -> None:
+    from arker._compat_process import success
+
+    monkeypatch.setattr("arker._compat_process.import_optional", lambda _: None)
+    assert success({"message": "done", "path": "/blaxel/test"}).to_dict() == {
+        "message": "done",
+        "path": "/blaxel/test",
+    }
+    assert success({"message": "done"}).to_dict() == {"message": "done"}
+
+
 def test_blaxel_remove_is_nonrecursive_unless_requested(monkeypatch) -> None:
     from arker._compat import CommandResult
     from arker.blaxel import FileSystem
