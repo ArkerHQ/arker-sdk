@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from arker._compat import UnsupportedCompatibilityOption
+import arker.modal as shim
+from arker._compat import CommandResult, UnsupportedCompatibilityOption
 from arker.modal import Sandbox
 
 
@@ -38,3 +39,30 @@ def test_arker_terminate_wait_rejected_before_delete() -> None:
 
     with pytest.raises(UnsupportedCompatibilityOption):
         Sandbox(vm=Guest()).terminate(wait=True)
+
+
+def test_arker_exec_none_environment_value_unsets_variable(monkeypatch) -> None:
+    import subprocess
+
+    class Guest:
+        id = "vm-test"
+
+    def run(vm, command, **kwargs):
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            env={"DROP_ME": "inherited", "KEEP_ME": "old"},
+        )
+        return CommandResult(stdout=result.stdout, stderr=result.stderr, exit_code=result.returncode)
+
+    monkeypatch.setattr(shim, "run_command", run)
+    process = Sandbox(vm=Guest()).exec(
+        "sh",
+        "-c",
+        'printf "%s|%s" "${DROP_ME+present}" "$KEEP_ME"',
+        env={"DROP_ME": None, "KEEP_ME": "new value"},
+    )
+    assert process.stdout.read() == "|new value"
+    assert process.wait() == 0

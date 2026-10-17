@@ -181,7 +181,7 @@ class Sandbox(UnsupportedMixin):
             for key, value in environment.items():
                 if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)) is None:
                     raise ValueError(f"Invalid environment variable name: {key}")
-                exports.append(f"export {key}={shlex.quote(str(value))};")
+                exports.append(f"unset {key};" if value is None else f"export {key}={shlex.quote(str(value))};")
             prefix += " ".join(exports) + " "
         prefix += f"cd {shlex.quote(str(workdir or '/'))} && "
         arker_timeout = timeout if timeout is not None else math.ceil(timeout_ms / 1_000) if timeout_ms else None

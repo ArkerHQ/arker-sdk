@@ -4,10 +4,14 @@
 
 The latest Python Modal native-route regression preserves the original process
 object, all native exec keyword arguments and terminate(wait=True)'s exit
-status. Four regression cases failed before the fix. All 421 Python vendor
-unit tests and scoped lint pass; a real Modal sandbox also passed binary
+status. Four regression cases failed before the fix. A fifth regression found
+that Arker exported env values of None as the string "None" rather than unsetting
+the variable; this now matches Modal's Python environment contract. All 422
+Python vendor unit tests and scoped lint pass; a real Modal sandbox passed binary
 stdin/stdout/stderr, EOF, wait and termination. This native-only test does not
-grant Arker-route coverage. An initial manual probe omitted Modal stdin.drain()
+grant Arker-route coverage. A separate real Arker VM passed unsetting inherited
+HOME while preserving another explicit environment value, and was deleted.
+An initial manual probe omitted Modal stdin.drain()
 and blocked; the checked-in program uses the documented flush operation.
 The frozen reports below predate this source change and are not current-source
 parity certification.
