@@ -2,6 +2,18 @@
 
 ## Current-main validation
 
+The private-port client work changes implementation fingerprints. Until the
+differential scenarios are rerun on these sources, the previous 38 Python and
+19 TypeScript entries below are historical, not current-source parity credit.
+The new transport has 15 passing Python unit cases and four passing Node test
+groups, including binary framing, independent half-close, refused upgrades,
+malformed frames and cleanup. It requires the draft backend private-port API;
+it has not yet been validated against a feature deployment or integrated into
+Blaxel fetch. Bun's WebSocket adapter exposes chunked upgrade error bodies
+without decoding their transfer framing in a local reproduction; preserving
+those typed errors under Bun remains unverified. Node's chunked-refusal test
+passes. None of these transport unit tests grants vendor API parity credit.
+
 On 2026-10-17 the branch was merged with SDK `main` at `2ec474e`.
 Fresh differential runs on current implementation sources establish **38/944
 Python** scenario-verified entries. TypeScript establishes **19/928** only when

@@ -1785,6 +1785,23 @@ export class VM {
     );
   }
 
+  /** Open an owner-authenticated VM-local TCP stream without public ingress. Node only. */
+  async connectPort(port: number, options: { timeoutMs?: number } = {}): Promise<import("node:stream").Duplex> {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new RangeError("port must be an integer from 1 through 65535");
+    }
+    const timeout = options.timeoutMs ?? 300000;
+    if (!Number.isFinite(timeout) || timeout <= 0) throw new RangeError("timeoutMs must be finite and positive");
+    const url = new URL(`${normalizeBaseUrl(this.baseUrl)}${vmPath(this.id)}/ports/${port}`);
+    if (url.protocol === "https:") url.protocol = "wss:";
+    else if (url.protocol === "http:") url.protocol = "ws:";
+    else throw new Error("private port requires an HTTP or HTTPS API URL");
+    const { connectPortStream } = await import("./internal/port.js");
+    return connectPortStream(url.toString(), this._client._authHeaders(), timeout, (body, status) =>
+      extractError(parseJson(body), status) ?? new ArkerError("internal", "Malformed private port upgrade error", status),
+    );
+  }
+
   async connectPty(options: PtyConnectOptions = {}): Promise<PtyConnection> {
     if (this.pool_id) throw new Error("Pool VMs do not support interactive shells; use run instead.");
     const sessionId = options.sessionId ?? sessionIdFrom(await this.createSession());

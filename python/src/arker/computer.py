@@ -40,6 +40,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from pydantic import TypeAdapter, ValidationError
 
+from ._port import PortStream
 from .generated.api_models import (
     BackgroundRunResponse,
     CancelRunResponse,
@@ -1361,6 +1362,47 @@ class VM:
             base_url=self.base_url,
         )
         return _decode_model(PatchSessionResponse, payload)
+
+    def connect_port(self, port: int, *, timeout: float = 300) -> PortStream:
+        """Connect to a VM-local TCP port without exposing public ingress."""
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            raise ValueError("port must be an integer from 1 through 65535")
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
+            raise ValueError("timeout must be finite and positive")
+        import websocket
+
+        parsed = urllib.parse.urlsplit(self.base_url + _vm_path(self.id) + f"/ports/{port}")
+        if parsed.scheme not in {"https", "http"}:
+            raise ValueError("private port requires an HTTP or HTTPS API URL")
+        url = urllib.parse.urlunsplit(parsed._replace(scheme="wss" if parsed.scheme == "https" else "ws"))
+        try:
+            connection = websocket.create_connection(
+                url,
+                header=[f"Authorization: Bearer {self._client._api_key}"],
+                subprotocols=["vm-port.v1"],
+                timeout=timeout,
+                redirect_limit=0,
+                enable_multithread=True,
+            )
+        except websocket.WebSocketBadStatusException as error:
+            try:
+                payload = json.loads(error.resp_body)
+            except (TypeError, ValueError):
+                raise ArkerError(
+                    "internal", "Private port upgrade returned a malformed error", error.status_code
+                ) from error
+            parsed_error = _extract_error(payload, error.status_code)
+            if parsed_error is None:
+                raise ArkerError(
+                    "internal", "Private port upgrade returned a malformed error", error.status_code
+                ) from error
+            raise parsed_error from error
+        return PortStream(connection)
 
     # ── Interactive PTY ────────────────────────────────────────────────
     def connect_pty(
