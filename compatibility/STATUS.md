@@ -12,8 +12,8 @@ had **25 Python passes / two failures**; that evidence is retained.
 
 Current gates pass **466 Python vendor tests / 457 lean tests** (nine optional
 vendor skips), full TypeScript typecheck/test/build/isolated-consumer gates,
-and all SDK CI/CodeQL checks. Matching-source cohorts against isolated backend
-`c14166a` pass **27 Python / 22 Node** cases (25/21 differential, 2/1 Arker-only),
+and all SDK CI/CodeQL checks. Fresh matching-source cohorts against isolated backend
+`45def92` pass **27 Python / 22 Node** cases (25/21 differential, 2/1 Arker-only),
 including the new timeout assertions. Fingerprints: Python
 `ace0a190770e60ba63a1a2c0c82754da414dd882cc1cfc26b852c09bfa6bc492`, Node
 `ae63b8ee881af515873f0947acbff2ee6277668f49b5c7c7825df0a7b3b968b7`.
@@ -28,18 +28,27 @@ fresh shells, native command-error identity and deletion. All owned parents
 and children were removed. This is supplemental Arker-only evidence, not
 additional native API coverage. Immutable Python wheel SHA-256:
 `549a5320197461be5f95fd4489bfb9e2d8f92cff0e69eb52fe1487c4655cea46`;
-it passes **627 harness unit tests**.
+it passes **645 harness unit tests** in the updated harness.
 
-Backend `c14166a` passes **12/12 live outbound-guard tests**, zero skips/errors,
+Backend `45def92` passes **12/12 live outbound-guard tests**, zero skips/errors,
 after the preceding five-pass/seven-failure run found guards dropped during
 encrypted storage. Current transport rerun remains **RED: 100 passed / one
-fixture error**, an unanswered POST fork. Idempotency-key reconciliation owns
-cleanup; the fresh isolated case passes, but the root cause is unresolved.
+fixture error**, a file-sync response that never arrived before the 300-second
+test timeout. A fresh isolated ingress suite passes **30/30**, but the root
+cause is unresolved. An earlier unanswered POST fork also remains unresolved;
+idempotency-key reconciliation owns its cleanup.
 The router did not restart; 800 bounded read-only health requests across both
 HTTP clients/reuse modes passed without explaining the failure. The retained
 protocol-201 guest passes Python and Node binary Unix transport with boot ID,
 agent PID/start time and binary hash unchanged. No worker/agent restart or
 retry waiver is credited as a fix.
+
+The same release passes **43/43 shared-filesystem, sync-contract and filesystem
+operation tests**, including mount statuses and independent-VM visibility,
+with zero skips/errors. These are Arker behavior checks, not native
+Drive/Volume equivalence. The broader network-policy gate remains red at
+347 passes, six failures and one environment exclusion; follow-up diagnostic
+and test corrections still require Linux and live validation.
 
 ## Previous creation-routing checkpoint
 
