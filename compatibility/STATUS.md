@@ -2,6 +2,19 @@
 
 ## Current validation
 
+The creation-routing checkpoint replaces error-name/status heuristics with an
+explicit local-preflight refusal type. Opaque exceptions, wrapped opaque
+failures, and HTTP 429 reproduced duplicate fallback in both languages before
+the fix; those regressions and safe-preflight fallback now pass. Python profiles
+pass **464 vendor tests / 455 lean tests** (nine optional-vendor skips). Full
+TypeScript typecheck/test/build/isolated-consumer gates pass; packed SHA-256:
+`e0240b98086297795fafa6ad09f8799fff4829cae0f198fedc81538af57e6606`.
+This source change invalidates the preceding live fingerprints. New cohorts
+are required; neither generic remote-error failover nor full API parity is
+established.
+
+## Previous outbound-guard SDK checkpoint
+
 The outbound-guard checkpoint replaces destructive native-network translation
 with independent egress permission floors in both languages. Configured keyed
 rules are merged, ordered replacements retain their replacement semantics,

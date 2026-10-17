@@ -7,6 +7,7 @@ from typing import Any
 
 from ._compat import (
     CommandResult,
+    CompatibilityCreationNotStartedError,
     UnsupportedCompatibilityOption,
     UnsupportedMixin,
     arker_create,
@@ -141,7 +142,7 @@ class Daytona(UnsupportedMixin):
         def create_native() -> Any:
             native = self._native_client()
             if native is None:
-                raise RuntimeError("Native Daytona SDK is not installed")
+                raise CompatibilityCreationNotStartedError("Native Daytona SDK is not installed")
             return native.create(*args, **kwargs)
 
         def create_arker() -> VM:

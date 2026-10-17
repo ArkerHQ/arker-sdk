@@ -4,6 +4,9 @@ export type UniversalSandbox = SandboxInterface;
 
 export class CompatibilityNotFoundError extends Error {}
 
+/** A local preflight refusal before any sandbox creation request is issued. */
+export class CompatibilityCreationNotStartedError extends Error {}
+
 export function nativeInstance(box: UniversalSandbox): object | undefined {
   if (box.provider === "arker") return undefined;
   const getter = (box as UniversalSandbox & { getInstance?: () => unknown }).getInstance;

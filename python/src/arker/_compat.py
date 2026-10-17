@@ -46,6 +46,10 @@ class UnsupportedCompatibilityOption(TypeError):
     """An option cannot be represented by the selected compatibility provider."""
 
 
+class CompatibilityCreationNotStartedError(ValueError):
+    """Local preflight refusal, before any sandbox creation request is issued."""
+
+
 class _InstanceOrClassMethod:
     def __init__(self, method):
         self.method = method
@@ -81,7 +85,9 @@ def arker_source(config: dict[str, Any] | None = None) -> str:
     cfg = config or {}
     source = cfg.get("source") or os.environ.get("ARKER_SOURCE") or os.environ.get("ARKER_SOURCE_VM")
     if not source:
-        raise ValueError("Arker source is required; set source, ARKER_SOURCE, or ARKER_SOURCE_VM")
+        raise CompatibilityCreationNotStartedError(
+            "Arker source is required; set source, ARKER_SOURCE, or ARKER_SOURCE_VM"
+        )
     return str(source)
 
 
@@ -288,105 +294,8 @@ def _instance_identifiers(instance: Any) -> list[str]:
 
 
 def _is_retryable(error: Exception) -> bool:
-    if isinstance(error, UnsupportedCompatibilityOption):
-        return False
-    current: BaseException | None = error
-    seen: set[int] = set()
-    while current is not None:
-        if id(current) in seen or isinstance(current, OSError):
-            return False
-        seen.add(id(current))
-        if any(
-            base.__name__.endswith(
-                (
-                    "AlreadyExistsError",
-                    "ConflictError",
-                    "InvalidError",
-                    "ValidationError",
-                    "AuthError",
-                    "AuthenticationError",
-                    "AuthorizationError",
-                    "PermissionDeniedError",
-                    "UnauthorizedError",
-                    "ForbiddenError",
-                    "ClientClosedError",
-                    "TimeoutError",
-                    "ServiceError",
-                    "InternalError",
-                    "DataLossError",
-                    "RemoteError",
-                    "InternalFailure",
-                )
-            )
-            for base in type(current).__mro__
-        ):
-            return False
-        response = getattr(current, "response", None)
-        status = (
-            getattr(current, "status_code", None)
-            or getattr(current, "status", None)
-            or getattr(response, "status_code", None)
-        )
-        if status in {400, 401, 403, 408, 409, 422} or (isinstance(status, int) and 500 <= status <= 599):
-            return False
-        if type(status).__module__.startswith(("grpc", "grpclib")) and getattr(status, "value", None) in {
-            1,
-            2,
-            3,
-            4,
-            6,
-            7,
-            9,
-            10,
-            13,
-            14,
-            15,
-            16,
-        }:
-            return False
-        code = str(getattr(current, "code", "")).lower()
-        if code in {"econnreset", "econnrefused", "epipe", "enetunreach", "etimedout", "und_err_socket"}:
-            return False
-        if code in {
-            "authentication",
-            "authorization",
-            "unauthorized",
-            "forbidden",
-            "invalid_request",
-            "validation",
-            "409",
-            "conflict",
-            "idempotency_conflict",
-            "already_exists",
-            "sandbox_already_exists",
-            "resource_already_exists",
-        }:
-            return False
-        message = str(current).lower()
-        if any(text in message for text in ("authentication failed", "unauthorized", "forbidden", "invalid api key")):
-            return False
-        if any(
-            text in message
-            for text in (
-                "outcome is unknown",
-                "may have succeeded",
-                "may have been created",
-                "network failure",
-                "transport error",
-                "timed out",
-                "timeout",
-                "fetch failed",
-                "connection reset",
-                "connection refused",
-                "connection closed",
-                "socket hang up",
-                "broken pipe",
-                "all connection attempts failed",
-            )
-        ):
-            return False
-        current = current.__cause__ or current.__context__
-    return True
+    # Even a 429 can come from polling a sandbox that was already created.
+    return isinstance(error, CompatibilityCreationNotStartedError)
 
 
 def routed_create(

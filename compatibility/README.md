@@ -54,6 +54,13 @@ same identifier fixtures in `router-identifiers.json`.
 
 ## Measurement
 
+Creation fallback is fail-closed. Only an explicit local preflight refusal
+before a creation request (such as a missing Arker source) permits trying the
+next provider. Remote errors, including opaque exceptions and HTTP 429, can
+come from polling an already-created sandbox and do not permit fallback.
+Priority and weighted initial selection still apply; generic remote-error
+failover is not a supported guarantee.
+
 Reports record native signatures, API names, providers, language/styles, matching
 shim declarations, and differential test evidence. The inventory includes
 sandbox/client roots, creation-related image/template/volume/secret roots, and

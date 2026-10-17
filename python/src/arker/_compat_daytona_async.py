@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from ._compat import UnsupportedCompatibilityOption, import_optional
+from ._compat import CompatibilityCreationNotStartedError, UnsupportedCompatibilityOption, import_optional
 from ._compat_async import NativeBridge, call, route
 
 
@@ -61,7 +61,7 @@ class AsyncDaytona:
         if self._native is None:
             module = import_optional("daytona")
             if module is None:
-                raise RuntimeError("Native Daytona SDK is not installed")
+                raise CompatibilityCreationNotStartedError("Native Daytona SDK is not installed")
             self._native = module.AsyncDaytona(*self._configuration._native_args, **self._configuration._native_kwargs)
         return self._native
 

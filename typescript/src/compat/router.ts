@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { CompatibilityCreationNotStartedError } from "./common.js";
 
 type Provider = {
   name?: string;
@@ -281,29 +282,8 @@ function instanceId(instance: any): string | undefined {
 }
 
 function retryable(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  let current: any = error;
-  const seen = new Set<object>();
-  while (current !== undefined && current !== null) {
-    if (typeof current !== "object" || seen.has(current)) return false;
-    seen.add(current);
-    const names = [current.name, current.constructor?.name];
-    if (names.some(name => typeof name === "string" && (/(AlreadyExists|Conflict|Invalid|Validation|Auth|Authentication|Authorization|PermissionDenied|Unauthorized|Forbidden|ClientClosed|Timeout|Service|Internal|DataLoss|Remote)Error$/.test(name) || name === "InternalFailure"))) return false;
-    if (typeof current.path === "string" && typeof current.details === "string"
-      && [1, 2, 3, 4, 6, 7, 9, 10, 13, 14, 15, 16].includes(current.code)) return false;
-    const status = current.status ?? current.statusCode ?? current.response?.status;
-    if (["ECONNRESET", "ECONNREFUSED", "EPIPE", "ENETUNREACH", "ETIMEDOUT", "UND_ERR_SOCKET"]
-      .includes(String(current.code ?? "").toUpperCase())) return false;
-    if (current.name === "AbortError" || [400, 401, 403, 408, 409, 422].includes(status) || (status >= 500 && status <= 599)) return false;
-    if (["authentication", "authorization", "unauthorized", "forbidden", "invalid_request", "validation",
-      "409", "conflict", "idempotency_conflict", "already_exists", "sandbox_already_exists", "resource_already_exists"]
-      .includes(String(current.code ?? "").toLowerCase())) return false;
-    if (/(authentication failed|unauthorized|forbidden|invalid api key|missing .*api key)/i.test(current.message ?? "")) return false;
-    if (/(outcome is unknown|may have (?:succeeded|been created)|network failure|transport error|timed? out|timeout|fetch failed|connection (?:reset|refused|closed)|socket hang up|broken pipe|all connection attempts failed)/i
-      .test(current.message ?? "")) return false;
-    current = current.cause;
-  }
-  return true;
+  // A remote failure can follow successful creation, even when it reports 429.
+  return error instanceof CompatibilityCreationNotStartedError;
 }
 
 export function createRoutedProvider(providers: Provider[], routerConfigPath?: string): Provider & {

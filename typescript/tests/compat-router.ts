@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { AlreadyExistsError, InvalidError } from "modal";
 
 import { createRoutedProvider, JsonRouteCache, parseRouterConfig, isArkerVmIdentifier, providerAcceptsIdentifier } from "../src/compat/router.js";
+import { CompatibilityCreationNotStartedError } from "../src/compat/common.js";
 
 function sandbox(id: string, provider: string) {
   return { instanceId: id, sandboxId: id, provider, destroy: async () => undefined };
@@ -68,7 +69,7 @@ async function testWeightedFallbackAndNonRetryableErrors(): Promise<void> {
     let fallbackCreates = 0;
     const routed = createRoutedProvider([
       provider("blaxel", { create: async () => { fallbackCreates += 1; return sandbox("native", "blaxel"); } }),
-      provider("arker", { create: async () => { throw new Error("capacity unavailable"); } }),
+      provider("arker", { create: async () => { throw new CompatibilityCreationNotStartedError("local source is not configured"); } }),
     ], path).instances!;
     assert.equal((await routed.create()).provider, "blaxel");
     assert.equal(fallbackCreates, 1);
@@ -102,6 +103,9 @@ async function testWeightedFallbackAndNonRetryableErrors(): Promise<void> {
     const cyclic = new Error("cyclic provider error");
     cyclic.cause = cyclic;
     for (const error of [
+      new Error("opaque provider failure"),
+      new Error("opaque wrapper", { cause: new Error("opaque provider failure") }),
+      Object.assign(new Error("opaque"), { status: 429 }),
       wrapped,
       cyclic,
       new TypeError("fetch failed"),

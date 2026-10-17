@@ -9,6 +9,7 @@ from ._compat import (
     CommandResult as _CommonCommandResult,
 )
 from ._compat import (
+    CompatibilityCreationNotStartedError,
     UnsupportedCompatibilityOption,
     UnsupportedMixin,
     _InstanceOrClassMethod,
@@ -285,7 +286,7 @@ class Sandbox(UnsupportedMixin):
 
         def create_native() -> Any:
             if native is None:
-                raise RuntimeError("Native E2B SDK is not installed")
+                raise CompatibilityCreationNotStartedError("Native E2B SDK is not installed")
             native_options = dict(kwargs)
             if allow_internet_access is not None:
                 native_options["allow_internet_access"] = allow_internet_access

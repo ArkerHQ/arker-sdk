@@ -9,6 +9,7 @@ from typing import Any
 
 from ._compat import (
     CommandResult,
+    CompatibilityCreationNotStartedError,
     CompatibilityNotFoundError,
     UnsupportedCompatibilityOption,
     UnsupportedMixin,
@@ -304,7 +305,7 @@ class SyncSandboxInstance(UnsupportedMixin):
 
         def create_native() -> Any:
             if native is None:
-                raise RuntimeError("Native Blaxel SDK is not installed")
+                raise CompatibilityCreationNotStartedError("Native Blaxel SDK is not installed")
             return native.create(sandbox, **kwargs)
 
         values = (

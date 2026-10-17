@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from arker._compat import get_or_none, routed_create, routed_get, router_config
+from arker._compat import arker_source, get_or_none, routed_create, routed_get, router_config
 from arker._router import (
     JsonRouteCache,
     RouterConfig,
@@ -341,7 +341,9 @@ def test_race_continues_after_one_provider_errors(tmp_path: Path) -> None:
     assert found is not None and found[0] == "arker"
 
 
-def test_missing_arker_source_falls_back_to_native_provider(tmp_path: Path) -> None:
+def test_missing_arker_source_falls_back_to_native_provider(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("ARKER_SOURCE", raising=False)
+    monkeypatch.delenv("ARKER_SOURCE_VM", raising=False)
     config_path = tmp_path / "computesdk_router.json"
     config_path.write_text(
         json.dumps(
@@ -354,7 +356,7 @@ def test_missing_arker_source_falls_back_to_native_provider(tmp_path: Path) -> N
     )
 
     def missing_source() -> None:
-        raise ValueError("Arker source is required")
+        arker_source({})
 
     provider, result = routed_create(
         "e2b",
@@ -391,6 +393,10 @@ def _grpc_create_failure():
 @pytest.mark.parametrize(
     "failure",
     [
+        RuntimeError("opaque provider failure"),
+        ValueError("opaque provider failure"),
+        _wrapped_create_failure(RuntimeError("opaque provider failure")),
+        type("RateLimited", (RuntimeError,), {"status": 429})("opaque"),
         RuntimeError("network failure: operation outcome is unknown"),
         ConnectionResetError("connection reset"),
         BrokenPipeError("broken pipe"),

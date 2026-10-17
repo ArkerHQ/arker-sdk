@@ -9,6 +9,7 @@ from typing import Any
 
 from ._compat import (
     CommandResult,
+    CompatibilityCreationNotStartedError,
     UnsupportedCompatibilityOption,
     UnsupportedMixin,
     arker_create,
@@ -113,7 +114,7 @@ class Sandbox(UnsupportedMixin):
 
         def create_native() -> Any:
             if native is None or not hasattr(native, "create"):
-                raise RuntimeError("Native Modal SDK is not installed")
+                raise CompatibilityCreationNotStartedError("Native Modal SDK is not installed")
             return native.create(*args, **native_kwargs)
 
         def create_arker() -> VM:
