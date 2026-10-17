@@ -661,80 +661,60 @@ async function testWhoamiUsesControlPlane(): Promise<void> {
 
 // ── Pools ──────────────────────────────────────────────────────────────
 
-const POOL_TERMS = { resources: { vcpu: 8, memory_mib: 32768 }, duration_seconds: 2_592_000 };
-const POOL = {
-  pool_id: "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61",
-  name: null,
-  provider: "aws",
-  region: "us-west-2",
-  ...POOL_TERMS,
-  status: "active",
-  created_at: "2026-09-25T00:00:00Z",
-  starts_at: "2026-09-25T00:00:00Z",
-  ends_at: "2026-10-25T00:00:00Z",
-  currency: "usd",
-  amount_cents: 12_345,
-  invoice_id: null,
-};
-const POOL_QUOTE = {
-  name: null,
-  catalog_version: "v1",
-  baseline_cents: 15_000,
-  discount_percent: 17.7,
-  provider: "aws",
-  region: "us-west-2",
-  ...POOL_TERMS,
-  currency: "usd",
-  amount_cents: 12_345,
-};
-
+const POOL_REQUEST = { type: "managed" as const, platform: "icelake", resources: { vcpu: 8, memory_mib: 32768, disk_mib: 0 } };
+const POOL = { ...POOL_REQUEST, pool_id: "pool-1", name: null, region: "aws-us-west-2", provider: "aws", state: "active", reason: null, created_at: "2026-10-15T00:00:00Z", resources_reserved: POOL_REQUEST.resources, resources_provisioned: { vcpu: 0, memory_mib: 0, disk_mib: 0 }, commitments: [{ starts_at: "2026-10-01T00:00:00Z", ends_at: "2026-10-02T00:00:00Z" }] };
 function poolClient(fetch: FakeFetch, attempts = 1): Arker {
-  return new Arker({
-    apiKey: "ark_live_test",
-    provider: "aws",
-    region: "us-west-2",
-    controlBaseUrl: "https://control.invalid/api",
-    fetch: fetch.fetch,
-    retry: attempts > 1 ? { attempts, baseDelayMs: 1, maxDelayMs: 1, jitterMs: 0 } : false,
-  });
+  return new Arker({ apiKey: "k", baseUrl: "https://test.invalid/api", controlBaseUrl: "https://control.invalid/api", fetch: fetch.fetch, retry: { attempts, baseDelayMs: 1, maxDelayMs: 1, jitterMs: 0 } });
+}
+async function testPoolsV2(): Promise<void> {
+  const fetch = new FakeFetch();
+  const route = (method: string, path: string) => (m: string, u: string) => m === method && u === `https://test.invalid/api/v1/pools${path}`;
+  fetch.addJson(route("POST", ""), 201, POOL);
+  fetch.addJson(route("GET", "/pool-1"), 200, POOL);
+  fetch.addJson(route("PATCH", "/pool-1"), 200, POOL);
+  fetch.addJson(route("PATCH", "/pool-1"), 200, POOL);
+  fetch.addJson(route("GET", "/pool-1/workers"), 200, { workers: [] });
+  fetch.addJson(route("DELETE", "/pool-1"), 202, { ...POOL, state: "deleting" });
+  fetch.addJson((m,u) => m === "GET" && u === "https://control.invalid/api/v1/pools?cursor=next&limit=2", 200, { pools: [POOL], next_cursor: null });
+  const client = poolClient(fetch);
+  assert.equal((await client.createPool(POOL_REQUEST)).pool_id, "pool-1");
+  const commitment = { starts_at: "2027-01-01T00:00:00Z", ends_at: "2027-01-02T00:00:00Z" };
+  await client.addPoolCommitment("pool-1", commitment);
+  await client.renamePool("pool-1", null);
+  await client.listPoolWorkers("pool-1");
+  assert.equal((await client.deletePool("pool-1")).state, "deleting");
+  await client.listPools({ cursor: "next", limit: 2 });
+  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), POOL_REQUEST);
+  assert.deepEqual(JSON.parse(fetch.calls[2]!.body!), { commitments: [...POOL.commitments, commitment] });
+  assert.deepEqual(JSON.parse(fetch.calls[3]!.body!), { name: null });
+  assert.equal(fetch.calls[0]!.headers["idempotency-key"], undefined);
+}
+async function testPoolQuotaIsNotRetried(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson(() => true, 429, { error: { code: "quota_exceeded", message: "pool quota reached" } });
+  await assert.rejects(poolClient(fetch, 3).createPool(POOL_REQUEST), (e: unknown) => e instanceof ArkerError && e.code === "quota_exceeded" && e.status === 429);
+  assert.equal(fetch.calls.length, 1);
 }
 
-const isQuote = (method: string, url: string) =>
-  method === "POST" && url === "https://control.invalid/api/v1/pools/quote";
-const isBuy = (method: string, url: string) =>
-  method === "POST" && url === "https://control.invalid/api/v1/pools";
-
-async function testCreatePoolBuysAtTheQuotedPrice(): Promise<void> {
+async function testPoolRefusals(): Promise<void> {
   const fetch = new FakeFetch();
-  fetch.addJson(isQuote, 200, POOL_QUOTE);
-  fetch.addJson(isBuy, 200, POOL);
-
-  const pool = await poolClient(fetch).createPool({ ...POOL_TERMS, name: "ci" });
-
-  assert.equal(pool.pool_id, POOL.pool_id);
-  const [quote, buy] = fetch.calls;
-  // Placement comes from the client when the caller does not give one.
-  const terms = { ...POOL_TERMS, name: "ci", provider: "aws", region: "us-west-2" };
-  assert.deepEqual(JSON.parse(quote!.body!), terms);
-  assert.deepEqual(JSON.parse(buy!.body!), { ...terms, amount_cents: 12_345 });
-  assert.match(buy!.headers["idempotency-key"] ?? "", /^sdk-pool-/);
-  assert.equal(quote!.headers["idempotency-key"], undefined);
-}
-
-async function testCreatePoolRetryReplaysTheSamePurchase(): Promise<void> {
-  // A purchase whose response was lost must be retried with the same key and
-  // price, so the service returns the original pool instead of a second one.
-  const fetch = new FakeFetch();
-  fetch.addJson(isQuote, 200, POOL_QUOTE);
-  fetch.addNetworkError(isBuy);
-  fetch.addJson(isBuy, 200, POOL);
-
-  await poolClient(fetch, 2).createPool({ ...POOL_TERMS, idempotencyKey: "buy-1" });
-
-  const buys = fetch.calls.filter((call) => isBuy(call.method, call.url));
-  assert.equal(buys.length, 2);
-  assert.deepEqual(buys.map((call) => call.headers["idempotency-key"]), ["buy-1", "buy-1"]);
-  assert.equal(buys[0]!.body, buys[1]!.body);
+  const { commitments, resources, provider, ...base } = POOL;
+  fetch.addJson(() => true, 200, { ...base, type: "self_hosted" });
+  await assert.rejects(poolClient(fetch).addPoolCommitment("pool-1", commitments[0]!), /self_hosted/);
+  assert.equal(fetch.calls.length, 1);
+  for (const [code, status] of [["capacity_unavailable", 503], ["unsupported_operation", 422]] as const) {
+    const refused = new FakeFetch();
+    refused.addJson(() => true, status, { error: { code, message: "pool refusal" } });
+    await assert.rejects(poolClient(refused).fork({ source_vm_id: "fleet-vm", pool_id: "pool-1" }),
+      (e: unknown) => e instanceof ArkerError && e.code === code && e.status === status);
+    assert.equal(refused.calls.length, 1);
+    assert.equal(JSON.parse(refused.calls[0]!.body!).pool_id, "pool-1");
+  }
+  const noShell = new FakeFetch();
+  const vm = poolClient(noShell).vm("vm-1");
+  Object.assign(vm, { pool_id: "pool-1" });
+  await assert.rejects(vm.connectPty(), /interactive shells/);
+  assert.equal(noShell.calls.length, 0);
 }
 
 async function testDiscoverRegionsRequiresNoConfiguredClient(): Promise<void> {
@@ -1320,8 +1300,9 @@ testPlacementRequiresSeparateProviderAndRegion();
 testInvalidProviderSyntaxFailsClosed();
 await testListRegionsUsesPublicControlPlaneCatalog();
 await testWhoamiUsesControlPlane();
-await testCreatePoolBuysAtTheQuotedPrice();
-await testCreatePoolRetryReplaysTheSamePurchase();
+await testPoolsV2();
+await testPoolRefusals();
+await testPoolQuotaIsNotRetried();
 await testDiscoverRegionsRequiresNoConfiguredClient();
 await testListedVmUsesItsPlacementEndpoint();
 testExplicitVmHandleUsesPlacementEndpoint();

@@ -452,6 +452,32 @@ func TestSetPoliciesReplacesTheDocument(t *testing.T) {
 	}
 }
 
+func TestPolicyVMStateAndSuspendRoundTrip(t *testing.T) {
+	var raw map[string]any
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		fmt.Fprint(w, `{"policies":[{"type":"inbound","match":{"ports":[8080],"vm_state":"idle"},"action":"deny"},{"type":"outbound","match":{"hosts":["api.example"]},"action":"suspend"}]}`)
+	}, reject(t, "control"))
+
+	out, err := c.VM("vm_1").SetPolicies(context.Background(), arker.PolicyDoc{Policies: []arker.PolicyEntry{
+		{Type: "inbound", Match: &arker.PolicyMatch{Ports: []any{8080}, VMState: "idle"}, Action: "deny"},
+		{Type: "outbound", Match: &arker.PolicyMatch{Hosts: []string{"api.example"}}, Action: "suspend"},
+	}})
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	sent := raw["policies"].([]any)
+	if got := sent[0].(map[string]any)["match"].(map[string]any)["vm_state"]; got != "idle" {
+		t.Fatalf("vm_state sent as %v", got)
+	}
+	if _, ok := sent[1].(map[string]any)["match"].(map[string]any)["vm_state"]; ok {
+		t.Fatalf("empty vm_state was sent: %v", sent[1])
+	}
+	if out.Policies[0].Match.VMState != "idle" || out.Policies[1].Action != "suspend" {
+		t.Fatalf("response did not decode: %+v", out.Policies)
+	}
+}
+
 // ── Filesystem transfer ─────────────────────────────────────────────────
 
 func TestReadFileDecodesInlineBase64(t *testing.T) {

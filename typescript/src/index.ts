@@ -319,20 +319,23 @@ export type FilesystemCreateRequest = ApiSchema<"FilesystemCreateRequest">;
 
 // ── Pools ──────────────────────────────────────────────────────────
 export type Pool = ApiSchema<"Pool">;
+export type ManagedPool = ApiSchema<"ManagedPool">;
+export type ByocPool = ApiSchema<"ByocPool">;
+export type SelfHostedPool = ApiSchema<"SelfHostedPool">;
 export type PoolResources = ApiSchema<"PoolResources">;
-export type PoolStatus = ApiSchema<"PoolStatus">;
-export type PoolUsage = ApiSchema<"PoolUsage">;
-export type PoolQuote = ApiSchema<"PoolQuote">;
-export type PoolQuoteRequest = ApiSchema<"PoolQuoteRequest">;
+export type PoolState = ApiSchema<"PoolState">;
+export type PoolCommitment = ApiSchema<"PoolCommitment">;
+export type PoolByoc = ApiSchema<"PoolByoc">;
+export type CreatePoolByoc = ApiSchema<"CreatePoolByoc">;
+export type CreatePoolRequest = ApiSchema<"CreatePoolRequest">;
+export type CreateManagedPoolRequest = ApiSchema<"CreateManagedPoolRequest">;
+export type CreateByocPoolRequest = ApiSchema<"CreateByocPoolRequest">;
+export type CreateSelfHostedPoolRequest = ApiSchema<"CreateSelfHostedPoolRequest">;
+export type UpdatePoolRequest = ApiSchema<"UpdatePoolRequest">;
 export type ListPoolsResponse = ApiSchema<"ListPoolsResponse">;
-/** What to buy. `provider` and `region` default to the client's placement. */
-export type CreatePoolOptions = Omit<PoolQuoteRequest, "provider" | "region"> &
-  Partial<Pick<PoolQuoteRequest, "provider" | "region">> & {
-    /** Use this key verbatim, to make a purchase replayable across calls and
-     * processes. Without one, each `createPool()` call buys a new pool; only
-     * the SDK's own retries within that call are deduplicated. */
-    idempotencyKey?: string;
-  };
+export type ListPoolWorkersResponse = ApiSchema<"ListPoolWorkersResponse">;
+export type Worker = ApiSchema<"Worker">;
+export type CreatePoolOptions = CreatePoolRequest;
 
 // ── Mounts ──────────────────────────────────────────────────────────
 export type Mount = ApiSchema<"Mount">;
@@ -857,76 +860,43 @@ export class Arker {
     return this._request("DELETE", `/v1/filesystems/${pathSegment(filesystemId)}`, undefined, this.baseUrl);
   }
 
-  // ── Pools (org-scoped, control-plane) ──────────────────────────────
-  // Available to organizations with pools enabled; others get `not_found`.
-
-  /** List the organization's pools, newest first. */
+  /** List pools across regions through the control plane. */
   async listPools(opts: ListOpts = {}): Promise<ListPoolsResponse> {
     const query: ListPoolsParameters = { cursor: opts.cursor, limit: opts.limit };
     return this._request("GET", buildQuery("/v1/pools", query), undefined, this.controlBaseUrl);
   }
 
   async getPool(poolId: string): Promise<Pool> {
-    return this._request("GET", `/v1/pools/${pathSegment(poolId)}`, undefined, this.controlBaseUrl);
+    return this._request("GET", `/v1/pools/${pathSegment(poolId)}`);
   }
 
-  /** Resources currently allocated to VMs in the pool. */
-  async getPoolUsage(poolId: string): Promise<PoolUsage> {
-    return this._request("GET", `/v1/pools/${pathSegment(poolId)}/usage`, undefined, this.controlBaseUrl);
+  /** Create in the client's region. For BYOC, open the returned byoc.setup_url. */
+  async createPool(request: CreatePoolRequest): Promise<Pool> {
+    return this._request("POST", "/v1/pools", request);
   }
 
-  /** Set a pool's name, or pass `null` to remove it. Requires an admin key. */
+  async updatePool(poolId: string, request: UpdatePoolRequest): Promise<Pool> {
+    return this._request("PATCH", `/v1/pools/${pathSegment(poolId)}`, request);
+  }
+
   async renamePool(poolId: string, name: string | null): Promise<Pool> {
-    return this._request("PATCH", `/v1/pools/${pathSegment(poolId)}`, { name }, this.controlBaseUrl);
+    return this.updatePool(poolId, { name });
   }
 
-  /**
-   * Buy a pool at the current price, billed on the organization's next
-   * invoice. Requires an admin key.
-   *
-   *     createPool({ resources: { vcpu: 8, memory_mib: 32768 }, duration_seconds: 30 * 86400 })
-   *
-   * Prices the pool, then buys it at exactly that price: if the price changes
-   * in between, this throws a `conflict` rather than paying a different amount.
-   * Member VMs' usage beyond the pool's resources bills at normal rates.
-   */
-  async createPool(options: CreatePoolOptions): Promise<Pool> {
-    const { idempotencyKey, ...terms } = options;
-    const request = this._poolRequest(terms);
-    const quote = await this._quotePool(request);
-    return this._buyPool(request, quote.amount_cents, idempotencyKey ?? `sdk-pool-${ulid()}`);
+  /** Deletes all VMs in the pool. Refused while a commitment is active. */
+  async deletePool(poolId: string): Promise<Pool> {
+    return this._request("DELETE", `/v1/pools/${pathSegment(poolId)}`);
   }
 
-  /** Fill in the client's placement. @internal */
-  _poolRequest(terms: Omit<CreatePoolOptions, "idempotencyKey">): PoolQuoteRequest {
-    const provider = terms.provider ?? this.provider;
-    const region = terms.region ?? this.region;
-    if (!provider || !region) {
-      throw new Error("provider and region are required for a pool; pass them or configure the client's placement");
-    }
-    return { ...terms, provider, region };
+  /** Read then replace commitments. Serialize concurrent commitment edits. */
+  async addPoolCommitment(poolId: string, commitment: PoolCommitment): Promise<Pool> {
+    const pool = await this.getPool(poolId);
+    if (pool.type !== "managed") throw new Error(`${pool.type} pools do not support commitments`);
+    return this.updatePool(poolId, { commitments: [...pool.commitments, commitment] });
   }
 
-  /** Price a pool without buying it. @internal */
-  async _quotePool(request: PoolQuoteRequest): Promise<PoolQuote> {
-    return this._request("POST", "/v1/pools/quote", request, this.controlBaseUrl);
-  }
-
-  /**
-   * Buy at a quoted price. The key is bound once, so every retry replays the
-   * same purchase rather than buying another -- which is what makes it safe
-   * to retry a purchase whose response was lost. @internal
-   */
-  async _buyPool(request: PoolQuoteRequest, amountCents: number, idempotencyKey: string): Promise<Pool> {
-    return this._request(
-      "POST",
-      "/v1/pools",
-      { ...request, amount_cents: amountCents },
-      this.controlBaseUrl,
-      { "Idempotency-Key": idempotencyKey },
-      undefined,
-      true,
-    );
+  async listPoolWorkers(poolId: string): Promise<ListPoolWorkersResponse> {
+    return this._request("GET", `/v1/pools/${pathSegment(poolId)}/workers`);
   }
 
   /** @internal */
@@ -1816,6 +1786,7 @@ export class VM {
   }
 
   async connectPty(options: PtyConnectOptions = {}): Promise<PtyConnection> {
+    if (this.pool_id) throw new Error("Pool VMs do not support interactive shells; use run instead.");
     const sessionId = options.sessionId ?? sessionIdFrom(await this.createSession());
     const useTicket = options.useTicket ?? !isNodeRuntime();
     const params = {
@@ -2359,6 +2330,7 @@ function wireRetryAfter(value: unknown): number | undefined {
 }
 
 function isRetryable(status: number, error?: ArkerError, replaySafe = false): boolean {
+  if (error?.code === "quota_exceeded") return false;
   const work = error?.body?.recovery?.work;
   if (work !== undefined) {
     if (work !== "not_started") return false;

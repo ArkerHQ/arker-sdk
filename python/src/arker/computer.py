@@ -28,6 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 from importlib.resources import files as package_files
 from typing import (
     Any,
+    Literal,
     TypeVar,
     get_args,
     get_origin,
@@ -60,6 +61,7 @@ from .generated.api_models import (
     ListOrgRunsResponse,
     ListPoolsParameters,
     ListPoolsResponse,
+    ListPoolWorkersResponse,
     ListRegionsResponse,
     ListRunsParameters,
     ListRunsResponse,
@@ -73,10 +75,7 @@ from .generated.api_models import (
     PatchVmRequest,
     PolicyDoc,
     Pool,
-    PoolQuote,
-    PoolQuoteRequest,
-    PoolResources,
-    PoolUsage,
+    PoolCommitment,
     PtyTicketResponse,
     ResourcesInput,
     Run,
@@ -95,6 +94,7 @@ from .generated.api_models import (
     SyncWriteOperationRequest,
     SyncWriteResponse,
     SyncWriteResult,
+    UpdatePoolRequest,
     Vm,
     VmNetwork,
     VmPolicies,
@@ -591,107 +591,53 @@ class Arker:
         )
         return _decode_model(DeleteFilesystemResponse, payload)
 
-    # ── Pools (org-scoped, control-plane) ───────────────────────────────
-    # Available to organizations with pools enabled; others get `not_found`.
     def list_pools(self, *, cursor: str | None = None, limit: int | None = None) -> ListPoolsResponse:
-        """List the organization's pools, newest first."""
+        """List pools across regions through the control plane."""
         path = _build_query("/v1/pools", ListPoolsParameters(cursor=cursor, limit=limit))
         return _decode_model(ListPoolsResponse, self._request("GET", path, base_url=self._control_base_url))
 
     def get_pool(self, pool_id: str) -> Pool:
-        payload = self._request("GET", f"/v1/pools/{_segment(pool_id)}", base_url=self._control_base_url)
-        return _decode_model(Pool, payload)
+        return _decode_value(Pool, self._request("GET", f"/v1/pools/{_segment(pool_id)}"))
 
-    def get_pool_usage(self, pool_id: str) -> PoolUsage:
-        """Resources currently allocated to VMs in the pool."""
-        payload = self._request("GET", f"/v1/pools/{_segment(pool_id)}/usage", base_url=self._control_base_url)
-        return _decode_model(PoolUsage, payload)
+    def create_pool(self, request: CreatePoolRequest | dict[str, Any]) -> Pool:
+        """Create in this client's region. For BYOC, open the returned byoc.setup_url."""
+        return _decode_value(Pool, self._request("POST", "/v1/pools", request))
+
+    def update_pool(self, pool_id: str, request: UpdatePoolRequest | dict[str, Any]) -> Pool:
+        """Replace supplied fields. Use {"name": None} to clear the name."""
+        preserve_nulls = isinstance(request, dict)
+        return _decode_value(
+            Pool,
+            self._request(
+                "PATCH",
+                f"/v1/pools/{_segment(pool_id)}",
+                request,
+                preserve_nulls=preserve_nulls,
+            ),
+        )
 
     def rename_pool(self, pool_id: str, name: str | None) -> Pool:
-        """Set a pool's name, or pass ``None`` to remove it. Requires an admin key."""
-        payload = self._request(
-            "PATCH",
-            f"/v1/pools/{_segment(pool_id)}",
-            {"name": name},
-            base_url=self._control_base_url,
-            preserve_nulls=True,
+        return self.update_pool(pool_id, {"name": name})
+
+    def delete_pool(self, pool_id: str) -> Pool:
+        """Delete the pool and all its VMs. Refused during an active commitment."""
+        return _decode_value(Pool, self._request("DELETE", f"/v1/pools/{_segment(pool_id)}"))
+
+    def add_pool_commitment(self, pool_id: str, commitment: PoolCommitment) -> Pool:
+        """Read then replace commitments. Serialize concurrent commitment edits."""
+        pool = self.get_pool(pool_id)
+        if pool.type != "managed":
+            raise ValueError(f"{pool.type} pools do not support commitments")
+        return self.update_pool(pool_id, UpdatePoolRequest(commitments=[*pool.commitments, commitment]))
+
+    def list_pool_workers(self, pool_id: str) -> ListPoolWorkersResponse:
+        return _decode_model(
+            ListPoolWorkersResponse,
+            self._request(
+                "GET",
+                f"/v1/pools/{_segment(pool_id)}/workers",
+            ),
         )
-        return _decode_model(Pool, payload)
-
-    def create_pool(
-        self,
-        *,
-        resources: PoolResources | dict[str, int],
-        duration_seconds: int,
-        name: str | None = None,
-        provider: str | None = None,
-        region: str | None = None,
-        idempotency_key: str | None = None,
-    ) -> Pool:
-        """Buy a pool at the current price, billed on the next invoice. Requires an admin key.
-
-        Prices the pool, then buys it at exactly that price: if the price
-        changes in between, this raises a ``conflict`` rather than paying a
-        different amount. Member VMs' usage beyond the pool's resources bills at
-        normal rates. ``provider`` and ``region`` default to the client's
-        placement. Without ``idempotency_key`` each call buys a new pool; only
-        this SDK's own retries within that call are deduplicated.
-        """
-        request = self._pool_request(resources, duration_seconds, name, provider, region)
-        quote = self._quote_pool(request)
-        return self._buy_pool(request, quote.amount_cents, idempotency_key or f"sdk-pool-{_ulid()}")
-
-    def _pool_request(
-        self,
-        resources: PoolResources | dict[str, int],
-        duration_seconds: int,
-        name: str | None,
-        provider: str | None,
-        region: str | None,
-    ) -> PoolQuoteRequest:
-        provider = provider or self._provider
-        region = region or self._region
-        if not provider or not region:
-            raise ValueError(
-                "provider and region are required for a pool; pass them or configure the client's placement"
-            )
-        return PoolQuoteRequest(
-            provider=provider,
-            region=region,
-            resources=resources if isinstance(resources, PoolResources) else PoolResources(**resources),
-            duration_seconds=duration_seconds,
-            name=name,
-        )
-
-    def _quote_pool(self, request: PoolQuoteRequest) -> PoolQuote:
-        """Price a pool without buying it."""
-        payload = self._request("POST", "/v1/pools/quote", request, base_url=self._control_base_url)
-        return _decode_model(PoolQuote, payload)
-
-    def _buy_pool(self, request: PoolQuoteRequest, amount_cents: int, idempotency_key: str) -> Pool:
-        """Buy at a quoted price.
-
-        The key is bound once, so every retry replays the same purchase rather
-        than buying another -- which is what makes it safe to retry a purchase
-        whose response was lost.
-        """
-        body = CreatePoolRequest(
-            provider=request.provider,
-            region=request.region,
-            resources=request.resources,
-            duration_seconds=request.duration_seconds,
-            amount_cents=amount_cents,
-            name=request.name,
-        )
-        payload = self._request(
-            "POST",
-            "/v1/pools",
-            body,
-            base_url=self._control_base_url,
-            extra_headers={"Idempotency-Key": idempotency_key},
-            retry_network_failures=True,
-        )
-        return _decode_model(Pool, payload)
 
     def _request(
         self,
@@ -1447,6 +1393,8 @@ class VM:
 
         Requires the ``websocket-client`` package — ``pip install 'arker[pty]'``.
         """
+        if getattr(self, "pool_id", None):
+            raise ValueError("Pool VMs do not support interactive shells; use run instead.")
         # Plain-text by default. A PTY inherits its session's environment, so
         # this is set when the session is created — no per-command prefixing and
         # no server-side change. An explicit `env` wins over the plain defaults,
@@ -1970,6 +1918,9 @@ def _decode_value(annotation: Any, value: Any) -> Any:
         if isinstance(value, dict):
             candidates: list[tuple[tuple[int, int], type[Any]]] = []
             for model_type in model_types:
+                tag = get_type_hints(model_type).get("type")
+                if get_origin(tag) is Literal and value.get("type") not in get_args(tag):
+                    continue
                 fields = dataclasses.fields(model_type)
                 field_names = {field.name for field in fields}
                 required = {
@@ -2062,6 +2013,8 @@ def _delete_after_failed_build(vm: VM, attempts: int = 3, base_delay_s: float = 
 
 
 def _is_retryable(status: int, error: ArkerError | None, *, replay_safe: bool = False) -> bool:
+    if error and error.code == "quota_exceeded":
+        return False
     if error and error.body and error.body.recovery:
         work = error.body.recovery.work
         if work != "not_started":

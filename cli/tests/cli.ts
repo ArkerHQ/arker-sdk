@@ -653,60 +653,51 @@ async function testWhoamiUsesAuthenticatedControlPlane(): Promise<void> {
   );
 }
 
-const POOL_TERMS = { resources: { vcpu: 8, memory_mib: 32768 }, duration_seconds: 2_592_000 };
-const CLI_POOL = {
-  pool_id: "7d1f7c2e-8a53-4c1e-9f3a-2b6d0c4e5f61",
-  name: "ci",
-  provider: "aws",
-  region: "us-west-2",
-  ...POOL_TERMS,
-  status: "active",
-  created_at: "2026-09-25T00:00:00Z",
-  starts_at: "2026-09-25T00:00:00Z",
-  ends_at: "2026-10-25T00:00:00Z",
-  currency: "usd",
-  amount_cents: 12_345,
-  invoice_id: null,
-};
-const CLI_POOL_QUOTE = {
-  name: "ci",
-  catalog_version: "v1",
-  baseline_cents: 15_000,
-  discount_percent: 17.7,
-  provider: "aws",
-  region: "us-west-2",
-  ...POOL_TERMS,
-  currency: "usd",
-  amount_cents: 12_345,
-};
-const POOL_ARGS = [
-  "--provider", "aws", "--region", "us-west-2", "--vcpu", "8", "--memory-mib", "32768", "--days", "30", "--name", "ci",
-];
-
-function poolResponder(request: CapturedRequest, res: ServerResponse): void {
-  jsonResponse(res, request.url === "/api/v1/pools/quote" ? CLI_POOL_QUOTE : CLI_POOL);
+const CLI_POOL = { pool_id: "pool-1", type: "byoc", provider: "aws", name: "ci", platform: "icelake", region: "aws-us-west-2", state: "creating", byoc: { account_id: "123456789012", setup_url: "https://console.aws.amazon.com/setup" } };
+const POOL_ARGS = ["--type", "byoc", "--platform", "icelake", "--vcpu", "8", "--memory-mib", "32768", "--disk-mib", "0", "--account-id", "123456789012", "--subnet-id", "subnet-1", "--name", "ci"];
+async function testPoolsCreateShowsSetup(): Promise<void> {
+  await withCapturedServer((_req, res) => jsonResponse(res, CLI_POOL), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["pools", "create", ...POOL_ARGS]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(stdoutText(result).includes(CLI_POOL.byoc.setup_url));
+    assert.match(stdoutText(result), /create the stack/);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]!.url, "/api/v1/pools");
+    assert.deepEqual(requests[0]!.body, { type: "byoc", provider: "aws", platform: "icelake", name: "ci", resources: { vcpu: 8, memory_mib: 32768, disk_mib: 0 }, byoc: { account_id: "123456789012", subnet_ids: ["subnet-1"] } });
+  });
 }
-
-async function testPoolsCreateNeedsConfirmationWithoutATerminal(): Promise<void> {
-  await withCapturedServer(poolResponder, async (baseUrl, requests) => {
-    const result = await runCli(baseUrl, ["pools", "create", ...POOL_ARGS], { controlOnly: true });
-    assert.equal(result.code, 1);
-    assert.match(result.stderr, /pass --yes/);
-    assert.equal(requests.length, 0, "nothing may be quoted or bought without confirmation");
+async function testPoolsCreateJson(): Promise<void> {
+  await withCapturedServer((_req, res) => jsonResponse(res, CLI_POOL), async (baseUrl) => {
+    const result = await runCli(baseUrl, ["pools", "create", ...POOL_ARGS, "--json"]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(JSON.parse(stdoutText(result)), CLI_POOL);
   });
 }
 
-async function testPoolsCreateYesBuysAtTheQuotedPrice(): Promise<void> {
-  await withCapturedServer(poolResponder, async (baseUrl, requests) => {
-    const result = await runCli(baseUrl, ["pools", "create", "--yes", ...POOL_ARGS], { controlOnly: true });
+async function testPoolManagementCommands(): Promise<void> {
+  const existing = { starts_at: "2026-01-01T00:00:00Z", ends_at: "2026-01-02T00:00:00Z" };
+  const added = { starts_at: "2027-01-01T00:00:00Z", ends_at: "2027-01-02T00:00:00Z" };
+  await withCapturedServer((_req, res) => jsonResponse(res, { ...CLI_POOL, type: "managed", commitments: [existing] }), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["pools", "add-commitment", "pool-1", "--starts-at", added.starts_at, "--ends-at", added.ends_at]);
     assert.equal(result.code, 0, result.stderr);
-    assert.equal(JSON.parse(stdoutText(result)).pool_id, CLI_POOL.pool_id);
-    const [quote, buy] = requests;
-    assert.equal(quote!.url, "/api/v1/pools/quote");
-    assert.equal(quote!.idempotencyKey, undefined);
-    assert.equal(buy!.url, "/api/v1/pools");
-    assert.deepEqual(buy!.body, { ...(quote!.body as object), amount_cents: 12_345 });
-    assert.match(buy!.idempotencyKey ?? "", /^cli-pool-/);
+    assert.deepEqual(requests.map(r => r.method), ["GET", "PATCH"]);
+    assert.deepEqual(requests[1]!.body, { commitments: [existing, added] });
+  });
+  for (const [args, method, path] of [
+    [["workers", "pool-1"], "GET", "/pool-1/workers"],
+    [["rm", "pool-1"], "DELETE", "/pool-1"],
+  ] as const) {
+    await withCapturedServer((_req, res) => jsonResponse(res, {}), async (baseUrl, requests) => {
+      const result = await runCli(baseUrl, ["pools", ...args]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.deepEqual(requests.map(r => [r.method, r.url]), [[method, `/api/v1/pools${path}`]]);
+    });
+  }
+  await withCapturedServer((_req, res) => jsonResponse(res, { vm_id: "vm-1", pool_id: "pool-1" }), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["shell", "vm-1"]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /Pool VMs do not support interactive shells/);
+    assert.equal(requests.length, 1);
   });
 }
 
@@ -1457,8 +1448,9 @@ await testComputeCommandRequiresProviderAndRegion();
 await testProviderOnlyVmListDoesNotRequireAComputeRegion();
 await testRegionsDiscoveryNeedsNoCredentialsOrPlacement();
 await testWhoamiUsesAuthenticatedControlPlane();
-await testPoolsCreateNeedsConfirmationWithoutATerminal();
-await testPoolsCreateYesBuysAtTheQuotedPrice();
+await testPoolsCreateShowsSetup();
+await testPoolsCreateJson();
+await testPoolManagementCommands();
 await testRemovedSecretAndUrlFlagsFailLocally();
 await testHelpMatchesSupportedSurface();
 await testPerCommandHelpIsCommandSpecific();
