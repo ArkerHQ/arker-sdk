@@ -91,7 +91,7 @@ type UpdatePoolRequest struct {
 
 type PoolWorker struct {
 	WorkerID             string        `json:"worker_id"`
-	Status               string        `json:"status"`
+	State                string        `json:"state"`
 	ResourcesProvisioned PoolResources `json:"resources_provisioned"`
 	ResourcesReserved    PoolResources `json:"resources_reserved"`
 	LastSeenAt           string        `json:"last_seen_at"`
