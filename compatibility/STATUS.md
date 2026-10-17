@@ -3,15 +3,19 @@
 ## Current validation
 
 The branch includes SDK main at 2ec474e. Fresh runtime-scoped differential
-reports verify **44/944 Python** entries on CPython 3.12.14/Linux/aarch64 and
-**21/928 TypeScript** entries on Node 22.23.3/Linux/arm64. The Node profile uses
+reports verify **47/944 Python** entries on CPython 3.12.14/Linux/aarch64 and
+**24/928 TypeScript** entries on Node 22.23.3/Linux/arm64. The Node profile uses
 the locally linked draft ComputeSDK providers from computesdk #6, not published
 provider releases. Both inventories are complete in their declared scope.
-The strict gates still exit 1: **900 Python and 907 TypeScript** entries remain
+The strict gates still exit 1: **897 Python and 904 TypeScript** entries remain
 unverified. Neither method counts nor these scenarios establish full equivalence.
 
 The unchanged files/process programs and new private HTTP programs passed all
-twelve Python cases. Node passed the three files/process routes and six HTTP
+twelve Python cases. Three additional E2B cases in each language preserve native
+environment option names, success results and typed nonzero command errors,
+including stdout, stderr, exit code and error text. The native TypeScript route
+also normalizes duplicate installed SDK exception classes without swallowing
+unrelated errors. Node passed the three files/process routes and six HTTP
 cases: original Blaxel, shim on Blaxel, and shim on Arker, with both H2 and
 explicitly disabled-H2 profiles. HTTP coverage includes every byte value,
 both application auth headers, repeated-header normalization, chunked and HEAD
@@ -23,7 +27,7 @@ run with inbound and outbound denied. They require the draft backend private
 port API, not a public ingress exception. Fresh feature tests passed all 58
 private-port/HTTPS/HTTP2/WebSocket cases with zero skips.
 
-Local validation passes 358 Python unit tests and lint, and the full TypeScript
+Local validation passes 360 Python unit tests and lint, and the full TypeScript
 test/build/typecheck pipeline. Source/vendor snapshots now reject changes during
 a scenario; runtime profiles are included in fingerprints. Existing evidence
 grouping tests also reject collisions and malformed events. These measurement

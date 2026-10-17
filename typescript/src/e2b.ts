@@ -1,5 +1,8 @@
 import { e2b as createE2BProvider } from "@computesdk/e2b";
 import type { RunCommandOptions } from "computesdk";
+import { CommandExitError, type CommandStartOpts } from "e2b";
+
+export { CommandExitError } from "e2b";
 
 import {
   assertSupportedObjectKeys,
@@ -16,6 +19,13 @@ export interface CommandExitResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  error?: string;
+}
+
+type CommandOptions = RunCommandOptions & CommandStartOpts;
+interface NativeSandbox {
+  getHost?: (port: number) => string;
+  commands?: { run: (command: string, options?: CommandStartOpts) => Promise<any> };
 }
 
 const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess"] as const;
@@ -31,11 +41,11 @@ export class Sandbox {
   readonly sandboxId: string;
   readonly provider: string;
   #box: UniversalSandbox;
-  #native?: { getHost?: (port: number) => string };
+  #native?: NativeSandbox;
   #arkerHostname?: string;
 
   readonly commands: {
-    run: (command: string, options?: RunCommandOptions) => Promise<CommandExitResult>;
+    run: (command: string, options?: CommandOptions) => Promise<CommandExitResult>;
   };
 
   readonly files: {
@@ -49,21 +59,50 @@ export class Sandbox {
 
   private constructor(box: UniversalSandbox, native?: object, arkerHostname?: string) {
     this.#box = box;
-    this.#native = native as { getHost?: (port: number) => string } | undefined;
+    this.#native = native as NativeSandbox | undefined;
     this.#arkerHostname = arkerHostname;
     this.sandboxId = box.sandboxId;
     this.provider = box.provider;
     this.commands = {
       run: async (command, options) => {
+        const { env, envs, timeout, timeoutMs, ...rest } = options ?? {};
+        if (env !== undefined && envs !== undefined) throw new TypeError("Pass envs, not both env and envs");
+        if (timeout !== undefined && timeoutMs !== undefined) throw new TypeError("Pass timeoutMs, not both timeout and timeoutMs");
+        if (this.#native?.commands) {
+          try {
+            return await this.#native.commands.run(command, {
+              ...rest,
+              ...(envs !== undefined || env !== undefined ? { envs: envs ?? env } : {}),
+              ...(timeoutMs !== undefined || timeout !== undefined ? { timeoutMs: timeoutMs ?? timeout } : {}),
+            });
+          } catch (error) {
+            // A provider can resolve another installed copy of the same vendor SDK.
+            const exit = error as Partial<CommandExitError> | null;
+            if (!(error instanceof CommandExitError) && exit?.name === "CommandExitError"
+              && Number.isInteger(exit.exitCode) && exit.exitCode !== 0
+              && typeof exit.stdout === "string" && typeof exit.stderr === "string"
+              && (exit.error === undefined || typeof exit.error === "string")) {
+              throw new CommandExitError({ stdout: exit.stdout, stderr: exit.stderr, exitCode: exit.exitCode!, error: exit.error });
+            }
+            throw error;
+          }
+        }
+        assertSupportedObjectKeys(options, ["cwd", "env", "envs", "timeout", "timeoutMs", "background"], "e2b", "commands.run");
+        if (options?.background) throw new TypeError("E2B background CommandHandle is not yet supported on Arker");
         const result = await this.#box.runCommand(command, {
-          ...options,
+          ...rest,
+          ...(envs !== undefined || env !== undefined ? { env: envs ?? env } : {}),
+          ...(timeoutMs !== undefined || timeout !== undefined ? { timeout: timeoutMs ?? timeout } : {}),
           ...(this.provider === "arker" && options?.cwd === undefined ? { cwd: "/home/user" } : {}),
         });
-        return {
+        const output = {
           stdout: result.stdout,
           stderr: result.stderr,
           exitCode: result.exitCode,
+          error: result.exitCode === 0 ? undefined : `exit status ${result.exitCode}`,
         };
+        if (result.exitCode !== 0) throw new CommandExitError(output);
+        return output;
       },
     };
     this.files = {

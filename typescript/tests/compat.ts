@@ -4,6 +4,7 @@ import type { CommandResult, FileEntry, RunCommandOptions, SandboxInfo, SandboxI
 
 import { Daytona } from "../src/daytona.js";
 import { Sandbox as E2BSandbox } from "../src/e2b.js";
+import { CommandExitError } from "e2b";
 import { SandboxInstance as BlaxelSandbox } from "../src/blaxel.js";
 import { ModalClient } from "../src/modal.js";
 import { createArkerComputeProvider } from "../src/compat/arker-provider.js";
@@ -202,11 +203,13 @@ async function testE2BSurface(): Promise<void> {
     assert.equal(sandbox.getHost(8080), "p8080.example.invalid");
     assert.equal(sandbox.getHost(3000), "p8080-3000.example.invalid");
 
-    const command = await sandbox.commands.run("printf e2b", { cwd: "/tmp", env: { A: "b" }, timeout: 200 });
-    assert.deepEqual(command, {
-      stdout: "stdout:printf e2b",
-      stderr: "stderr:printf e2b",
-      exitCode: 7,
+    await assert.rejects(() => sandbox.commands.run("printf e2b", { cwd: "/tmp", envs: { A: "b" }, timeoutMs: 200 }), (error: unknown) => {
+      assert.ok(error instanceof CommandExitError);
+      assert.equal(error.stdout, "stdout:printf e2b");
+      assert.equal(error.stderr, "stderr:printf e2b");
+      assert.equal(error.exitCode, 7);
+      assert.equal(error.error, "exit status 7");
+      return true;
     });
     assert.deepEqual(box.runCalls[0]!.options, { cwd: "/tmp", env: { A: "b" }, timeout: 200 });
 
@@ -235,6 +238,31 @@ async function testE2BSurface(): Promise<void> {
     );
   } finally {
     fake.cleanup();
+  }
+}
+
+async function testE2BNativeErrorIdentity(): Promise<void> {
+  const foreignExit = Object.assign(new Error("exit status 17"), {
+    name: "CommandExitError", stdout: "output", stderr: "failure", exitCode: 17, error: "exit status 17",
+  });
+  const authentication = new Error("authentication refused");
+  for (const failure of [foreignExit, authentication]) {
+    const box = new FakeSandbox("native-e2b", "e2b", {
+      commands: { run: async () => { throw failure; } },
+    });
+    installFakeCompute(box);
+    try {
+      const sandbox = await E2BSandbox.create();
+      await assert.rejects(() => sandbox.commands.run("exit 17"), (error: unknown) => {
+        if (failure === authentication) assert.equal(error, authentication);
+        else {
+          assert.ok(error instanceof CommandExitError);
+          assert.equal(error.exitCode, 17);
+          assert.equal(error.error, "exit status 17");
+        }
+        return true;
+      });
+    } finally { setCompatComputeFactoryForTests(); }
   }
 }
 
@@ -587,6 +615,7 @@ await testDaytonaSurface();
 await testNativeProviderExtensionsAreDelegated();
 await testDaytonaGetNotFound();
 await testE2BSurface();
+await testE2BNativeErrorIdentity();
 await testModalSurface();
 await testInternalArkerProvider();
 await testInternalArkerProviderImageAndResources();

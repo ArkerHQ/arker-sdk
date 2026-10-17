@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import re
 import shlex
+from dataclasses import dataclass
 from typing import Any
 
 from ._compat import (
-    CommandResult,
+    CommandResult as _CommonCommandResult,
+)
+from ._compat import (
     UnsupportedCompatibilityOption,
     UnsupportedMixin,
     arker_create,
@@ -22,10 +25,25 @@ from ._compat import (
 from .computer import VM
 
 
+@dataclass(frozen=True)
+class _CommandResult(_CommonCommandResult):
+    error: str | None = None
+
+
+class _CommandExitException(RuntimeError):
+    def __init__(self, *, stdout: str, stderr: str, exit_code: int, error: str | None = None):
+        self.stdout, self.stderr, self.exit_code, self.error = stdout, stderr, exit_code, error
+        super().__init__(f"Command exited with code {exit_code} and error:\n{stderr}")
+
+
 def __getattr__(name: str) -> Any:
     module = import_optional("e2b")
     if module is not None:
         return getattr(module, name)
+    if name == "CommandResult":
+        return _CommandResult
+    if name == "CommandExitException":
+        return _CommandExitException
     raise AttributeError(name)
 
 
@@ -42,14 +60,18 @@ class Commands(UnsupportedMixin):
         *,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        envs: dict[str, str] | None = None,
         timeout: int | None = None,
         background: bool = False,
-    ) -> CommandResult | Any:
+    ) -> _CommonCommandResult | Any:
+        if env is not None and envs is not None:
+            raise TypeError("Pass envs, not both env and envs")
+        environment = envs if envs is not None else env
         if self._vm is not None:
             prefix = ""
-            if env:
+            if environment:
                 exports = []
-                for key, value in env.items():
+                for key, value in environment.items():
                     if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) is None:
                         raise ValueError(f"Invalid environment variable name: {key}")
                     exports.append(f"export {key}={shlex.quote(value)};")
@@ -58,10 +80,17 @@ class Commands(UnsupportedMixin):
             full_command = prefix + command
             if background:
                 full_command = f"nohup sh -lc {shlex.quote(full_command)} > /dev/null 2>&1 &"
-            return run_command(self._vm, full_command, timeout=timeout)
+            result = run_command(self._vm, full_command, timeout=timeout)
+            module = import_optional("e2b")
+            fields = {"stdout": result.stdout, "stderr": result.stderr, "exit_code": result.exit_code, "error": None}
+            if result.exit_code != 0:
+                fields["error"] = f"exit status {result.exit_code}"
+                error_type = getattr(module, "CommandExitException", _CommandExitException)
+                raise error_type(**fields)
+            return getattr(module, "CommandResult", _CommandResult)(**fields)
         native_options = {
             **({"cwd": cwd} if cwd is not None else {}),
-            **({"env": env} if env is not None else {}),
+            **({"envs": environment} if environment is not None else {}),
             **({"timeout": timeout} if timeout is not None else {}),
             **({"background": True} if background else {}),
         }
