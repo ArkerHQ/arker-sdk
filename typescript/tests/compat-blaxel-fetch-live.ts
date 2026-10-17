@@ -138,6 +138,7 @@ async function program(
 
 if (!process.env.ARKER_API_KEY || !process.env.BL_API_KEY)
   throw new Error("Live credentials required");
+assert(process.env.BL_REGION, "BL_REGION is required to exercise Blaxel H2 rather than its regionless Fetch fallback");
 const directory = await mkdtemp(join(tmpdir(), "compat-private-fetch-"));
 const previous = process.env.COMPUTESDK_ROUTER_CONFIG;
 const previousH2 = settings.config.disableH2;
@@ -165,6 +166,10 @@ try {
         await program(
           traceVendor(constructor, "SandboxInstance.static", called),
           async (sandbox) => {
+            if (provider === "blaxel") {
+              assert.equal(Boolean(sandbox.h2Domain), !disableH2,
+                "Native sandbox did not select the requested H2/Fetch profile");
+            }
             assert.equal(
               settings.disableH2,
               disableH2,

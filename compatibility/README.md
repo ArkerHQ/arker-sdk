@@ -140,6 +140,11 @@ They are supplementary checks, not native-provider API equivalence evidence.
 
 For the Node integration profile, run the TypeScript programs and reporter with
 `npx -y tsx@4.20.6` instead of Bun. Mixing runtimes correctly invalidates evidence.
+Set `BL_REGION` to an available Blaxel region (for example `us-pdx-1`) for the
+Node private-fetch scenario. Enabling H2 alone does not select it: the native
+SDK uses regular Fetch when no region is supplied. The scenario verifies the
+actual native H2 domain before testing each transport profile; a fallback must
+not be reported as H2 coverage.
 Python private HTTP requires the native Blaxel SDK's HTTP dependencies, or
 `pip install 'arker[blaxel]'` for Arker-only HTTP use.
 Python E2B command handles require `arker[e2b]` and Python 3.11 or later, matching
