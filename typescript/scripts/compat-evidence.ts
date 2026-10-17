@@ -30,14 +30,20 @@ export function verifiedScenarios(api: string, evidence: any[], version: string,
   const groups = new Map<string, { routes: Set<string>; failed: boolean }>();
   for (const item of evidence) {
     if (item.implementation_fingerprint !== fingerprint || item.vendor_version !== version) continue;
-    const key = `${item.run}:${item.scenario}`;
+    if (![item.run, item.scenario].every((value) => typeof value === "string" && value.trim()) ||
+      !["reference", "native", "arker"].includes(item.route) ||
+      !["passed", "failed"].includes(item.outcome) || !Array.isArray(item.apis) ||
+      !item.apis.every((api: unknown) => typeof api === "string" && api.trim())) {
+      throw new Error("Invalid compatibility evidence");
+    }
+    const key = JSON.stringify([item.run, item.scenario]);
     const group = groups.get(key) ?? { routes: new Set<string>(), failed: false };
     if (item.outcome === "passed" && item.apis.includes(api)) group.routes.add(item.route);
     else if (item.outcome !== "passed") group.failed = true;
     groups.set(key, group);
   }
   return [...groups].filter(([, group]) => !group.failed && ["reference", "native", "arker"].every((route) => group.routes.has(route)))
-    .map(([key]) => key).sort();
+    .map(([key]) => (JSON.parse(key) as string[]).join(":")).sort();
 }
 
 export async function recordEvidence(provider: "blaxel" | "e2b" | "modal" | "daytona", route: string, scenario: string, apis: string[], outcome: string): Promise<void> {

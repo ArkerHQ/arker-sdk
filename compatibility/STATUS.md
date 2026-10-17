@@ -1,5 +1,23 @@
 # Recorded coverage baseline
 
+## Current-main validation
+
+On 2026-10-17 the branch was merged with SDK `main` at `2ec474e`.
+Both strict reporters reject all previous live evidence because upstream SDK
+implementation files changed: the current fingerprints have **0/944 Python**
+and **0/928 TypeScript** scenario-verified entries. Both inventories are complete
+within their declared bounded scope, and both strict gates return exit code 1.
+The historical live results below must not be used as current-head certification.
+
+Post-merge local validation passes: 298 Python unit tests and lint, plus the full
+TypeScript test/build/typecheck pipeline. New evidence-validator regressions
+first failed in both languages, demonstrating that colon-delimited run/scenario
+keys could combine unrelated runs. Tuple keys now isolate those runs; malformed
+current evidence also fails closed. These are harness tests, not live parity
+credit.
+
+## Historical live baseline
+
 Measured against the pinned vendor SDKs on 2026-10-16. Counts below are public
 entries within the bounded inventory described in `README.md`, not claims that
 each entry's option combinations or error paths are equivalent.

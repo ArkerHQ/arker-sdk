@@ -98,13 +98,21 @@ def verified_scenarios(api, evidence, version, fingerprint):
     for item in evidence:
         if item.get("vendor_version") != version or item.get("implementation_fingerprint") != fingerprint:
             continue
-        group = f"{item['run']}:{item['scenario']}"
+        if (
+            not all(isinstance(item.get(key), str) and item[key].strip() for key in ("run", "scenario"))
+            or item.get("route") not in ("reference", "native", "arker")
+            or item.get("outcome") not in ("passed", "failed")
+            or not isinstance(item.get("apis"), list)
+            or not all(isinstance(api, str) and api.strip() for api in item["apis"])
+        ):
+            raise ValueError("Invalid compatibility evidence")
+        group = (item["run"], item["scenario"])
         if item.get("outcome") != "passed":
             failures.add(group)
         elif api in item.get("apis", []):
             groups.setdefault(group, set()).add(item["route"])
     return sorted(
-        group
+        f"{group[0]}:{group[1]}"
         for group, routes in groups.items()
         if {"reference", "native", "arker"} <= routes and group not in failures
     )

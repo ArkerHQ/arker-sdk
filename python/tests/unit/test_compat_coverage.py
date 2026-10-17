@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 spec = importlib.util.spec_from_file_location(
     "compat_coverage", Path(__file__).resolve().parents[2] / "scripts" / "compat_coverage.py"
 )
@@ -40,3 +42,42 @@ def test_evidence_requires_reference_and_both_routes_for_current_code_and_versio
         )
         == []
     )
+
+
+def test_evidence_cannot_combine_colliding_run_and_scenario_names():
+    events = [
+        {
+            "run": run,
+            "scenario": scenario,
+            "route": route,
+            "outcome": "passed",
+            "apis": ["process.exec"],
+            "vendor_version": "1",
+            "implementation_fingerprint": "current",
+        }
+        for run, scenario, route in [
+            ("a:b", "c", "reference"),
+            ("a:b", "c", "native"),
+            ("a", "b:c", "arker"),
+        ]
+    ]
+    assert coverage.verified_scenarios("process.exec", events, "1", "current") == []
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("run", ""), ("scenario", None), ("route", "other"), ("outcome", "skipped"), ("apis", "process.exec")],
+)
+def test_malformed_current_evidence_fails_closed(field, value):
+    event = {
+        "run": "run-1",
+        "scenario": "exec",
+        "route": "arker",
+        "outcome": "passed",
+        "apis": ["process.exec"],
+        "vendor_version": "1",
+        "implementation_fingerprint": "current",
+        field: value,
+    }
+    with pytest.raises(ValueError, match="Invalid compatibility evidence"):
+        coverage.verified_scenarios("process.exec", [event], "1", "current")

@@ -28,4 +28,13 @@ assert.deepEqual(verifiedScenarios("process.exec", [...complete, event("arker", 
 assert.deepEqual(verifiedScenarios("process.exec", [...native, event("arker", { run: "run-2" })], "1", "current"), []);
 assert.deepEqual(verifiedScenarios("process.kill", complete, "1", "current"), []);
 assert.deepEqual(verifiedScenarios("process.exec", [...complete, event("arker", { outcome: "failed", apis: [] })], "1", "current"), []);
+
+assert.deepEqual(verifiedScenarios("process.exec", [
+  event("reference", { run: "a:b", scenario: "c" }),
+  event("native", { run: "a:b", scenario: "c" }),
+  event("arker", { run: "a", scenario: "b:c" }),
+], "1", "current"), []);
+for (const options of [{ run: "" }, { scenario: null }, { route: "other" }, { outcome: "skipped" }, { apis: "process.exec" }]) {
+  assert.throws(() => verifiedScenarios("process.exec", [event("arker", options)], "1", "current"), /Invalid compatibility evidence/);
+}
 console.log("PASS compatibility coverage evidence validation");
