@@ -15,6 +15,24 @@ coverage = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(coverage)
 
 
+def test_inventory_includes_blaxel_sandbox_storage_secrets_and_images():
+    roots = {(style, prefix) for style, prefix, _, _ in coverage.ROOTS["blaxel"]}
+    for style in ("sync", "async"):
+        for prefix in ("DriveInstance", "VolumeInstance", "SecretInstance", "Snapshot"):
+            assert (style, prefix) in roots
+    assert ("sync", "ImageInstance") in roots
+
+
+def test_blaxel_import_shim_keeps_core_resource_exports():
+    native = pytest.importorskip("blaxel.core")
+    from arker import blaxel
+
+    for name in (
+        "DriveInstance", "SyncDriveInstance", "VolumeInstance", "SyncVolumeInstance", "SecretInstance", "ImageInstance"
+    ):
+        assert getattr(blaxel, name) is getattr(native, name)
+
+
 def test_inventory_includes_modal_returned_process_and_stream_surfaces():
     roots = {(style, prefix, native) for style, prefix, native, _ in coverage.ROOTS["modal"]}
     for style in ("sync", "async"):

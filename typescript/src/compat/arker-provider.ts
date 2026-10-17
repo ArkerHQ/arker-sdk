@@ -26,6 +26,10 @@ export interface ArkerComputeProviderConfig extends ArkerOptions {
   source?: string;
   sourceVmName?: string;
   sourceVmId?: string;
+  /** Applied at fork time; policy secrets stay outside the guest environment. */
+  policies?: ForkOptions["policies"];
+  /** Used only when creating from an image, never when forking an existing VM. */
+  registryAuth?: ForkOptions["registry_auth"];
 }
 
 interface DirectProvider {
@@ -86,13 +90,12 @@ function networkPolicies(values: Record<string, unknown>): ForkOptions["policies
 
 function toFileEntries(stdout: string): FileEntry[] {
   const entries: FileEntry[] = [];
-  for (const line of stdout.split("\n")) {
-    if (!line) continue;
-    const parts = line.split("\t");
-    if (parts.length < 4) continue;
-    const [type, size, mtime, ...nameParts] = parts;
+  // POSIX filenames may contain tabs and newlines, but never NUL.
+  const fields = stdout.split("\0");
+  for (let index = 0; index + 3 < fields.length; index += 4) {
+    const [type, size, mtime, name] = fields.slice(index, index + 4);
     entries.push({
-      name: nameParts.join("\t"),
+      name: name!,
       type: type === "d" ? "directory" : "file",
       size: Number(size) || 0,
       modified: new Date((Number(mtime) || 0) * 1000),
@@ -127,10 +130,10 @@ class ArkerComputeSandbox implements SandboxInterface {
         const script =
           `cd ${p} 2>/dev/null || exit 3; ` +
           `for e in * .*; do ` +
-          `[ "$e" = "." ] && continue; [ "$e" = ".." ] && continue; [ -e "$e" ] || continue; ` +
+          `[ "$e" = "." ] && continue; [ "$e" = ".." ] && continue; [ -e "$e" ] || [ -L "$e" ] || continue; ` +
           `if [ -d "$e" ]; then t=d; else t=f; fi; ` +
-          `s=$(stat -c %s "$e" 2>/dev/null || echo 0); m=$(stat -c %Y "$e" 2>/dev/null || echo 0); ` +
-          `printf '%s\\t%s\\t%s\\t%s\\n' "$t" "$s" "$m" "$e"; done`;
+          `s=$(stat -c %s -- "$e" 2>/dev/null || echo 0); m=$(stat -c %Y -- "$e" 2>/dev/null || echo 0); ` +
+          `printf '%s\\000%s\\000%s\\000%s\\000' "$t" "$s" "$m" "$e"; done`;
         const result = await this.runCommand(script);
         if (result.exitCode !== 0) throw new Error(`Arker readdir failed for ${path}: ${result.stderr || `exit ${result.exitCode}`}`);
         return toFileEntries(result.stdout);
@@ -373,12 +376,15 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
           : sourceVmId
             ? { source_vm_id: sourceVmId }
             : { source_vm_name: sourceVmName! };
-        const policies = networkPolicies(values);
+        const network = networkPolicies(values);
+        const policies = config.policies || network ? { ...config.policies, ...network } : undefined;
+        if (network && policies) delete policies.rules;
         const request: ForkOptions = {
           ...sourceRequest,
           ...(options?.name ? { name: options.name } : {}),
           ...(resources ? { resources } : {}),
           ...(policies ? { policies } : {}),
+          ...(image && config.registryAuth ? { registry_auth: config.registryAuth } : {}),
         };
         const vm = await client.fork(request);
         return wrap(vm);

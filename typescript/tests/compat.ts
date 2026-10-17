@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { CommandResult, FileEntry, RunCommandOptions, SandboxInfo, SandboxInterface } from "computesdk";
 
@@ -497,6 +501,34 @@ async function testInternalArkerProviderImageAndResources(): Promise<void> {
   });
 }
 
+async function testInternalArkerDirectoryNames(): Promise<void> {
+  const directory = mkdtempSync(join(tmpdir(), "arker-directory-parity-"));
+  try {
+    const names = ["line\nbreak", "tab\tname", "-leading", ".hidden", "quote'file", "back\\slash"];
+    for (const name of names) writeFileSync(join(directory, name), "hello");
+    mkdirSync(join(directory, "directory\nname"));
+    symlinkSync("missing", join(directory, "dangling"));
+    const fetch = new FakeFetch();
+    fetch.addJson((method, url) => method === "POST" && url.endsWith("/v1/fork"), 200,
+      { vm_id: "vm_directory", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] });
+    const localFetch: typeof globalThis.fetch = async (input, init) => {
+      if (String(input).endsWith("/runs")) {
+        const request = JSON.parse(String(init?.body));
+        return Response.json({ state: "completed", stdout: execFileSync("/bin/sh", ["-c", request.command], { encoding: "utf8" }), stdout_encoding: "utf-8", stderr: "", stderr_encoding: "utf-8", exit_code: 0 });
+      }
+      return fetch.fetch(input, init);
+    };
+    const provider = createArkerComputeProvider({ apiKey: "test", source: "ubuntu", baseUrl: "https://arker.invalid/api", fetch: localFetch, retry: false });
+    const sandbox = await provider.sandbox.create();
+    const entries = await sandbox.filesystem.readdir(directory);
+    assert.deepEqual(entries.map(entry => entry.name).sort(), [...names, "directory\nname", "dangling"].sort());
+    for (const entry of entries.filter(entry => names.includes(entry.name))) assert.equal(entry.size, 5);
+    assert.equal(entries.find(entry => entry.name === "directory\nname")?.type, "directory");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 async function testInternalArkerProviderSourceProvenance(): Promise<void> {
   const fetch = new FakeFetch();
   for (const id of ["vm_from_template", "vm_from_snapshot"]) {
@@ -511,6 +543,27 @@ async function testInternalArkerProviderSourceProvenance(): Promise<void> {
   await provider.sandbox.create({ snapshotId: "snapshot-without-vm-prefix" });
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { source_vm_name: "vm-template-name" });
   assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), { source_vm_id: "snapshot-without-vm-prefix" });
+}
+
+async function testSharedForkPolicySecretsAndRegistry(): Promise<void> {
+  const fetch = new FakeFetch();
+  for (const id of ["vm_child", "vm_image"]) {
+    fetch.addJson((method, url) => method === "POST" && url.endsWith("/v1/fork"), 200,
+      { vm_id: id, owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] });
+  }
+  const policies = { secrets: { TEST_TOKEN: "synthetic-policy-secret" }, rules: { inherited: { type: "outbound", action: "allow" } } } as any;
+  const registryAuth = { username: "synthetic", password: "synthetic-registry-password" };
+  const provider = createArkerComputeProvider({ apiKey: "test", sourceVmId: "vm_image_parent", policies, registryAuth, baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false });
+  await provider.sandbox.create({ blockNetwork: true });
+  await provider.sandbox.create({ image: "private.example/image@sha256:abc" });
+  const [child, image] = fetch.calls.map(call => JSON.parse(call.body!));
+  assert.equal(child.source_vm_id, "vm_image_parent");
+  assert.equal(child.registry_auth, undefined);
+  assert.deepEqual(child.policies, { secrets: policies.secrets, policies: [{ type: "outbound", action: "deny" }] });
+  assert.deepEqual(image.registry_auth, registryAuth);
+  assert.deepEqual(image.policies, policies);
+  assert.equal(image.source_vm_id, undefined);
+  assert.ok(policies.rules.inherited, "network translation must not mutate caller policy config");
 }
 
 async function testDaytonaResourceUnits(): Promise<void> {
@@ -707,7 +760,9 @@ await testE2BNativeErrorIdentity();
 await testModalSurface();
 await testInternalArkerProvider();
 await testInternalArkerProviderImageAndResources();
+await testInternalArkerDirectoryNames();
 await testInternalArkerProviderSourceProvenance();
+await testSharedForkPolicySecretsAndRegistry();
 await testDaytonaResourceUnits();
 await testInternalArkerProviderPolicyReplacement();
 await testInternalArkerProviderRequiresSource();

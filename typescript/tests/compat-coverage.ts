@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import guestSource from "../src/compat/guest-process.generated.js";
 import { captureEvidenceSnapshot, implementationFingerprint, runtimeInfo, verifiedScenarios } from "../scripts/compat-evidence.js";
@@ -12,6 +13,13 @@ import { Image as NativeModalImage } from "modal";
 assert.equal(Template, NativeTemplate);
 assert.equal(DaytonaImage, NativeDaytonaImage);
 assert.equal(ModalImage, NativeModalImage);
+const inventory = JSON.parse(execFileSync("bun", ["scripts/compat-coverage.ts"], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
+assert.equal(inventory.complete_inventory, true, JSON.stringify(inventory.diagnostics));
+for (const name of ["DriveInstance", "VolumeInstance", "Snapshot", "ImageInstance"]) {
+  const entries = inventory.apis.filter((row: { provider: string; api: string }) => row.provider === "blaxel" && row.api.startsWith(`${name}.`));
+  assert.ok(entries.length > 0, `Blaxel ${name} must be inventoried`);
+  assert.ok(entries.every((row: { status: string }) => row.status === "unverified"), "native-only exports are not Arker parity evidence");
+}
 assert.equal(guestSource, await readFile(new URL("../../python/src/arker/_guest_process.py", import.meta.url), "utf8"));
 
 const event = (route: string, options: Record<string, unknown> = {}) => ({

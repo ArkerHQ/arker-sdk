@@ -2,6 +2,48 @@
 
 ## Current validation
 
+The requested target is now core sandbox parity; Apps and Functions stay
+native. Drives/mounts, secrets and image inputs remain in scope, not waived.
+
+The shared fork path now supports Python source VM IDs (including image-backed
+parents), configured host policy secrets in both languages, and registry
+credentials restricted to image-import requests. Provider network constraints
+replace configured network rules without discarding named secrets. These are
+explicit Arker settings, not translations of native Secret/Volume/Image handles.
+Private-registry authentication has request-shape tests, not a live private
+registry fixture.
+
+New feature-environment checks pass in Python and Node: one Ubuntu registry
+import followed by three distinct child VM forks, inherited parent files,
+isolated child writes, masked inherited policy secrets, no corresponding guest
+environment variable, and egress denial with a successful pre-policy connection
+control. Python additionally passes an allowed HTTPS header rewrite containing
+a named synthetic secret and a denied HTTPS destination with its own positive
+control. TLS-classification denial resets the connection before HTTP; a bare
+TCP connect is not an L7 enforcement check.
+
+The TypeScript shared filesystem adapter also fixes newline-delimited filename
+corruption, omitted dangling symlinks and leading-dash stat arguments. Both a
+real-shell regression and the live Node API check cover these names.
+
+Fresh full differential cohorts pass **25 Python and 18 Node cases**, plus
+**two Python and one Node Arker-only image/policy cases**. All **443 Python
+unit tests**, Ruff and the complete TypeScript typecheck/test/build/isolated
+consumer pipeline pass. Packed SHA-256:
+`80f6b059ca5b2b05e8e54ac384252ace88e2c5576b346bb7ff99232fd8cab6a9`.
+
+Blaxel's Python import forwarding now preserves core Drive, Volume, Secret,
+Snapshot and Image helpers, rather than only the sandbox module's exports.
+These helpers remain native, not Arker implementations. The expanded inventory
+records them in both languages: Python **100/1,138** scenario-verified (1,038
+unverified), Node **51/1,048** (997 unverified). Both inventories complete their
+declared roots and both strict gates exit 1; full equivalence remains false.
+Current fingerprints are
+`0402e83e022684050dc98fba09c98ed4a638c9efae527cfe2f30f2c5865f7a83`
+and `be0bf4fe257a7dd774e3e78945676b894519f27845be0356af258257edb89637`.
+The earlier differential fingerprints below are historical. Additional
+Arker-only tests do not grant native-equivalence coverage.
+
 The latest Modal descendant-lifetime fix keeps the managed Arker run alive
 until a Linux subreaper has reaped detached descendants, while the native
 process wait/poll still reports the foreground exit immediately. Before this

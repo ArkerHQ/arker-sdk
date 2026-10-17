@@ -97,12 +97,21 @@ def arker_create(
     request: dict[str, Any] = {"name": name or cfg.get("name")}
     if image:
         request["image"] = image
+        if cfg.get("registry_auth") is not None:
+            request["registry_auth"] = cfg["registry_auth"]
+    elif not template_id and (source_id := cfg.get("source_vm_id")):
+        request["source_vm_id"] = source_id
     else:
         request["source_vm_name"] = template_id or arker_source(config)
     if resources:
         request["resources"] = resources
-    if policies:
-        request["policies"] = policies
+    fork_policies = dict(cfg.get("policies") or {})
+    if policies is not None:
+        if "policies" in policies:
+            fork_policies.pop("rules", None)
+        fork_policies.update(policies)
+    if fork_policies:
+        request["policies"] = fork_policies
     return arker_client(config).fork(**request)
 
 

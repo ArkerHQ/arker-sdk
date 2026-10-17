@@ -5,6 +5,41 @@ The tools inventory installed SDKs, rather than a list of implemented shim metho
 Python versions are pinned in `requirements.txt`; TypeScript reference SDKs are
 pinned in `typescript/package.json`.
 
+The migration target is the core sandbox API. Apps and Functions remain native;
+this exclusion does not exclude sandbox image inputs, secrets, drives, mounts,
+processes, policies, or lifecycle behavior. These still have unverified gaps.
+
+## Image parents and host policy secrets
+
+The shared Arker adapter accepts `source_vm_id` (Python) or `sourceVmId`
+(TypeScript), so an image-backed parent can be imported once and forked many
+times without another registry import. Explicit per-call images take precedence
+over the configured parent. Python's explicit `template_id` takes precedence
+over a configured parent ID. Otherwise a parent ID takes precedence over a
+source name.
+Python retains its legacy named-source `ARKER_SOURCE_VM` interpretation; use
+the explicit `source_vm_id` setting for a parent ID.
+
+Both adapters accept an Arker `policies` configuration passed to the fork API.
+Named policy secrets are host-side values, not guest environment variables.
+Provider network constraints replace configured network rules, preserving the
+named secret map; a block-all constraint must not inherit an allow rule.
+Registry credentials are configured as `registry_auth` in Python or
+`registryAuth` in TypeScript, with `username` and `password`. They are sent only
+for an image import, never for a child fork from an existing VM. Keep these
+values in application configuration/environment, not the routing JSON or cache.
+Native vendor Secret handles and native registry/image builder handles are not
+translated by this configuration mechanism.
+
+Live checks (not vendor-equivalence evidence):
+
+```sh
+cd python
+uv run pytest tests/e2e/test_compat_image_forks.py -q
+cd ../typescript
+npx -y tsx@4.20.6 tests/compat-image-forks-live.ts
+```
+
 In mixed routes containing Arker, E2B and Modal are not queried for identifiers
 matching Arker's exact VM ID grammar: those vendors reject that syntax instead
 of reporting absence. This also invalidates incompatible cache hints. Arker must
@@ -33,8 +68,8 @@ combined to manufacture a passing comparison.
 TypeScript fingerprints also include the installed ComputeSDK/provider runtime
 artifacts. Native-route evidence refuses a different SDK version inside its
 native adapter than the direct native reference. E2B and Blaxel adapters now live
-in the shims and resolve the embedding application's vendor SDK; Modal and
-Daytona currently resolve through their ComputeSDK provider packages. Tests of locally
+in the shims and resolve the embedding application's vendor SDK, as do Modal
+and Daytona. Tests of locally
 linked, unreleased provider builds do not certify registry releases.
 
 Fingerprints include the host runtime and architecture. A Node report does not

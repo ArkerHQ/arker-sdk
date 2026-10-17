@@ -27,9 +27,13 @@ from .computer import VM
 
 
 def __getattr__(name: str) -> Any:
-    module = import_optional("blaxel.core.sandbox")
-    if module is not None:
-        return getattr(module, name)
+    for module_name in ("blaxel.core.sandbox", "blaxel.core"):
+        module = import_optional(module_name)
+        if module is not None:
+            try:
+                return getattr(module, name)
+            except AttributeError:
+                pass
     raise AttributeError(name)
 
 

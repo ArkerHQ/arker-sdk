@@ -55,6 +55,15 @@ ROOTS = {
         ("sync", "Secret", "modal:Secret", "arker.modal:Secret"),
     ],
     "blaxel": [
+        ("sync", "DriveInstance", "blaxel.core:SyncDriveInstance", "arker.blaxel:SyncDriveInstance"),
+        ("async", "DriveInstance", "blaxel.core:DriveInstance", "arker.blaxel:DriveInstance"),
+        ("sync", "VolumeInstance", "blaxel.core:SyncVolumeInstance", "arker.blaxel:SyncVolumeInstance"),
+        ("async", "VolumeInstance", "blaxel.core:VolumeInstance", "arker.blaxel:VolumeInstance"),
+        ("sync", "SecretInstance", "blaxel.core:SyncSecretInstance", "arker.blaxel:SyncSecretInstance"),
+        ("async", "SecretInstance", "blaxel.core:SecretInstance", "arker.blaxel:SecretInstance"),
+        ("sync", "Snapshot", "blaxel.core:SyncSnapshot", "arker.blaxel:SyncSnapshot"),
+        ("async", "Snapshot", "blaxel.core:Snapshot", "arker.blaxel:Snapshot"),
+        ("sync", "ImageInstance", "blaxel.core:ImageInstance", "arker.blaxel:ImageInstance"),
         ("sync", "SandboxInstance", "blaxel.core.sandbox:SyncSandboxInstance", "arker.blaxel:SyncSandboxInstance"),
         ("async", "SandboxInstance", "blaxel.core.sandbox:SandboxInstance", "arker.blaxel:SandboxInstance"),
         (

@@ -12,7 +12,7 @@ import httpx2 as httpx
 import pytest
 
 import arker.computer as sdk
-from arker._compat import arker_source
+from arker._compat import arker_create, arker_source
 from arker.blaxel import SyncSandboxInstance as BlaxelSandbox
 from arker.daytona import Daytona
 from arker.e2b import Sandbox as E2BSandbox
@@ -133,6 +133,45 @@ def add_arker_not_found(t: FakeTransport, vm_id: str) -> None:
             }
         },
     )
+
+
+def test_shared_fork_keeps_policy_secrets_and_uses_image_source_id(monkeypatch):
+    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
+    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+    config = {
+        "source_vm_id": "vm_image_parent",
+        "policies": {"secrets": {"TEST_TOKEN": "synthetic-policy-secret"}},
+        "registry_auth": {"username": "synthetic", "password": "synthetic-registry-password"},
+    }
+    t = FakeTransport()
+    for vm_id in ("vm_child", "vm_image"):
+        t.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, vm_payload(vm_id))
+    with use_transport(t):
+        arker_create(config, policies={"policies": [{"type": "outbound", "action": "deny"}]})
+        arker_create(config, image="private.example/image@sha256:abc")
+    child, image = (json.loads(call["body"]) for call in t.calls)
+    assert child["source_vm_id"] == "vm_image_parent"
+    assert "source_vm_name" not in child
+    assert "registry_auth" not in child
+    assert child["policies"] == {
+        "secrets": {"TEST_TOKEN": "synthetic-policy-secret"},
+        "policies": [{"type": "outbound", "action": "deny"}],
+    }
+    assert image["registry_auth"] == config["registry_auth"]
+    assert "source_vm_id" not in image
+    assert config["policies"] == {"secrets": {"TEST_TOKEN": "synthetic-policy-secret"}}
+
+
+def test_shared_fork_preserves_legacy_named_source_environment(monkeypatch):
+    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
+    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+    monkeypatch.delenv("ARKER_SOURCE", raising=False)
+    monkeypatch.setenv("ARKER_SOURCE_VM", "legacy-source-name")
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, vm_payload("vm_child"))
+    with use_transport(t):
+        arker_create()
+    assert json.loads(t.calls[0]["body"])["source_vm_name"] == "legacy-source-name"
 
 
 @pytest.mark.parametrize(

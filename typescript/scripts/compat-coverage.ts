@@ -20,6 +20,10 @@ const roots = [
   ["modal", "modal", "Volume", "../src/modal.js"],
   ["modal", "modal", "Secret", "../src/modal.js"],
   ["blaxel", "@blaxel/core", "SandboxInstance", "../src/blaxel.js"],
+  ["blaxel", "@blaxel/core", "DriveInstance", "../src/blaxel.js"],
+  ["blaxel", "@blaxel/core", "VolumeInstance", "../src/blaxel.js"],
+  ["blaxel", "@blaxel/core", "Snapshot", "../src/blaxel.js"],
+  ["blaxel", "@blaxel/core", "ImageInstance", "../src/blaxel.js"],
 ] as const;
 
 const filename = resolve("scripts/__compat_inventory__.ts");
