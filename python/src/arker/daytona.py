@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from ._compat import (
@@ -134,16 +135,25 @@ class Daytona(UnsupportedMixin):
             return native.create(*args, **kwargs)
 
         def create_arker() -> VM:
-            if args:
-                raise UnsupportedCompatibilityOption(
-                    "Daytona.create positional arguments are not supported when routing to Arker"
-                )
+            values = dict(kwargs)
+            if len(args) > 1 or (args and "params" in values):
+                raise TypeError("Daytona.create accepts one params argument")
+            params = args[0] if args else values.pop("params", None)
+            if params is not None:
+                if hasattr(params, "model_dump"):
+                    params = params.model_dump(exclude_none=True)
+                if not isinstance(params, dict):
+                    raise TypeError("Daytona.create params must be a mapping or a native parameter model")
+                if set(params) & set(values):
+                    raise TypeError("Daytona.create received duplicate parameter values")
+                values = {**params, **values}
             supported = {
                 "image",
                 "snapshot",
                 "name",
                 "resources",
                 "envVars",
+                "env_vars",
                 "language",
                 "networkBlockAll",
                 "network_block_all",
@@ -152,35 +162,42 @@ class Daytona(UnsupportedMixin):
                 "domainAllowList",
                 "domain_allow_list",
             }
-            unknown = sorted(set(kwargs) - supported)
+            unknown = sorted(set(values) - supported)
             if unknown:
                 raise UnsupportedCompatibilityOption(
                     f"Daytona.create received unsupported option(s) for Arker: {', '.join(unknown)}"
                 )
-            unsupported = [key for key in ("envVars", "language") if kwargs.get(key) is not None]
+            unsupported = [key for key in ("envVars", "env_vars", "language") if values.get(key) is not None]
             if unsupported:
                 raise UnsupportedCompatibilityOption(
                     f"Daytona.create option(s) are not supported by Arker: {', '.join(unsupported)}"
                 )
-            raw_resources = kwargs.get("resources") or {}
+            raw_resources = values.get("resources") or {}
+            if is_dataclass(raw_resources) and not isinstance(raw_resources, type):
+                raw_resources = {key: value for key, value in asdict(raw_resources).items() if value is not None}
+            if not isinstance(raw_resources, dict):
+                raise TypeError("Daytona resources must be a mapping or native Resources model")
+            unknown_resources = sorted(set(raw_resources) - {"cpu", "vcpu", "memory", "memory_mib", "disk", "disk_mib"})
+            if unknown_resources:
+                raise UnsupportedCompatibilityOption("Unsupported Daytona resource(s): " + ", ".join(unknown_resources))
             resources = {
                 **({"vcpu": raw_resources["cpu"]} if "cpu" in raw_resources else {}),
                 **({"vcpu": raw_resources["vcpu"]} if "vcpu" in raw_resources else {}),
-                **({"memory_mib": raw_resources["memory"]} if "memory" in raw_resources else {}),
+                **({"memory_mib": raw_resources["memory"] * 1024} if "memory" in raw_resources else {}),
                 **({"memory_mib": raw_resources["memory_mib"]} if "memory_mib" in raw_resources else {}),
-                **({"disk_mib": raw_resources["disk"]} if "disk" in raw_resources else {}),
+                **({"disk_mib": raw_resources["disk"] * 1024} if "disk" in raw_resources else {}),
                 **({"disk_mib": raw_resources["disk_mib"]} if "disk_mib" in raw_resources else {}),
             }
             return arker_create(
                 self._arker_config,
-                name=kwargs.get("name"),
-                template_id=kwargs.get("snapshot"),
-                image=kwargs.get("image"),
+                name=values.get("name"),
+                template_id=values.get("snapshot"),
+                image=values.get("image"),
                 resources=resources or None,
                 policies=compat_network_policies(
-                    block_all=bool(kwargs.get("networkBlockAll", kwargs.get("network_block_all", False))),
-                    domains=kwargs.get("domainAllowList", kwargs.get("domain_allow_list")),
-                    cidrs=kwargs.get("networkAllowList", kwargs.get("network_allow_list")),
+                    block_all=bool(values.get("networkBlockAll", values.get("network_block_all", False))),
+                    domains=values.get("domainAllowList", values.get("domain_allow_list")),
+                    cidrs=values.get("networkAllowList", values.get("network_allow_list")),
                 ),
             )
 

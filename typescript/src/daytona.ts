@@ -29,6 +29,21 @@ export interface ExecuteCommandOptions {
 const DAYTONA_CONFIG_KEYS = ["apiKey", "arker", "routerConfigPath"] as const;
 const DAYTONA_CREATE_OPTION_KEYS = ["image", "snapshot", "envVars", "name", "language", "resources", "networkBlockAll", "networkAllowList", "domainAllowList"] as const;
 
+function arkerCreateOptions(options: Record<string, unknown>): Record<string, unknown> {
+  const { resources, ...rest } = options;
+  if (resources === undefined) return rest;
+  if (typeof resources !== "object" || resources === null || Array.isArray(resources)) throw new TypeError("Daytona resources must be an object");
+  assertSupportedObjectKeys(resources, ["cpu", "memory", "disk"], "daytona", "resources");
+  const converted: Record<string, number> = {};
+  for (const [source, target, multiplier] of [["cpu", "cpu", 1], ["memory", "memoryMiB", 1024], ["disk", "diskMiB", 1024]] as const) {
+    const value = (resources as Record<string, unknown>)[source];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || value <= 0 || !Number.isSafeInteger(value * multiplier)) throw new TypeError(`Invalid Daytona resource ${source}`);
+    converted[target] = value * multiplier;
+  }
+  return { ...rest, ...converted };
+}
+
 export class Sandbox {
   readonly id: string;
   readonly provider: string;
@@ -81,6 +96,7 @@ export class Daytona {
       arker: config?.arker,
       fallbackProvider: createDaytonaProvider({ apiKey: config?.apiKey }),
       routerConfigPath: config?.routerConfigPath,
+      mapArkerCreateOptions: arkerCreateOptions,
     });
     return guardUnsupported(this, "daytona");
   }
@@ -88,17 +104,20 @@ export class Daytona {
   async create(params?: Record<string, unknown>): Promise<Sandbox> {
     assertSupportedObjectKeys(params, DAYTONA_CREATE_OPTION_KEYS, "daytona", "Daytona.create");
     const source = params ?? {};
-    const box = await this.#sdk.sandbox.create({
+    const request = {
       ...(typeof source.image === "string" ? { image: source.image } : {}),
       ...(typeof source.snapshot === "string" ? { snapshotId: source.snapshot } : {}),
       ...(source.envVars && typeof source.envVars === "object" ? { envs: source.envVars as Record<string, string> } : {}),
       ...(typeof source.name === "string" ? { name: source.name } : {}),
       ...(typeof source.language === "string" ? { runtime: source.language } : {}),
-      ...(source.resources && typeof source.resources === "object" ? source.resources : {}),
+      ...(source.resources !== undefined ? { resources: source.resources } : {}),
       ...(typeof source.networkBlockAll === "boolean" ? { networkBlockAll: source.networkBlockAll } : {}),
       ...(typeof source.networkAllowList === "string" ? { networkAllowList: source.networkAllowList } : {}),
       ...(typeof source.domainAllowList === "string" ? { domainAllowList: source.domainAllowList } : {}),
-    });
+    };
+    // ComputeSDK currently narrows `resources` to Vercel's shape; the native
+    // Daytona provider forwards its own SDK's resources without that narrowing.
+    const box = await this.#sdk.sandbox.create(request as Parameters<CompatSdk["sandbox"]["create"]>[0]);
     if (box.provider === "arker") await box.filesystem.mkdir("/home/daytona");
     return guardUnsupported(new Sandbox(box), "daytona", nativeInstance(box));
   }

@@ -209,6 +209,41 @@ def test_daytona_official_surface(monkeypatch) -> None:
     assert alias_run["timeout"] == 9
 
 
+@pytest.mark.parametrize("keyword", [False, True])
+def test_daytona_accepts_typed_create_params_and_gib_resources(monkeypatch, keyword):
+    from dataclasses import dataclass
+
+    @dataclass
+    class Resources:
+        cpu: int = 4
+        memory: int = 8
+        disk: int = 20
+        gpu: None = None
+
+    class Params:
+        def model_dump(self, *, exclude_none):
+            assert exclude_none is True
+            return {"image": "ubuntu:24.04", "name": "typed", "resources": Resources()}
+
+    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
+    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+    transport = FakeTransport()
+    transport.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, vm_payload("typed"))
+    with use_transport(transport):
+        if keyword:
+            Daytona().create(params=Params())
+        else:
+            Daytona().create(Params())
+    assert json.loads(transport.calls[0]["body"])["resources"] == {"vcpu": 4, "memory_mib": 8192, "disk_mib": 20480}
+
+
+def test_daytona_does_not_drop_unsupported_resource_requests(monkeypatch):
+    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
+    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+    with use_transport(FakeTransport()), pytest.raises(TypeError, match="gpu"):
+        Daytona().create(image="ubuntu:24.04", resources={"cpu": 4, "gpu": 1})
+
+
 def test_compat_requires_source(monkeypatch) -> None:
     monkeypatch.delenv("ARKER_SOURCE", raising=False)
     monkeypatch.delenv("ARKER_SOURCE_VM", raising=False)
@@ -255,7 +290,7 @@ def test_python_shims_translate_or_reject_arker_create_options(monkeypatch) -> N
     )
 
     with use_transport(t):
-        Daytona().create(image="ubuntu:24.04", name="daytona", resources={"cpu": 4, "memory": 8192})
+        Daytona().create(image="ubuntu:24.04", name="daytona", resources={"cpu": 4, "memory": 8})
         BlaxelSandbox.create({"image": "ubuntu:24.04", "name": "blaxel", "memory": 4096})
         with pytest.raises(TypeError, match="envVars"):
             Daytona().create(envVars={"A": "b"})

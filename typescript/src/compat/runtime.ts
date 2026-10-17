@@ -15,12 +15,18 @@ export interface CreateCompatSdkOptions {
   arker?: ArkerComputeProviderConfig;
   fallbackProvider: unknown;
   routerConfigPath?: string;
+  mapArkerCreateOptions?: (options: Record<string, unknown>) => Record<string, unknown>;
 }
 
 export function createCompatSdk(options: CreateCompatSdkOptions): CompatSdk {
   const hasArker = !!(options.arker?.apiKey || globalThis.process?.env?.ARKER_API_KEY?.trim());
+  const arker = hasArker ? createArkerComputeProvider(options.arker) : undefined;
+  if (arker && options.mapArkerCreateOptions) {
+    const create = arker.sandbox.create.bind(arker.sandbox);
+    arker.sandbox.create = (values) => create(options.mapArkerCreateOptions!(values ?? {}));
+  }
   const routed = createRoutedProvider([
-    ...(hasArker ? [createArkerComputeProvider(options.arker)] : []),
+    ...(arker ? [arker] : []),
     options.fallbackProvider as any,
   ], options.routerConfigPath ?? globalThis.process?.env?.COMPUTESDK_ROUTER_CONFIG);
   return computeFactory({

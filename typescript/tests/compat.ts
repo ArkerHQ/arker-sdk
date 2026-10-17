@@ -130,6 +130,10 @@ async function testDaytonaSurface(): Promise<void> {
     assert.equal(executeCommandResult.result, "stdout:echo compat");
     assert.deepEqual(box.runCalls[1]!.options, { cwd: "/official", env: { OFFICIAL: "yes" }, timeout: 12_000 });
 
+    await daytona.create({ image: "ubuntu:24.04", resources: { cpu: 4, memory: 8, disk: 20 } });
+    assert.deepEqual((fake.createCalls[1] as any).resources, { cpu: 4, memory: 8, disk: 20 });
+    assert.equal((fake.createCalls[1] as any).memory, undefined);
+
     await daytona.delete(sandbox);
     assert.equal(box.destroyed, true);
 
@@ -407,6 +411,17 @@ async function testInternalArkerProviderSourceProvenance(): Promise<void> {
   assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), { source_vm_id: "snapshot-without-vm-prefix" });
 }
 
+async function testDaytonaResourceUnits(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson((method, url) => method === "POST" && url.endsWith("/v1/fork"), 200,
+    { vm_id: "vm_resources", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] });
+  fetch.addJson((method, url) => method === "POST" && url.endsWith("/runs"), 200,
+    { state: "completed", stdout: "", stdout_encoding: "utf-8", stderr: "", stderr_encoding: "utf-8", exit_code: 0 });
+  const client = new Daytona({ arker: { apiKey: "ark-key", baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false } });
+  await client.create({ image: "ubuntu:24.04", resources: { cpu: 4, memory: 8, disk: 20 } });
+  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!).resources, { vcpu: 4, memory_mib: 8192, disk_mib: 20480 });
+}
+
 async function testInternalArkerProviderPolicyReplacement(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(
@@ -504,6 +519,7 @@ await testModalSurface();
 await testInternalArkerProvider();
 await testInternalArkerProviderImageAndResources();
 await testInternalArkerProviderSourceProvenance();
+await testDaytonaResourceUnits();
 await testInternalArkerProviderPolicyReplacement();
 await testInternalArkerProviderRequiresSource();
 await testBlaxelCreateIfNotExistsAndTtl();
