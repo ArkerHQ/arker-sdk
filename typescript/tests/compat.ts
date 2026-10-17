@@ -246,6 +246,14 @@ async function testModalSurface(): Promise<void> {
     const sandbox = await client.sandboxes.create();
     assertArkerFirst(fake.captured(), "modal");
     assert.equal(sandbox.sandboxId, "modal-box");
+    assert.equal(typeof client.apps.fromName, "function");
+    assert.equal(typeof client.images.fromRegistry, "function");
+
+    const app = { appId: "ap-native" };
+    const image = { imageId: "im-native" };
+    await client.sandboxes.create(app, image, { blockNetwork: true });
+    assert.deepEqual(fake.createCalls.at(-1), { modalApp: app, modalImage: image, blockNetwork: true });
+    await assert.rejects(() => client.sandboxes.create(app), /requires both app and image/);
 
     const proc = await sandbox.exec(["sh", "-c", "echo modal"], {
       workdir: "/workspace",

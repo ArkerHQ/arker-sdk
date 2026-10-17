@@ -118,6 +118,12 @@ instrumented API counts above.
 
 ## Open release requirements
 
+- Translate native Modal app/image handles on Arker. TypeScript now preserves
+  them through ComputeSDK on native Modal routes, rather than silently using a
+  default image. A live native-versus-shim test passed with Alpine 3.22 and exit
+  code 17. Native apps/images are delegated; this does not establish Arker image
+  parity or grant instrumented coverage.
+
 - Remove the guest process agent's Python 3 dependency or provide an
   image-independent runtime. A real Arker `ubuntu:24.04` image probe confirmed
   that Python 3 is absent. The current background process implementation was

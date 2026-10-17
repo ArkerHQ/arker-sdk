@@ -1,4 +1,5 @@
 import { modal as createModalProvider } from "@computesdk/modal";
+import { ModalClient as NativeModalClient } from "modal";
 import type { RunCommandOptions } from "computesdk";
 
 import {
@@ -142,9 +143,21 @@ export class Sandbox {
 
 export class ModalClient {
   #sdk: CompatSdk;
+  #native: NativeModalClient | undefined;
+  #nativeConfig: Pick<ModalCompatConfig, "tokenId" | "tokenSecret">;
+
+  #nativeClient(): NativeModalClient {
+    return this.#native ??= new NativeModalClient(this.#nativeConfig);
+  }
+
+  get apps(): NativeModalClient["apps"] { return this.#nativeClient().apps; }
+  get images(): NativeModalClient["images"] { return this.#nativeClient().images; }
+
+  close(): void { this.#native?.close(); }
 
   constructor(config?: ModalCompatConfig) {
     assertSupportedObjectKeys(config, MODAL_CONFIG_KEYS, "modal", "new ModalClient");
+    this.#nativeConfig = { tokenId: config?.tokenId, tokenSecret: config?.tokenSecret };
     this.#sdk = createCompatSdk({
       arker: config?.arker,
       fallbackProvider: lazyModalProvider({
@@ -160,8 +173,16 @@ export class ModalClient {
     create: async (...args: unknown[]): Promise<Sandbox> => {
       if (args.length > 3) throw new Error("ModalClient.sandboxes.create accepts at most app, image, and options");
       const options = (args.length >= 3 ? args[2] : args.length === 1 ? args[0] : undefined) as Record<string, unknown> | undefined;
+      if (args.length === 1 && options && "appId" in options) {
+        throw new Error("ModalClient.sandboxes.create requires both app and image");
+      }
       assertSupportedObjectKeys(options, MODAL_CREATE_OPTION_KEYS, "modal", "ModalClient.sandboxes.create");
+      const handles = args.length >= 2 ? { modalApp: args[0], modalImage: args[1] } : {};
+      if (args.length >= 2 && (!args[0] || typeof args[0] !== "object" || !args[1] || typeof args[1] !== "object")) {
+        throw new Error("ModalClient.sandboxes.create requires native app and image handles");
+      }
       const box = await this.#sdk.sandbox.create({
+        ...handles,
         ...(typeof options?.blockNetwork === "boolean" ? { blockNetwork: options.blockNetwork } : {}),
         ...(Array.isArray(options?.outboundCidrAllowlist) ? { outboundCidrAllowlist: options.outboundCidrAllowlist } : {}),
         ...(Array.isArray(options?.outboundDomainAllowlist) ? { outboundDomainAllowlist: options.outboundDomainAllowlist } : {}),
