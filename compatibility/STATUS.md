@@ -3,11 +3,15 @@
 ## Current-main validation
 
 On 2026-10-17 the branch was merged with SDK `main` at `2ec474e`.
-Both strict reporters reject all previous live evidence because upstream SDK
-implementation files changed: the current fingerprints have **0/944 Python**
-and **0/928 TypeScript** scenario-verified entries. Both inventories are complete
-within their declared bounded scope, and both strict gates return exit code 1.
-The historical live results below must not be used as current-head certification.
+Fresh differential runs on current implementation sources establish **30/944
+Python** scenario-verified entries. TypeScript establishes **15/928** only when
+using the locally linked draft ComputeSDK provider builds from computesdk #6.
+After restoring the committed published dependencies, those integration
+fingerprints correctly become stale: **0/928 TypeScript** entries are verified
+for the published dependency profile. Both inventories are complete within
+their declared bounded scope, and both strict gates return exit code 1.
+Neither the draft integration profile nor historical results certify the
+published packages or complete API equivalence.
 
 Post-merge local validation passes: 305 Python unit tests and lint, plus the full
 TypeScript test/build/typecheck pipeline. New evidence-validator regressions
@@ -20,6 +24,16 @@ Evidence fingerprints include the scenario and measurement sources, not just
 production files and dependency manifests. Changing a test or its tracer also
 invalidates old live evidence; regression tests exercise that requirement.
 Empty discovered vendor roots are inventory errors, not zero-gap success.
+TypeScript fingerprints also include installed ComputeSDK/provider runtime
+artifacts. Native evidence rejects a vendor version mismatch between the
+reference SDK and the provider's actual resolved dependency.
+
+All four providers passed the current-main common execution comparison using
+the draft provider builds. Cross-language process control, daemon/inbound
+behavior, and unchanged Blaxel programs (six Python cases, three TypeScript
+cases) passed. The unchanged programs now assert exact stdout, stderr, status,
+and exit code for a command exiting 17. These passing comparisons do not grant
+inventory credit unless recorded by the differential measurement harness.
 
 Current Daytona regressions additionally verify GiB-to-MiB conversion only for
 Arker creation, unchanged native resource objects, typed Python creation models,
@@ -82,23 +96,33 @@ instrumented API counts above.
 - Release the ComputeSDK provider fixes before the migration SDK release.
 - Implement Arker-backed Blaxel fetch. Supporting both application auth headers
   simultaneously also needs a non-conflicting platform-authentication channel.
+- Establish native Daytona allowlist equivalence with an account that permits
+  per-sandbox overrides. The supplied workspace rejects them. The current live
+  policy matrix passes its other nine supported cases but deliberately exits 1
+  for this unverified comparison; it does not treat account restrictions as a
+  passing skip. Changing the workspace-wide policy requires separate approval.
 
 Full API equivalence has not been established. The three PRs remain drafts.
 
 ## Underlying Arker policy validation
 
-An isolated feature environment passed 45 focused inbound cases and 47 HTTPS,
-HTTP/2, and WebSocket cases. A broader selection executed 270 cases: 267 passed
-and three failed. Main's recorded baseline also fails those three cases:
-outbound GET to portquiz.net:8080 times out, a subdomain TCP:853 connection
-fails, and applying an inline run policy permits an idle pause before the run.
-The latter two reproduced separately. These failures remain open; baseline
-classification does not turn them into passing behavior. TLS-only exclusions
-from the broader HTTP run were addressed by the separate HTTPS selection.
+The current-main isolated HTTPS policy selection executed 321 cases: 312
+passed, nine failed, and one additional selected case was skipped for a missing
+golden. Triage classified all nine failures as known on main. Two stale suspend
+request cases and one preview-resume race were fixed in the test setup; all five
+focused fork/preview/WebSocket cases then passed. The six other broad-run
+failures remain unresolved. Baseline classification does not turn them green.
+See arker-app #4260 for the exact failures and immutable artifacts.
 
 The first ingress fix also exposed a repeated-header edge case: a later Arker
 key among application header values reached the guest. Both live regression
 cases failed before the additional worker hardening. After deployment of that
 hardening, all 49 HTTPS, HTTP/2, and WebSocket cases passed, with zero skips and
-exit code 0. This also verifies preservation of application Authorization when
-the platform key is supplied in `x-api-key`. See arker-app #4260 for artifacts.
+exit code 0. Further live regressions found lower- and mixed-case bearer keys
+also leaked when another header authenticated the request (two failed, two
+canonical controls passed). After the case-insensitive worker fix was deployed
+to the isolated feature environment, all **51 HTTPS/HTTP2/WebSocket cases
+passed**, zero skips/errors, exit 0, on release
+`compat-parity-main-gdf3f0561b747-cf6cfba4`. Artifact:
+`s3://arker-ci/arkt-runs/artifacts/20261017T021137617064Z-compat-parity-main/`.
+This is isolated validation, not a production deployment or full policy parity.
