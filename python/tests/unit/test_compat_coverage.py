@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import runpy
 import sys
 import types
 from pathlib import Path
@@ -13,6 +14,13 @@ spec = importlib.util.spec_from_file_location(
 )
 coverage = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(coverage)
+
+
+def test_missing_evidence_run_id_fails_before_starting_live_programs(monkeypatch, tmp_path):
+    monkeypatch.setenv("COMPAT_COVERAGE_EVIDENCE", str(tmp_path / "evidence.jsonl"))
+    monkeypatch.delenv("COMPAT_COVERAGE_RUN", raising=False)
+    with pytest.raises(RuntimeError, match="COMPAT_COVERAGE_RUN"):
+        runpy.run_path(str(Path(__file__).resolve().parents[1] / "e2e" / "compat_evidence.py"))
 
 
 def test_inventory_includes_blaxel_sandbox_storage_secrets_and_images():

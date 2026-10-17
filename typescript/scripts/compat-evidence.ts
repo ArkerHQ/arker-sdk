@@ -4,6 +4,10 @@ import { dirname, join, relative, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
+if (process.env.COMPAT_COVERAGE_EVIDENCE && !process.env.COMPAT_COVERAGE_RUN?.trim()) {
+  throw new Error("COMPAT_COVERAGE_RUN is required when recording evidence");
+}
+
 async function dependencyManifest(name: string, directory: string): Promise<string> {
   const require = createRequire(resolve(await realpath(directory), "package.json"));
   let candidate = dirname(require.resolve(name));

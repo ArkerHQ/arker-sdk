@@ -6,6 +6,9 @@ import os
 import runpy
 from pathlib import Path
 
+if os.environ.get("COMPAT_COVERAGE_EVIDENCE") and not os.environ.get("COMPAT_COVERAGE_RUN", "").strip():
+    raise RuntimeError("COMPAT_COVERAGE_RUN is required when recording evidence")
+
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "compat_coverage.py"
 INITIAL_FINGERPRINT = runpy.run_path(str(SCRIPT))["implementation_fingerprint"]()
 

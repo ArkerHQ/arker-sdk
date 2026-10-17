@@ -13,6 +13,11 @@ import { Image as NativeModalImage } from "modal";
 assert.equal(Template, NativeTemplate);
 assert.equal(DaytonaImage, NativeDaytonaImage);
 assert.equal(ModalImage, NativeModalImage);
+const incompleteEvidenceEnvironment: NodeJS.ProcessEnv = { ...process.env, COMPAT_COVERAGE_EVIDENCE: "/unused-evidence.jsonl" };
+delete incompleteEvidenceEnvironment.COMPAT_COVERAGE_RUN;
+assert.throws(() => execFileSync("bun", ["--eval", 'await import("./scripts/compat-evidence.ts")'], {
+  env: incompleteEvidenceEnvironment, stdio: "pipe",
+}), /COMPAT_COVERAGE_RUN/);
 const inventory = JSON.parse(execFileSync("bun", ["scripts/compat-coverage.ts"], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
 assert.equal(inventory.complete_inventory, true, JSON.stringify(inventory.diagnostics));
 for (const name of ["DriveInstance", "VolumeInstance", "Snapshot", "ImageInstance"]) {
