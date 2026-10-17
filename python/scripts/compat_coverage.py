@@ -205,7 +205,10 @@ def main() -> None:
             versions[provider] = importlib.metadata.version(provider)
             for style, prefix, reference, shim_reference in roots:
                 try:
-                    rows.extend(surfaces(provider, style, prefix, resolve(reference), resolve(shim_reference)))
+                    discovered = list(surfaces(provider, style, prefix, resolve(reference), resolve(shim_reference)))
+                    if not discovered:
+                        missing.append({"root": reference, "error": "no public APIs discovered"})
+                    rows.extend(discovered)
                 except (ImportError, AttributeError) as error:
                     missing.append({"root": reference, "error": str(error)})
         except importlib.metadata.PackageNotFoundError:
@@ -226,7 +229,7 @@ def main() -> None:
         ),
         "vendor_versions": versions,
         "implementation_fingerprint": fingerprint,
-        "complete_inventory": not missing,
+        "complete_inventory": bool(rows) and not missing,
         "missing_roots": missing,
         "counts": dict(Counter(row["status"] for row in rows)),
         "full_api_equivalence": False,
@@ -237,7 +240,9 @@ def main() -> None:
         args.output.write_text(output)
     else:
         print(output, end="")
-    if args.fail_on_unverified and (missing or any(row["status"] == "unverified" for row in rows)):
+    if args.fail_on_unverified and (
+        not report["complete_inventory"] or any(row["status"] == "unverified" for row in rows)
+    ):
         raise SystemExit(1)
 
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -94,3 +96,15 @@ def test_evidence_fingerprint_includes_measurement_and_scenario_code(monkeypatch
 
     monkeypatch.setattr(Path, "read_bytes", changed)
     assert coverage.implementation_fingerprint() != before
+
+
+def test_empty_vendor_surfaces_cannot_pass_the_strict_gate(monkeypatch, capsys):
+    monkeypatch.setattr(coverage, "surfaces", lambda *args: iter(()))
+    monkeypatch.setattr(coverage, "resolve", lambda reference: object())
+    monkeypatch.setattr(coverage.importlib.metadata, "version", lambda provider: "1")
+    monkeypatch.setattr(sys, "argv", ["compat_coverage.py", "--fail-on-unverified"])
+    with pytest.raises(SystemExit, match="1"):
+        coverage.main()
+    report = json.loads(capsys.readouterr().out)
+    assert report["complete_inventory"] is False
+    assert len(report["missing_roots"]) == sum(len(roots) for roots in coverage.ROOTS.values())

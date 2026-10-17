@@ -96,11 +96,14 @@ function inventory(provider: string, prefix: string, type: ts.Type, shim: ts.Typ
   }
 }
 
+const missingRoots: string[] = [];
 for (const [index, [provider, , name]] of roots.entries()) {
+  const before = rows.size;
   const native = types.get(`Native${index}`)!;
   const shim = types.get(`Shim${index}`);
   inventory(provider, name, native.instance, shim?.instance);
   inventory(provider, `${name}.static`, native.constructor, shim?.constructor);
+  if (rows.size === before) missingRoots.push(`${provider}:${name}`);
 }
 const diagnostics = ts.getPreEmitDiagnostics(program).filter((diagnostic) => diagnostic.file?.fileName === filename);
 const vendorVersions: Record<string, string> = {};
@@ -130,7 +133,8 @@ const report = {
   scope: "Public sandbox/client methods and properties, static methods, and connected service objects to depth 2; exposed declarations do not count as behavioral verification.",
   vendor_versions: vendorVersions,
   implementation_fingerprint: fingerprint,
-  complete_inventory: diagnostics.length === 0,
+  complete_inventory: rows.size > 0 && diagnostics.length === 0 && missingRoots.length === 0,
+  missing_roots: missingRoots,
   diagnostics: diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")),
   counts,
   full_api_equivalence: false,
@@ -140,6 +144,6 @@ const output = JSON.stringify(report, null, 2) + "\n";
 const outputIndex = process.argv.indexOf("--output");
 if (outputIndex >= 0) await writeFile(process.argv[outputIndex + 1]!, output);
 else process.stdout.write(output);
-if (process.argv.includes("--fail-on-unverified") && (diagnostics.length || [...rows.values()].some((row) => row.status === "unverified"))) {
+if (process.argv.includes("--fail-on-unverified") && (!report.complete_inventory || [...rows.values()].some((row) => row.status === "unverified"))) {
   process.exitCode = 1;
 }
