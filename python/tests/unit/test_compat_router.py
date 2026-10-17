@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 import json
 import multiprocessing
 import threading
@@ -382,6 +383,11 @@ def _cyclic_create_failure():
     return failure
 
 
+def _grpc_create_failure():
+    status = enum.Enum("Status", {"UNAVAILABLE": 14}, module="grpclib.const")
+    return type("RPCFailure", (RuntimeError,), {"status": status.UNAVAILABLE})("opaque")
+
+
 @pytest.mark.parametrize(
     "failure",
     [
@@ -393,7 +399,11 @@ def _cyclic_create_failure():
         _wrapped_create_failure(OSError("read failed")),
         _cyclic_create_failure(),
         type("Conflict", (RuntimeError,), {"status": 409})("exists"),
+        type("ServerFailure", (RuntimeError,), {"status": 503})("opaque"),
         type("Conflict", (RuntimeError,), {"code": "SANDBOX_ALREADY_EXISTS"})("exists"),
+        type("AlreadyExistsError", (RuntimeError,), {})("opaque"),
+        type("InvalidError", (RuntimeError,), {})("opaque"),
+        _grpc_create_failure(),
     ],
 )
 def test_ambiguous_create_outcome_does_not_fall_through(tmp_path: Path, failure: Exception) -> None:

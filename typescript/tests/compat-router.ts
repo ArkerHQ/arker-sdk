@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { AlreadyExistsError, InvalidError } from "modal";
 
 import { createRoutedProvider, JsonRouteCache, parseRouterConfig, isArkerVmIdentifier, providerAcceptsIdentifier } from "../src/compat/router.js";
 
@@ -109,6 +110,10 @@ async function testWeightedFallbackAndNonRetryableErrors(): Promise<void> {
       new Error("socket hang up"),
       { code: "SANDBOX_ALREADY_EXISTS", message: "exists" },
       Object.assign(new Error("conflict"), { status: 409 }),
+      Object.assign(new Error("opaque"), { status: 503 }),
+      new AlreadyExistsError("opaque"),
+      new InvalidError("opaque"),
+      Object.assign(new Error("opaque"), { code: 14, details: "opaque", path: "/modal.client.ModalClient/SandboxCreate" }),
     ]) {
       const reset = createRoutedProvider([
         provider("blaxel", { create: async () => { throw error; } }),

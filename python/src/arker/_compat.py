@@ -296,13 +296,53 @@ def _is_retryable(error: Exception) -> bool:
         if id(current) in seen or isinstance(current, OSError):
             return False
         seen.add(id(current))
+        if any(
+            base.__name__.endswith(
+                (
+                    "AlreadyExistsError",
+                    "ConflictError",
+                    "InvalidError",
+                    "ValidationError",
+                    "AuthError",
+                    "AuthenticationError",
+                    "AuthorizationError",
+                    "PermissionDeniedError",
+                    "UnauthorizedError",
+                    "ForbiddenError",
+                    "ClientClosedError",
+                    "TimeoutError",
+                    "ServiceError",
+                    "InternalError",
+                    "DataLossError",
+                    "RemoteError",
+                    "InternalFailure",
+                )
+            )
+            for base in type(current).__mro__
+        ):
+            return False
         response = getattr(current, "response", None)
         status = (
             getattr(current, "status_code", None)
             or getattr(current, "status", None)
             or getattr(response, "status_code", None)
         )
-        if status in {400, 401, 403, 409, 422}:
+        if status in {400, 401, 403, 408, 409, 422} or (isinstance(status, int) and 500 <= status <= 599):
+            return False
+        if type(status).__module__.startswith(("grpc", "grpclib")) and getattr(status, "value", None) in {
+            1,
+            2,
+            3,
+            4,
+            6,
+            7,
+            9,
+            10,
+            13,
+            14,
+            15,
+            16,
+        }:
             return False
         code = str(getattr(current, "code", "")).lower()
         if code in {"econnreset", "econnrefused", "epipe", "enetunreach", "etimedout", "und_err_socket"}:
