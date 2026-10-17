@@ -2,8 +2,83 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { test } from "node:test";
-import { Sandbox as Native, NotFoundError } from "e2b";
+import {
+  Sandbox as Native,
+  NotFoundError,
+  CommandExitError,
+  FileType,
+} from "e2b";
 import { Sandbox } from "../src/e2b.js";
+import {
+  NativeE2BSandbox,
+  createNativeE2BProvider,
+} from "../src/compat/e2b-provider.js";
+
+test("the shim provider preserves embedding SDK identity, native filesystem metadata and errors", async () => {
+  const original = { create: Native.create, connect: Native.connect };
+  const modifiedTime = new Date("2026-10-17T00:00:00Z");
+  const failure = new CommandExitError({
+    stdout: "output",
+    stderr: "failure",
+    exitCode: 17,
+    error: "exit status 17",
+  });
+  const native = {
+    sandboxId: "embedded",
+    commands: {
+      run: async () => {
+        throw failure;
+      },
+    },
+    files: {
+      list: async () => [
+        { name: "folder", type: FileType.DIR, size: 4096, modifiedTime },
+      ],
+    },
+  } as unknown as Native;
+  Native.create = (async () => native) as typeof Native.create;
+  Native.connect = (async () => native) as typeof Native.connect;
+  try {
+    const provider = createNativeE2BProvider();
+    const box = await provider.instances.create();
+    assert(box instanceof NativeE2BSandbox);
+    assert.equal(box.getInstance(), native);
+    assert.equal(
+      (await provider.instances.getById("embedded"))!.getInstance(),
+      native,
+    );
+    assert.deepEqual(await box.filesystem.readdir("/"), [
+      { name: "folder", type: "directory", size: 4096, modified: modifiedTime },
+    ]);
+    const result = await box.runCommand("exit 17");
+    assert.deepEqual(
+      [result.stdout, result.stderr, result.exitCode],
+      ["output", "failure", 17],
+    );
+    const unavailable = new Error("fetch failed");
+    Native.create = async () => {
+      throw unavailable;
+    };
+    Native.connect = async () => {
+      throw unavailable;
+    };
+    await assert.rejects(
+      provider.instances.create(),
+      (error) => error === unavailable,
+    );
+    await assert.rejects(
+      provider.instances.getById("embedded"),
+      (error) => error === unavailable,
+    );
+    Native.connect = async () => {
+      throw new NotFoundError("missing");
+    };
+    assert.equal(await provider.instances.getById("missing"), null);
+  } finally {
+    Native.create = original.create;
+    Native.connect = original.connect;
+  }
+});
 
 test("static E2B deletion uses metadata ownership without connecting and preserves errors", async () => {
   const previous = {

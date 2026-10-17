@@ -1,7 +1,6 @@
-import { e2b as createE2BProvider } from "@computesdk/e2b";
 import type { RunCommandOptions } from "computesdk";
 import { ArkerError, type VM } from "./index.js";
-import { CommandExitError, Sandbox as VendorSandbox, NotFoundError, type CommandStartOpts, type CommandHandle,
+import { CommandExitError, Sandbox as VendorSandbox, type CommandStartOpts, type CommandHandle,
   type Commands as VendorCommands, type CommandConnectOpts, type CommandRequestOpts } from "e2b";
 
 export { CommandExitError } from "e2b";
@@ -20,6 +19,7 @@ import {
 import { createCompatSdk, createCompatRouter } from "./compat/runtime.js";
 import { GuestProcesses, GuestProcessError } from "./compat/guest-process.js";
 import { e2bCommandHandle, e2bProcessError } from "./compat/e2b-command.js";
+import { createNativeE2BProvider } from "./compat/e2b-provider.js";
 
 export interface CommandExitResult {
   stdout: string;
@@ -43,26 +43,8 @@ interface NativeSandbox {
 const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess"] as const;
 
 function routingOptions(routerConfigPath?: string) {
-  const nativeConfig = {
-    apiKey: process.env.E2B_API_KEY,
-    nativeSdk: { Sandbox: VendorSandbox, NotFoundError, CommandExitError },
-  };
-  const fallbackProvider = Object.assign(
-    createE2BProvider(nativeConfig),
-    {
-      ownershipProbe: async (id: string): Promise<boolean> => {
-        try {
-          await VendorSandbox.getInfo(id);
-          return true;
-        } catch (error) {
-          if (error instanceof NotFoundError) return false;
-          throw error;
-        }
-      },
-    },
-  );
   return {
-    fallbackProvider,
+    fallbackProvider: createNativeE2BProvider(),
     routerConfigPath,
   };
 }

@@ -3,11 +3,12 @@
 ## Current validation
 
 The branch includes SDK main at 2ec474e. Fresh runtime-scoped differential
-reports verify **57/950 Python** entries on CPython 3.12.14/Linux/aarch64 and
-**34/938 TypeScript** entries on Node 22.23.3/Linux/arm64. The Node profile uses
-the locally linked draft ComputeSDK providers from computesdk #6, not published
-provider releases. Both inventories are complete in their declared scope.
-The strict gates still exit 1: **893 Python and 904 TypeScript** entries remain
+reports verify **60/965 Python** entries on CPython 3.12.14/Linux/aarch64 and
+**36/938 TypeScript** entries on Node 22.23.3/Linux/arm64. The latest Node profile
+uses a clean install of published dependencies, with no local provider links.
+E2B's native bridge is in the shim and uses the embedding SDK's E2B 2.56.0.
+Both inventories are complete in their declared scope.
+The strict gates still exit 1: **905 Python and 902 TypeScript** entries remain
 unverified. Neither method counts nor these scenarios establish full equivalence.
 
 The unchanged files/process programs and new private HTTP programs passed all
@@ -17,9 +18,13 @@ including stdout, stderr, exit code and error text. They additionally cover
 background PID identity, stdin/EOF, disconnect/reconnect, typed wait and kill
 errors, and authoritative missing-PID behavior. The Arker E2B route succeeds
 without an E2B key. Returned command handles are now included in the inventory;
-the expanded denominator is intentional. The TypeScript native route supplies
-its vendor constructors to ComputeSDK, preserving class identity across package
-installations. Node passed the three files/process routes and six HTTP
+the expanded denominator is intentional. Python context/iteration protocols are
+also inventoried. Static and instance sandbox deletion, repeated deletion, and
+Python context cleanup/error propagation pass the same unchanged programs.
+Ownership probes use metadata, not E2B connect, so a losing race does not resume
+a paused sandbox. The TypeScript native bridge registers the embedding vendor
+instance with ComputeSDK, preserving class identity across package installations.
+Node passed the three files/process routes and six HTTP
 cases: original Blaxel, shim on Blaxel, and shim on Arker, with both H2 and
 explicitly disabled-H2 profiles. HTTP coverage includes every byte value,
 both application auth headers, repeated-header normalization, chunked and HEAD
@@ -31,7 +36,7 @@ run with inbound and outbound denied. They require the draft backend private
 port API, not a public ingress exception. Fresh feature tests passed all 58
 private-port/HTTPS/HTTP2/WebSocket cases with zero skips.
 
-Local validation passes 375 Python unit tests and lint, and the full TypeScript
+Local validation passes 387 Python unit tests and lint, and the full TypeScript
 test/build/typecheck pipeline. Source/vendor snapshots now reject changes during
 a scenario; runtime profiles are included in fingerprints. Existing evidence
 grouping tests also reject collisions and malformed events. These measurement
@@ -47,9 +52,18 @@ The separate framed relay helper in arker-app #4260 now passes real Python and
 Node half-close probes against a retained protocol-2.1 guest. Its boot ID, old
 agent build and PID 110 stayed unchanged, and helper permissions are 0700.
 The refreshed 58-case ingress/private-port selection passed with zero skips.
-Bun's chunked WebSocket-upgrade refusal decoding remains unverified. Node's
-chunked-refusal tests pass. Published dependencies and other runtimes are
-separate profiles and are not certified by Node's report.
+Bun 1.4.3 and Node preserve chunked WebSocket-upgrade refusals, including split
+Unicode error bytes. Bun's shim supplies raw chunk frames; bounded transfer
+decoding preserves the original typed API error. Bun 1.3.8 lacks the required
+upgrade-response behavior; development and CI now pin 1.4.3. Runtime profiles
+remain separate and are not certified by Node's live report.
+
+A clean published-dependency run first failed version attestation: published
+ComputeSDK's E2B provider embeds 2.35.0, while the reference uses 2.56.0. The
+new in-shim bridge uses the embedding SDK directly and still participates in
+ComputeSDK routing. Attestation checks the dependency actually used by that
+bridge; the mismatch was not waived. The refreshed 12-program Node cohort
+passed with all four provider packages restored to published installs.
 
 An immutable SDK wheel before the resource-alias fix exposed 15 real smoke
 failures: public resource attributes and the vcpu_count resize argument had been

@@ -32,8 +32,10 @@ combined to manufacture a passing comparison.
 
 TypeScript fingerprints also include the installed ComputeSDK/provider runtime
 artifacts. Native-route evidence refuses a different SDK version inside its
-ComputeSDK provider than the direct native reference. Tests of locally linked,
-unreleased provider builds therefore do not certify the registry releases.
+native adapter than the direct native reference. E2B's adapter now lives in the
+shim and resolves the embedding application's vendor SDK; the other adapters
+currently resolve through their ComputeSDK provider package. Tests of locally
+linked, unreleased provider builds do not certify registry releases.
 
 Fingerprints include the host runtime and architecture. A Node report does not
 certify Bun, or another Node version. Live recorders snapshot source and vendor
