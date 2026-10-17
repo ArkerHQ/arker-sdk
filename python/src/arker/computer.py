@@ -685,6 +685,9 @@ class VM:
     provider: str | None
     network: VmNetwork | None
     resources: VmResources | None
+    vcpu_count: int | None
+    memory_mib: int | None
+    disk_mib: int | None
     max_vcpus: int | None
     max_memory_mib: int | None
     min_memory_mib: int | None
@@ -705,6 +708,10 @@ class VM:
         self.base_url = base_url or client.base_url
         for f in dataclasses.fields(Vm):
             setattr(self, f.name, getattr(data, f.name) if data is not None else None)
+        # Preserve public handle attributes while the wire contract nests resources.
+        self.vcpu_count = self.resources.vcpu if self.resources is not None else None
+        self.memory_mib = self.resources.memory_mib if self.resources is not None else None
+        self.disk_mib = self.resources.disk_mib if self.resources is not None else None
 
     def __repr__(self) -> str:
         return f"VM(id={self.id!r}, name={self.name!r}, state={self.state!r})"
@@ -879,6 +886,7 @@ class VM:
         self,
         *,
         vcpu: int | None = None,
+        vcpu_count: int | None = None,
         memory_mib: int | None = None,
         disk_mib: int | None = None,
         vgpu: float | None = None,
@@ -902,6 +910,9 @@ class VM:
         current policy unchanged.
 
         Returns the updated :class:`Vm`."""
+        if vcpu is not None and vcpu_count is not None:
+            raise TypeError("Pass vcpu, not both vcpu and vcpu_count")
+        vcpu = vcpu if vcpu is not None else vcpu_count
         resources: ResourcesInput | None = None
         if vcpu is not None or memory_mib is not None or disk_mib is not None or vgpu is not None:
             resources = ResourcesInput(
