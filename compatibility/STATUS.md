@@ -9,7 +9,7 @@ and **0/928 TypeScript** scenario-verified entries. Both inventories are complet
 within their declared bounded scope, and both strict gates return exit code 1.
 The historical live results below must not be used as current-head certification.
 
-Post-merge local validation passes: 302 Python unit tests and lint, plus the full
+Post-merge local validation passes: 305 Python unit tests and lint, plus the full
 TypeScript test/build/typecheck pipeline. New evidence-validator regressions
 first failed in both languages, demonstrating that colon-delimited run/scenario
 keys could combine unrelated runs. Tuple keys now isolate those runs; malformed
@@ -20,6 +20,11 @@ Evidence fingerprints include the scenario and measurement sources, not just
 production files and dependency manifests. Changing a test or its tracer also
 invalidates old live evidence; regression tests exercise that requirement.
 Empty discovered vendor roots are inventory errors, not zero-gap success.
+
+Current Daytona regressions additionally verify GiB-to-MiB conversion only for
+Arker creation, unchanged native resource objects, typed Python creation models,
+and rejection of unsupported resource fields. These request-level tests do not
+grant live equivalence credit.
 
 ## Historical live baseline
 
