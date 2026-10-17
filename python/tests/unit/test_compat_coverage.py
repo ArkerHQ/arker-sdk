@@ -81,3 +81,16 @@ def test_malformed_current_evidence_fails_closed(field, value):
     }
     with pytest.raises(ValueError, match="Invalid compatibility evidence"):
         coverage.verified_scenarios("process.exec", [event], "1", "current")
+
+
+@pytest.mark.parametrize("name", ["compat_coverage.py", "compat_evidence.py", "test_blaxel_import_only.py"])
+def test_evidence_fingerprint_includes_measurement_and_scenario_code(monkeypatch, name):
+    original = Path.read_bytes
+    before = coverage.implementation_fingerprint()
+
+    def changed(path):
+        content = original(path)
+        return content + b"\n# changed test harness\n" if path.name == name else content
+
+    monkeypatch.setattr(Path, "read_bytes", changed)
+    assert coverage.implementation_fingerprint() != before

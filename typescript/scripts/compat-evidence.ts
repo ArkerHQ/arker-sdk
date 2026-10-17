@@ -3,12 +3,17 @@ import { appendFile, readdir, readFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export async function implementationFingerprint(): Promise<string> {
+export async function implementationFingerprint(read: (path: string) => Promise<Uint8Array> = readFile): Promise<string> {
   const root = fileURLToPath(new URL("../src", import.meta.url));
   const paths: string[] = [
     resolve(root, "../../bun.lock"), resolve(root, "../package.json"),
     resolve(root, "../../python/src/arker/_guest_process.py"),
+    resolve(root, "../scripts/compat-evidence.ts"), resolve(root, "../scripts/compat-coverage.ts"),
   ];
+  const tests = resolve(root, "../tests");
+  for (const name of await readdir(tests)) {
+    if (name.startsWith("compat") && name.endsWith(".ts")) paths.push(join(tests, name));
+  }
   async function visit(directory: string): Promise<void> {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
@@ -20,7 +25,7 @@ export async function implementationFingerprint(): Promise<string> {
   const hash = createHash("sha256");
   for (const path of paths.sort()) {
     hash.update(relative(resolve(root, "../.."), path) + "\0");
-    hash.update(await readFile(path));
+    hash.update(await read(path));
     hash.update("\0");
   }
   return hash.digest("hex");

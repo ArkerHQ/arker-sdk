@@ -17,7 +17,9 @@ scenarios. This bounded inventory does not enumerate every vendor behavior.
 `scenario_verified` means runtime tracing observed a call and the same scenario
 passed with the original SDK, the shim on the vendor, and the shim on Arker.
 Evidence must match the SDK version, implementation fingerprint, scenario, and
-test-run ID. A failed route invalidates that scenario. Different runs cannot be
+test-run ID. The fingerprint includes implementation, dependencies, scenarios,
+and measurement code; changing the test also requires new evidence. A failed
+route invalidates that scenario. Different runs cannot be
 combined to manufacture a passing comparison.
 
 `unverified` includes missing methods, partial implementations, vendor-only

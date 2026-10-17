@@ -70,6 +70,8 @@ def implementation_fingerprint():
         root / "pyproject.toml",
         root / "uv.lock",
         root.parent / "compatibility" / "requirements.txt",
+        root / "scripts" / "compat_coverage.py",
+        *root.joinpath("tests", "e2e").glob("*.py"),
     ]
     digest = hashlib.sha256()
     for path in sorted(paths):
