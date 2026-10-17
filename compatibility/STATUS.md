@@ -2,6 +2,42 @@
 
 ## Current validation
 
+The `2c687cd` checkpoint makes `OperationFailed.recovery` required in both
+generated language types, matching the existing wire schema. A real private
+registry negative test found that the backend omitted this required field on
+image authentication failures. The backend fix supplies truthful `unknown`
+recovery when no more specific execution state is available; its feature
+deployment and full Linux gate are still running. The permanent Python and
+Node registry tests must pass against that release before this issue is closed.
+The authenticated import and three independent forks after deleting the
+registry fixture have already passed in supplemental probes; these are not
+native-provider differential coverage.
+
+At this checkpoint, Python vendor units pass **458 tests** and the lean profile
+passes **449 with nine optional-vendor skips**. The full TypeScript
+typecheck/test/build/isolated-consumer pipeline passes, as do the current SDK
+GitHub checks. Packed SHA-256:
+`143115622e269c5b45ca5f1f7f3605d37db454672bcfc4a49089582873e34ebc`.
+
+The preceding `6168dbe` source cohort passed **27 Python/19 Node cases**
+(25/18 differential plus 2/1 Arker-only). Its strict reports remain
+**100/1,138 Python** and **51/1,048 Node** verified, not full parity. That
+evidence predates the generated-type change and is not current-source evidence.
+
+The deployed Unix transport checkpoint passed **101 declared inbound/private
+transport cases**, with no failures or skips. Python and Node also passed TCP
+and Unix byte-stream probes against the retained protocol-201 guest without
+restarting its original agent. This certifies those transports, not a native
+Blaxel daemon integration.
+
+An additional unresolved policy-composition gap is explicit: translating a
+provider network restriction can replace configured rules, dropping inbound,
+schedule/lifecycle controls or secret-header rewrites. Preserving the named
+secret map alone does not establish policy equivalence. A safe composition
+must intersect egress permissions rather than append a bypassing allow rule.
+
+## Previous Unix-socket SDK checkpoint
+
 The private Unix-socket SDK checkpoint adds Python `VM.connect_unix` and Node
 `VM.connectUnix`, sharing the existing owner-authenticated binary/EOF stream
 transport. Its new unit cases check exact control-character path encoding,
