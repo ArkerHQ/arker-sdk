@@ -38,7 +38,7 @@ for (const options of [{ run: "" }, { scenario: null }, { route: "other" }, { ou
   assert.throws(() => verifiedScenarios("process.exec", [event("arker", options)], "1", "current"), /Invalid compatibility evidence/);
 }
 const fingerprint = await implementationFingerprint();
-for (const name of ["compat-evidence.ts", "compat-coverage.ts", "compat-trace.ts", "compat-blaxel-import-live.ts"]) {
+for (const name of ["compat-evidence.ts", "compat-coverage.ts", "compat-trace.ts", "compat-blaxel-import-live.ts", "dist/index.mjs"]) {
   const changed = await implementationFingerprint(async (path) => {
     const content = await readFile(path);
     return path.endsWith(`/${name}`) ? Buffer.concat([content, Buffer.from("\n// changed harness\n")]) : content;

@@ -110,7 +110,7 @@ async function arkerBlaxel(): Promise<Box> {
   const sandbox = await BlaxelSandbox.create({}, config);
   const wrap = (value: BlaxelSandbox): Box => ({
     id: value.id,
-    run: (command, options) => value.process.exec({ command, workingDir: options?.cwd, env: options?.env, timeout: options?.timeout }),
+    run: (command, options) => value.process.exec({ command, workingDir: options?.cwd, env: options?.env, timeout: options?.timeout, waitForCompletion: true }),
     read: (path) => value.fs.read(path),
     write: (path, content) => value.fs.write(path, content),
     reconnect: async () => wrap(await BlaxelSandbox.get(value.id, config)),
@@ -184,7 +184,9 @@ for (const [provider, createNative, createArker] of pairs) {
       arkerDefaultDirectory: arkerObservation.defaultDirectory,
     });
   } finally {
-    await Promise.allSettled([native?.destroy(), arker?.destroy()]);
+    const cleanup = await Promise.allSettled([native?.destroy(), arker?.destroy()]);
+    const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Sandbox cleanup failed");
   }
 }
 

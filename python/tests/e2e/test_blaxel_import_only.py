@@ -35,6 +35,12 @@ try:
         wait_for_completion=True,
     ))
     assert isolated.stdout == "/blaxel:unset", isolated.stdout
+    failed = sandbox.process.exec(ProcessRequestWithLog(
+        command="printf failure-out; printf failure-err >&2; exit 17", wait_for_completion=True,
+    ))
+    assert (failed.stdout, failed.stderr, failed.exit_code, failed.status) == (
+        "failure-out", "failure-err", 17, "failed",
+    )
     sandbox.fs.mkdir("/blaxel/import-only")
     sandbox.fs.write("/blaxel/import-only/probe.txt", "first")
     sandbox.fs.write("/blaxel/import-only/probe.txt", "second")

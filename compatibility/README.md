@@ -22,6 +22,11 @@ and measurement code; changing the test also requires new evidence. A failed
 route invalidates that scenario. Different runs cannot be
 combined to manufacture a passing comparison.
 
+TypeScript fingerprints also include the installed ComputeSDK/provider runtime
+artifacts. Native-route evidence refuses a different SDK version inside its
+ComputeSDK provider than the direct native reference. Tests of locally linked,
+unreleased provider builds therefore do not certify the registry releases.
+
 `unverified` includes missing methods, partial implementations, vendor-only
 delegation, and methods without recorded differential scenarios. An exposed
 method or explicit unsupported error does not grant behavioral coverage. One

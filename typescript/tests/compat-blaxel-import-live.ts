@@ -28,6 +28,10 @@ async function program(SandboxInstance: typeof Native | typeof Shim): Promise<vo
       waitForCompletion: true,
     });
     assert.equal(isolated.stdout, "/blaxel:unset");
+    const failed = await sandbox.process.exec({
+      command: "printf failure-out; printf failure-err >&2; exit 17", waitForCompletion: true,
+    });
+    assert.deepEqual([failed.stdout, failed.stderr, failed.exitCode, failed.status], ["failure-out", "failure-err", 17, "failed"]);
     await sandbox.fs.mkdir("/blaxel/import-only");
     await sandbox.fs.write("/blaxel/import-only/probe.txt", "first");
     await sandbox.fs.write("/blaxel/import-only/probe.txt", "second");

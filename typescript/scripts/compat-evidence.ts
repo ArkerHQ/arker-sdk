@@ -1,7 +1,24 @@
 import { createHash } from "node:crypto";
-import { appendFile, readdir, readFile } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { appendFile, readdir, readFile, realpath } from "node:fs/promises";
+import { dirname, join, relative, resolve } from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+
+async function dependencyManifest(name: string, directory: string): Promise<string> {
+  const require = createRequire(resolve(await realpath(directory), "package.json"));
+  let candidate = dirname(require.resolve(name));
+  while (true) {
+    const manifest = join(candidate, "package.json");
+    try {
+      if (JSON.parse(await readFile(manifest, "utf8")).name === name) return manifest;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const parent = dirname(candidate);
+    if (parent === candidate) throw new Error(`Cannot locate manifest for ${name}`);
+    candidate = parent;
+  }
+}
 
 export async function implementationFingerprint(read: (path: string) => Promise<Uint8Array> = readFile): Promise<string> {
   const root = fileURLToPath(new URL("../src", import.meta.url));
@@ -10,6 +27,24 @@ export async function implementationFingerprint(read: (path: string) => Promise<
     resolve(root, "../../python/src/arker/_guest_process.py"),
     resolve(root, "../scripts/compat-evidence.ts"), resolve(root, "../scripts/compat-coverage.ts"),
   ];
+  for (const name of ["computesdk", "@computesdk/e2b", "@computesdk/daytona", "@computesdk/modal", "@computesdk/blaxel"]) {
+    const directory = resolve(root, "../node_modules", name);
+    const manifest = resolve(directory, "package.json");
+    const pkg = JSON.parse(await readFile(manifest, "utf8"));
+    paths.push(manifest);
+    for (const entry of new Set([pkg.main, pkg.module])) {
+      if (typeof entry === "string") paths.push(resolve(directory, entry));
+    }
+    if (name.startsWith("@computesdk/")) {
+      const manifestPath = await dependencyManifest("@computesdk/provider", directory);
+      const dependencyDirectory = dirname(manifestPath);
+      const dependency = JSON.parse(await readFile(manifestPath, "utf8"));
+      paths.push(manifestPath);
+      for (const entry of new Set([dependency.main, dependency.module])) {
+        if (typeof entry === "string") paths.push(resolve(dependencyDirectory, entry));
+      }
+    }
+  }
   const tests = resolve(root, "../tests");
   for (const name of await readdir(tests)) {
     if (name.startsWith("compat") && name.endsWith(".ts")) paths.push(join(tests, name));
@@ -57,6 +92,12 @@ export async function recordEvidence(provider: "blaxel" | "e2b" | "modal" | "day
   if (!process.env.COMPAT_COVERAGE_RUN) throw new Error("COMPAT_COVERAGE_RUN is required when recording evidence");
   const packages = { blaxel: "@blaxel/core", e2b: "e2b", modal: "modal", daytona: "@daytona/sdk" };
   const version = JSON.parse(await readFile(new URL(`../node_modules/${packages[provider]}/package.json`, import.meta.url), "utf8")).version;
+  if (route === "native") {
+    const providerDirectory = fileURLToPath(new URL(`../node_modules/@computesdk/${provider}`, import.meta.url));
+    const nativeManifest = await dependencyManifest(packages[provider], providerDirectory);
+    const nativeVersion = JSON.parse(await readFile(nativeManifest, "utf8")).version;
+    if (nativeVersion !== version) throw new Error(`Reference ${provider} ${version} differs from provider dependency ${nativeVersion}`);
+  }
   await appendFile(output, JSON.stringify({
     provider,
     run: process.env.COMPAT_COVERAGE_RUN,
