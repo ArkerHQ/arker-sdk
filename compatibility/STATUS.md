@@ -2,9 +2,10 @@
 
 ## Current-main validation
 
-Fresh differential runs after the private-port and mkdir changes restore
+Before synchronizing the new private-port OpenAPI contract, differential runs after the private-port and mkdir changes restored
 38/944 Python and 19/928 TypeScript scenario-verified entries for these sources
-and the draft linked provider profile. Both strict gates exit 1, with 906 and
+and the draft linked provider profile. The generated-contract sync invalidates
+these fingerprints until the scenarios are rerun. Both strict gates exit 1, with 906 and
 909 unverified entries respectively. The new transport has 15 passing Python unit cases and four passing Node test
 groups, including binary framing, independent half-close, refused upgrades,
 malformed frames and cleanup. It requires the draft backend private-port API;

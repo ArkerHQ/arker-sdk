@@ -68,7 +68,10 @@ test("private port upgrade refuses redirects and preserves API errors without re
     let requests = 0;
     const server = createServer((_request, response) => {
       requests++;
-      const body = JSON.stringify({ error: { code: "not_found", message: "missing" } });
+      const body = JSON.stringify({ error: {
+        code: "not_found", message: "missing", timestamp: "2026-10-17T06:00:00Z", request_id: "req-port-test",
+        request: { kind: "matched", operation_id: "openVmPort" }, details: { resource: "vm" },
+      } });
       response.writeHead(status, { "Content-Type": "application/json", ...(!chunked ? { "Content-Length": Buffer.byteLength(body) } : {}), Location: "http://example.invalid/secret" });
       response.end(body);
     });
@@ -82,6 +85,9 @@ test("private port upgrade refuses redirects and preserves API errors without re
         assert(error instanceof ArkerError);
         assert.equal(error.code, "not_found");
         assert.equal(error.status, status);
+        assert(error.body && "request" in error.body);
+        assert(error.body.request.kind === "matched");
+        assert.equal(error.body.request.operation_id, "openVmPort");
         return true;
       });
       assert.equal(requests, 1);

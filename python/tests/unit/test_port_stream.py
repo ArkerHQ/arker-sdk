@@ -96,7 +96,18 @@ def test_upgrade_refusal_preserves_api_error_without_retry(monkeypatch):
         raise websocket.WebSocketBadStatusException(
             "refused",
             status_code=404,
-            resp_body=json.dumps({"error": {"code": "not_found", "message": "missing"}}),
+            resp_body=json.dumps(
+                {
+                    "error": {
+                        "code": "not_found",
+                        "message": "missing",
+                        "timestamp": "2026-10-17T06:00:00Z",
+                        "request_id": "req-port-test",
+                        "request": {"kind": "matched", "operation_id": "openVmPort"},
+                        "details": {"resource": "vm"},
+                    }
+                }
+            ),
         )
 
     monkeypatch.setattr(websocket, "create_connection", refused)
@@ -105,4 +116,5 @@ def test_upgrade_refusal_preserves_api_error_without_retry(monkeypatch):
         vm.connect_port(8080)
     assert caught.value.code == "not_found"
     assert caught.value.status == 404
+    assert caught.value.body.request.operation_id == "openVmPort"
     assert len(calls) == 1
