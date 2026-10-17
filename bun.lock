@@ -30,6 +30,7 @@
       },
       "dependencies": {
         "@computesdk/provider": "^2.1.14",
+        "computesdk": "^4.1.12",
         "dockerfile-ast": "^0.7.1",
         "tar": "^7.5.22",
         "ws": "^8.21.0",
@@ -59,7 +60,6 @@
         "@computesdk/e2b": "^1.7.62",
         "@computesdk/modal": "^1.9.19",
         "@daytona/sdk": "^0.224.1",
-        "computesdk": "^4.1.12",
         "e2b": "^2.56.0",
         "modal": "^0.11.1",
       },
@@ -70,7 +70,6 @@
         "@computesdk/e2b",
         "@computesdk/modal",
         "@daytona/sdk",
-        "computesdk",
         "e2b",
         "modal",
       ],

@@ -53,7 +53,8 @@
     "example:ios-qa": "bun examples/ios-qa.ts",
     "generate:api-types": "openapi-typescript ../openapi.json --default-non-nullable false -o src/generated/api-types.ts",
     "smoke": "bun tests/conformance/fork-run-sync.ts",
-    "test": "bun run generate:validators && bun test tests/typed-errors.test.ts && bun run test:port && bun tests/unit.ts && bun tests/compat.ts && bun tests/compat-router.ts && bun tests/compat-coverage.ts && bun run build && bun tests/http2.ts",
+    "test": "bun run generate:validators && bun test tests/typed-errors.test.ts && bun run test:port && bun tests/unit.ts && bun tests/compat.ts && bun tests/compat-router.ts && bun tests/compat-coverage.ts && bun run build && bun tests/http2.ts && bun run test:consumer",
+    "test:consumer": "node scripts/test-consumer.mjs",
     "test:port": "bun build tests/port-stream.test.ts --target=node --external=ws --outfile=node_modules/.cache/port-tests.cjs --format=cjs && node node_modules/.cache/port-tests.cjs && bun test tests/port-stream.test.ts && bun run test:private-fetch && bun run test:e2b-handles",
     "test:e2b-handles": "bun build tests/e2b-command-handle.test.ts tests/e2b-lifecycle.test.ts tests/blaxel-provider.test.ts --target=node --external=e2b --external=@blaxel/core --outdir=node_modules/.cache/e2b-tests --format=cjs && node node_modules/.cache/e2b-tests/e2b-command-handle.test.js && node node_modules/.cache/e2b-tests/e2b-lifecycle.test.js && node node_modules/.cache/e2b-tests/blaxel-provider.test.js",
     "test:private-fetch": "bun build tests/private-fetch.test.ts --target=node --outfile=node_modules/.cache/private-fetch-tests.cjs --format=cjs && node node_modules/.cache/private-fetch-tests.cjs",
@@ -110,8 +111,7 @@
     "@computesdk/daytona": "^1.7.43",
     "@computesdk/e2b": "^1.7.62",
     "@computesdk/modal": "^1.9.19",
-    "@computesdk/blaxel": "^1.6.33",
-    "computesdk": "^4.1.12"
+    "@computesdk/blaxel": "^1.6.33"
   },
   "peerDependenciesMeta": {
     "e2b": { "optional": true },
@@ -131,13 +131,11 @@
     },
     "@computesdk/blaxel": {
       "optional": true
-    },
-    "computesdk": {
-      "optional": true
     }
   },
   "dependencies": {
     "@computesdk/provider": "^2.1.14",
+    "computesdk": "^4.1.12",
     "dockerfile-ast": "^0.7.1",
     "tar": "^7.5.22",
     "ws": "^8.21.0"
