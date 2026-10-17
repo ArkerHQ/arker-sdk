@@ -31,6 +31,10 @@ try {
   const entries = await parent.filesystem.readdir(directory);
   assert.deepEqual(entries.map(entry => entry.name).sort(), [...names, "dangling"].sort());
   for (const entry of entries.filter(entry => names.includes(entry.name))) assert.equal(entry.size, 5);
+  await parent.filesystem.mkdir("--leading-relative-directory");
+  assert.deepEqual(await parent.filesystem.readdir("--leading-relative-directory"), []);
+  await parent.filesystem.remove("--leading-relative-directory");
+  assert.equal(await parent.filesystem.exists("--leading-relative-directory"), false);
   await parent.filesystem.writeFile("/tmp/compat-image-marker", "parent");
   const provider = createArkerComputeProvider({ ...config, sourceVmId: parent.sandboxId });
   for (let index = 0; index < 3; index++) {

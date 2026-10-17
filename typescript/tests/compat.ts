@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -514,7 +514,7 @@ async function testInternalArkerDirectoryNames(): Promise<void> {
     const localFetch: typeof globalThis.fetch = async (input, init) => {
       if (String(input).endsWith("/runs")) {
         const request = JSON.parse(String(init?.body));
-        return Response.json({ state: "completed", stdout: execFileSync("/bin/sh", ["-c", request.command], { encoding: "utf8" }), stdout_encoding: "utf-8", stderr: "", stderr_encoding: "utf-8", exit_code: 0 });
+        return Response.json({ state: "completed", stdout: execFileSync("/bin/sh", ["-c", request.command], { encoding: "utf8", cwd: directory }), stdout_encoding: "utf-8", stderr: "", stderr_encoding: "utf-8", exit_code: 0 });
       }
       return fetch.fetch(input, init);
     };
@@ -524,6 +524,19 @@ async function testInternalArkerDirectoryNames(): Promise<void> {
     assert.deepEqual(entries.map(entry => entry.name).sort(), [...names, "directory\nname", "dangling"].sort());
     for (const entry of entries.filter(entry => names.includes(entry.name))) assert.equal(entry.size, 5);
     assert.equal(entries.find(entry => entry.name === "directory\nname")?.type, "directory");
+    mkdirSync(join(directory, "--list"));
+    mkdirSync(join(directory, "--remove"));
+    const failures: string[] = [];
+    for (const [name, action] of [
+      ["mkdir", () => sandbox.filesystem.mkdir("--mkdir")],
+      ["readdir", () => sandbox.filesystem.readdir("--list")],
+      ["remove", () => sandbox.filesystem.remove("--remove")],
+    ] as const) {
+      try { await action(); } catch { failures.push(name); }
+    }
+    assert.deepEqual(failures, [], "relative leading-dash paths must not become shell options");
+    assert.ok(existsSync(join(directory, "--mkdir")));
+    assert.ok(!existsSync(join(directory, "--remove")));
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

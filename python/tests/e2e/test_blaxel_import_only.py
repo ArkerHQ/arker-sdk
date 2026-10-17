@@ -48,6 +48,20 @@ try:
     assert sandbox.fs.read("/blaxel/import-only/probe.txt") == "second"
     listing = sandbox.fs.ls("/blaxel/import-only")
     assert any(entry.name == "probe.txt" for entry in listing.files)
+    odd_names = ["line" + chr(10) + "break", "tab" + chr(9) + "file", "-leading", ".hidden"]
+    import shlex
+    guest_code = (
+        "from pathlib import Path; root = Path('/blaxel/import-only'); "
+        "[(root / name).write_text('literal-name') for name in " + repr(odd_names) + "]"
+    )
+    created = sandbox.process.exec(ProcessRequestWithLog(
+        command="python3 -c " + shlex.quote(guest_code), wait_for_completion=True,
+    ))
+    assert created.exit_code == 0, created.stderr
+    listing = sandbox.fs.ls("/blaxel/import-only")
+    actual_names = {entry.name for entry in listing.files}
+    expected_names = {"probe.txt", *odd_names}
+    assert actual_names == expected_names, (sorted(actual_names), sorted(expected_names))
     payload = bytes(range(256))
     binary_path = "/blaxel/import-only/binary"
     uploaded = sandbox.fs.write_binary(binary_path, payload)

@@ -486,7 +486,7 @@ def test_blaxel_typed_request_and_directory_attributes(monkeypatch) -> None:
 
     monkeypatch.setattr(GuestProcesses, "exec", execute)
     t = FakeTransport()
-    add_create_run_delete(t, "vm_blaxel_typed", "f\tprobe.txt\nd\tnested\n")
+    add_create_run_delete(t, "vm_blaxel_typed", "f\0probe.txt\0d\0nested\0complete\0")
     with use_transport(t):
         sandbox = BlaxelSandbox.create()
         assert sandbox.process.exec(TypedRequest()).stdout == "typed"
@@ -499,6 +499,63 @@ def test_blaxel_typed_request_and_directory_attributes(monkeypatch) -> None:
         sandbox.delete()
     assert captured[0] == {"command": "printf typed", "workingDir": "/tmp", "waitForCompletion": True, "timeout": 1500}
     assert captured[1]["waitForCompletion"] is False
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Exercises the Linux guest directory command")
+@pytest.mark.parametrize("terminal", [False, True])
+def test_blaxel_listing_preserves_control_characters_in_names(monkeypatch, tmp_path, terminal):
+    import errno
+    import os
+    import pty
+    import subprocess
+    import tty
+
+    from arker._compat import CommandResult
+    from arker.blaxel import FileSystem
+
+    names = ["line\nbreak", "tab\tfile", "-leading", ".hidden"]
+    for name in names:
+        (tmp_path / name).write_text("content")
+    (tmp_path / "directory\nname").mkdir()
+    (tmp_path / "dangling").symlink_to("missing")
+
+    def execute(_vm, command):
+        if not terminal:
+            return CommandResult(subprocess.check_output(["/bin/sh", "-c", command], text=True), "", 0)
+        master, slave = pty.openpty()
+        tty.setraw(slave)
+        output = bytearray()
+        try:
+            with subprocess.Popen(["/bin/sh", "-c", command], stdout=slave) as process:
+                os.close(slave)
+                while True:
+                    try:
+                        block = os.read(master, 65536)
+                    except OSError as error:
+                        if error.errno != errno.EIO:
+                            raise
+                        break
+                    if not block:
+                        break
+                    output.extend(block)
+            return CommandResult(output.decode(), "", process.returncode)
+        finally:
+            os.close(master)
+
+    monkeypatch.setattr("arker.blaxel.run_command", execute)
+    listing = FileSystem(vm=object()).ls(str(tmp_path))
+    assert sorted(entry.name for entry in listing.files) == sorted([*names, "dangling"])
+    assert [entry.name for entry in listing.subdirectories] == ["directory\nname"]
+
+
+@pytest.mark.parametrize("stdout", ["", "f\0name\0", "f\0complete\0", "f\0name\0complete\0truncated"])
+def test_blaxel_listing_rejects_incomplete_producer_output(monkeypatch, stdout):
+    from arker._compat import CommandResult
+    from arker.blaxel import FileSystem
+
+    monkeypatch.setattr("arker.blaxel.run_command", lambda *_: CommandResult(stdout, "", 0))
+    with pytest.raises(RuntimeError, match="Incomplete directory listing"):
+        FileSystem(vm=object()).ls("/missing")
 
 
 def test_blaxel_native_typed_requests_are_passed_through() -> None:

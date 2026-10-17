@@ -2,6 +2,41 @@
 
 ## Current validation
 
+Literal filesystem paths now survive both shared TypeScript shell operations
+and Python Blaxel listings. Three leading-dash mkdir/list/remove regressions
+failed before adding option terminators. Python's NUL-delimited listing also
+needed a pipe: GNU find replaces control characters with `?` on a terminal.
+The new real-PTY regression failed before correction, and a success marker
+detects failed/truncated producer output despite the pipe. Listings retain
+native lexical order. This still requires GNU find on the Python guest path.
+
+An expanded differential program initially failed six cases: native Python
+Blaxel rejects control characters in file-write URLs, while Arker accepted
+them but sanitized their listing. The listing scenario now creates these files
+through process execution, which is supported by every route; the write-URL
+validation mismatch remains a separate gap, not a waived equivalence claim.
+
+Fresh matching-source cohorts pass **25 Python/18 Node differential cases**
+plus **two Python/one Node Arker-only image/policy cases**. Python vendor units
+pass **449**, lean **440 with nine optional-vendor skips**. Ruff lint/format
+and the full TypeScript typecheck/test/build/isolated-consumer gate pass.
+Packed SHA-256:
+`ae375cda155348067afe6b7ef04b5ec64a7a45ab5858cb19b76b7561d9d34ae8`.
+Current Python fingerprint:
+`f5039f5f13e1aa3fa67845b8c71d02d548388131a735baf7011df7b72110b422`;
+Node: `0dc397cdd142853713fed578fa3be023614165b3ac4f3affcaf2a535f7ea5068`.
+Strict reports remain **100/1,138 Python** and **51/1,048 Node**, both exit 1,
+full equivalence false. These changes have not removed the remaining gaps.
+
+The same random-write/append/rename/mmap/SQLite program passes on a native
+Blaxel persistent volume and on an Arker FUSE mount. Native volume cleanup first
+returned 400 after sandbox deletion; the exact probe sandbox was subsequently
+TERMINATED, and explicit cleanup confirmed both sandbox and volume absent.
+An additional two-VM Arker mount probe observed an immediate remote overwrite
+after close. Neither result certifies all mount semantics or shim adapters.
+
+## Previous image/secret checkpoint
+
 The requested target is now core sandbox parity; Apps and Functions stay
 native. Drives/mounts, secrets and image inputs remain in scope, not waived.
 

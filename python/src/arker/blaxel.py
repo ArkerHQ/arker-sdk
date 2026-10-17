@@ -189,14 +189,21 @@ class FileSystem:
         resolved = resolve_compat_path(path, "/blaxel")
         result = run_command(
             self._vm,
-            f"find {shlex.quote(resolved)} -mindepth 1 -maxdepth 1 -printf '%y\\t%f\\n'",
+            # find sanitizes control characters on a terminal. The success
+            # marker preserves producer failure detection through the pipe.
+            f"(find {shlex.quote(resolved)} -mindepth 1 -maxdepth 1 -printf '%y\\0%f\\0' "
+            "&& printf 'complete\\0') | cat",
         )
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"list failed with exit {result.exit_code}")
         files: list[DirectoryEntry] = []
         subdirectories: list[DirectoryEntry] = []
-        for line in result.stdout.splitlines():
-            kind, _, name = line.partition("\t")
+        fields = result.stdout.split("\0")
+        if fields[-2:] != ["complete", ""] or len(fields[:-2]) % 2:
+            raise RuntimeError(result.stderr or "Incomplete directory listing response")
+        records = fields[:-2]
+        entries = zip(records[::2], records[1::2], strict=True)
+        for kind, name in sorted(entries, key=lambda entry: entry[1]):
             entry = DirectoryEntry(name=name, path=f"{resolved.rstrip('/')}/{name}")
             (subdirectories if kind == "d" else files).append(entry)
         return Directory(

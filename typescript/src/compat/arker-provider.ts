@@ -122,13 +122,13 @@ class ArkerComputeSandbox implements SandboxInterface {
         await this.vm.sync(path, content);
       },
       mkdir: async (path) => {
-        const result = await this.runCommand(`mkdir -p ${shellQuote(path)}`);
+        const result = await this.runCommand(`mkdir -p -- ${shellQuote(path)}`);
         if (result.exitCode !== 0) throw new Error(`Arker mkdir failed for ${path}: ${result.stderr || `exit ${result.exitCode}`}`);
       },
       readdir: async (path) => {
         const p = shellQuote(path);
         const script =
-          `cd ${p} 2>/dev/null || exit 3; ` +
+          `cd -- ${p} 2>/dev/null || exit 3; ` +
           `for e in * .*; do ` +
           `[ "$e" = "." ] && continue; [ "$e" = ".." ] && continue; [ -e "$e" ] || [ -L "$e" ] || continue; ` +
           `if [ -d "$e" ]; then t=d; else t=f; fi; ` +
@@ -143,7 +143,7 @@ class ArkerComputeSandbox implements SandboxInterface {
         return result.exitCode === 0;
       },
       remove: async (path) => {
-        const result = await this.runCommand(`rm -rf ${shellQuote(path)}`);
+        const result = await this.runCommand(`rm -rf -- ${shellQuote(path)}`);
         if (result.exitCode !== 0) throw new Error(`Arker remove failed for ${path}: ${result.stderr || `exit ${result.exitCode}`}`);
       },
     };
