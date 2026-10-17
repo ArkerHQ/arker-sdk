@@ -117,6 +117,27 @@ Both reporters accept `--fail-on-unverified` as a strict scenario-coverage gate.
 It currently fails: full coverage has not been achieved. Existing tests without
 instrumentation do not receive retrospective coverage.
 
+### Authenticated registry checks
+
+Configure an isolated private image with `COMPAT_PRIVATE_REGISTRY_IMAGE`,
+`COMPAT_REGISTRY_USERNAME` and `COMPAT_REGISTRY_PASSWORD`, plus the Arker API
+configuration above. Keep these values in a protected environment, not source
+or command arguments. Run:
+
+```sh
+cd python
+uv run pytest tests/e2e/test_compat_private_registry.py
+cd ../typescript
+npx -y tsx@4.20.6 tests/compat-private-registry-live.ts
+```
+
+These Arker-only checks import once per language, require cached-image requests
+with incorrect credentials to fail, then fork three isolated children. They
+inspect the shared fork arguments to ensure credentials appear only on image
+imports, and check that passwords do not appear in child environments. Each
+test deletes its own VMs; it does not modify or delete the supplied registry.
+They are supplementary checks, not native-provider API equivalence evidence.
+
 For the Node integration profile, run the TypeScript programs and reporter with
 `npx -y tsx@4.20.6` instead of Bun. Mixing runtimes correctly invalidates evidence.
 Python private HTTP requires the native Blaxel SDK's HTTP dependencies, or
