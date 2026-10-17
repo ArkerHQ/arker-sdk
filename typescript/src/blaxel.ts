@@ -138,6 +138,7 @@ export class SandboxInstance {
         return guest.exec({
           ...options,
           command,
+          signalExitCode: -1,
           ...(value.timeout !== undefined ? { timeout: value.timeout * 1000 } : {}),
           workingDir: value.workingDir ?? working_dir,
           env: value.env ?? envs,

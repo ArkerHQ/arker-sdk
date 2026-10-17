@@ -150,7 +150,7 @@ def worker(request, ready_fd):
                             child.stdin.close()
                     time.sleep(0.02)
             code = child.wait()
-            state["exitCode"] = code if code >= 0 else 128 - code
+            state["exitCode"] = code if code >= 0 else request.get("signalExitCode", 128 - code)
             state["_returnCode"] = code
             termination = directory / "termination"
             state["status"] = (
@@ -191,6 +191,10 @@ def dispatch(request):
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     action = request["action"]
     if action == "exec":
+        if "signalExitCode" in request and (
+            type(request["signalExitCode"]) is not int or request["signalExitCode"] != -1
+        ):
+            raise ValueError("Invalid signal exit code")
         if "preserveDescendants" in request and type(request["preserveDescendants"]) is not bool:
             raise ValueError("Invalid descendant supervision option")
         if "argv" in request and (

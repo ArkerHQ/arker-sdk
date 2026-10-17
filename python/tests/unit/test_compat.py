@@ -527,6 +527,7 @@ def test_blaxel_typed_request_and_directory_attributes(monkeypatch) -> None:
         "workingDir": "/tmp",
         "waitForCompletion": True,
         "timeout": 1500000,
+        "signalExitCode": -1,
     }
     assert captured[1]["waitForCompletion"] is False
     assert "timeout" not in captured[1]

@@ -347,6 +347,16 @@ def test_execution_timeout_kills_process(processes):
     assert finished.exit_code != 0
 
 
+@pytest.mark.parametrize("command, expected", [("exit 137", 137), ("exec sh -c 'kill -KILL $$'", -1)])
+def test_blaxel_signal_exit_keeps_explicit_positive_exit_codes(processes, command, expected):
+    manager, directory = processes
+    current = manager.exec(
+        {"command": command, "workingDir": str(directory), "waitForCompletion": True, "signalExitCode": -1}
+    )
+    assert current.exit_code == expected
+    assert manager.get(current.name).exit_code == expected
+
+
 def test_async_wait_cancellation_leaves_process_observable(processes):
     from arker.blaxel import _AsyncProcess
 

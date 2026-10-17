@@ -128,6 +128,7 @@ class Process:
             request.pop("cmd", None)
             if request.get("timeout") is not None:
                 request["timeout"] *= 1000
+            request["signalExitCode"] = -1
             return self._guest.exec(request)
         return run_command(self._vm, command, timeout=timeout)
 
