@@ -1518,6 +1518,67 @@
         }
       }
     },
+    "/v1/vms/{id}/sockets": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/VmId"
+        },
+        {
+          "name": "path",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 107
+          },
+          "description": "Absolute Unix socket pathname inside the VM, at most 107 UTF-8 bytes and containing no NUL."
+        }
+      ],
+      "get": {
+        "operationId": "openVmSocket",
+        "tags": [
+          "VMs"
+        ],
+        "summary": "Open a private guest Unix socket (WebSocket upgrade)",
+        "description": "Upgrade to a WebSocket with subprotocol `vm-port.v1`, carrying a byte stream to the named Unix socket inside the caller's VM. This owner-authenticated operation has the same authority as SSH and never opens a public TCP listener or changes inbound policy. API credentials authenticate only the upgrade, never the guest byte stream. Binary frames carry bytes, with a maximum message size of 65536 bytes. A text frame containing exactly `eof` half-closes that direction; bytes after EOF or any other text are protocol errors. Closing the WebSocket closes the guest connection. Ownership, key scope, mutability, billing and activation quotas are checked before connecting. Runtime activity is held until disconnection. Unsupported runtimes return an explicit capability error.",
+        "responses": {
+          "101": {
+            "description": "The private guest Unix socket byte stream is established."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequiredError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/InvalidStateOrResourceBusyError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
+    },
     "/v1/vms/{id}/sessions/{sid}/pty": {
       "parameters": [
         {
@@ -7778,6 +7839,7 @@
           "deleteSession",
           "attachSessionPty",
           "openVmPort",
+          "openVmSocket",
           "mintSessionPtyTicket",
           "createMount",
           "listMounts",

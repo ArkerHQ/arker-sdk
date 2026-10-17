@@ -1378,6 +1378,15 @@ class VM:
         """Connect to a VM-local TCP port without exposing public ingress."""
         if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
             raise ValueError("port must be an integer from 1 through 65535")
+        return self._connect_private_stream(f"/ports/{port}", timeout=timeout)
+
+    def connect_unix(self, path: str, *, timeout: float = 300) -> PortStream:
+        """Open an owner-authenticated guest Unix socket without public ingress."""
+        if not isinstance(path, str) or not path.startswith("/") or "\0" in path or len(path.encode("utf-8")) > 107:
+            raise ValueError("socket path must be absolute, NUL-free, and at most 107 UTF-8 bytes")
+        return self._connect_private_stream("/sockets?" + urllib.parse.urlencode({"path": path}), timeout=timeout)
+
+    def _connect_private_stream(self, endpoint: str, *, timeout: float) -> PortStream:
         if (
             isinstance(timeout, bool)
             or not isinstance(timeout, (int, float))
@@ -1387,7 +1396,7 @@ class VM:
             raise ValueError("timeout must be finite and positive")
         import websocket
 
-        parsed = urllib.parse.urlsplit(self.base_url + _vm_path(self.id) + f"/ports/{port}")
+        parsed = urllib.parse.urlsplit(self.base_url + _vm_path(self.id) + endpoint)
         if parsed.scheme not in {"https", "http"}:
             raise ValueError("private port requires an HTTP or HTTPS API URL")
         url = urllib.parse.urlunsplit(parsed._replace(scheme="wss" if parsed.scheme == "https" else "ws"))

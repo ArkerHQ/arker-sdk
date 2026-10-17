@@ -63,6 +63,57 @@ test("private port rejects invalid ports before network access", async () => {
   }
 });
 
+test("private Unix socket preserves path, authentication and stream framing", async () => {
+  const server = new WebSocketServer({ port: 0 });
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address === "object");
+  const path = "/tmp/quote'\nservice.sock";
+  const checked = new Promise<void>((resolve, reject) => {
+    server.on("connection", (ws, request) => {
+      try {
+        const url = new URL(request.url!, "http://localhost");
+        assert.equal(url.pathname, "/v1/vms/vm_test/sockets");
+        assert.equal(url.searchParams.get("path"), path);
+        assert.equal(request.headers.authorization, "Bearer ark_test");
+        assert.equal(ws.protocol, "vm-port.v1");
+        ws.on("message", (data, binary) => {
+          if (binary) ws.send(data, { binary: true });
+          else ws.send("eof");
+        });
+        resolve();
+      } catch (error) { reject(error); }
+    });
+  });
+  try {
+    const vm = new Arker({ apiKey: "ark_test", baseUrl: `http://127.0.0.1:${address.port}` }).vm("vm_test");
+    const stream = await vm.connectUnix(path);
+    const chunks: Buffer[] = [];
+    const finished = new Promise<void>((resolve, reject) => {
+      stream.on("data", chunk => chunks.push(chunk));
+      stream.on("end", resolve);
+      stream.on("error", reject);
+    });
+    stream.end(Buffer.from([0, 255, 10, 128]));
+    await Promise.all([checked, finished]);
+    assert.deepEqual(Buffer.concat(chunks), Buffer.from([0, 255, 10, 128]));
+    stream.destroy();
+  } finally {
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test("private Unix socket rejects invalid UTF-8 byte lengths and paths before network access", async () => {
+  const vm = new Arker({ apiKey: "ark_test", baseUrl: "https://example.invalid" }).vm("test");
+  for (const path of ["", "relative", "/bad\0path", "/" + "x".repeat(107), "/" + "é".repeat(54)]) {
+    await assert.rejects(() => vm.connectUnix(path), /socket path/);
+  }
+  for (const timeoutMs of [0, -1, Infinity, NaN]) {
+    await assert.rejects(() => vm.connectUnix("/tmp/service.sock", { timeoutMs }), /timeoutMs/);
+  }
+});
+
 test("private port upgrade refuses redirects and preserves API errors without retry", async () => {
   for (const [status, chunked] of [[404, false], [302, false], [404, true]] as const) {
     let requests = 0;

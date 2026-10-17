@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import socket
+import urllib.parse
 
 import pytest
 import websocket
@@ -26,6 +27,35 @@ class Socket:
 
     def close(self):
         self.closed = True
+
+
+def test_private_unix_socket_preserves_path_and_authority(monkeypatch):
+    calls = []
+    sock = Socket()
+    monkeypatch.setattr(websocket, "create_connection", lambda url, **options: calls.append((url, options)) or sock)
+    vm = Arker(api_key="ark_test", base_url="https://example.invalid/api").vm("vm_1")
+    path = "/tmp/quote'\nservice.sock"
+    with vm.connect_unix(path):
+        pass
+    parsed = urllib.parse.urlsplit(calls[0][0])
+    assert parsed.scheme == "wss"
+    assert parsed.path == "/api/v1/vms/vm_1/sockets"
+    assert urllib.parse.parse_qs(parsed.query) == {"path": [path]}
+    assert calls[0][1]["header"] == ["Authorization: Bearer ark_test"]
+    assert calls[0][1]["subprotocols"] == ["vm-port.v1"]
+    assert calls[0][1]["redirect_limit"] == 0
+    assert sock.closed
+
+
+@pytest.mark.parametrize("path", [None, "", "relative", "/bad\0path", "/" + "x" * 107, "/" + "é" * 54])
+def test_invalid_unix_path_never_opens_a_connection(monkeypatch, path):
+    def unexpected(*args, **kwargs):
+        raise AssertionError("invalid path reached the network")
+
+    monkeypatch.setattr(websocket, "create_connection", unexpected)
+    vm = Arker(api_key="ark_test", base_url="https://example.invalid/api").vm("vm_1")
+    with pytest.raises(ValueError, match="socket path"):
+        vm.connect_unix(path)
 
 
 @pytest.mark.parametrize("already_disconnected", [False, True])

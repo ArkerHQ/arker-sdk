@@ -1790,9 +1790,21 @@ export class VM {
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       throw new RangeError("port must be an integer from 1 through 65535");
     }
+    return this._connectPrivateStream(`/ports/${port}`, options);
+  }
+
+  /** Open an owner-authenticated guest Unix socket without public ingress. Node only. */
+  async connectUnix(path: string, options: { timeoutMs?: number } = {}): Promise<import("node:stream").Duplex> {
+    if (typeof path !== "string" || !path.startsWith("/") || path.includes("\0") || new TextEncoder().encode(path).length > 107) {
+      throw new RangeError("socket path must be absolute, NUL-free, and at most 107 UTF-8 bytes");
+    }
+    return this._connectPrivateStream(`/sockets?${new URLSearchParams({ path })}`, options);
+  }
+
+  private async _connectPrivateStream(endpoint: string, options: { timeoutMs?: number }): Promise<import("node:stream").Duplex> {
     const timeout = options.timeoutMs ?? 300000;
     if (!Number.isFinite(timeout) || timeout <= 0) throw new RangeError("timeoutMs must be finite and positive");
-    const url = new URL(`${normalizeBaseUrl(this.baseUrl)}${vmPath(this.id)}/ports/${port}`);
+    const url = new URL(`${normalizeBaseUrl(this.baseUrl)}${vmPath(this.id)}${endpoint}`);
     if (url.protocol === "https:") url.protocol = "wss:";
     else if (url.protocol === "http:") url.protocol = "ws:";
     else throw new Error("private port requires an HTTP or HTTPS API URL");

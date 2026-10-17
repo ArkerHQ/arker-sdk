@@ -493,6 +493,7 @@ OpenApiOperationId: TypeAlias = Literal[
     'deleteSession',
     'attachSessionPty',
     'openVmPort',
+    'openVmSocket',
     'mintSessionPtyTicket',
     'createMount',
     'listMounts',
@@ -1802,6 +1803,12 @@ class DeleteSessionParameters:
 class OpenVmPortParameters:
     id: str
     port: int
+
+
+@dataclass(frozen=True)
+class OpenVmSocketParameters:
+    id: str
+    path: str
 
 
 @dataclass(frozen=True)
