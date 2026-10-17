@@ -11,6 +11,7 @@ from ._compat import (
 from ._compat import (
     UnsupportedCompatibilityOption,
     UnsupportedMixin,
+    _InstanceOrClassMethod,
     arker_create,
     arker_get,
     compat_network_policies,
@@ -22,20 +23,9 @@ from ._compat import (
     routed_get,
     run_command,
 )
+from ._compat_e2b_async import AsyncSandbox as AsyncSandbox
 from ._compat_process import GuestProcessError, GuestProcesses
 from .computer import VM, ArkerError
-
-
-class _InstanceOrClassMethod:
-    def __init__(self, method):
-        self.method = method
-
-    def __get__(self, instance, owner):
-        return (
-            self.method.__get__(instance, owner)
-            if instance is not None
-            else getattr(owner, f"_class_{self.method.__name__}")
-        )
 
 
 @dataclass(frozen=True)
@@ -286,7 +276,7 @@ class Sandbox(UnsupportedMixin):
     @classmethod
     def create(cls, template_id: str | None = None, **kwargs: Any) -> Sandbox:
         timeout = kwargs.pop("timeout", kwargs.pop("timeout_ms", kwargs.pop("timeoutMs", None)))
-        allow_internet_access = kwargs.pop("allow_internet_access", kwargs.pop("allowInternetAccess", True))
+        allow_internet_access = kwargs.pop("allow_internet_access", kwargs.pop("allowInternetAccess", None))
         arker_config = kwargs.pop("arker", None) or {}
         router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
         if router_path:
@@ -296,7 +286,9 @@ class Sandbox(UnsupportedMixin):
         def create_native() -> Any:
             if native is None:
                 raise RuntimeError("Native E2B SDK is not installed")
-            native_options = {**kwargs, "allow_internet_access": allow_internet_access}
+            native_options = dict(kwargs)
+            if allow_internet_access is not None:
+                native_options["allow_internet_access"] = allow_internet_access
             if timeout is not None:
                 native_options["timeout"] = timeout
             if template_id is not None:
@@ -324,7 +316,7 @@ class Sandbox(UnsupportedMixin):
         arker_config: dict[str, Any],
         template_id: str | None,
         timeout: int | None,
-        allow_internet_access: bool,
+        allow_internet_access: bool | None,
         native_options: dict[str, Any],
     ) -> VM:
         unsupported = [*([] if timeout is None else ["timeout"]), *sorted(native_options)]

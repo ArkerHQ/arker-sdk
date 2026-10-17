@@ -3,14 +3,14 @@
 ## Current validation
 
 The branch includes SDK main at 2ec474e. Fresh runtime-scoped differential
-reports verify **60/965 Python** entries on CPython 3.12.14/Linux/aarch64 and
+reports verify **79/975 Python** entries on CPython 3.12.14/Linux/aarch64 and
 **36/938 TypeScript** entries on Node 22.23.3/Linux/arm64. The latest Node profile
 uses a clean install of published dependencies, with no local provider links.
 E2B and Blaxel native bridges are in the shims, built with ComputeSDK's provider
 factory, and use the embedding SDK's vendor versions. The shared factory is a
 declared dependency, not an undeclared transitive import.
 Both inventories are complete in their declared scope.
-The strict gates still exit 1: **905 Python and 902 TypeScript** entries remain
+The strict gates still exit 1: **896 Python and 902 TypeScript** entries remain
 unverified. Neither method counts nor these scenarios establish full equivalence.
 
 The unchanged files/process programs and new private HTTP programs passed all
@@ -38,11 +38,28 @@ run with inbound and outbound denied. They require the draft backend private
 port API, not a public ingress exception. Fresh feature tests passed all 58
 private-port/HTTPS/HTTP2/WebSocket cases with zero skips.
 
-Local validation passes 389 Python unit tests and lint, and the full TypeScript
+Local validation passes 398 Python unit tests and lint, and the full TypeScript
 test/build/typecheck pipeline. Source/vendor snapshots now reject changes during
 a scenario; runtime profiles are included in fingerprints. Existing evidence
 grouping tests also reject collisions and malformed events. These measurement
 tests do not grant vendor parity credit.
+
+Python's async E2B entry point now uses the same router and ownership cache as
+the sync entry point instead of returning the native class and bypassing routing.
+Native async calls stay on their original event loop. Cancellation does not
+trigger cross-provider fallback, losing ownership probes are cancelled, and a
+late successful Arker creation is deleted after caller cancellation. These
+cancellation paths have unit coverage, not complete live interleaving coverage.
+The refreshed cohort passes all 18 Python and 12 Node programs. Async E2B adds
+typed native handles, awaited callbacks, stdin/EOF, reconnect, context cleanup,
+and static/instance deletion on all three routes. The inventory now includes
+async command handles. This does not verify user identity or all creation defaults.
+
+The TypeScript test gate also packs the SDK and installs it in an isolated npm
+consumer with only E2B and Blaxel vendor dependencies. ESM and CommonJS imports,
+native error identity, and creation inputs pass mocked checks without separate
+ComputeSDK vendor packages. ComputeSDK is a declared runtime dependency. This
+packaging check is credential-free and does not count as live cloud evidence.
 
 A fresh Node HTTP rerun exposed a reset/abort race after an earlier passing
 cohort: the body could expose ECONNRESET instead of AbortError. A deterministic

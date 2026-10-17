@@ -6,6 +6,21 @@ import arker.e2b as shim
 from arker._compat import CommandResult
 
 
+def test_native_creation_does_not_override_an_omitted_internet_policy(monkeypatch):
+    calls = []
+
+    class Native:
+        @classmethod
+        def create(cls, **options):
+            calls.append(options)
+            return types.SimpleNamespace(sandbox_id="native")
+
+    monkeypatch.setattr(shim.Sandbox, "_native_sandbox", staticmethod(lambda: Native))
+    monkeypatch.setattr(shim, "routed_create", lambda provider, config, creators: ("e2b", creators["e2b"]()))
+    shim.Sandbox.create()
+    assert calls == [{}]
+
+
 def test_native_command_environment_uses_the_vendor_envs_option():
     calls = []
     native = types.SimpleNamespace(run=lambda command, **options: calls.append((command, options)))

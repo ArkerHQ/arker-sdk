@@ -45,6 +45,18 @@ class UnsupportedCompatibilityOption(TypeError):
     """An option cannot be represented by the selected compatibility provider."""
 
 
+class _InstanceOrClassMethod:
+    def __init__(self, method):
+        self.method = method
+
+    def __get__(self, instance, owner):
+        return (
+            self.method.__get__(instance, owner)
+            if instance is not None
+            else getattr(owner, f"_class_{self.method.__name__}")
+        )
+
+
 class UnsupportedMixin:
     _compat_name = "provider"
 

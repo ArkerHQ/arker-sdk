@@ -25,7 +25,8 @@ ROOTS = {
     "e2b": [
         ("sync", "Sandbox", "e2b:Sandbox", "arker.e2b:Sandbox"),
         ("sync", "CommandHandle", "e2b:CommandHandle", "arker.e2b:CommandHandle"),
-        ("async", "Sandbox", "e2b:AsyncSandbox", None),
+        ("async", "Sandbox", "e2b:AsyncSandbox", "arker.e2b:AsyncSandbox"),
+        ("async", "CommandHandle", "e2b:AsyncCommandHandle", "arker.e2b:AsyncCommandHandle"),
         ("sync", "Template", "e2b:Template", "arker.e2b:Template"),
         ("sync", "Volume", "e2b:Volume", "arker.e2b:Volume"),
         ("sync", "Secret", "e2b:Secret", "arker.e2b:Secret"),

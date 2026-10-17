@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from importlib.resources import files
@@ -45,42 +46,31 @@ def process_control(call, *args, **kwargs):
         raise NotFoundException(str(error)) from error
 
 
-def command_handle(processes, current, timeout):
-    native_handle, proto, oneof = require_native_handle()
-    identifier = str(current.pid)
-    deadline = None if timeout in (None, 0) else time.monotonic() + timeout
-
-    def events():
-        from e2b import TimeoutException
-
-        offsets = {"stdout": 0, "stderr": 0}
-        while True:
-            if deadline is not None and time.monotonic() >= deadline:
-                raise TimeoutException("Timed out waiting for command")
-            value = process_control(processes.get, identifier, raw_exit_code=True)
-            if deadline is not None and time.monotonic() >= deadline:
-                raise TimeoutException("Timed out waiting for command")
-            for stream in offsets:
-                text = getattr(value, stream)
-                chunk = text[offsets[stream] :]
-                offsets[stream] = len(text)
-                if chunk:
-                    yield proto.StartResponse(
-                        event=proto.ProcessEvent(
-                            event=oneof(
-                                "data",
-                                proto.ProcessEvent.DataEvent(output=oneof(stream, chunk.encode())),
-                            )
+def _snapshot_events(value, offsets, proto, oneof):
+    events = []
+    for stream in offsets:
+        text = getattr(value, stream)
+        chunk = text[offsets[stream] :]
+        offsets[stream] = len(text)
+        if chunk:
+            events.append(
+                proto.StartResponse(
+                    event=proto.ProcessEvent(
+                        event=oneof(
+                            "data",
+                            proto.ProcessEvent.DataEvent(output=oneof(stream, chunk.encode())),
                         )
                     )
-            if value.status != "running":
-                fields = exit_fields(value)
-                end = proto.ProcessEvent.EndEvent(exit_code=fields["exit_code"], exited=True, error=fields["error"])
-                yield proto.StartResponse(event=proto.ProcessEvent(event=oneof("end", end)))
-                return
-            remaining = None if deadline is None else max(0, deadline - time.monotonic())
-            time.sleep(0.05 if remaining is None else min(0.05, remaining))
+                )
+            )
+    if value.status != "running":
+        fields = exit_fields(value)
+        end = proto.ProcessEvent.EndEvent(exit_code=fields["exit_code"], exited=True, error=fields["error"])
+        events.append(proto.StartResponse(event=proto.ProcessEvent(event=oneof("end", end))))
+    return events
 
+
+def _control_callbacks(processes, identifier):
     def kill():
         try:
             if processes.get(identifier).status != "running":
@@ -102,10 +92,79 @@ def command_handle(processes, current, timeout):
             raise UnsupportedCompatibilityOption("Per-request stdin timeouts are not yet supported on Arker")
         process_control(processes.close_stdin, identifier)
 
+    return kill, stdin, eof
+
+
+def command_handle(processes, current, timeout):
+    native_handle, proto, oneof = require_native_handle()
+    identifier = str(current.pid)
+    deadline = None if timeout in (None, 0) else time.monotonic() + timeout
+
+    def events():
+        from e2b import TimeoutException
+
+        offsets = {"stdout": 0, "stderr": 0}
+        while True:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutException("Timed out waiting for command")
+            value = process_control(processes.get, identifier, raw_exit_code=True)
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutException("Timed out waiting for command")
+            yield from _snapshot_events(value, offsets, proto, oneof)
+            if value.status != "running":
+                return
+            remaining = None if deadline is None else max(0, deadline - time.monotonic())
+            time.sleep(0.05 if remaining is None else min(0.05, remaining))
+
+    kill, stdin, eof = _control_callbacks(processes, identifier)
     return native_handle(
         pid=int(current.pid),
         events=events(),
         handle_kill=kill,
         handle_send_stdin=stdin,
         handle_close_stdin=eof,
+    )
+
+
+def async_command_handle(processes, current, timeout, on_stdout=None, on_stderr=None):
+    from e2b import AsyncCommandHandle, TimeoutException
+
+    _, proto, oneof = require_native_handle()
+    identifier = str(current.pid)
+    deadline = None if timeout in (None, 0) else time.monotonic() + timeout
+
+    async def events():
+        offsets = {"stdout": 0, "stderr": 0}
+        while True:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutException("Timed out waiting for command")
+            value = await asyncio.to_thread(process_control, processes.get, identifier, raw_exit_code=True)
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutException("Timed out waiting for command")
+            for event in _snapshot_events(value, offsets, proto, oneof):
+                yield event
+            if value.status != "running":
+                return
+            remaining = None if deadline is None else max(0, deadline - time.monotonic())
+            await asyncio.sleep(0.05 if remaining is None else min(0.05, remaining))
+
+    kill, stdin, eof = _control_callbacks(processes, identifier)
+
+    async def async_kill():
+        return await asyncio.to_thread(kill)
+
+    async def async_stdin(data, request_timeout=None):
+        return await asyncio.to_thread(stdin, data, request_timeout)
+
+    async def async_eof(request_timeout=None):
+        return await asyncio.to_thread(eof, request_timeout)
+
+    return AsyncCommandHandle(
+        pid=int(current.pid),
+        events=events(),
+        handle_kill=async_kill,
+        handle_send_stdin=async_stdin,
+        handle_close_stdin=async_eof,
+        on_stdout=on_stdout,
+        on_stderr=on_stderr,
     )
