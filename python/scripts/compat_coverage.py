@@ -14,6 +14,7 @@ import importlib.metadata
 import inspect
 import json
 import platform
+import re
 import sys
 import textwrap
 import typing
@@ -105,6 +106,7 @@ def implementation_fingerprint():
         root / "uv.lock",
         root.parent / "compatibility" / "requirements.txt",
         root.parent / "compatibility" / "http-service.py",
+        root.parent / "compatibility" / "api-scope.json",
         root / "src" / "arker" / "_linux_signals.json",
         root / "scripts" / "compat_coverage.py",
         *root.joinpath("tests", "e2e").glob("*.py"),
@@ -115,6 +117,29 @@ def implementation_fingerprint():
         digest.update(str(path.relative_to(root.parent)).encode() + b"\0")
         digest.update(path.read_bytes() + b"\0")
     return digest.hexdigest()
+
+
+def select_scope(rows, scope):
+    if scope not in ("expanded", "core-sandbox"):
+        raise ValueError("unknown compatibility scope")
+    contract = json.loads((Path(__file__).resolve().parents[2] / "compatibility" / "api-scope.json").read_text())
+    if type(contract["version"]) is not int or contract["version"] != 1:
+        raise ValueError("unsupported API scope contract")
+    selected, excluded = [], []
+    for row in rows:
+        match = next(
+            (
+                rule
+                for rule in contract["exclusions"]
+                if row["provider"] == rule["provider"] and re.search(rule["pattern"], row["api"])
+            ),
+            None,
+        )
+        if match:
+            excluded.append({**row, "exclusion_reason": match["reason"]})
+        if scope == "expanded" or not match:
+            selected.append(row)
+    return selected, excluded
 
 
 def resolve(reference: str | None) -> Any:
@@ -230,6 +255,7 @@ def main() -> None:
     parser.add_argument("--evidence", type=Path, action="append", default=[])
     parser.add_argument("--output", type=Path)
     parser.add_argument("--fail-on-unverified", action="store_true")
+    parser.add_argument("--scope", choices=("expanded", "core-sandbox"), default="expanded")
     args = parser.parse_args()
     evidence = []
     for path in args.evidence:
@@ -258,9 +284,12 @@ def main() -> None:
             row["id"], provider_evidence, versions[row["provider"]], fingerprint
         )
         row["status"] = "scenario_verified" if row["verified_scenarios"] else "unverified"
+    rows, exclusions = select_scope(rows, args.scope)
     report = {
         "schema_version": 1,
         "language": "python",
+        "selected_scope": args.scope,
+        "scope_exclusions": exclusions,
         "runtime": runtime_info(),
         "scope": (
             "Public methods and properties of sandbox/client roots and statically discoverable service objects, "

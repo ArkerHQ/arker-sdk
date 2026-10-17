@@ -20,6 +20,16 @@ assert.throws(() => execFileSync("bun", ["--eval", 'await import("./scripts/comp
 }), /COMPAT_COVERAGE_RUN/);
 const inventory = JSON.parse(execFileSync("bun", ["scripts/compat-coverage.ts"], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
 assert.equal(inventory.complete_inventory, true, JSON.stringify(inventory.diagnostics));
+assert.equal(inventory.selected_scope, "expanded");
+assert.ok(inventory.apis.some((row: { api: string }) => row.api.startsWith("App.")));
+const coreInventory = JSON.parse(execFileSync("bun", ["scripts/compat-coverage.ts", "--scope", "core-sandbox"], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
+assert.equal(coreInventory.selected_scope, "core-sandbox");
+assert.ok(coreInventory.scope_exclusions.some((row: { api: string }) => row.api.startsWith("App.")));
+assert.ok(!coreInventory.apis.some((row: { api: string }) => row.api.startsWith("App.")));
+for (const prefix of ["Sandbox.", "Image.", "Volume.", "Secret.", "DriveInstance.", "ModalClient.cloudBucketMounts.", "ModalClient.cpClient.sandbox"]) {
+  assert.ok(coreInventory.apis.some((row: { api: string }) => row.api.startsWith(prefix)), `${prefix} stays in core scope`);
+}
+assert.throws(() => execFileSync("bun", ["scripts/compat-coverage.ts", "--scope", "unknown"], { stdio: "pipe" }));
 for (const name of ["DriveInstance", "VolumeInstance", "Snapshot", "ImageInstance"]) {
   const entries = inventory.apis.filter((row: { provider: string; api: string }) => row.provider === "blaxel" && row.api.startsWith(`${name}.`));
   assert.ok(entries.length > 0, `Blaxel ${name} must be inventoried`);
@@ -56,7 +66,7 @@ const snapshots = ["before", "after"];
 const finishSnapshot = captureEvidenceSnapshot(async () => snapshots.shift()!);
 assert.deepEqual(await finishSnapshot(), { fingerprint: "before", changed: true });
 assert.deepEqual(await captureEvidenceSnapshot(async () => "stable")(), { fingerprint: "stable", changed: false });
-for (const name of ["compat-evidence.ts", "compat-coverage.ts", "compat-trace.ts", "compat-blaxel-import-live.ts", "http-service.py", "dist/index.mjs"]) {
+for (const name of ["compat-evidence.ts", "compat-coverage.ts", "compat-trace.ts", "compat-blaxel-import-live.ts", "http-service.py", "api-scope.json", "dist/index.mjs"]) {
   const changed = await implementationFingerprint(async (path) => {
     const content = await readFile(path);
     return path.endsWith(`/${name}`) ? Buffer.concat([content, Buffer.from("\n// changed harness\n")]) : content;

@@ -16,6 +16,36 @@ coverage = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(coverage)
 
 
+def test_core_scope_excludes_only_app_and_function_surfaces():
+    names = [
+        "App.lookup",
+        "ModalClient.apps.fromName",
+        "ModalClient.functions.fromName",
+        "ModalClient.cls.fromName",
+        "ModalClient.cpClient.appGetInfo",
+        "ModalClient.cpClient.functionGet",
+        "ModalClient.cpClient.classGet",
+    ]
+    retained = [
+        "Sandbox.create",
+        "Image.run_function",
+        "Volume.commit",
+        "Secret.from_name",
+        "ModalClient.cpClient.sandboxCreate",
+        "ModalClient.cpClient.secretGet",
+        "ModalClient.cloudBucketMounts.create",
+        "DriveInstance.create",
+    ]
+    rows = [{"provider": "modal", "api": name} for name in names + retained]
+    selected, excluded = coverage.select_scope(rows, "core-sandbox")
+    assert [row["api"] for row in selected] == retained
+    assert [row["api"] for row in excluded] == names
+    assert all(row["exclusion_reason"] for row in excluded)
+    assert coverage.select_scope(rows, "expanded")[0] == rows
+    with pytest.raises(ValueError):
+        coverage.select_scope(rows, "unknown")
+
+
 def test_missing_evidence_run_id_fails_before_starting_live_programs(monkeypatch, tmp_path):
     monkeypatch.setenv("COMPAT_COVERAGE_EVIDENCE", str(tmp_path / "evidence.jsonl"))
     monkeypatch.delenv("COMPAT_COVERAGE_RUN", raising=False)
@@ -141,7 +171,8 @@ def test_malformed_current_evidence_fails_closed(field, value):
 
 
 @pytest.mark.parametrize(
-    "name", ["compat_coverage.py", "compat_evidence.py", "test_blaxel_import_only.py", "http-service.py"]
+    "name",
+    ["compat_coverage.py", "compat_evidence.py", "test_blaxel_import_only.py", "http-service.py", "api-scope.json"],
 )
 def test_evidence_fingerprint_includes_measurement_and_scenario_code(monkeypatch, name):
     original = Path.read_bytes

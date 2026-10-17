@@ -35,6 +35,7 @@ export async function implementationFingerprint(read: (path: string) => Promise<
     resolve(root, "../../python/src/arker/_guest_process.py"),
     resolve(root, "../../python/src/arker/_linux_signals.json"),
     resolve(root, "../../compatibility/http-service.py"),
+    resolve(root, "../../compatibility/api-scope.json"),
     resolve(root, "../scripts/compat-evidence.ts"), resolve(root, "../scripts/compat-coverage.ts"),
   ];
   for (const name of ["computesdk", "@computesdk/provider"]) {

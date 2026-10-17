@@ -1,5 +1,16 @@
 # Recorded coverage baseline
 
+## Core-sandbox measurement update
+
+Both reporters now accept `--scope core-sandbox`, using the same fingerprinted
+scope contract and listing every excluded App/Function API with its reason.
+The expanded inventory remains the default. Storage, mounts, secrets, images,
+sandbox methods and unknown APIs remain in the scoped inventory. Regressions
+failed before the change. Python gates pass **468 vendor / 459 lean tests**
+(nine optional-vendor skips); TypeScript typecheck and full test/build/packed
+consumer gates pass. Fresh differential evidence for this measurement source
+is pending; the fingerprints and coverage counts below are historical.
+
 ## Current validation
 
 The `e43dcaa` process checkpoint translates native Blaxel execution timeout

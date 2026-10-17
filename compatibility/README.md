@@ -128,6 +128,15 @@ Both reporters accept `--fail-on-unverified` as a strict scenario-coverage gate.
 It currently fails: full coverage has not been achieved. Existing tests without
 instrumentation do not receive retrospective coverage.
 
+Use `--scope core-sandbox --fail-on-unverified` for the migration target above.
+The default `--scope expanded` retains the broader inventory. Both languages
+read the same `api-scope.json` exclusions, report `selected_scope`, and list
+each App/Function surface under `scope_exclusions` with its reason. A scoped
+report retains images, secrets, volumes, drives, mounts, sandbox lifecycle,
+and sandbox-related low-level client methods. Unknown APIs remain in scope.
+Exclusions grant no behavioral coverage. The scope contract is fingerprinted;
+changing it invalidates existing evidence and requires fresh live scenarios.
+
 ### Authenticated registry checks
 
 Configure an isolated private image with `COMPAT_PRIVATE_REGISTRY_IMAGE`,

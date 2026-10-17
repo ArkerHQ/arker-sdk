@@ -132,25 +132,41 @@ for (const row of rows.values()) {
     ? "scenario_verified" : "unverified";
 }
 const counts: Record<string, number> = {};
-for (const row of rows.values()) counts[row.status] = (counts[row.status] ?? 0) + 1;
+const scopeIndex = process.argv.indexOf("--scope");
+const selectedScope = scopeIndex < 0 ? "expanded" : process.argv[scopeIndex + 1];
+if (selectedScope !== "expanded" && selectedScope !== "core-sandbox") throw new Error("Unknown compatibility scope");
+const scopeContract = JSON.parse(await readFile(new URL("../../compatibility/api-scope.json", import.meta.url), "utf8")) as {
+  version: number; exclusions: { provider: string; pattern: string; reason: string }[];
+};
+if (scopeContract.version !== 1) throw new Error("Unsupported API scope contract");
+const selectedRows: Row[] = [];
+const exclusions: (Row & { exclusion_reason: string })[] = [];
+for (const row of rows.values()) {
+  const rule = scopeContract.exclusions.find((rule) => rule.provider === row.provider && new RegExp(rule.pattern).test(row.api));
+  if (rule) exclusions.push({ ...row, exclusion_reason: rule.reason });
+  if (selectedScope === "expanded" || !rule) selectedRows.push(row);
+}
+for (const row of selectedRows) counts[row.status] = (counts[row.status] ?? 0) + 1;
 const report = {
   schema_version: 1,
   language: "typescript",
+  selected_scope: selectedScope,
+  scope_exclusions: exclusions,
   runtime: runtimeInfo(),
   scope: "Public sandbox/client methods and properties, static methods, and connected service objects to depth 2; exposed declarations do not count as behavioral verification.",
   vendor_versions: vendorVersions,
   implementation_fingerprint: fingerprint,
-  complete_inventory: rows.size > 0 && diagnostics.length === 0 && missingRoots.length === 0,
+  complete_inventory: selectedRows.length > 0 && diagnostics.length === 0 && missingRoots.length === 0,
   missing_roots: missingRoots,
   diagnostics: diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")),
   counts,
   full_api_equivalence: false,
-  apis: [...rows.values()].sort((a, b) => a.id.localeCompare(b.id)),
+  apis: selectedRows.sort((a, b) => a.id.localeCompare(b.id)),
 };
 const output = JSON.stringify(report, null, 2) + "\n";
 const outputIndex = process.argv.indexOf("--output");
 if (outputIndex >= 0) await writeFile(process.argv[outputIndex + 1]!, output);
 else process.stdout.write(output);
-if (process.argv.includes("--fail-on-unverified") && (!report.complete_inventory || [...rows.values()].some((row) => row.status === "unverified"))) {
+if (process.argv.includes("--fail-on-unverified") && (!report.complete_inventory || selectedRows.some((row) => row.status === "unverified"))) {
   process.exitCode = 1;
 }
