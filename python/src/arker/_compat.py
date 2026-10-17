@@ -207,11 +207,20 @@ def get_or_none(getter: Callable[[], Any]) -> Any | None:
             getattr(error, "status_code", None) or vars(error).get("status") or getattr(response, "status_code", None)
         )
         code = str(getattr(error, "code", "")).lower()
-        message = str(error).lower()
         if status is not None and status != 404:
             raise
-        if status == 404 or code in {"not_found", "notfound"} or "not found" in message:
+        if status == 404 or code in {"404", "not_found", "notfound"}:
             return None
+        for module_name, class_name in (
+            ("modal.exception", "NotFoundError"),
+            ("e2b.exceptions", "SandboxNotFoundException"),
+            ("daytona.common.errors", "DaytonaNotFoundError"),
+        ):
+            if any(base.__module__ == module_name for base in type(error).__mro__):
+                module = import_optional(module_name)
+                missing_type = getattr(module, class_name, None)
+                if isinstance(missing_type, type) and isinstance(error, missing_type):
+                    return None
         raise
 
 

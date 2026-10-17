@@ -403,6 +403,27 @@ def test_native_lookup_errors_are_not_hidden() -> None:
         get_or_none(lambda: (_ for _ in ()).throw(RuntimeError("provider unavailable")))
 
 
+def test_unknown_lookup_error_text_cannot_trigger_fallback() -> None:
+    error = RuntimeError("Sandbox not found in upstream response")
+    with pytest.raises(RuntimeError) as caught:
+        get_or_none(lambda: (_ for _ in ()).throw(error))
+    assert caught.value is error
+
+
+@pytest.mark.parametrize(
+    "module_name,class_name",
+    [
+        ("modal.exception", "NotFoundError"),
+        ("e2b.exceptions", "SandboxNotFoundException"),
+        ("daytona.common.errors", "DaytonaNotFoundError"),
+    ],
+)
+def test_typed_native_absence_does_not_require_message_guessing(monkeypatch, module_name, class_name) -> None:
+    missing_type = type(class_name, (Exception,), {"__module__": module_name})
+    monkeypatch.setattr("arker._compat.import_optional", lambda _: types.SimpleNamespace(**{class_name: missing_type}))
+    assert get_or_none(lambda: (_ for _ in ()).throw(missing_type("opaque"))) is None
+
+
 def test_cache_cannot_override_configured_providers(tmp_path: Path) -> None:
     cache_path = tmp_path / "ownership.json"
     JsonRouteCache(cache_path).set("existing", "arker")
