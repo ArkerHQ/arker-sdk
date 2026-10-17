@@ -66,10 +66,7 @@ def test_shared_fork_injects_policy_secret_only_to_allowed_upstream():
     try:
         assert sandbox.get_policies().secrets == {"COMPAT_HOST_TOKEN": "***"}
         assert sandbox.run("printenv COMPAT_HOST_TOKEN").exit_code == 1
-        denied = (
-            "import urllib.request; "
-            "urllib.request.urlopen('https://example.com', timeout=10).read()"
-        )
+        denied = "import urllib.request; urllib.request.urlopen('https://example.com', timeout=10).read()"
         sandbox.set_policies({"policies": [{"type": "outbound", "action": "allow"}]})
         assert sandbox.run("python3 -c " + shlex.quote(denied), timeout=15).exit_code == 0
         sandbox.set_policies(document)

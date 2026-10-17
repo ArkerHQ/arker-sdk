@@ -28,7 +28,12 @@ def test_blaxel_import_shim_keeps_core_resource_exports():
     from arker import blaxel
 
     for name in (
-        "DriveInstance", "SyncDriveInstance", "VolumeInstance", "SyncVolumeInstance", "SecretInstance", "ImageInstance"
+        "DriveInstance",
+        "SyncDriveInstance",
+        "VolumeInstance",
+        "SyncVolumeInstance",
+        "SecretInstance",
+        "ImageInstance",
     ):
         assert getattr(blaxel, name) is getattr(native, name)
 
