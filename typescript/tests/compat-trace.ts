@@ -9,7 +9,7 @@ export function traceVendor<T extends object>(target: T, prefix: string, calls: 
           calls.add(api);
           const result = Reflect.apply(value, object, args);
           const observed = (result: unknown) => {
-            if (prefix.endsWith(".static") && ["create", "get", "createIfNotExists"].includes(property)) {
+            if (prefix.endsWith(".static") && ["create", "connect", "get", "createIfNotExists"].includes(property)) {
               return traceVendor(result as object, prefix.slice(0, -".static".length), calls);
             }
             if (["Sandbox.commands.run", "Sandbox.commands.connect"].includes(api)

@@ -14,6 +14,20 @@ coverage = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(coverage)
 
 
+def test_inventory_includes_public_context_and_iteration_protocols():
+    class Native:
+        def __enter__(self): ...
+        def __exit__(self, *args): ...
+        def __iter__(self): ...
+        def __next__(self): ...
+        def _private(self): ...
+
+    for name in ("__enter__", "__exit__", "__iter__", "__next__", "_private"):
+        getattr(Native, name).__module__ = "e2b.example"
+    names = {item["api"] for item in coverage.surfaces("e2b", "sync", "Sandbox", Native, None)}
+    assert names == {f"Sandbox.{name}" for name in ("__enter__", "__exit__", "__iter__", "__next__")}
+
+
 def test_evidence_requires_reference_and_both_routes_for_current_code_and_version():
     def event(route, **options):
         return {

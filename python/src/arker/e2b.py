@@ -23,7 +23,7 @@ from ._compat import (
     run_command,
 )
 from ._compat_process import GuestProcessError, GuestProcesses
-from .computer import VM
+from .computer import VM, ArkerError
 
 
 @dataclass(frozen=True)
@@ -342,26 +342,32 @@ class Sandbox(UnsupportedMixin):
             arker_config,
             {
                 "arker": lambda: arker_get(sandbox_id, arker_config),
-                "e2b": lambda: (
-                    get_or_none(lambda: native.connect(sandbox_id))
-                    if native is not None and hasattr(native, "connect")
-                    else None
-                ),
+                "e2b": lambda: get_or_none(lambda: native.get_info(sandbox_id)) if native is not None else None,
             },
         )
         if found is not None:
             provider, result = found
-            return cls(vm=result if provider == "arker" else None, native=result if provider == "e2b" else None)
+            return cls(
+                vm=result if provider == "arker" else None,
+                native=native.connect(sandbox_id) if provider == "e2b" else None,
+            )
         raise format_not_found("Sandbox", sandbox_id)
 
-    def kill(self) -> None:
+    def __enter__(self) -> Sandbox:
+        return self
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        self.kill()
+
+    def kill(self) -> bool:
         if self._vm is not None:
-            self._vm.delete()
-            return
+            try:
+                self._vm.refresh()
+                return self._vm.delete().deleted
+            except ArkerError as error:
+                if error.status == 404:
+                    return False
+                raise
         if hasattr(self._native, "kill"):
-            self._native.kill()
-            return
-        if hasattr(self._native, "close"):
-            self._native.close()
-            return
+            return self._native.kill()
         raise AttributeError("Native E2B sandbox does not expose kill().")

@@ -1,5 +1,6 @@
 import { e2b as createE2BProvider } from "@computesdk/e2b";
 import type { RunCommandOptions } from "computesdk";
+import { ArkerError, type VM } from "./index.js";
 import { CommandExitError, Sandbox as VendorSandbox, NotFoundError, type CommandStartOpts, type CommandHandle,
   type Commands as VendorCommands, type CommandConnectOpts, type CommandRequestOpts } from "e2b";
 
@@ -34,6 +35,7 @@ interface CommandRunner {
   (command: string, options?: CommandOptions): Promise<CommandExitResult | CommandHandle>;
 }
 interface NativeSandbox {
+  kill: () => Promise<boolean>;
   getHost?: (port: number) => string;
   commands?: VendorCommands;
 }
@@ -41,8 +43,22 @@ interface NativeSandbox {
 const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess"] as const;
 
 function sdk(routerConfigPath?: string) {
+  const fallbackProvider = Object.assign(
+    createE2BProvider({ nativeSdk: { Sandbox: VendorSandbox, NotFoundError, CommandExitError } }),
+    {
+      ownershipProbe: async (id: string): Promise<boolean> => {
+        try {
+          await VendorSandbox.getInfo(id);
+          return true;
+        } catch (error) {
+          if (error instanceof NotFoundError) return false;
+          throw error;
+        }
+      },
+    },
+  );
   return createCompatSdk({
-    fallbackProvider: createE2BProvider({ nativeSdk: { Sandbox: VendorSandbox, NotFoundError, CommandExitError } }),
+    fallbackProvider,
     routerConfigPath,
   });
 }
@@ -215,8 +231,16 @@ export class Sandbox {
     return port === 8080 ? this.#arkerHostname : this.#arkerHostname.replace(/^([^.]+)/, `$1-${port}`);
   }
 
-  async kill(): Promise<void> {
-    await this.#box.destroy();
+  async kill(): Promise<boolean> {
+    if (this.#native) return this.#native.kill();
+    const vm = (this.#box as UniversalSandbox & { getInstance(): VM }).getInstance();
+    try {
+      await vm.refresh();
+      return (await vm.delete()).deleted;
+    } catch (error) {
+      if (error instanceof ArkerError && error.status === 404) return false;
+      throw error;
+    }
   }
 }
 export * from "e2b";

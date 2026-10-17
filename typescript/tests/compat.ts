@@ -5,6 +5,7 @@ import type { CommandResult, FileEntry, RunCommandOptions, SandboxInfo, SandboxI
 import { Daytona } from "../src/daytona.js";
 import { Sandbox as E2BSandbox } from "../src/e2b.js";
 import { CommandExitError } from "e2b";
+import { ArkerError } from "../src/index.js";
 import { SandboxInstance as BlaxelSandbox } from "../src/blaxel.js";
 import { ModalClient } from "../src/modal.js";
 import { createArkerComputeProvider } from "../src/compat/arker-provider.js";
@@ -61,6 +62,17 @@ class FakeSandbox implements SandboxInterface {
 
   async destroy(): Promise<void> {
     this.destroyed = true;
+  }
+
+  async delete(): Promise<{ deleted: boolean }> {
+    const deleted = !this.destroyed;
+    this.destroyed = true;
+    return { deleted };
+  }
+
+  async refresh(): Promise<this> {
+    if (this.destroyed) throw new ArkerError("not_found", "VM not found", 404);
+    return this;
   }
 
   readonly filesystem = {
@@ -219,7 +231,8 @@ async function testE2BSurface(): Promise<void> {
     assert.deepEqual(await sandbox.files.list("/tmp"), [{ name: "/tmp", type: "file", size: 1 }]);
     assert.equal(await sandbox.files.exists("/tmp/a"), true);
     await sandbox.files.remove("/tmp/a");
-    await sandbox.kill();
+    assert.equal(await sandbox.kill(), true);
+    assert.equal(await sandbox.kill(), false);
     assert.equal(box.destroyed, true);
 
     assert.throws(

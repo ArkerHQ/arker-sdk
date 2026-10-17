@@ -289,4 +289,38 @@ async function testNativeFirstArkerIdentifiers(): Promise<void> {
 }
 await testNativeFirstArkerIdentifiers();
 
+async function testOwnershipProbesDoNotConnectLosingSandboxes(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "arker-probe-routing-"));
+  const path = await config(directory, {
+    version: 1, existing: { strategy: "race", order: ["e2b", "arker"] },
+    create: { strategy: "priority", order: ["arker"] },
+  });
+  let connects = 0;
+  let release!: (found: boolean) => void;
+  const native = Object.assign(provider("e2b", {
+    getById: async (id) => { connects++; return sandbox(id, "e2b"); },
+  }), { ownershipProbe: () => new Promise<boolean>((resolve) => { release = resolve; }) });
+  const routed = createRoutedProvider([
+    native, provider("arker", { getById: async (id) => sandbox(id, "arker") }),
+  ], path).instances!;
+  assert.equal((await routed.getById("shared"))?.provider, "arker");
+  release(true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(connects, 0);
+
+  let probes = 0;
+  let deleted = 0;
+  const nativeOnly = createRoutedProvider([Object.assign(provider("e2b", {
+    getById: async (id) => { connects++; return sandbox(id, "e2b"); },
+    destroy: async () => { deleted++; },
+  }), { ownershipProbe: async () => { probes++; return true; } })]).instances!;
+  assert.equal((await nativeOnly.getById("native"))?.provider, "e2b");
+  assert.equal(connects, 1);
+  await nativeOnly.destroy("native");
+  assert.equal(probes, 2);
+  assert.equal(connects, 1);
+  assert.equal(deleted, 1);
+}
+await testOwnershipProbesDoNotConnectLosingSandboxes();
+
 console.log("PASS compat router");

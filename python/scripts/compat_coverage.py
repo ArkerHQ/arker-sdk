@@ -136,8 +136,9 @@ def verified_scenarios(api, evidence, version, fingerprint):
 
 
 def surfaces(provider: str, style: str, prefix: str, native: type, shim: type | None, depth: int = 0):
+    protocols = {"__enter__", "__exit__", "__aenter__", "__aexit__", "__iter__", "__next__", "__aiter__", "__anext__"}
     for name in sorted(dir(native)):
-        if name.startswith("_"):
+        if name.startswith("_") and name not in protocols:
             continue
         raw = inspect.getattr_static(native, name)
         if isinstance(raw, property):

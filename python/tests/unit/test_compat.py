@@ -92,6 +92,12 @@ def completed(stdout: str, stderr: str = "", exit_code: int = 0) -> dict[str, An
 
 
 def add_create_run_delete(t: FakeTransport, vm_id: str, stdout: str) -> None:
+    if vm_id == "vm_e2b":
+        t.add_json(
+            lambda method, url: method == "GET" and url == f"https://test.invalid/api/v1/vms/{vm_id}",
+            200,
+            vm_payload(vm_id),
+        )
     t.add_json(
         lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/fork",
         200,
@@ -657,6 +663,11 @@ def test_e2b_connect_falls_back_to_native_sdk(monkeypatch) -> None:
     class NativeSandbox:
         sandbox_id = "native_e2b"
         commands = NativeCommands()
+
+        @classmethod
+        def get_info(cls, sandbox_id: str) -> Any:
+            assert sandbox_id == "native_e2b"
+            return types.SimpleNamespace(sandbox_id=sandbox_id)
 
         @classmethod
         def connect(cls, sandbox_id: str) -> NativeSandbox:

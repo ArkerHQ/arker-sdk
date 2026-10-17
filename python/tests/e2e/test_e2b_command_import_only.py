@@ -11,6 +11,9 @@ from e2b import Sandbox, CommandResult, CommandExitException, CommandHandle, Not
 
 sandbox = Sandbox.create()
 try:
+    connected_sandbox = Sandbox.connect(sandbox.sandbox_id)
+    assert connected_sandbox.sandbox_id == sandbox.sandbox_id
+    assert connected_sandbox.commands.run("printf connected").stdout == "connected"
     result = sandbox.commands.run('printf "%s" "$COMPAT_VALUE"', envs={"COMPAT_VALUE": "preserved"})
     assert isinstance(result, CommandResult)
     assert result.stdout == "preserved"
@@ -61,7 +64,15 @@ try:
     else:
         raise AssertionError("Missing process connect did not raise NotFoundException")
 finally:
-    sandbox.kill()
+    try:
+        with sandbox as entered:
+            assert entered is sandbox
+            raise RuntimeError("context sentinel")
+    except RuntimeError as error:
+        assert str(error) == "context sentinel"
+    else:
+        raise AssertionError("Context manager suppressed application error")
+    assert sandbox.kill() is False
 """
 
 
@@ -105,6 +116,9 @@ def test_command_import_only(provider, shim, tmp_path, monkeypatch):
             "import-only-command-environment-and-exit",
             [
                 "Sandbox.create",
+                "Sandbox.connect",
+                "Sandbox.__enter__",
+                "Sandbox.__exit__",
                 "Sandbox.commands.run",
                 "Sandbox.commands.connect",
                 "Sandbox.commands.send_stdin",

@@ -7,9 +7,12 @@ import { Sandbox as Shim } from "../src/e2b.js";
 import { recordEvidence } from "../scripts/compat-evidence.js";
 import { traceVendor } from "./compat-trace.js";
 
-async function program(Sandbox: { create(): Promise<Native | Shim> }) {
+async function program(Sandbox: { create(): Promise<Native | Shim>; connect(id: string): Promise<Native | Shim> }) {
   const sandbox = await Sandbox.create();
   try {
+    const connectedSandbox = await Sandbox.connect(sandbox.sandboxId);
+    assert.equal(connectedSandbox.sandboxId, sandbox.sandboxId);
+    assert.equal((await connectedSandbox.commands.run("printf connected")).stdout, "connected");
     const result = await sandbox.commands.run('printf "%s" "$COMPAT_VALUE"', {
       envs: { COMPAT_VALUE: "preserved" },
       timeoutMs: 10_000,
@@ -67,7 +70,8 @@ async function program(Sandbox: { create(): Promise<Native | Shim> }) {
     assert.equal(await sandbox.commands.kill(2147483647), false);
     await assert.rejects(sandbox.commands.connect(2147483647), NotFoundError);
   } finally {
-    await sandbox.kill();
+    assert.equal(await sandbox.kill(), true);
+    assert.equal(await sandbox.kill(), false);
   }
 }
 

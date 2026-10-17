@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 
 type Provider = {
   name?: string;
+  ownershipProbe?: (id: string) => Promise<boolean>;
   instances?: ProviderInstances;
   sandbox?: ProviderInstances;
 };
@@ -325,7 +326,17 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
     }
     return instance;
   };
-  const find = async (id: string): Promise<{ instance: any; provider: Provider } | null> => {
+  type Located = { instance?: any; provider: Provider };
+  const lookup = async (provider: Provider, id: string): Promise<Located | null> => {
+    if (provider.ownershipProbe) return await provider.ownershipProbe(id) ? { provider } : null;
+    const instance = await manager(provider).getById(id);
+    return instance ? { instance, provider } : null;
+  };
+  const rememberOwner = async (id: string, located: Located): Promise<Located> => {
+    await cache.set(id, located.provider.name!).catch(() => undefined);
+    return located;
+  };
+  const find = async (id: string): Promise<Located | null> => {
     const router = await configured;
     let cachedName = await cache.get(id).catch(() => null);
     const eligible = (name: string) => providerAcceptsIdentifier(name, id, router.existing.order.includes("arker"));
@@ -335,8 +346,8 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
     }
     if (cachedName && byName.has(cachedName) && router.existing.order.includes(cachedName)) {
       const provider = byName.get(cachedName)!;
-      const instance = await manager(provider).getById(id);
-      if (instance) return { instance: await remember(instance, provider), provider };
+      const located = await lookup(provider, id);
+      if (located) return rememberOwner(id, located);
       await cache.delete(id).catch(() => undefined);
     }
     const candidates = router.existing.order.filter((name) => name !== cachedName && eligible(name)).map((name) => byName.get(name)!);
@@ -347,12 +358,11 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
         const errors: unknown[] = [];
         if (remaining === 0) resolveRace(null);
         for (const provider of candidates) {
-          manager(provider).getById(id).then(async (instance) => {
+          lookup(provider, id).then(async (located) => {
             if (finished) return;
-            if (instance) {
+            if (located) {
               finished = true;
-              await remember(instance, provider);
-              resolveRace({ instance, provider });
+              resolveRace(await rememberOwner(id, located));
               return;
             }
             remaining -= 1;
@@ -374,8 +384,8 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
       });
     }
     for (const provider of candidates) {
-      const instance = await manager(provider).getById(id);
-      if (instance) return { instance: await remember(instance, provider), provider };
+      const located = await lookup(provider, id);
+      if (located) return rememberOwner(id, located);
     }
     return null;
   };
@@ -403,7 +413,14 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
         }
         throw lastError ?? new Error("No compatibility provider could create a sandbox");
       },
-      async getById(id: string) { return (await find(id))?.instance ?? null; },
+      async getById(id: string) {
+        const located = await find(id);
+        if (!located) return null;
+        if (located.instance) return located.instance;
+        const instance = await manager(located.provider).getById(id);
+        if (!instance) await cache.delete(id).catch(() => undefined);
+        return instance;
+      },
       async destroy(id: string) {
         const known = (await find(id))?.provider;
         if (!known) return;
