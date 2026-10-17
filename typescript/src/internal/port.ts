@@ -1,6 +1,37 @@
 import { Duplex } from "node:stream";
 import WebSocket from "ws";
 
+function decodeUpgradeBody(body: Buffer, encoding: string | string[] | undefined): string {
+  // Bun's ws shim pushes raw handshake bytes into IncomingMessage, without
+  // HTTP transfer decoding: https://github.com/oven-sh/bun/blob/bun-v1.4.3/src/js/thirdparty/ws.js#L94-L104
+  if (!process.versions.bun || encoding !== "chunked") return body.toString();
+  const chunks: Buffer[] = [];
+  let offset = 0;
+  while (offset < body.length) {
+    const end = body.indexOf("\r\n", offset);
+    if (end < 0) break;
+    const header = body.subarray(offset, end).toString("ascii");
+    if (!/^[0-9a-f]+(?:;[^\r\n]*)?$/i.test(header)) break;
+    const size = Number.parseInt(header, 16);
+    offset = end + 2;
+    if (!Number.isSafeInteger(size) || size > body.length - offset) break;
+    if (size === 0) {
+      const terminal = body.subarray(offset);
+      const trailerEnd = body.indexOf("\r\n\r\n", offset);
+      if (terminal.equals(Buffer.from("\r\n"))
+        || (trailerEnd >= offset && trailerEnd === body.length - 4)) {
+        return Buffer.concat(chunks).toString();
+      }
+      break;
+    }
+    if (body.toString("ascii", offset + size, offset + size + 2) !== "\r\n") break;
+    chunks.push(body.subarray(offset, offset + size));
+    offset += size + 2;
+  }
+  // Already-decoded responses (including future Bun fixes) pass through.
+  return body.toString();
+}
+
 class PortStream extends Duplex {
   private readEof = false;
   private writeEof = false;
@@ -79,17 +110,20 @@ export function connectPortStream(
       });
     });
     socket.once("unexpected-response", (_request, response) => {
-      let body = "";
+      const chunks: Buffer[] = [];
+      let size = 0;
       const timer = setTimeout(() => {
         response.destroy();
         socket.terminate();
         reject(new Error("Private port upgrade response timed out"));
       }, timeoutMs);
       response.on("data", (chunk: Buffer) => {
-        body += chunk.toString();
-        if (Buffer.byteLength(body) > 65536) {
+        size += chunk.length;
+        if (size > 65536) {
           response.destroy(new Error("Private port upgrade error exceeds 65536 bytes"));
+          return;
         }
+        chunks.push(Buffer.from(chunk));
       });
       response.once("error", (error) => {
         clearTimeout(timer);
@@ -98,7 +132,7 @@ export function connectPortStream(
       });
       response.once("end", () => {
         clearTimeout(timer);
-        reject(parseError(body, response.statusCode ?? 500));
+        reject(parseError(decodeUpgradeBody(Buffer.concat(chunks), response.headers["transfer-encoding"]), response.statusCode ?? 500));
         socket.terminate();
       });
     });
