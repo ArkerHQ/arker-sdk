@@ -37,6 +37,17 @@ interface RouteCache {
 const DEFAULT_CACHE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_CACHE_ENTRIES = 20_000;
 
+export function isArkerVmIdentifier(id: string): boolean {
+  // Identifier syntax is not ownership; the Arker adapter still authorizes lookup.
+  return (id.length === 26 || id.length === 47)
+    && /^(?:vmh-[0-9a-f]{16}-)?[0-7][0-9a-hjkmnp-tv-z]{25}$/i.test(id);
+}
+
+export function providerAcceptsIdentifier(provider: string, id: string, arkerEnabled: boolean): boolean {
+  // E2B and Modal reject Arker's ID grammar rather than returning absence.
+  return !(arkerEnabled && ["e2b", "modal"].includes(provider) && isArkerVmIdentifier(id));
+}
+
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
   return value as Record<string, unknown>;
@@ -309,14 +320,19 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
   };
   const find = async (id: string): Promise<{ instance: any; provider: Provider } | null> => {
     const router = await configured;
-    const cachedName = await cache.get(id).catch(() => null);
+    let cachedName = await cache.get(id).catch(() => null);
+    const eligible = (name: string) => providerAcceptsIdentifier(name, id, router.existing.order.includes("arker"));
+    if (cachedName && !eligible(cachedName)) {
+      await cache.delete(id).catch(() => undefined);
+      cachedName = null;
+    }
     if (cachedName && byName.has(cachedName) && router.existing.order.includes(cachedName)) {
       const provider = byName.get(cachedName)!;
       const instance = await manager(provider).getById(id);
       if (instance) return { instance: await remember(instance, provider), provider };
       await cache.delete(id).catch(() => undefined);
     }
-    const candidates = router.existing.order.filter((name) => name !== cachedName).map((name) => byName.get(name)!);
+    const candidates = router.existing.order.filter((name) => name !== cachedName && eligible(name)).map((name) => byName.get(name)!);
     if (router.existing.strategy === "race") {
       return new Promise((resolveRace, rejectRace) => {
         let remaining = candidates.length;

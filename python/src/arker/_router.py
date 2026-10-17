@@ -5,6 +5,7 @@ import json
 import math
 import os
 import random
+import re
 import secrets
 import tempfile
 import time
@@ -12,6 +13,19 @@ from collections.abc import Callable, Mapping
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
+
+
+def is_arker_vm_identifier(identifier: str) -> bool:
+    """Recognize Arker-shaped identifiers, without establishing ownership."""
+    return (
+        re.fullmatch(r"(?:vmh-[0-9a-f]{16}-)?[0-7][0-9a-hjkmnp-tv-z]{25}", identifier, re.IGNORECASE | re.ASCII)
+        is not None
+    )
+
+
+def provider_accepts_identifier(provider: str, identifier: str, *, arker_enabled: bool) -> bool:
+    # E2B and Modal reject Arker's ID grammar rather than returning absence.
+    return not (arker_enabled and provider in {"e2b", "modal"} and is_arker_vm_identifier(identifier))
 
 
 @dataclasses.dataclass(frozen=True)

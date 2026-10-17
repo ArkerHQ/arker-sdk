@@ -11,7 +11,13 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from ._router import JsonRouteCache, RouterConfig, load_router_config, select_weighted_provider
+from ._router import (
+    JsonRouteCache,
+    RouterConfig,
+    load_router_config,
+    provider_accepts_identifier,
+    select_weighted_provider,
+)
 from .computer import VM, Arker, ArkerError, CompletedRunResult
 
 ARKER_CLIENT_KEYS = {
@@ -349,12 +355,17 @@ def routed_get(
 ) -> tuple[str, Any] | None:
     router = router_config(config, native_provider)
     _validate_router_providers(list(router.existing.order), getters)
+    eligible = {
+        name
+        for name in router.existing.order
+        if provider_accepts_identifier(name, identifier, arker_enabled="arker" in router.existing.order)
+    }
     cache = _cache(router)
     try:
         cached = cache.get(identifier) if cache is not None else None
     except Exception:
         cached = None
-    if cached is not None and (cached not in getters or cached not in router.existing.order):
+    if cached is not None and (cached not in getters or cached not in eligible):
         if cache is not None:
             with suppress(Exception):
                 cache.delete(identifier)
@@ -365,7 +376,7 @@ def routed_get(
             return cached, result
         with suppress(Exception):
             cache.delete(identifier)
-    order = [name for name in router.existing.order if name in getters and name != cached]
+    order = [name for name in router.existing.order if name in getters and name != cached and name in eligible]
     if router.existing.strategy == "race" and len(order) > 1:
         results: queue.Queue[tuple[str, Any, Exception | None]] = queue.Queue()
         errors: list[Exception] = []

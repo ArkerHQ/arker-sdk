@@ -5,6 +5,14 @@ The tools inventory installed SDKs, rather than a list of implemented shim metho
 Python versions are pinned in `requirements.txt`; TypeScript reference SDKs are
 pinned in `typescript/package.json`.
 
+In mixed routes containing Arker, E2B and Modal are not queried for identifiers
+matching Arker's exact VM ID grammar: those vendors reject that syntax instead
+of reporting absence. This also invalidates incompatible cache hints. Arker must
+still authorize the lookup; recognizing syntax never establishes ownership.
+Blaxel and Daytona remain eligible because their sandbox names may match that
+grammar. Native-only configurations are unchanged. Both languages exercise the
+same identifier fixtures in `router-identifiers.json`.
+
 ## Measurement
 
 Reports record native signatures, API names, providers, language/styles, matching

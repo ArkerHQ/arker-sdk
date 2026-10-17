@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createRoutedProvider, JsonRouteCache, parseRouterConfig } from "../src/compat/router.js";
+import { createRoutedProvider, JsonRouteCache, parseRouterConfig, isArkerVmIdentifier, providerAcceptsIdentifier } from "../src/compat/router.js";
 
 function sandbox(id: string, provider: string) {
   return { instanceId: id, sandboxId: id, provider, destroy: async () => undefined };
@@ -237,5 +237,37 @@ async function testCacheCannotOverrideConfiguredProviders(): Promise<void> {
 }
 
 await testCacheCannotOverrideConfiguredProviders();
+
+async function testNativeFirstArkerIdentifiers(): Promise<void> {
+  const cases: Array<{ id: string; arker: boolean }> = JSON.parse(await readFile(new URL("../../compatibility/router-identifiers.json", import.meta.url), "utf8"));
+  for (const testCase of cases) {
+    assert.equal(isArkerVmIdentifier(testCase.id), testCase.arker);
+    for (const name of ["e2b", "modal", "blaxel", "daytona", "arker"]) {
+      assert.equal(providerAcceptsIdentifier(name, testCase.id, false), true);
+      assert.equal(providerAcceptsIdentifier(name, testCase.id, true), !testCase.arker || !["e2b", "modal"].includes(name));
+    }
+  }
+  const id = "vmh-b471cad989f2eab9-01M548DGAXJ48SGE3SRTRR8HNV";
+  for (const native of ["e2b", "modal"]) {
+    for (const strategy of ["priority", "race"]) {
+      for (const staleCache of [false, true]) {
+        const directory = await mkdtemp(join(tmpdir(), "arker-id-routing-"));
+        const cachePath = join(directory, "cache.json");
+        if (staleCache) await new JsonRouteCache(cachePath).set(id, native);
+        const path = await config(directory, {
+          version: 1, existing: { strategy, order: [native, "arker"] },
+          create: { strategy: "priority", order: ["arker"] },
+          cache: { path: cachePath },
+        });
+        const routed = createRoutedProvider([
+          provider(native, { getById: async () => { throw new Error("native ID format is incompatible"); } }),
+          provider("arker", { getById: async () => sandbox(id, "arker") }),
+        ], path).instances!;
+        assert.equal((await routed.getById(id))?.provider, "arker");
+      }
+    }
+  }
+}
+await testNativeFirstArkerIdentifiers();
 
 console.log("PASS compat router");

@@ -10,7 +10,14 @@ from pathlib import Path
 import pytest
 
 from arker._compat import get_or_none, routed_create, routed_get, router_config
-from arker._router import JsonRouteCache, RouterConfig, load_router_config, select_weighted_provider
+from arker._router import (
+    JsonRouteCache,
+    RouterConfig,
+    is_arker_vm_identifier,
+    load_router_config,
+    provider_accepts_identifier,
+    select_weighted_provider,
+)
 
 
 def _cache_writer(path: str, prefix: str) -> None:
@@ -408,6 +415,51 @@ def test_unknown_lookup_error_text_cannot_trigger_fallback() -> None:
     with pytest.raises(RuntimeError) as caught:
         get_or_none(lambda: (_ for _ in ()).throw(error))
     assert caught.value is error
+
+
+@pytest.mark.parametrize("native", ["e2b", "modal"])
+@pytest.mark.parametrize("strategy", ["priority", "race"])
+@pytest.mark.parametrize("stale_cache", [False, True])
+def test_native_first_lookup_accepts_an_arker_identifier(tmp_path, native, strategy, stale_cache) -> None:
+    identifier = "vmh-b471cad989f2eab9-01M548DGAXJ48SGE3SRTRR8HNV"
+    path = tmp_path / "router.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "existing": {"strategy": strategy, "order": [native, "arker"]},
+                "create": {"strategy": "priority", "order": ["arker"]},
+                "cache": {"path": str(tmp_path / "cache.json")},
+            }
+        )
+    )
+
+    def incompatible():
+        raise ValueError("native SDK cannot represent an Arker VM identifier")
+
+    if stale_cache:
+        JsonRouteCache(tmp_path / "cache.json").set(identifier, native)
+
+    assert routed_get(
+        identifier,
+        native,
+        {"router_config_path": str(path)},
+        {
+            native: incompatible,
+            "arker": lambda: "found",
+        },
+    ) == ("arker", "found")
+
+
+def test_shared_identifier_conformance_and_native_only_eligibility() -> None:
+    cases = json.loads((Path(__file__).resolve().parents[3] / "compatibility/router-identifiers.json").read_text())
+    for case in cases:
+        assert is_arker_vm_identifier(case["id"]) is case["arker"]
+        for provider in ["e2b", "modal", "blaxel", "daytona", "arker"]:
+            assert provider_accepts_identifier(provider, case["id"], arker_enabled=False)
+            assert provider_accepts_identifier(provider, case["id"], arker_enabled=True) is (
+                not case["arker"] or provider not in {"e2b", "modal"}
+            )
 
 
 @pytest.mark.parametrize(
