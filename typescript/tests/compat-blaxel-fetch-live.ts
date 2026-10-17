@@ -165,6 +165,11 @@ try {
         await program(
           traceVendor(constructor, "SandboxInstance.static", called),
           async (sandbox) => {
+            assert.equal(
+              settings.disableH2,
+              disableH2,
+              "Creation changed the requested HTTP transport profile",
+            );
             if (provider === "arker") {
               await new Arker().vm((sandbox as Shim).id).setPolicies({
                 policies: [
@@ -174,6 +179,11 @@ try {
               });
             }
           },
+        );
+        assert.equal(
+          settings.disableH2,
+          disableH2,
+          "Operations changed the requested HTTP transport profile",
         );
         outcome = "passed";
       } finally {

@@ -1,4 +1,3 @@
-import { blaxel as createBlaxelProvider } from "@computesdk/blaxel";
 import { SandboxInstance as NativeBlaxelSandbox, settings as blaxelSettings } from "@blaxel/core";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import type { VM } from "./index.js";
@@ -8,6 +7,8 @@ import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
 import { GuestProcesses } from "./compat/guest-process.js";
 import { privateFetch } from "./compat/private-fetch.js";
+import { createNativeBlaxelProvider } from "./compat/blaxel-provider.js";
+import { nativeInstance } from "./compat/common.js";
 
 export interface BlaxelCompatConfig {
   apiKey?: string;
@@ -64,10 +65,9 @@ function parseTtl(ttl: string | number | undefined): number | undefined {
 function makeSdk(config: BlaxelCompatConfig = {}): CompatSdk {
   return createCompatSdk({
     arker: config.arker,
-    fallbackProvider: createBlaxelProvider({
+    fallbackProvider: createNativeBlaxelProvider({
       apiKey: config.apiKey,
       workspace: config.workspace,
-      image: undefined,
     }),
     routerConfigPath: config.routerConfigPath,
   });
@@ -113,7 +113,8 @@ export class SandboxInstance {
     this.network = native?.network ?? network as unknown as NativeBlaxelSandbox["network"];
     this.id = box.sandboxId;
     this.provider = box.provider;
-    this.metadata = (native?.metadata ?? { name: box.sandboxId }) as NativeBlaxelSandbox["metadata"];
+    const vm = box.provider === "arker" ? (box as UniversalSandbox & { getInstance(): VM }).getInstance() : undefined;
+    this.metadata = (native?.metadata ?? { name: vm?.name ?? box.sandboxId }) as NativeBlaxelSandbox["metadata"];
     const guest = new GuestProcesses(box);
     this.process = (native?.process ?? {
       exec: async (request) => {
@@ -202,7 +203,7 @@ export class SandboxInstance {
 
   private static async wrap(box: UniversalSandbox): Promise<SandboxInstance> {
     if (box.provider !== "blaxel") return new SandboxInstance(box);
-    return new SandboxInstance(box, await NativeBlaxelSandbox.get(box.sandboxId));
+    return new SandboxInstance(box, nativeInstance(box) as NativeBlaxelSandbox);
   }
 
   static async create(options: BlaxelCreateOptions = {}, callOptions: BlaxelCreateCallOptions = {}): Promise<SandboxInstance> {

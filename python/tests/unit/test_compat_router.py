@@ -392,6 +392,8 @@ def _cyclic_create_failure():
         _wrapped_create_failure(RuntimeError("unauthorized")),
         _wrapped_create_failure(OSError("read failed")),
         _cyclic_create_failure(),
+        type("Conflict", (RuntimeError,), {"status": 409})("exists"),
+        type("Conflict", (RuntimeError,), {"code": "SANDBOX_ALREADY_EXISTS"})("exists"),
     ],
 )
 def test_ambiguous_create_outcome_does_not_fall_through(tmp_path: Path, failure: Exception) -> None:

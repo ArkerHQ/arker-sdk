@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, readFile, stat, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 import { SandboxInstance as Native } from "@blaxel/core";
 import { SandboxInstance as Shim } from "../src/blaxel.js";
@@ -10,8 +11,10 @@ import { traceVendor } from "./compat-trace.js";
 
 // This program uses only official Blaxel calls; the harness changes the import.
 async function program(SandboxInstance: typeof Native | typeof Shim): Promise<void> {
-  const sandbox = await SandboxInstance.create();
+  const sandboxName = `arker-import-${randomUUID().slice(0, 12)}`;
+  const sandbox = await SandboxInstance.create({ name: sandboxName });
   try {
+    assert.equal(sandbox.metadata?.name, sandboxName);
     assert.ok(Array.isArray((await sandbox.fs.ls("/blaxel")).files));
     const result = await sandbox.process.exec({
       command: "printf '%s:%s' \"$PWD\" \"$IMPORT_ONLY\"; printf diagnostic >&2",

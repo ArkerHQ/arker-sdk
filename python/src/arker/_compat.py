@@ -287,15 +287,28 @@ def _is_retryable(error: Exception) -> bool:
         response = getattr(current, "response", None)
         status = (
             getattr(current, "status_code", None)
-            or vars(current).get("status")
+            or getattr(current, "status", None)
             or getattr(response, "status_code", None)
         )
-        if status in {400, 401, 403, 422}:
+        if status in {400, 401, 403, 409, 422}:
             return False
         code = str(getattr(current, "code", "")).lower()
         if code in {"econnreset", "econnrefused", "epipe", "enetunreach", "etimedout", "und_err_socket"}:
             return False
-        if code in {"authentication", "authorization", "unauthorized", "forbidden", "invalid_request", "validation"}:
+        if code in {
+            "authentication",
+            "authorization",
+            "unauthorized",
+            "forbidden",
+            "invalid_request",
+            "validation",
+            "409",
+            "conflict",
+            "idempotency_conflict",
+            "already_exists",
+            "sandbox_already_exists",
+            "resource_already_exists",
+        }:
             return False
         message = str(current).lower()
         if any(text in message for text in ("authentication failed", "unauthorized", "forbidden", "invalid api key")):

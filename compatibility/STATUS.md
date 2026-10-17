@@ -6,7 +6,9 @@ The branch includes SDK main at 2ec474e. Fresh runtime-scoped differential
 reports verify **60/965 Python** entries on CPython 3.12.14/Linux/aarch64 and
 **36/938 TypeScript** entries on Node 22.23.3/Linux/arm64. The latest Node profile
 uses a clean install of published dependencies, with no local provider links.
-E2B's native bridge is in the shim and uses the embedding SDK's E2B 2.56.0.
+E2B and Blaxel native bridges are in the shims, built with ComputeSDK's provider
+factory, and use the embedding SDK's vendor versions. The shared factory is a
+declared dependency, not an undeclared transitive import.
 Both inventories are complete in their declared scope.
 The strict gates still exit 1: **905 Python and 902 TypeScript** entries remain
 unverified. Neither method counts nor these scenarios establish full equivalence.
@@ -36,7 +38,7 @@ run with inbound and outbound denied. They require the draft backend private
 port API, not a public ingress exception. Fresh feature tests passed all 58
 private-port/HTTPS/HTTP2/WebSocket cases with zero skips.
 
-Local validation passes 387 Python unit tests and lint, and the full TypeScript
+Local validation passes 389 Python unit tests and lint, and the full TypeScript
 test/build/typecheck pipeline. Source/vendor snapshots now reject changes during
 a scenario; runtime profiles are included in fingerprints. Existing evidence
 grouping tests also reject collisions and malformed events. These measurement
@@ -64,6 +66,23 @@ new in-shim bridge uses the embedding SDK directly and still participates in
 ComputeSDK routing. Attestation checks the dependency actually used by that
 bridge; the mismatch was not waived. The refreshed 12-program Node cohort
 passed with all four provider packages restored to published installs.
+
+A named Blaxel regression then failed on the published-provider route: it
+discarded the requested name and returned a UUID. The in-shim adapter preserves
+name, environment, network, strict/get-or-create, safety and creation timeout.
+The strengthened named program now passes all three Node routes. Its Arker
+metadata also preserves the configured sandbox name rather than the VM ID.
+Credential epochs preserve global HTTP transport settings; the live harness
+now asserts that disabled-H2 cases remain disabled before and after operations.
+
+The separate strict-create lifecycle regression is still RED on Arker: it
+creates a second same-name VM instead of returning a conflict. Both native
+routes preserve Blaxel's SANDBOX_ALREADY_EXISTS code. ComputeSDK's redundant
+outer creation fallback had wrapped that structured error; disabling it leaves
+fallback decisions in the shim router. Both routers now refuse fallback after
+409/structured conflicts, with regressions that failed before the fix. Own
+duplicate test resources were deleted. A local mutex cannot provide the missing
+distributed name guarantee, and the failing live test has not been weakened.
 
 An immutable SDK wheel before the resource-alias fix exposed 15 real smoke
 failures: public resource attributes and the vcpu_count resize argument had been

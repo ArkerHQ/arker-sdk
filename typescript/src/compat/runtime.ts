@@ -5,6 +5,7 @@ import { createRoutedProvider } from "./router.js";
 
 type ComputeFactory = (config: {
   providers: unknown[];
+  fallbackOnError: boolean;
 }) => ReturnType<typeof compute>;
 
 let computeFactory: ComputeFactory = compute as ComputeFactory;
@@ -32,7 +33,7 @@ export function createCompatRouter(options: CreateCompatSdkOptions) {
 }
 
 export function createCompatSdk(options: CreateCompatSdkOptions): CompatSdk {
-  return computeFactory({ providers: [createCompatRouter(options)] });
+  return computeFactory({ providers: [createCompatRouter(options)], fallbackOnError: false });
 }
 
 export function setCompatComputeFactoryForTests(factory?: ComputeFactory): void {

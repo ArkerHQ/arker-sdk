@@ -32,9 +32,9 @@ combined to manufacture a passing comparison.
 
 TypeScript fingerprints also include the installed ComputeSDK/provider runtime
 artifacts. Native-route evidence refuses a different SDK version inside its
-native adapter than the direct native reference. E2B's adapter now lives in the
-shim and resolves the embedding application's vendor SDK; the other adapters
-currently resolve through their ComputeSDK provider package. Tests of locally
+native adapter than the direct native reference. E2B and Blaxel adapters now live
+in the shims and resolve the embedding application's vendor SDK; Modal and
+Daytona currently resolve through their ComputeSDK provider packages. Tests of locally
 linked, unreleased provider builds do not certify registry releases.
 
 Fingerprints include the host runtime and architecture. A Node report does not

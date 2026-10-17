@@ -9,10 +9,7 @@ import {
   FileType,
 } from "e2b";
 import { Sandbox } from "../src/e2b.js";
-import {
-  NativeE2BSandbox,
-  createNativeE2BProvider,
-} from "../src/compat/e2b-provider.js";
+import { createNativeE2BProvider } from "../src/compat/e2b-provider.js";
 
 test("the shim provider preserves embedding SDK identity, native filesystem metadata and errors", async () => {
   const original = { create: Native.create, connect: Native.connect };
@@ -41,7 +38,7 @@ test("the shim provider preserves embedding SDK identity, native filesystem meta
   try {
     const provider = createNativeE2BProvider();
     const box = await provider.instances.create();
-    assert(box instanceof NativeE2BSandbox);
+    assert.equal(box.provider, "e2b");
     assert.equal(box.getInstance(), native);
     assert.equal(
       (await provider.instances.getById("embedded"))!.getInstance(),

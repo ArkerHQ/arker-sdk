@@ -9,7 +9,7 @@ import { ArkerError } from "../src/index.js";
 import { SandboxInstance as BlaxelSandbox } from "../src/blaxel.js";
 import { ModalClient } from "../src/modal.js";
 import { createArkerComputeProvider } from "../src/compat/arker-provider.js";
-import { setCompatComputeFactoryForTests } from "../src/compat/runtime.js";
+import { createCompatSdk, setCompatComputeFactoryForTests } from "../src/compat/runtime.js";
 import { GuestProcesses } from "../src/compat/guest-process.js";
 
 type CapturedComputeConfig = {
@@ -663,5 +663,26 @@ await testBlaxelBinaryFiles();
 await testBlaxelNonrecursiveRemoval();
 await testBackgroundProcessOwnsAnArkerRun();
 await testProcessControlHasAnIsolatedSerializedSession();
+
+async function testSharedRouterPreservesNativeCreateError(): Promise<void> {
+  const previous = process.env.ARKER_API_KEY;
+  delete process.env.ARKER_API_KEY;
+  const conflict = { code: "SANDBOX_ALREADY_EXISTS", message: "exists" };
+  try {
+    const sdk = createCompatSdk({ fallbackProvider: {
+      name: "blaxel",
+      instances: {
+        create: async () => { throw conflict; },
+        getById: async () => null,
+        destroy: async () => undefined,
+      },
+    } });
+    await assert.rejects(sdk.sandbox.create(), (error) => error === conflict);
+  } finally {
+    if (previous === undefined) delete process.env.ARKER_API_KEY;
+    else process.env.ARKER_API_KEY = previous;
+  }
+}
+await testSharedRouterPreservesNativeCreateError();
 
 console.log("PASS compat");

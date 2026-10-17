@@ -107,6 +107,8 @@ async function testWeightedFallbackAndNonRetryableErrors(): Promise<void> {
       Object.assign(new Error("read failed"), { code: "ECONNRESET" }),
       Object.assign(new Error("write failed"), { code: "EPIPE" }),
       new Error("socket hang up"),
+      { code: "SANDBOX_ALREADY_EXISTS", message: "exists" },
+      Object.assign(new Error("conflict"), { status: 409 }),
     ]) {
       const reset = createRoutedProvider([
         provider("blaxel", { create: async () => { throw error; } }),

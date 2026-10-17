@@ -290,8 +290,9 @@ function retryable(error: unknown): boolean {
     const status = current.status ?? current.statusCode ?? current.response?.status;
     if (["ECONNRESET", "ECONNREFUSED", "EPIPE", "ENETUNREACH", "ETIMEDOUT", "UND_ERR_SOCKET"]
       .includes(String(current.code ?? "").toUpperCase())) return false;
-    if (current.name === "AbortError" || [400, 401, 403, 422].includes(status)) return false;
-    if (["authentication", "authorization", "unauthorized", "forbidden", "invalid_request", "validation"]
+    if (current.name === "AbortError" || [400, 401, 403, 409, 422].includes(status)) return false;
+    if (["authentication", "authorization", "unauthorized", "forbidden", "invalid_request", "validation",
+      "409", "conflict", "idempotency_conflict", "already_exists", "sandbox_already_exists", "resource_already_exists"]
       .includes(String(current.code ?? "").toLowerCase())) return false;
     if (/(authentication failed|unauthorized|forbidden|invalid api key|missing .*api key)/i.test(current.message ?? "")) return false;
     if (/(outcome is unknown|may have (?:succeeded|been created)|network failure|transport error|timed? out|timeout|fetch failed|connection (?:reset|refused|closed)|socket hang up|broken pipe|all connection attempts failed)/i
