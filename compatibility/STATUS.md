@@ -39,10 +39,22 @@ records them in both languages: Python **100/1,138** scenario-verified (1,038
 unverified), Node **51/1,048** (997 unverified). Both inventories complete their
 declared roots and both strict gates exit 1; full equivalence remains false.
 Current fingerprints are
-`0402e83e022684050dc98fba09c98ed4a638c9efae527cfe2f30f2c5865f7a83`
+`3ee7fb112ecc413cb1bb9c29323143ec07ec3a13db74a696a5b855577d8f021f`
 and `be0bf4fe257a7dd774e3e78945676b894519f27845be0356af258257edb89637`.
 The earlier differential fingerprints below are historical. Additional
 Arker-only tests do not grant native-equivalence coverage.
+
+The lean Python profile passes **434 tests with nine optional-vendor skips**.
+GitHub's formatter caught two new test files before correction; the formatted
+head passes all CI/CodeQL checks and the repeated Python live cohort passes
+27 cases with the new fingerprint above.
+
+An additional isolated Arker filesystem/mount probe passes random writes,
+append, rename, writable mmap and SQLite on the live FUSE mount. This does not
+establish multi-VM cache coherence or native mount equivalence. Native Blaxel
+Drive creation and read-only listing both return HTTP 403: "Drives feature is
+not enabled for this workspace". No drive was created. Drive parity remains
+unverified; the workspace setting was not changed.
 
 The latest Modal descendant-lifetime fix keeps the managed Arker run alive
 until a Linux subreaper has reaped detached descendants, while the native
