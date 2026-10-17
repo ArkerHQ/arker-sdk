@@ -22,6 +22,7 @@ from ._compat import (
     routed_get,
     run_command,
 )
+from ._compat_process import GuestProcessError, GuestProcesses
 from .computer import VM
 
 
@@ -53,6 +54,7 @@ class Commands(UnsupportedMixin):
     def __init__(self, vm: VM | None = None, native: Any | None = None) -> None:
         self._vm = vm
         self._native = native
+        self._processes = GuestProcesses(vm) if vm is not None else None
 
     def run(
         self,
@@ -63,11 +65,34 @@ class Commands(UnsupportedMixin):
         envs: dict[str, str] | None = None,
         timeout: int | None = None,
         background: bool = False,
+        stdin: bool | None = None,
+        on_stdout: Any = None,
+        on_stderr: Any = None,
+        user: str | None = None,
+        request_timeout: float | None = None,
     ) -> _CommonCommandResult | Any:
         if env is not None and envs is not None:
             raise TypeError("Pass envs, not both env and envs")
         environment = envs if envs is not None else env
         if self._vm is not None:
+            if user is not None or request_timeout is not None:
+                raise UnsupportedCompatibilityOption(
+                    "E2B user and per-request timeout options are not yet supported on Arker"
+                )
+            if background or stdin or on_stdout is not None or on_stderr is not None:
+                from ._compat_e2b import command_handle, require_native_handle
+
+                require_native_handle()
+                current = self._processes.exec(
+                    {
+                        "command": f"exec /bin/bash -lc {shlex.quote(command)}",
+                        "workingDir": cwd or "/home/user",
+                        "env": environment or {},
+                        "stdin": bool(stdin),
+                    }
+                )
+                handle = command_handle(self._processes, current, timeout)
+                return handle if background else handle.wait(on_stdout=on_stdout, on_stderr=on_stderr)
             prefix = ""
             if environment:
                 exports = []
@@ -78,8 +103,6 @@ class Commands(UnsupportedMixin):
                 prefix += " ".join(exports) + " "
             prefix += f"cd {shlex.quote(cwd or '/home/user')} && "
             full_command = prefix + command
-            if background:
-                full_command = f"nohup sh -lc {shlex.quote(full_command)} > /dev/null 2>&1 &"
             result = run_command(self._vm, full_command, timeout=timeout)
             module = import_optional("e2b")
             fields = {"stdout": result.stdout, "stderr": result.stderr, "exit_code": result.exit_code, "error": None}
@@ -93,8 +116,58 @@ class Commands(UnsupportedMixin):
             **({"envs": environment} if environment is not None else {}),
             **({"timeout": timeout} if timeout is not None else {}),
             **({"background": True} if background else {}),
+            **({"stdin": stdin} if stdin is not None else {}),
+            **({"on_stdout": on_stdout} if on_stdout is not None else {}),
+            **({"on_stderr": on_stderr} if on_stderr is not None else {}),
+            **({"user": user} if user is not None else {}),
+            **({"request_timeout": request_timeout} if request_timeout is not None else {}),
         }
         return self._native.run(command, **native_options)
+
+    def connect(self, pid: int, timeout: float | None = 60, request_timeout: float | None = None):
+        if self._vm is None:
+            return self._native.connect(pid, timeout=timeout, request_timeout=request_timeout)
+        if request_timeout is not None:
+            raise UnsupportedCompatibilityOption("Per-request command timeouts are not yet supported on Arker")
+        from ._compat_e2b import command_handle, process_control
+
+        current = process_control(self._processes.get, str(pid))
+        return command_handle(self._processes, current, timeout)
+
+    def kill(self, pid: int, request_timeout: float | None = None) -> bool:
+        if self._vm is None:
+            return self._native.kill(pid, request_timeout=request_timeout)
+        if request_timeout is not None:
+            raise UnsupportedCompatibilityOption("Per-request command timeouts are not yet supported on Arker")
+        try:
+            if self._processes.get(str(pid)).status != "running":
+                return False
+        except GuestProcessError as error:
+            if error.code == "process_not_found":
+                return False
+            raise
+        self._processes.kill(str(pid))
+        return True
+
+    def send_stdin(self, pid: int, data: str | bytes, request_timeout: float | None = None) -> None:
+        if self._vm is None:
+            self._native.send_stdin(pid, data, request_timeout=request_timeout)
+            return
+        if request_timeout is not None:
+            raise UnsupportedCompatibilityOption("Per-request stdin timeouts are not yet supported on Arker")
+        from ._compat_e2b import process_control
+
+        process_control(self._processes.write_stdin, str(pid), data)
+
+    def close_stdin(self, pid: int, request_timeout: float | None = None) -> None:
+        if self._vm is None:
+            self._native.close_stdin(pid, request_timeout=request_timeout)
+            return
+        if request_timeout is not None:
+            raise UnsupportedCompatibilityOption("Per-request stdin timeouts are not yet supported on Arker")
+        from ._compat_e2b import process_control
+
+        process_control(self._processes.close_stdin, str(pid))
 
 
 class Files(UnsupportedMixin):

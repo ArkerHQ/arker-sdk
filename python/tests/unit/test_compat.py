@@ -316,11 +316,6 @@ def test_e2b_official_surface(monkeypatch) -> None:
     monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
     t = FakeTransport()
     add_create_run_delete(t, "vm_e2b", "Hello from E2B Sandbox!\n")
-    t.add_json(
-        lambda method, url: method == "POST" and url.endswith("/v1/vms/vm_e2b/runs"),
-        200,
-        completed(""),
-    )
 
     with use_transport(t):
         sandbox = E2BSandbox.create()
@@ -329,17 +324,11 @@ def test_e2b_official_surface(monkeypatch) -> None:
         assert result.exit_code == 0
         assert sandbox.get_host(8080) == "vm_e2b.aws-us-west-2.arker.app"
         assert sandbox.getHost(3000) == "vm_e2b-3000.aws-us-west-2.arker.app"
-        background = sandbox.commands.run("python3 -m http.server 8080", background=True)
-        assert background.exit_code == 0
         sandbox.kill()
 
     run = json.loads(t.calls[1]["body"])
     assert run["command"] == '(\nexport FOO=bar; cd /workspace && echo "Hello from E2B Sandbox!"\n)'
     assert run["timeout"] == 8
-    background_run = json.loads(t.calls[2]["body"])
-    assert background_run["command"] == (
-        "(\nnohup sh -lc 'cd /home/user && python3 -m http.server 8080' > /dev/null 2>&1 &\n)"
-    )
 
 
 def test_e2b_nested_native_surface_delegates_provider_extensions() -> None:

@@ -25,6 +25,10 @@ ROOT = Path(os.environ.get("ARKER_COMPAT_PROCESS_ROOT", "/tmp/arker-compat-proce
 TERMINAL = {"completed", "failed", "stopped", "killed"}
 
 
+class ProcessNotFound(ValueError):
+    pass
+
+
 def timestamp():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -43,12 +47,16 @@ def identity(pid):
         return None
 
 
-def snapshot(directory):
+def snapshot(directory, *, raw_exit_code=False):
     state = json.loads((directory / "state").read_text())
     for stream in ("stdout", "stderr"):
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
         state[stream] = decoder.decode((directory / stream).read_bytes(), final=state["status"] in TERMINAL)
     state["logs"] = state["stdout"] + state["stderr"]
+    if raw_exit_code and state["status"] in TERMINAL:
+        if "_returnCode" not in state:
+            raise ValueError("Raw exit status is unavailable for this legacy process")
+        state["exitCode"] = state["_returnCode"]
     return {key: value for key, value in state.items() if not key.startswith("_")}
 
 
@@ -63,7 +71,7 @@ def locate(identifier):
                 return directory
         except (OSError, ValueError, KeyError):
             continue
-    raise ValueError(f"Process {identifier!r} not found")
+    raise ProcessNotFound(f"Process {identifier!r} not found")
 
 
 def worker(request, ready_fd):
@@ -133,6 +141,7 @@ def worker(request, ready_fd):
                     time.sleep(0.02)
             code = child.wait()
             state["exitCode"] = code if code >= 0 else 128 - code
+            state["_returnCode"] = code
             termination = directory / "termination"
             state["status"] = (
                 json.loads(termination.read_text())["status"]
@@ -200,7 +209,7 @@ def dispatch(request):
         return [snapshot(path) for path in ROOT.glob("*") if (path / "state").exists()]
     directory = locate(request["identifier"])
     if action == "get":
-        return snapshot(directory)
+        return snapshot(directory, raw_exit_code=request.get("rawExitCode") is True)
     if action in {"kill", "stop"}:
         state = json.loads((directory / "state").read_text())
         if state["status"] not in TERMINAL and identity(state["pid"]) == state["_identity"]:
@@ -240,5 +249,12 @@ if __name__ == "__main__":
                         raise RuntimeError(json.loads((directory / "error").read_text())["error"])
                     time.sleep(0.02)
         except Exception as error:
-            print(json.dumps({"error": str(error)}))
+            print(
+                json.dumps(
+                    {
+                        "error": str(error),
+                        **({"code": "process_not_found"} if isinstance(error, ProcessNotFound) else {}),
+                    }
+                )
+            )
             sys.exit(1)

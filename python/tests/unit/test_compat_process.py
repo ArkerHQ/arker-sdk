@@ -113,6 +113,13 @@ def test_background_reconnect_stdin_eof_and_logs(processes):
         reconnected.write_stdin("input", "late")
 
 
+def test_missing_process_has_a_structured_code_instead_of_message_matching(processes):
+    manager, _ = processes
+    with pytest.raises(RuntimeError) as raised:
+        manager.get("never-created")
+    assert getattr(raised.value, "code", None) == "process_not_found"
+
+
 def test_background_process_holds_an_arker_run_until_it_finishes(processes):
     manager, directory = processes
     process = manager.exec({"command": "sleep 30", "workingDir": str(directory)})
@@ -120,6 +127,29 @@ def test_background_process_holds_an_arker_run_until_it_finishes(processes):
     assert any(run.poll() is None for run, _, _ in manager._vm.runs.values())
     manager.kill(process.name)
     manager.wait(process.name, max_wait=5000, interval=10)
+
+
+def test_process_control_uses_a_separate_reused_session_not_the_application_session(processes):
+    manager, directory = processes
+    process = manager.exec({"command": "cat", "stdin": True, "workingDir": str(directory)})
+    manager.get(process.name)
+    manager.get(process.name)
+    manager.close_stdin(process.name)
+    manager.wait(process.name, max_wait=5000, interval=10)
+    supervisors = {call["session_id"] for call in manager._vm.calls if call.get("time_to_background") == 0}
+    controls = [call.get("session_id") for call in manager._vm.calls if call.get("time_to_background") != 0]
+    assert controls and all(controls)
+    assert len(set(controls)) == 1
+    assert set(controls).isdisjoint(supervisors)
+
+
+@pytest.mark.parametrize("command, raw_code", [("exit 137", 137), ("exec sh -c 'kill -KILL $$'", -9)])
+def test_internal_raw_exit_preserves_signal_vs_explicit_exit_without_changing_blaxel(processes, command, raw_code):
+    manager, directory = processes
+    current = manager.exec({"command": command, "workingDir": str(directory), "waitForCompletion": True})
+    assert current.exit_code == 137
+    assert manager.get(current.name, raw_exit_code=True).exit_code == raw_code
+    assert not any(key.startswith("_") for key in current.to_dict())
 
 
 def test_foreground_callbacks_and_nonzero_exit(processes):

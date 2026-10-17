@@ -590,6 +590,27 @@ async function testBackgroundProcessOwnsAnArkerRun(): Promise<void> {
   assert.deepEqual(calls[0].options, { session_id: "process-session", time_to_background: 0 });
 }
 
+async function testProcessControlHasAnIsolatedSerializedSession(): Promise<void> {
+  let sessions = 0;
+  let active = 0;
+  const ids: string[] = [];
+  const vm = {
+    createSession: async () => ({ session_id: `control-${++sessions}` }),
+    run: async (_command: string, options: { session_id: string }) => {
+      ids.push(options.session_id);
+      assert.equal(++active, 1, "control requests must not collide within a shared session");
+      await Promise.resolve();
+      active--;
+      return { type: "completed", stdout: JSON.stringify({ result: { name: "controlled" } }), stderr: "", exitCode: 0 };
+    },
+  };
+  const manager = new GuestProcesses(new FakeSandbox("control-vm", "arker", vm));
+  const results = await Promise.all([manager.get("controlled"), manager.get("controlled")]);
+  assert.deepEqual(results.map((result) => result.name), ["controlled", "controlled"]);
+  assert.equal(sessions, 1);
+  assert.deepEqual(ids, ["control-1", "control-1"]);
+}
+
 async function testInternalArkerProviderRequiresSource(): Promise<void> {
   const previousSource = process.env.ARKER_SOURCE;
   const previousSourceVm = process.env.ARKER_SOURCE_VM;
@@ -628,5 +649,6 @@ await testBlaxelInitializationFailureDeletesCreatedVm();
 await testBlaxelBinaryFiles();
 await testBlaxelNonrecursiveRemoval();
 await testBackgroundProcessOwnsAnArkerRun();
+await testProcessControlHasAnIsolatedSerializedSession();
 
 console.log("PASS compat");

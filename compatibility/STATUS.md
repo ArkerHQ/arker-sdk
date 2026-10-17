@@ -3,19 +3,23 @@
 ## Current validation
 
 The branch includes SDK main at 2ec474e. Fresh runtime-scoped differential
-reports verify **47/944 Python** entries on CPython 3.12.14/Linux/aarch64 and
-**24/928 TypeScript** entries on Node 22.23.3/Linux/arm64. The Node profile uses
+reports verify **57/950 Python** entries on CPython 3.12.14/Linux/aarch64 and
+**34/938 TypeScript** entries on Node 22.23.3/Linux/arm64. The Node profile uses
 the locally linked draft ComputeSDK providers from computesdk #6, not published
 provider releases. Both inventories are complete in their declared scope.
-The strict gates still exit 1: **897 Python and 904 TypeScript** entries remain
+The strict gates still exit 1: **893 Python and 904 TypeScript** entries remain
 unverified. Neither method counts nor these scenarios establish full equivalence.
 
 The unchanged files/process programs and new private HTTP programs passed all
 twelve Python cases. Three additional E2B cases in each language preserve native
 environment option names, success results and typed nonzero command errors,
-including stdout, stderr, exit code and error text. The native TypeScript route
-also normalizes duplicate installed SDK exception classes without swallowing
-unrelated errors. Node passed the three files/process routes and six HTTP
+including stdout, stderr, exit code and error text. They additionally cover
+background PID identity, stdin/EOF, disconnect/reconnect, typed wait and kill
+errors, and authoritative missing-PID behavior. The Arker E2B route succeeds
+without an E2B key. Returned command handles are now included in the inventory;
+the expanded denominator is intentional. The TypeScript native route supplies
+its vendor constructors to ComputeSDK, preserving class identity across package
+installations. Node passed the three files/process routes and six HTTP
 cases: original Blaxel, shim on Blaxel, and shim on Arker, with both H2 and
 explicitly disabled-H2 profiles. HTTP coverage includes every byte value,
 both application auth headers, repeated-header normalization, chunked and HEAD
@@ -27,7 +31,7 @@ run with inbound and outbound denied. They require the draft backend private
 port API, not a public ingress exception. Fresh feature tests passed all 58
 private-port/HTTPS/HTTP2/WebSocket cases with zero skips.
 
-Local validation passes 360 Python unit tests and lint, and the full TypeScript
+Local validation passes 375 Python unit tests and lint, and the full TypeScript
 test/build/typecheck pipeline. Source/vendor snapshots now reject changes during
 a scenario; runtime profiles are included in fingerprints. Existing evidence
 grouping tests also reject collisions and malformed events. These measurement
@@ -39,11 +43,22 @@ regression fails without preserving the caller's abort reason and passes with
 the fix on Node and Bun. All nine Node live programs passed again afterward.
 This is bounded evidence, not proof that every cancellation interleaving works.
 
-Older guest agents still require validation of the separate framed relay helper
-under development in arker-app #4260. A retained old-release VM reproduced a
-503; fresh guests passed. Bun's chunked WebSocket-upgrade refusal decoding also
-remains unverified. Node's chunked-refusal tests pass. Published dependencies
-and other runtimes are separate profiles and are not certified by Node's report.
+The separate framed relay helper in arker-app #4260 now passes real Python and
+Node half-close probes against a retained protocol-2.1 guest. Its boot ID, old
+agent build and PID 110 stayed unchanged, and helper permissions are 0700.
+The refreshed 58-case ingress/private-port selection passed with zero skips.
+Bun's chunked WebSocket-upgrade refusal decoding remains unverified. Node's
+chunked-refusal tests pass. Published dependencies and other runtimes are
+separate profiles and are not certified by Node's report.
+
+An immutable SDK wheel before the resource-alias fix exposed 15 real smoke
+failures: public resource attributes and the vcpu_count resize argument had been
+removed on SDK main. Restoring those aliases preserves the nested wire contract.
+The fixed immutable wheel passed all 353 executed smoke cases, zero failures;
+194 other cases were excluded by the feature environment. This certifies that
+wheel, not subsequent edits or the published SDK. An interrupted earlier live
+cohort failed during router-roll cleanup and remains red; a stable fresh cohort
+subsequently passed all 15 Python and 12 Node programs.
 
 Evidence fingerprints include the scenario and measurement sources, not just
 production files and dependency manifests. Changing a test or its tracer also
@@ -130,11 +145,12 @@ instrumented API counts above.
 
 ## Open release requirements
 
-- E2B background CommandHandle parity is not established. The TypeScript Arker
-  route rejects background handles explicitly; Python's detached-shell path
-  still returns a command result rather than the native handle and needs
-  replacement. Default cwd checks do not establish user/UID/HOME or shell
-  identity equivalence. Foreground command scenarios do not certify these gaps.
+- E2B handles have bounded live coverage, not complete parity. Process listing,
+  request-timeout options, all callback/error combinations, foreground signal
+  termination, sandbox kill return values and context-manager protocols need
+  further work. Default cwd checks do not establish user/UID/HOME equivalence.
+  Python's current E2B handle bridge requires SDK 2.56 and Python 3.11 or later;
+  both languages still need Python 3 in the guest process image.
 
 - Translate native Modal app/image handles on Arker. TypeScript now preserves
   them through ComputeSDK on native Modal routes, rather than silently using a

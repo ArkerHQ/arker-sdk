@@ -26,13 +26,25 @@ type Callbacks = {
   onLog?: (chunk: string) => void;
 };
 
+export class GuestProcessError extends Error {
+  constructor(message: string, readonly code?: string) { super(message); this.name = "GuestProcessError"; }
+}
+
 export class GuestProcesses {
   private installed?: Promise<unknown>;
+  private controlSession?: Promise<string>;
+  private pending: Promise<unknown> = Promise.resolve();
   private readonly path = `/tmp/arker-compat-process-${createHash("sha256").update(source).digest("hex").slice(0, 16)}.py`;
 
   constructor(private readonly sandbox: SandboxInterface) {}
 
-  private async call<T>(action: string, values: Record<string, unknown> = {}): Promise<T> {
+  private call<T>(action: string, values: Record<string, unknown> = {}): Promise<T> {
+    const result = this.pending.then(() => this.callOnce<T>(action, values));
+    this.pending = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  private async callOnce<T>(action: string, values: Record<string, unknown>): Promise<T> {
     this.installed ??= this.sandbox.filesystem.writeFile(this.path, source).catch((error) => {
       this.installed = undefined;
       throw error;
@@ -60,12 +72,21 @@ export class GuestProcesses {
         await delay(20);
       }
     } else {
-      response = await this.sandbox.runCommand(`python3 ${shellQuote(this.path)} call ${shellQuote(payload)}`);
+      const vm = (this.sandbox as unknown as { getInstance(): VM }).getInstance();
+      this.controlSession ??= vm.createSession().then((session) => session.session_id).catch((error) => {
+        this.controlSession = undefined;
+        throw error;
+      });
+      const completed = await vm.run(`python3 ${shellQuote(this.path)} call ${shellQuote(payload)}`, {
+        session_id: await this.controlSession,
+      });
+      if (completed.type !== "completed") throw new Error("Guest process control did not complete synchronously");
+      response = completed;
     }
-    let parsed: { error?: string; result: T };
+    let parsed: { error?: string; code?: string; result: T };
     try { parsed = JSON.parse(response.stdout); }
     catch { throw new Error(response.stderr || "Guest process agent returned invalid JSON"); }
-    if (parsed.error) throw new Error(parsed.error);
+    if (parsed.error) throw new GuestProcessError(parsed.error, parsed.code);
     if (response.exitCode !== 0) throw new Error(response.stderr || "Guest process agent failed");
     return parsed.result;
   }
@@ -80,9 +101,9 @@ export class GuestProcesses {
       : current;
   }
 
-  get(identifier: string, options?: { signal?: AbortSignal; retry?: boolean }): Promise<GuestProcessResult> {
+  get(identifier: string, options?: { signal?: AbortSignal; retry?: boolean; rawExitCode?: boolean }): Promise<GuestProcessResult> {
     options?.signal?.throwIfAborted();
-    return this.call<GuestProcessResult>("get", { identifier }).then((result) => {
+    return this.call<GuestProcessResult>("get", { identifier, ...(options?.rawExitCode ? { rawExitCode: true } : {}) }).then((result) => {
       options?.signal?.throwIfAborted();
       return result;
     });

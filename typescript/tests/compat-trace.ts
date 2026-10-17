@@ -6,17 +6,22 @@ export function traceVendor<T extends object>(target: T, prefix: string, calls: 
       const api = `${prefix}.${property}`;
       if (typeof value === "function") {
         return (...args: unknown[]) => {
+          calls.add(api);
           const result = Reflect.apply(value, object, args);
           const observed = (result: unknown) => {
-            calls.add(api);
             if (prefix.endsWith(".static") && ["create", "get", "createIfNotExists"].includes(property)) {
               return traceVendor(result as object, prefix.slice(0, -".static".length), calls);
+            }
+            if (["Sandbox.commands.run", "Sandbox.commands.connect"].includes(api)
+              && result && typeof (result as { wait?: unknown }).wait === "function") {
+              return traceVendor(result as object, "CommandHandle", calls);
             }
             return result;
           };
           return result instanceof Promise ? result.then(observed) : observed(result);
         };
       }
+      if (prefix === "CommandHandle" && ["pid", "stdout", "stderr", "exitCode", "error"].includes(property)) calls.add(api);
       return value && typeof value === "object" ? traceVendor(value, api, calls) : value;
     },
   });

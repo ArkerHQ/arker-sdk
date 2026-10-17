@@ -24,6 +24,7 @@ from typing import Any
 ROOTS = {
     "e2b": [
         ("sync", "Sandbox", "e2b:Sandbox", "arker.e2b:Sandbox"),
+        ("sync", "CommandHandle", "e2b:CommandHandle", "arker.e2b:CommandHandle"),
         ("async", "Sandbox", "e2b:AsyncSandbox", None),
         ("sync", "Template", "e2b:Template", "arker.e2b:Template"),
         ("sync", "Volume", "e2b:Volume", "arker.e2b:Volume"),
@@ -82,6 +83,7 @@ def implementation_fingerprint():
         root / "uv.lock",
         root.parent / "compatibility" / "requirements.txt",
         root.parent / "compatibility" / "http-service.py",
+        root / "src" / "arker" / "_linux_signals.json",
         root / "scripts" / "compat_coverage.py",
         *root.joinpath("tests", "e2e").glob("*.py"),
     ]

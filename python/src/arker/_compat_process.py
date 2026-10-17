@@ -11,8 +11,8 @@ import uuid
 from importlib.resources import files
 from typing import Any
 
-from ._compat import CommandResult, import_optional, run_command
-from .computer import REQUEST_TIMEOUT_S, VM
+from ._compat import CommandResult, import_optional
+from .computer import REQUEST_TIMEOUT_S, VM, CompletedRunResult
 
 
 @dataclasses.dataclass(frozen=True)
@@ -68,11 +68,19 @@ def success(value):
     return models.SuccessResponse.from_dict(value) if models is not None else SuccessResponse(**value)
 
 
+class GuestProcessError(RuntimeError):
+    def __init__(self, message, code=None):
+        self.code = code
+        super().__init__(message)
+
+
 class GuestProcesses:
     def __init__(self, vm: VM) -> None:
         self._vm = vm
         self._installed = False
         self._lock = threading.Lock()
+        self._control_lock = threading.Lock()
+        self._control_session = None
         self._source = files("arker").joinpath("_guest_process.py").read_text()
         self._path = f"/tmp/arker-compat-process-{hashlib.sha256(self._source.encode()).hexdigest()[:16]}.py"
 
@@ -101,13 +109,21 @@ class GuestProcesses:
                     raise TimeoutError("Guest process supervisor did not report readiness")
                 time.sleep(0.02)
         else:
-            response = run_command(self._vm, f"python3 {shlex.quote(self._path)} call {shlex.quote(payload)}")
+            with self._control_lock:
+                if self._control_session is None:
+                    self._control_session = self._vm.create_session().session_id
+                response = self._vm.run(
+                    f"python3 {shlex.quote(self._path)} call {shlex.quote(payload)}",
+                    session_id=self._control_session,
+                )
+                if not isinstance(response, CompletedRunResult):
+                    raise RuntimeError("Guest process control did not complete synchronously")
         try:
             parsed = json.loads(response.stdout)
         except ValueError as error:
             raise RuntimeError(response.stderr or "Guest process agent returned invalid JSON") from error
         if "error" in parsed:
-            raise RuntimeError(parsed["error"])
+            raise GuestProcessError(parsed["error"], parsed.get("code"))
         if response.exit_code != 0:
             raise RuntimeError(response.stderr or "Guest process agent failed")
         return parsed["result"]
@@ -124,8 +140,10 @@ class GuestProcesses:
             current = self._wait(current.name, -1, 50, callbacks)
         return current
 
-    def get(self, identifier: str, *, retry: bool = True, timeout: float | None = None) -> ProcessResult:
-        return result(self._call("get", identifier=identifier))
+    def get(
+        self, identifier: str, *, retry: bool = True, timeout: float | None = None, raw_exit_code: bool = False
+    ) -> ProcessResult:
+        return result(self._call("get", identifier=identifier, **({"rawExitCode": True} if raw_exit_code else {})))
 
     def list(self) -> list[ProcessResult]:
         return [result(value) for value in self._call("list")]

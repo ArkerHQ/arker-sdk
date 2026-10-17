@@ -1,8 +1,10 @@
 import { e2b as createE2BProvider } from "@computesdk/e2b";
 import type { RunCommandOptions } from "computesdk";
-import { CommandExitError, type CommandStartOpts } from "e2b";
+import { CommandExitError, Sandbox as VendorSandbox, NotFoundError, type CommandStartOpts, type CommandHandle,
+  type Commands as VendorCommands, type CommandConnectOpts, type CommandRequestOpts } from "e2b";
 
 export { CommandExitError } from "e2b";
+export type { CommandHandle } from "e2b";
 
 import {
   assertSupportedObjectKeys,
@@ -12,8 +14,11 @@ import {
   type CreateOptions,
   type UniversalSandbox,
   resolveCompatPath,
+  shellQuote,
 } from "./compat/common.js";
 import { createCompatSdk } from "./compat/runtime.js";
+import { GuestProcesses, GuestProcessError } from "./compat/guest-process.js";
+import { e2bCommandHandle, e2bProcessError } from "./compat/e2b-command.js";
 
 export interface CommandExitResult {
   stdout: string;
@@ -23,16 +28,21 @@ export interface CommandExitResult {
 }
 
 type CommandOptions = RunCommandOptions & CommandStartOpts;
+interface CommandRunner {
+  (command: string, options: CommandOptions & { background: true }): Promise<CommandHandle>;
+  (command: string, options?: CommandOptions & { background?: false }): Promise<CommandExitResult>;
+  (command: string, options?: CommandOptions): Promise<CommandExitResult | CommandHandle>;
+}
 interface NativeSandbox {
   getHost?: (port: number) => string;
-  commands?: { run: (command: string, options?: CommandStartOpts) => Promise<any> };
+  commands?: VendorCommands;
 }
 
 const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess"] as const;
 
 function sdk(routerConfigPath?: string) {
   return createCompatSdk({
-    fallbackProvider: createE2BProvider({}),
+    fallbackProvider: createE2BProvider({ nativeSdk: { Sandbox: VendorSandbox, NotFoundError, CommandExitError } }),
     routerConfigPath,
   });
 }
@@ -43,9 +53,14 @@ export class Sandbox {
   #box: UniversalSandbox;
   #native?: NativeSandbox;
   #arkerHostname?: string;
+  #processes?: GuestProcesses;
 
   readonly commands: {
-    run: (command: string, options?: CommandOptions) => Promise<CommandExitResult>;
+    run: CommandRunner;
+    connect: (pid: number, options?: CommandConnectOpts) => Promise<CommandHandle>;
+    kill: (pid: number, options?: CommandRequestOpts) => Promise<boolean>;
+    sendStdin: (pid: number, data: string | Uint8Array, options?: CommandRequestOpts) => Promise<void>;
+    closeStdin: (pid: number, options?: CommandRequestOpts) => Promise<void>;
   };
 
   readonly files: {
@@ -63,8 +78,9 @@ export class Sandbox {
     this.#arkerHostname = arkerHostname;
     this.sandboxId = box.sandboxId;
     this.provider = box.provider;
+    this.#processes = box.provider === "arker" ? new GuestProcesses(box) : undefined;
     this.commands = {
-      run: async (command, options) => {
+      run: (async (command: string, options?: CommandOptions): Promise<CommandExitResult | CommandHandle> => {
         const { env, envs, timeout, timeoutMs, ...rest } = options ?? {};
         if (env !== undefined && envs !== undefined) throw new TypeError("Pass envs, not both env and envs");
         if (timeout !== undefined && timeoutMs !== undefined) throw new TypeError("Pass timeoutMs, not both timeout and timeoutMs");
@@ -87,8 +103,19 @@ export class Sandbox {
             throw error;
           }
         }
-        assertSupportedObjectKeys(options, ["cwd", "env", "envs", "timeout", "timeoutMs", "background"], "e2b", "commands.run");
-        if (options?.background) throw new TypeError("E2B background CommandHandle is not yet supported on Arker");
+        assertSupportedObjectKeys(options, ["cwd", "env", "envs", "timeout", "timeoutMs", "background", "stdin", "onStdout", "onStderr"], "e2b", "commands.run");
+        const limit = timeoutMs ?? timeout;
+        if (limit !== undefined && (!Number.isFinite(limit) || limit < 0)) throw new RangeError("timeoutMs must be nonnegative and finite");
+        if (options?.background || options?.stdin || options?.onStdout || options?.onStderr) {
+          const current = await this.#processes!.exec({
+            command: `exec /bin/bash -lc ${shellQuote(command)}`, workingDir: options?.cwd ?? "/home/user",
+            env: envs ?? env ?? {}, stdin: options?.stdin ?? false,
+          });
+          const handle = e2bCommandHandle(this.#processes!, current, {
+            timeoutMs: limit, onStdout: options?.onStdout, onStderr: options?.onStderr,
+          });
+          return options?.background ? handle : handle.wait();
+        }
         const result = await this.#box.runCommand(command, {
           ...rest,
           ...(envs !== undefined || env !== undefined ? { env: envs ?? env } : {}),
@@ -103,6 +130,34 @@ export class Sandbox {
         };
         if (result.exitCode !== 0) throw new CommandExitError(output);
         return output;
+      }) as CommandRunner,
+      connect: async (pid, options) => {
+        if (this.#native?.commands) return this.#native.commands.connect(pid, options);
+        assertSupportedObjectKeys(options, ["timeoutMs", "onStdout", "onStderr"], "e2b", "commands.connect");
+        const current = await this.#processes!.get(String(pid)).catch((error) => { throw e2bProcessError(error); });
+        return e2bCommandHandle(this.#processes!, current, options);
+      },
+      kill: async (pid, options) => {
+        if (this.#native?.commands) return this.#native.commands.kill(pid, options);
+        assertSupportedObjectKeys(options, [], "e2b", "commands.kill");
+        try {
+          if ((await this.#processes!.get(String(pid))).status !== "running") return false;
+        } catch (error) {
+          if (error instanceof GuestProcessError && error.code === "process_not_found") return false;
+          throw error;
+        }
+        await this.#processes!.kill(String(pid));
+        return true;
+      },
+      sendStdin: async (pid, data, options) => {
+        if (this.#native?.commands) return this.#native.commands.sendStdin(pid, data, options);
+        assertSupportedObjectKeys(options, [], "e2b", "commands.sendStdin");
+        await this.#processes!.writeStdin(String(pid), data).catch((error) => { throw e2bProcessError(error); });
+      },
+      closeStdin: async (pid, options) => {
+        if (this.#native?.commands) return this.#native.commands.closeStdin(pid, options);
+        assertSupportedObjectKeys(options, [], "e2b", "commands.closeStdin");
+        await this.#processes!.closeStdin(String(pid)).catch((error) => { throw e2bProcessError(error); });
       },
     };
     this.files = {

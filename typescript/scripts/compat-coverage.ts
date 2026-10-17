@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { implementationFingerprint, runtimeInfo, verifiedScenarios } from "./compat-evidence.js";
 
 const roots = [
+  ["e2b", "e2b", "CommandHandle", "../src/e2b.js"],
   ["e2b", "e2b", "Sandbox", "../src/e2b.js"],
   ["e2b", "e2b", "Template", "../src/e2b.js"],
   ["e2b", "e2b", "Volume", "../src/e2b.js"],

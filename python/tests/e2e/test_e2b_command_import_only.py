@@ -7,7 +7,7 @@ import pytest
 from compat_evidence import record
 
 PROGRAM = """
-from e2b import Sandbox, CommandResult, CommandExitException
+from e2b import Sandbox, CommandResult, CommandExitException, CommandHandle, NotFoundException
 
 sandbox = Sandbox.create()
 try:
@@ -26,6 +26,40 @@ try:
         assert error.error == "exit status 17", repr(error.error)
     else:
         raise AssertionError("Nonzero command did not raise CommandExitException")
+    handle = sandbox.commands.run("printf '%s\\n' $$; cat; printf diagnostic >&2; exit 17", background=True, stdin=True)
+    assert isinstance(handle, CommandHandle)
+    sandbox.commands.send_stdin(handle.pid, "hello\\n")
+    sandbox.commands.close_stdin(handle.pid)
+    try:
+        handle.wait()
+    except CommandExitException as error:
+        assert error.stdout == str(handle.pid) + "\\nhello\\n", repr(error.stdout)
+        assert (error.stderr, error.exit_code, error.error) == ("diagnostic", 17, "exit status 17")
+    else:
+        raise AssertionError("Background nonzero wait did not raise")
+    handle = sandbox.commands.run("cat; printf reconnected", background=True, stdin=True)
+    handle.disconnect()
+    connected = sandbox.commands.connect(handle.pid)
+    assert connected.pid == handle.pid
+    connected.send_stdin("shared\\n")
+    connected.close_stdin()
+    assert connected.wait().stdout == "shared\\nreconnected"
+    killed = sandbox.commands.run("cat", background=True, stdin=True)
+    assert killed.kill() is True
+    try:
+        killed.wait()
+    except CommandExitException as error:
+        assert (error.exit_code, error.error) == (-1, "signal: killed")
+    else:
+        raise AssertionError("Killed process did not raise")
+    assert sandbox.commands.kill(killed.pid) is False
+    assert sandbox.commands.kill(2147483647) is False
+    try:
+        sandbox.commands.connect(2147483647)
+    except NotFoundException:
+        pass
+    else:
+        raise AssertionError("Missing process connect did not raise NotFoundException")
 finally:
     sandbox.kill()
 """
@@ -34,8 +68,12 @@ finally:
 @pytest.mark.parametrize("provider,shim", [("e2b", False), ("e2b", True), ("arker", True)])
 def test_command_import_only(provider, shim, tmp_path, monkeypatch):
     pytest.importorskip("e2b")
-    if not os.environ.get("E2B_API_KEY") or (provider == "arker" and not os.environ.get("ARKER_API_KEY")):
+    if (provider == "e2b" and not os.environ.get("E2B_API_KEY")) or (
+        provider == "arker" and not os.environ.get("ARKER_API_KEY")
+    ):
         pytest.skip("live credentials required")
+    if provider == "arker":
+        monkeypatch.delenv("E2B_API_KEY", raising=False)
     config = tmp_path / "router.json"
     config.write_text(
         json.dumps(
@@ -65,6 +103,20 @@ def test_command_import_only(provider, shim, tmp_path, monkeypatch):
             "sync",
             "reference" if not shim else "arker" if provider == "arker" else "native",
             "import-only-command-environment-and-exit",
-            ["Sandbox.create", "Sandbox.commands.run", "Sandbox.kill"],
+            [
+                "Sandbox.create",
+                "Sandbox.commands.run",
+                "Sandbox.commands.connect",
+                "Sandbox.commands.send_stdin",
+                "Sandbox.commands.close_stdin",
+                "Sandbox.commands.kill",
+                "Sandbox.kill",
+                "CommandHandle.pid",
+                "CommandHandle.wait",
+                "CommandHandle.send_stdin",
+                "CommandHandle.close_stdin",
+                "CommandHandle.disconnect",
+                "CommandHandle.kill",
+            ],
             outcome,
         )

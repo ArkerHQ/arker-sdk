@@ -29,6 +29,7 @@ export async function implementationFingerprint(read: (path: string) => Promise<
   const paths: string[] = [
     resolve(root, "../../bun.lock"), resolve(root, "../package.json"),
     resolve(root, "../../python/src/arker/_guest_process.py"),
+    resolve(root, "../../python/src/arker/_linux_signals.json"),
     resolve(root, "../../compatibility/http-service.py"),
     resolve(root, "../scripts/compat-evidence.ts"), resolve(root, "../scripts/compat-coverage.ts"),
   ];
