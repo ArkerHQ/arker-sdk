@@ -1,68 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
-import inspect
 import shlex
-import threading
-import warnings
 from typing import Any
 
 from ._compat import UnsupportedCompatibilityOption, _InstanceOrClassMethod, import_optional
-
-
-class _RoutingCancelled(UnsupportedCompatibilityOption):
-    pass
-
-
-async def _call(function, *args, **kwargs):
-    result = await asyncio.to_thread(function, *args, **kwargs)
-    return await result if inspect.isawaitable(result) else result
-
-
-class _NativeBridge:
-    def __init__(self, native, loop):
-        self.native, self.loop = native, loop
-        self.cancelled = threading.Event()
-        self.lock = threading.Lock()
-        self.pending = set()
-
-    def cancel(self):
-        self.cancelled.set()
-        with self.lock:
-            for future in self.pending:
-                future.cancel()
-
-    def __getattr__(self, name):
-        function = getattr(self.native, name)
-
-        def invoke(*args, **kwargs):
-            with self.lock:
-                if self.cancelled.is_set():
-                    raise _RoutingCancelled("Async routing was cancelled")
-                coroutine = function(*args, **kwargs)
-                future = asyncio.run_coroutine_threadsafe(coroutine, self.loop)
-                self.pending.add(future)
-            try:
-                return future.result()
-            except concurrent.futures.CancelledError as error:
-                raise _RoutingCancelled("Async routing was cancelled") from error
-            finally:
-                with self.lock:
-                    self.pending.discard(future)
-
-        return invoke
-
-
-_cleanups: set[asyncio.Task] = set()
-
-
-def _cleanup_finished(task):
-    _cleanups.discard(task)
-    if not task.cancelled() and task.exception() is not None:
-        warnings.warn(
-            "Cleanup after cancelled E2B creation failed; reconcile the created sandbox", RuntimeWarning, stacklevel=2
-        )
+from ._compat_async import NativeBridge, route
+from ._compat_async import call as _call
 
 
 async def _route(method, *args, **kwargs):
@@ -71,35 +15,18 @@ async def _route(method, *args, **kwargs):
     loop = asyncio.get_running_loop()
     module = import_optional("e2b")
     native = getattr(module, "AsyncSandbox", None) if module else None
-    bridge = _NativeBridge(native, loop) if native else None
+    bridge = NativeBridge(native, loop, creation_cleanup=lambda sandbox: sandbox.kill()) if native else None
 
     class Routed(Sandbox):
         @staticmethod
         def _native_sandbox():
             return bridge
 
-    task = asyncio.create_task(asyncio.to_thread(getattr(Routed, method), *args, **kwargs))
-    try:
-        return await asyncio.shield(task)
-    except _RoutingCancelled as error:
-        raise asyncio.CancelledError from error
-    except asyncio.CancelledError:
-        if bridge:
-            bridge.cancel()
-
-        def discard(done):
-            if done.cancelled() or done.exception() is not None:
-                return
-            if method == "create":
-                cleanup = loop.create_task(_call(done.result().kill))
-                _cleanups.add(cleanup)
-                cleanup.add_done_callback(_cleanup_finished)
-
-        task.add_done_callback(discard)
-        raise
-    finally:
-        if bridge:
-            bridge.cancel()
+    return await route(
+        lambda: getattr(Routed, method)(*args, **kwargs),
+        bridges=[bridge] if bridge else [],
+        cleanup=(lambda result: result.kill()) if method == "create" else None,
+    )
 
 
 class _AsyncFiles:

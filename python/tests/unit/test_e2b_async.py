@@ -7,6 +7,37 @@ import pytest
 import arker.e2b as shim
 
 
+def test_native_creation_that_suppresses_cancellation_is_not_leaked(tmp_path, monkeypatch):
+    native = pytest.importorskip("e2b")
+    _router(tmp_path, monkeypatch, ["e2b"])
+
+    async def scenario():
+        entered, deleted = asyncio.Event(), asyncio.Event()
+
+        async def kill():
+            deleted.set()
+            return True
+
+        class Native:
+            @classmethod
+            async def create(cls, *args, **kwargs):
+                entered.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    return types.SimpleNamespace(sandbox_id="late-native", kill=kill)
+
+        monkeypatch.setattr(native, "AsyncSandbox", Native)
+        pending = asyncio.create_task(shim.AsyncSandbox.create())
+        await asyncio.wait_for(entered.wait(), 1)
+        pending.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+        await asyncio.wait_for(deleted.wait(), 1)
+
+    asyncio.run(scenario())
+
+
 def test_async_create_obeys_arker_only_routing_instead_of_bypassing_it(tmp_path, monkeypatch):
     native = pytest.importorskip("e2b")
     calls = []

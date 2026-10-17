@@ -34,8 +34,8 @@ ROOTS = {
     "daytona": [
         ("sync", "Daytona", "daytona:Daytona", "arker.daytona:Daytona"),
         ("sync", "Sandbox", "daytona:Sandbox", "arker.daytona:Sandbox"),
-        ("async", "Daytona", "daytona:AsyncDaytona", None),
-        ("async", "Sandbox", "daytona:AsyncSandbox", None),
+        ("async", "Daytona", "daytona:AsyncDaytona", "arker.daytona:AsyncDaytona"),
+        ("async", "Sandbox", "daytona:AsyncSandbox", "arker.daytona:AsyncSandbox"),
         ("sync", "Image", "daytona:Image", "arker.daytona:Image"),
     ],
     "modal": [

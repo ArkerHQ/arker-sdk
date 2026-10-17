@@ -19,6 +19,8 @@ from ._compat import (
     routed_get,
     run_command,
 )
+from ._compat_daytona_async import AsyncDaytona as AsyncDaytona
+from ._compat_daytona_async import AsyncSandbox as AsyncSandbox
 from .computer import VM
 
 
@@ -62,7 +64,15 @@ class Process:
             prefix += f"cd {shlex.quote(cwd)} && "
         else:
             prefix += "mkdir -p /home/daytona && cd /home/daytona && "
-        return ExecuteResponse(run_command(self._vm, prefix + command, timeout=timeout))
+        result = run_command(self._vm, prefix + command, timeout=timeout)
+        native = import_optional("daytona.common.process")
+        if native is not None:
+            return native.ExecuteResponse(
+                exit_code=result.exit_code,
+                result=result.stdout,
+                artifacts=native.ExecutionArtifacts(stdout=result.stdout, charts=[]),
+            )
+        return ExecuteResponse(result)
 
     def execute_command(
         self,
