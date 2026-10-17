@@ -280,15 +280,22 @@ function instanceId(instance: any): string | undefined {
 }
 
 function retryable(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
   let current: any = error;
-  for (let depth = 0; current && typeof current === "object" && depth < 5; depth += 1, current = current.cause) {
+  const seen = new Set<object>();
+  while (current !== undefined && current !== null) {
+    if (typeof current !== "object" || seen.has(current)) return false;
+    seen.add(current);
     const status = current.status ?? current.statusCode ?? current.response?.status;
+    if (["ECONNRESET", "ECONNREFUSED", "EPIPE", "ENETUNREACH", "ETIMEDOUT", "UND_ERR_SOCKET"]
+      .includes(String(current.code ?? "").toUpperCase())) return false;
     if (current.name === "AbortError" || [400, 401, 403, 422].includes(status)) return false;
     if (["authentication", "authorization", "unauthorized", "forbidden", "invalid_request", "validation"]
       .includes(String(current.code ?? "").toLowerCase())) return false;
     if (/(authentication failed|unauthorized|forbidden|invalid api key|missing .*api key)/i.test(current.message ?? "")) return false;
-    if (/(outcome is unknown|may have (?:succeeded|been created)|network failure|transport error|timed? out|timeout)/i
+    if (/(outcome is unknown|may have (?:succeeded|been created)|network failure|transport error|timed? out|timeout|fetch failed|connection (?:reset|refused|closed)|socket hang up|broken pipe|all connection attempts failed)/i
       .test(current.message ?? "")) return false;
+    current = current.cause;
   }
   return true;
 }

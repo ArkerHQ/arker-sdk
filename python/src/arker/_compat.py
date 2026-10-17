@@ -279,9 +279,11 @@ def _is_retryable(error: Exception) -> bool:
     if isinstance(error, UnsupportedCompatibilityOption):
         return False
     current: BaseException | None = error
-    for _ in range(5):
-        if current is None:
-            break
+    seen: set[int] = set()
+    while current is not None:
+        if id(current) in seen or isinstance(current, OSError):
+            return False
+        seen.add(id(current))
         response = getattr(current, "response", None)
         status = (
             getattr(current, "status_code", None)
@@ -291,6 +293,8 @@ def _is_retryable(error: Exception) -> bool:
         if status in {400, 401, 403, 422}:
             return False
         code = str(getattr(current, "code", "")).lower()
+        if code in {"econnreset", "econnrefused", "epipe", "enetunreach", "etimedout", "und_err_socket"}:
+            return False
         if code in {"authentication", "authorization", "unauthorized", "forbidden", "invalid_request", "validation"}:
             return False
         message = str(current).lower()
@@ -306,6 +310,13 @@ def _is_retryable(error: Exception) -> bool:
                 "transport error",
                 "timed out",
                 "timeout",
+                "fetch failed",
+                "connection reset",
+                "connection refused",
+                "connection closed",
+                "socket hang up",
+                "broken pipe",
+                "all connection attempts failed",
             )
         ):
             return False

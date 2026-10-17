@@ -368,7 +368,33 @@ def test_missing_arker_source_falls_back_to_native_provider(tmp_path: Path) -> N
     assert result.sandbox_id == "native-e2b"
 
 
-def test_ambiguous_create_outcome_does_not_fall_through(tmp_path: Path) -> None:
+def _wrapped_create_failure(failure):
+    for _ in range(8):
+        wrapper = RuntimeError("provider creation failed")
+        wrapper.__cause__ = failure
+        failure = wrapper
+    return failure
+
+
+def _cyclic_create_failure():
+    failure = RuntimeError("cyclic provider error")
+    failure.__cause__ = failure
+    return failure
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        RuntimeError("network failure: operation outcome is unknown"),
+        ConnectionResetError("connection reset"),
+        BrokenPipeError("broken pipe"),
+        TypeError("fetch failed"),
+        _wrapped_create_failure(RuntimeError("unauthorized")),
+        _wrapped_create_failure(OSError("read failed")),
+        _cyclic_create_failure(),
+    ],
+)
+def test_ambiguous_create_outcome_does_not_fall_through(tmp_path: Path, failure: Exception) -> None:
     config_path = tmp_path / "computesdk_router.json"
     config_path.write_text(
         json.dumps(
@@ -382,19 +408,20 @@ def test_ambiguous_create_outcome_does_not_fall_through(tmp_path: Path) -> None:
     duplicate_creates = 0
 
     def ambiguous() -> None:
-        raise RuntimeError("network failure: operation outcome is unknown")
+        raise failure
 
     def duplicate() -> object:
         nonlocal duplicate_creates
         duplicate_creates += 1
         return object()
 
-    with pytest.raises(RuntimeError, match="outcome is unknown"):
+    with pytest.raises(type(failure)) as raised:
         routed_create(
             "e2b",
             {"router_config_path": config_path},
             {"e2b": ambiguous, "arker": duplicate},
         )
+    assert raised.value is failure
     assert duplicate_creates == 0
 
 

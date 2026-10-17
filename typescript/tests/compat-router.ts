@@ -96,6 +96,25 @@ async function testWeightedFallbackAndNonRetryableErrors(): Promise<void> {
     ]).instances!;
     await assert.rejects(ambiguous.create(), /outcome is unknown/);
     assert.equal(duplicateCreates, 0, "ambiguous creation outcomes must never fall through and create a duplicate");
+    let wrapped: Error = new Error("unauthorized");
+    for (let index = 0; index < 8; index++) wrapped = new Error("provider creation failed", { cause: wrapped });
+    const cyclic = new Error("cyclic provider error");
+    cyclic.cause = cyclic;
+    for (const error of [
+      wrapped,
+      cyclic,
+      new TypeError("fetch failed"),
+      Object.assign(new Error("read failed"), { code: "ECONNRESET" }),
+      Object.assign(new Error("write failed"), { code: "EPIPE" }),
+      new Error("socket hang up"),
+    ]) {
+      const reset = createRoutedProvider([
+        provider("blaxel", { create: async () => { throw error; } }),
+        provider("arker", { create: async () => { duplicateCreates += 1; return sandbox("duplicate", "arker"); } }),
+      ]).instances!;
+      await assert.rejects(reset.create(), (caught: unknown) => caught === error);
+    }
+    assert.equal(duplicateCreates, 0, "transport failures do not prove the first creation failed");
 
     const created = { get instanceId(): string { throw new Error("metadata unavailable"); } };
     const metadataFailure = createRoutedProvider([
