@@ -2,6 +2,16 @@
 
 ## Current validation
 
+The latest Python Modal native-route regression preserves the original process
+object, all native exec keyword arguments and terminate(wait=True)'s exit
+status. Four regression cases failed before the fix. All 421 Python vendor
+unit tests and scoped lint pass; a real Modal sandbox also passed binary
+stdin/stdout/stderr, EOF, wait and termination. This native-only test does not
+grant Arker-route coverage. An initial manual probe omitted Modal stdin.drain()
+and blocked; the checked-in program uses the documented flush operation.
+The frozen reports below predate this source change and are not current-source
+parity certification.
+
 The branch includes SDK main at 2ec474e. Frozen commit e2dc4cc runtime-scoped differential
 reports verify **86/975 Python** entries on CPython 3.12.14/Linux/aarch64 and
 **51/967 TypeScript** entries on Node 22.23.3/Linux/arm64. The latest Node profile
@@ -151,6 +161,15 @@ command as root with root environment variables. Both report /home/user as cwd.
 Matching directories does not establish matching permissions or process
 identity. The probe deleted both disposable sandboxes. This is a deployment
 blocker, not a cosmetic output difference.
+
+The expanded four-provider identity probe is RED for every default source.
+Native Daytona runs as uid/gid 1001 (daytona), with HOME=/home/daytona;
+Arker runs as root with HOME=/root despite the matching working directory.
+Native Blaxel runs as root but sets HOME=/blaxel, unlike Arker's HOME=/root.
+Native Modal prints empty USER/LOGNAME, while Arker sets both to root.
+Unset versus empty variables still needs a separate check. All disposable
+sandboxes were cleaned up. These results compare the native defaults with
+Arker's configured ubuntu source, not every possible custom image.
 
 A named Blaxel regression then failed on the published-provider route: it
 discarded the requested name and returned a UUID. The in-shim adapter preserves
