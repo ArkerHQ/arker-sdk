@@ -2,15 +2,15 @@
 
 ## Current validation
 
-The branch includes SDK main at 2ec474e. Frozen commit d7af319 runtime-scoped differential
+The branch includes SDK main at 2ec474e. Frozen commit e2dc4cc runtime-scoped differential
 reports verify **86/975 Python** entries on CPython 3.12.14/Linux/aarch64 and
-**41/938 TypeScript** entries on Node 22.23.3/Linux/arm64. The latest Node profile
+**51/967 TypeScript** entries on Node 22.23.3/Linux/arm64. The latest Node profile
 uses a clean install of published dependencies, with no local provider links.
-E2B, Daytona and Blaxel native bridges are in the shims, built with ComputeSDK's provider
+All four native bridges are in the shims, built with ComputeSDK's provider
 factory, and use the embedding SDK's vendor versions. The shared factory is a
 declared dependency, not an undeclared transitive import.
 Both inventories are complete in their declared scope.
-The strict gates still exit 1: **889 Python and 897 TypeScript** entries remain
+The strict gates still exit 1: **889 Python and 916 TypeScript** entries remain
 unverified. Neither method counts nor these scenarios establish full equivalence.
 
 The unchanged files/process programs and new private HTTP programs passed all
@@ -38,14 +38,14 @@ run with inbound and outbound denied. They require the draft backend private
 port API, not a public ingress exception. Fresh feature tests passed all 58
 private-port/HTTPS/HTTP2/WebSocket cases with zero skips.
 
-Local validation passes 406 Python unit tests and lint, and the full TypeScript
+Local validation passes 417 Python unit tests and lint, and the full TypeScript
 test/build/typecheck pipeline. Source/vendor snapshots now reject changes during
 a scenario; runtime profiles are included in fingerprints. Existing evidence
 grouping tests also reject collisions and malformed events. These measurement
 tests do not grant vendor parity credit.
 
 The pinned-vendor Python CI lane installs all four SDKs from the lockfile and
-passes all 406 tests without skips. A separate lean environment passes 402 tests
+passes all 417 tests without skips. A separate lean environment passes 413 tests
 and skips four optional-Daytona checks. Both were verified in clean temporary
 virtualenvs; the initial CI failure from assuming an optional SDK was installed
 was fixed, not suppressed in the vendor lane. All GitHub checks pass at d7af319.
@@ -54,13 +54,43 @@ environment. Evidence now fingerprints installed transitive dependency versions
 in addition to source, vendor roots and interpreter, preventing evidence from
 different Python environments from being combined.
 
+Modal's TypeScript adapter now uses the embedding SDK and returns its native
+ContainerProcess class rather than waiting for completion and fabricating a
+small result wrapper. All three from-ID routes pass literal argv (including
+shell positional arguments), cwd/environment isolation, 256 KiB binary stdin
+and output, EOF, exit status 17 and stream cancellation. The Arker route has no
+Modal credentials and denies inbound/outbound traffic. Fixtures create the
+sandboxes separately; this does not certify native image-builder creation on
+Arker. PTY, secrets, entrypoint-wait and other streaming cases remain gaps.
+
+A large-input regression reproduced guest shell argument overflow in Python
+and TypeScript. Both clients now chunk stdin into bounded control frames and
+serialize each complete write before EOF. The shared guest protocol provides
+bounded binary output reads at byte offsets; tests cover all byte values and
+reject invalid stream paths and bounds. Python-free images remain unsupported.
+
+The packed-consumer gate now installs the SDK with each vendor separately, plus
+standard Node type-check tooling, and also checks a base-only installation.
+All five profiles import successfully in ESM/CommonJS without unrelated vendor
+SDKs or ComputeSDK vendor adapters. Native controls and import-changed examples
+pass strict typechecks in both modes, without skipLibCheck. This exposed missing
+vendor declaration dependencies and a real CommonJS private-class mismatch.
+The SDK declares required type dependencies and selects matching .d.ts/.d.cts
+exports. Runtime-only import checks had not caught the mismatch. These consumer
+calls are mocked; the separate paid cohorts provide cloud evidence.
+
+Opaque native conflict/validation classes, gRPC mutation failures and HTTP
+timeouts/5xx responses now fail closed instead of creating elsewhere. The
+regressions failed before the guards. Such failures cannot establish that
+creation did not happen; native error identity is preserved.
+
 Python's async E2B entry point now uses the same router and ownership cache as
 the sync entry point instead of returning the native class and bypassing routing.
 Native async calls stay on their original event loop. Cancellation does not
 trigger cross-provider fallback, losing ownership probes are cancelled, and a
 late successful Arker creation is deleted after caller cancellation. These
 cancellation paths have unit coverage, not complete live interleaving coverage.
-The refreshed cohort passes all 21 Python and 15 Node programs. Async E2B adds
+The refreshed cohort passes all 21 Python and 18 Node programs. Async E2B adds
 typed native handles, awaited callbacks, stdin/EOF, reconnect, context cleanup,
 and static/instance deletion on all three routes. The inventory now includes
 async command handles. This does not verify user identity or all creation defaults.
