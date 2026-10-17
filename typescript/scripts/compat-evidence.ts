@@ -33,22 +33,13 @@ export async function implementationFingerprint(read: (path: string) => Promise<
     resolve(root, "../../compatibility/http-service.py"),
     resolve(root, "../scripts/compat-evidence.ts"), resolve(root, "../scripts/compat-coverage.ts"),
   ];
-  for (const name of ["computesdk", "@computesdk/provider", "@computesdk/daytona", "@computesdk/modal"]) {
+  for (const name of ["computesdk", "@computesdk/provider"]) {
     const directory = resolve(root, "../node_modules", name);
     const manifest = resolve(directory, "package.json");
     const pkg = JSON.parse(await readFile(manifest, "utf8"));
     paths.push(manifest);
     for (const entry of new Set([pkg.main, pkg.module])) {
       if (typeof entry === "string") paths.push(resolve(directory, entry));
-    }
-    if (name.startsWith("@computesdk/") && name !== "@computesdk/provider") {
-      const manifestPath = await dependencyManifest("@computesdk/provider", directory);
-      const dependencyDirectory = dirname(manifestPath);
-      const dependency = JSON.parse(await readFile(manifestPath, "utf8"));
-      paths.push(manifestPath);
-      for (const entry of new Set([dependency.main, dependency.module])) {
-        if (typeof entry === "string") paths.push(resolve(dependencyDirectory, entry));
-      }
     }
   }
   const tests = resolve(root, "../tests");
@@ -116,9 +107,7 @@ export async function recordEvidence(provider: "blaxel" | "e2b" | "modal" | "day
   if (!process.env.COMPAT_COVERAGE_RUN) throw new Error("COMPAT_COVERAGE_RUN is required when recording evidence");
   const version = await vendorVersion(provider);
   if (route === "native") {
-    const providerDirectory = ["e2b", "blaxel", "daytona"].includes(provider)
-      ? fileURLToPath(new URL("../src/compat", import.meta.url))
-      : fileURLToPath(new URL(`../node_modules/@computesdk/${provider}`, import.meta.url));
+    const providerDirectory = fileURLToPath(new URL("../src/compat", import.meta.url));
     const nativeManifest = await dependencyManifest(packages[provider], providerDirectory);
     const nativeVersion = JSON.parse(await readFile(nativeManifest, "utf8")).version;
     if (nativeVersion !== version) throw new Error(`Reference ${provider} ${version} differs from provider dependency ${nativeVersion}`);

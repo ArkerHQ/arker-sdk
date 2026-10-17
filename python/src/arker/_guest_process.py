@@ -208,6 +208,24 @@ def dispatch(request):
     if action == "list":
         return [snapshot(path) for path in ROOT.glob("*") if (path / "state").exists()]
     directory = locate(request["identifier"])
+    if action == "readStream":
+        stream = request.get("stream")
+        if stream not in {"stdout", "stderr"}:
+            raise ValueError("Invalid process stream")
+        offset, limit = request.get("offset", 0), request.get("limit", 65536)
+        if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 65536:
+            raise ValueError("Invalid process output bounds")
+        state = json.loads((directory / "state").read_text())
+        with (directory / stream).open("rb") as output:
+            output.seek(offset)
+            data = output.read(limit)
+            end = output.tell()
+            size = os.fstat(output.fileno()).st_size
+        return {
+            "data": base64.b64encode(data).decode(),
+            "nextOffset": end,
+            "eof": state["status"] in TERMINAL and end >= size,
+        }
     if action == "get":
         return snapshot(directory, raw_exit_code=request.get("rawExitCode") is True)
     if action in {"kill", "stop"}:

@@ -1,19 +1,21 @@
-import { modal as createModalProvider } from "@computesdk/modal";
-import { ModalClient as NativeModalClient } from "modal";
+import { ModalClient as NativeModalClient, type ModalClientParams, type Sandbox as NativeSandbox, type SandboxExecParams, type ContainerProcess, type SandboxTerminateParams } from "modal";
 import type { RunCommandOptions } from "computesdk";
 
 import {
-  argvToCommand,
   assertSupportedObjectKeys,
   guardUnsupported,
   isStringRecord,
   nativeInstance,
   type UniversalSandbox,
+  shellQuote,
 } from "./compat/common.js";
+import { createNativeModalProvider } from "./compat/modal-provider.js";
+import { modalCommandHandle } from "./compat/modal-command.js";
+import { GuestProcesses } from "./compat/guest-process.js";
 import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
 
-export interface ModalCompatConfig {
+export interface ModalCompatConfig extends ModalClientParams {
   /** Modal token ID used only for native Modal fallback. */
   tokenId?: string;
   /** Modal token secret used only for native Modal fallback. */
@@ -23,41 +25,11 @@ export interface ModalCompatConfig {
   routerConfigPath?: string;
 }
 
-interface ModalExecOptions {
-  workdir?: string;
-  env?: Record<string, string>;
-  timeoutMs?: number;
-  stdout?: "pipe";
-  stderr?: "pipe";
-  mode?: "text";
-}
+type ModalExecOptions = SandboxExecParams;
 
-const MODAL_CONFIG_KEYS = ["tokenId", "tokenSecret", "arker", "routerConfigPath"] as const;
+const MODAL_CONFIG_KEYS = ["tokenId", "tokenSecret", "oauthRefreshToken", "oauthClientId", "oauthClientSecret", "oauthJwtKey", "environment", "endpoint", "timeoutMs", "maxRetries", "maxThrottleWaitSecs", "logger", "logLevel", "grpcMiddleware", "cpClient", "arker", "routerConfigPath"] as const;
 const MODAL_EXEC_OPTION_KEYS = ["workdir", "env", "timeoutMs", "stdout", "stderr", "mode"] as const;
-const MODAL_CREATE_OPTION_KEYS = ["blockNetwork", "outboundCidrAllowlist", "outboundDomainAllowlist"] as const;
-
-type ModalProvider = ReturnType<typeof createModalProvider>;
-
-function lazyModalProvider(config?: Pick<ModalCompatConfig, "tokenId" | "tokenSecret">): Pick<ModalProvider, "name" | "sandbox"> {
-  let provider: ModalProvider | null = null;
-  const getProvider = (): ModalProvider => {
-    provider ??= createModalProvider({
-      tokenId: config?.tokenId,
-      tokenSecret: config?.tokenSecret,
-    });
-    return provider;
-  };
-
-  return {
-    name: "modal",
-    sandbox: {
-      create: (options) => getProvider().sandbox.create(options),
-      getById: (sandboxId) => getProvider().sandbox.getById(sandboxId),
-      destroy: (sandboxId) => getProvider().sandbox.destroy(sandboxId),
-      list: () => getProvider().sandbox.list(),
-    },
-  };
-}
+const MODAL_CREATE_OPTION_KEYS = ["cpu", "cpuLimit", "memoryMiB", "memoryLimitMiB", "runtime", "gpu", "timeoutMs", "idleTimeoutMs", "workdir", "command", "env", "secrets", "volumes", "cloudBucketMounts", "pty", "encryptedPorts", "h2Ports", "unencryptedPorts", "blockNetwork", "outboundCidrAllowlist", "outboundDomainAllowlist", "experimentalOutboundPolicy", "inboundCidrAllowlist", "i6pn", "cloud", "regions", "verbose", "proxy", "readinessProbe", "name", "tags", "experimentalOptions", "customDomain", "includeOidcIdentityToken", "experimentalEnableSnapshot"] as const;
 
 function assertOptionValue(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -81,16 +53,16 @@ function toRunCommandOptions(opts: unknown): RunCommandOptions | undefined {
     "Sandbox.exec option 'env' must be an object in the Arker compatibility layer for modal.",
   );
   assertOptionValue(
-    modalOpts.stdout === undefined || modalOpts.stdout === "pipe",
-    "Sandbox.exec only supports stdout: 'pipe' in the Arker compatibility layer for modal.",
+    modalOpts.stdout === undefined || modalOpts.stdout === "pipe" || modalOpts.stdout === "ignore",
+    "Sandbox.exec supports stdout: 'pipe' or 'ignore' in the Arker compatibility layer for modal.",
   );
   assertOptionValue(
-    modalOpts.stderr === undefined || modalOpts.stderr === "pipe",
-    "Sandbox.exec only supports stderr: 'pipe' in the Arker compatibility layer for modal.",
+    modalOpts.stderr === undefined || modalOpts.stderr === "pipe" || modalOpts.stderr === "ignore",
+    "Sandbox.exec supports stderr: 'pipe' or 'ignore' in the Arker compatibility layer for modal.",
   );
   assertOptionValue(
-    modalOpts.mode === undefined || modalOpts.mode === "text",
-    "Sandbox.exec only supports mode: 'text' in the Arker compatibility layer for modal.",
+    modalOpts.mode === undefined || modalOpts.mode === "text" || modalOpts.mode === "binary",
+    "Sandbox.exec supports mode: 'text' or 'binary' in the Arker compatibility layer for modal.",
   );
 
   const runOptions: RunCommandOptions = {};
@@ -101,42 +73,48 @@ function toRunCommandOptions(opts: unknown): RunCommandOptions | undefined {
   return Object.keys(runOptions).length > 0 ? runOptions : undefined;
 }
 
-class ModalProcess {
-  readonly stdout: { readText: () => Promise<string> };
-  readonly stderr: { readText: () => Promise<string> };
-  #exitCode: number;
-
-  constructor(out: string, err: string, exitCode: number) {
-    this.#exitCode = exitCode;
-    this.stdout = { readText: async () => out };
-    this.stderr = { readText: async () => err };
-  }
-
-  async wait(): Promise<number> {
-    return this.#exitCode;
-  }
-}
-
 export class Sandbox {
   readonly sandboxId: string;
   readonly provider: string;
   #box: UniversalSandbox;
+  #native: NativeSandbox | undefined;
+  #processes: GuestProcesses | undefined;
 
   constructor(box: UniversalSandbox) {
     this.#box = box;
     this.sandboxId = box.sandboxId;
     this.provider = box.provider;
+    this.#native = nativeInstance(box) as NativeSandbox | undefined;
+    this.#processes = box.provider === "arker" ? new GuestProcesses(box) : undefined;
   }
 
-  async exec(cmd: string[] | string, opts?: ModalExecOptions): Promise<ModalProcess> {
-    const command = argvToCommand(cmd);
+  async exec(cmd: string[] | string, opts: ModalExecOptions & { mode: "binary" }): Promise<ContainerProcess<Uint8Array>>;
+  async exec(cmd: string[] | string, opts?: ModalExecOptions & { mode?: "text" }): Promise<ContainerProcess<string>>;
+  async exec(cmd: string[] | string, opts?: ModalExecOptions): Promise<ContainerProcess<string | Uint8Array>> {
+    const argv = typeof cmd === "string" ? ["sh", "-c", cmd] : cmd;
+    if (typeof this.#native?.exec === "function") {
+      return opts?.mode === "binary"
+        ? this.#native.exec(argv, opts as ModalExecOptions & { mode: "binary" })
+        : this.#native.exec(argv, opts as ModalExecOptions & { mode?: "text" });
+    }
     const runOptions = toRunCommandOptions(opts) ?? {};
-    if (this.provider === "arker" && runOptions.cwd === undefined) runOptions.cwd = "/";
-    const result = Object.keys(runOptions).length > 0 ? await this.#box.runCommand(command, runOptions) : await this.#box.runCommand(command);
-    return new ModalProcess(result.stdout, result.stderr, result.exitCode);
+    if (!this.#processes) throw new Error("Native Modal sandbox instance is unavailable");
+    if (!argv.length || argv.some(arg => typeof arg !== "string")) throw new TypeError("Modal exec requires a nonempty array of string arguments");
+    const current = await this.#processes.exec({
+      command: "exec " + argv.map(shellQuote).join(" "), workingDir: runOptions.cwd ?? "/", env: runOptions.env ?? {},
+      stdin: true, ...(runOptions.timeout !== undefined ? { timeout: runOptions.timeout } : {}),
+    });
+    return opts?.mode === "binary"
+      ? modalCommandHandle(this.#processes, current, opts as ModalExecOptions & { mode: "binary" })
+      : modalCommandHandle(this.#processes, current, opts as ModalExecOptions & { mode?: "text" });
   }
 
-  async terminate(): Promise<void> {
+  async terminate(): Promise<void>;
+  async terminate(params: { wait: true }): Promise<number>;
+  async terminate(params?: SandboxTerminateParams): Promise<void | number> {
+    if (this.#native) return params?.wait ? this.#native.terminate({ wait: true }) : this.#native.terminate();
+    assertSupportedObjectKeys(params, ["wait"], "modal", "Sandbox.terminate");
+    if (params?.wait) throw new Error("Waiting for a Modal entrypoint exit status is not supported on Arker");
     await this.#box.destroy();
   }
 }
@@ -144,7 +122,7 @@ export class Sandbox {
 export class ModalClient {
   #sdk: CompatSdk;
   #native: NativeModalClient | undefined;
-  #nativeConfig: Pick<ModalCompatConfig, "tokenId" | "tokenSecret">;
+  #nativeConfig: ModalClientParams;
 
   #nativeClient(): NativeModalClient {
     return this.#native ??= new NativeModalClient(this.#nativeConfig);
@@ -157,14 +135,13 @@ export class ModalClient {
 
   constructor(config?: ModalCompatConfig) {
     assertSupportedObjectKeys(config, MODAL_CONFIG_KEYS, "modal", "new ModalClient");
-    this.#nativeConfig = { tokenId: config?.tokenId, tokenSecret: config?.tokenSecret };
+    const { arker, routerConfigPath, ...native } = config ?? {};
+    this.#nativeConfig = native;
     this.#sdk = createCompatSdk({
-      arker: config?.arker,
-      fallbackProvider: lazyModalProvider({
-        tokenId: config?.tokenId,
-        tokenSecret: config?.tokenSecret,
-      }),
-      routerConfigPath: config?.routerConfigPath,
+      arker,
+      fallbackProvider: createNativeModalProvider(() => this.#nativeClient()),
+      routerConfigPath,
+      mapArkerCreateOptions: ({ modalCreateParams, ...rest }) => ({ ...rest, ...(modalCreateParams as Record<string, unknown>) }),
     });
     return guardUnsupported(this, "modal");
   }
@@ -183,9 +160,7 @@ export class ModalClient {
       }
       const box = await this.#sdk.sandbox.create({
         ...handles,
-        ...(typeof options?.blockNetwork === "boolean" ? { blockNetwork: options.blockNetwork } : {}),
-        ...(Array.isArray(options?.outboundCidrAllowlist) ? { outboundCidrAllowlist: options.outboundCidrAllowlist } : {}),
-        ...(Array.isArray(options?.outboundDomainAllowlist) ? { outboundDomainAllowlist: options.outboundDomainAllowlist } : {}),
+        modalCreateParams: options ?? {},
       });
       return guardUnsupported(new Sandbox(box), "modal", nativeInstance(box));
     },

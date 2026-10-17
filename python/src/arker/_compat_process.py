@@ -74,12 +74,16 @@ class GuestProcessError(RuntimeError):
         super().__init__(message)
 
 
+STDIN_CHUNK_BYTES = 32 * 1024
+
+
 class GuestProcesses:
     def __init__(self, vm: VM) -> None:
         self._vm = vm
         self._installed = False
         self._lock = threading.Lock()
         self._control_lock = threading.Lock()
+        self._input_lock = threading.Lock()
         self._control_session = None
         self._source = files("arker").joinpath("_guest_process.py").read_text()
         self._path = f"/tmp/arker-compat-process-{hashlib.sha256(self._source.encode()).hexdigest()[:16]}.py"
@@ -191,7 +195,16 @@ class GuestProcesses:
 
     def write_stdin(self, identifier: str, data: str | bytes) -> Any:
         raw = data.encode() if isinstance(data, str) else data
-        return success(self._call("writeStdin", identifier=identifier, data=base64.b64encode(raw).decode()))
+        with self._input_lock:
+            # Nested base64 control frames must fit in a guest shell argument.
+            for offset in range(0, max(1, len(raw)), STDIN_CHUNK_BYTES):
+                response = self._call(
+                    "writeStdin",
+                    identifier=identifier,
+                    data=base64.b64encode(raw[offset : offset + STDIN_CHUNK_BYTES]).decode(),
+                )
+        return success(response)
 
     def close_stdin(self, identifier: str) -> Any:
-        return success(self._call("closeStdin", identifier=identifier))
+        with self._input_lock:
+            return success(self._call("closeStdin", identifier=identifier))

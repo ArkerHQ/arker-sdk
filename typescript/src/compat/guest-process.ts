@@ -5,6 +5,9 @@ import type { VM } from "../index.js";
 import source from "./guest-process.generated.js";
 import { shellQuote } from "./common.js";
 
+// Nested base64 control frames must fit in a guest shell argument.
+const STDIN_CHUNK_BYTES = 32 * 1024;
+
 export interface GuestProcessResult {
   name: string;
   command: string;
@@ -39,7 +42,11 @@ export class GuestProcesses {
   constructor(private readonly sandbox: SandboxInterface) {}
 
   private call<T>(action: string, values: Record<string, unknown> = {}): Promise<T> {
-    const result = this.pending.then(() => this.callOnce<T>(action, values));
+    return this.schedule(() => this.callOnce<T>(action, values));
+  }
+
+  private schedule<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.pending.then(operation);
     this.pending = result.then(() => undefined, () => undefined);
     return result;
   }
@@ -111,6 +118,13 @@ export class GuestProcesses {
 
   list(): Promise<GuestProcessResult[]> { return this.call("list"); }
 
+  async readOutput(identifier: string, stream: "stdout" | "stderr", offset: number, signal?: AbortSignal): Promise<{ data: Uint8Array; nextOffset: number; eof: boolean }> {
+    signal?.throwIfAborted();
+    const result = await this.call<{ data: string; nextOffset: number; eof: boolean }>("readStream", { identifier, stream, offset, limit: 65536 });
+    signal?.throwIfAborted();
+    return { ...result, data: Buffer.from(result.data, "base64") };
+  }
+
   private async waitFor(identifier: string, options: { maxWait?: number; interval?: number; signal?: AbortSignal }, callbacks: Callbacks = {}): Promise<GuestProcessResult> {
     const maxWait = options.maxWait ?? 60_000;
     const interval = options.interval ?? 1000;
@@ -148,7 +162,14 @@ export class GuestProcesses {
   }
 
   writeStdin(identifier: string, data: string | Uint8Array): Promise<{ message: string }> {
-    return this.call("writeStdin", { identifier, data: Buffer.from(data).toString("base64") });
+    const bytes = Buffer.from(data);
+    return this.schedule(async () => {
+      let result: { message: string } | undefined;
+      for (let offset = 0; offset < Math.max(1, bytes.length); offset += STDIN_CHUNK_BYTES) {
+        result = await this.callOnce("writeStdin", { identifier, data: bytes.subarray(offset, offset + STDIN_CHUNK_BYTES).toString("base64") });
+      }
+      return result!;
+    });
   }
   closeStdin(identifier: string): Promise<{ message: string }> { return this.call("closeStdin", { identifier }); }
 }

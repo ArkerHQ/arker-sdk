@@ -319,8 +319,17 @@ async function testE2BNativeErrorIdentity(): Promise<void> {
 async function testModalSurface(): Promise<void> {
   const box = new FakeSandbox("modal-box");
   const fake = installFakeCompute(box);
+  const original = { exec: GuestProcesses.prototype.exec, get: GuestProcesses.prototype.get, readOutput: GuestProcesses.prototype.readOutput };
+  const requests: unknown[] = [];
+  const current = { pid: "7", status: "failed", exitCode: 7 } as any;
+  GuestProcesses.prototype.exec = async (request) => { requests.push(request); return current; };
+  GuestProcesses.prototype.get = async () => current;
+  GuestProcesses.prototype.readOutput = async (_id, stream, offset) => {
+    const bytes = new TextEncoder().encode(`${stream}:echo modal`);
+    return { data: bytes.slice(offset), nextOffset: bytes.length, eof: true };
+  };
+  const client = new ModalClient({ tokenId: "modal-token-id", tokenSecret: "modal-token-secret" });
   try {
-    const client = new ModalClient({ tokenId: "modal-token-id", tokenSecret: "modal-token-secret" });
     const sandbox = await client.sandboxes.create();
     assertArkerFirst(fake.captured(), "modal");
     assert.equal(sandbox.sandboxId, "modal-box");
@@ -330,7 +339,7 @@ async function testModalSurface(): Promise<void> {
     const app = { appId: "ap-native" };
     const image = { imageId: "im-native" };
     await client.sandboxes.create(app, image, { blockNetwork: true });
-    assert.deepEqual(fake.createCalls.at(-1), { modalApp: app, modalImage: image, blockNetwork: true });
+    assert.deepEqual(fake.createCalls.at(-1), { modalApp: app, modalImage: image, modalCreateParams: { blockNetwork: true } });
     await assert.rejects(() => client.sandboxes.create(app), /requires both app and image/);
 
     const proc = await sandbox.exec(["sh", "-c", "echo modal"], {
@@ -341,21 +350,20 @@ async function testModalSurface(): Promise<void> {
     assert.equal(await proc.stdout.readText(), "stdout:echo modal");
     assert.equal(await proc.stderr.readText(), "stderr:echo modal");
     assert.equal(await proc.wait(), 7);
-    assert.deepEqual(box.runCalls[0], {
-      command: "echo modal",
-      options: { cwd: "/workspace", env: { FOO: "bar" }, timeout: 456 },
+    assert.deepEqual(requests[0], {
+      command: "exec sh -c 'echo modal'", workingDir: "/workspace", env: { FOO: "bar" }, timeout: 456, stdin: true,
     });
 
     await sandbox.exec(["node", "script with space.js", "arg"]);
-    assert.equal(box.runCalls[1]!.command, "node 'script with space.js' arg");
+    assert.equal((requests[1] as any).command, "exec node 'script with space.js' arg");
 
     await sandbox.terminate();
     assert.equal(box.destroyed, true);
 
     await assert.rejects(() => client.sandboxes.create("app", "image", {}, "extra"), /at most app, image, and options/);
     await assert.rejects(
-      () => client.sandboxes.create("app", "image", { gpu: "H100" }),
-      /unsupported option\(s\) 'gpu'/,
+      () => client.sandboxes.create(app, image, { unsupported: true }),
+      /unsupported option\(s\) 'unsupported'/,
     );
     await assert.rejects(
       () => sandbox.exec("pwd", { pty: true } as any),
@@ -366,6 +374,8 @@ async function testModalSurface(): Promise<void> {
       /not supported by the Arker compatibility layer for modal/,
     );
   } finally {
+    Object.assign(GuestProcesses.prototype, original);
+    client.close();
     fake.cleanup();
   }
 }

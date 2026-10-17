@@ -13,6 +13,7 @@ const roots = [
   ["daytona", "@daytona/sdk", "Sandbox", "../src/daytona.js"],
   ["daytona", "@daytona/sdk", "Image", "../src/daytona.js"],
   ["modal", "modal", "ModalClient", "../src/modal.js"],
+  ["modal", "modal", "ContainerProcess", "../src/modal.js"],
   ["modal", "modal", "Sandbox", "../src/modal.js"],
   ["modal", "modal", "Image", "../src/modal.js"],
   ["modal", "modal", "App", "../src/modal.js"],

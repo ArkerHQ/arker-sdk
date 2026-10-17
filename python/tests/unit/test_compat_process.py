@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import subprocess
 import types
 import uuid
@@ -118,6 +119,63 @@ def test_missing_process_has_a_structured_code_instead_of_message_matching(proce
     with pytest.raises(RuntimeError) as raised:
         manager.get("never-created")
     assert getattr(raised.value, "code", None) == "process_not_found"
+
+
+def test_process_output_supports_bounded_binary_reads_at_byte_offsets(processes):
+    manager, directory = processes
+    started = manager.exec(
+        {
+            "command": "python3 -c 'import sys; sys.stdout.buffer.write(bytes(range(256))*257)'",
+            "workingDir": str(directory),
+        }
+    )
+    manager.wait(started.name, max_wait=5000, interval=10)
+    payload = bytearray()
+    offset = 0
+    while True:
+        chunk = manager._call("readStream", identifier=started.pid, stream="stdout", offset=offset, limit=32771)
+        data = base64.b64decode(chunk["data"])
+        assert len(data) <= 32771
+        assert chunk["nextOffset"] == offset + len(data)
+        payload.extend(data)
+        offset = chunk["nextOffset"]
+        if chunk["eof"]:
+            break
+    assert payload == bytes(range(256)) * 257
+
+
+def test_large_binary_stdin_does_not_exceed_guest_shell_argument_limits(processes):
+    manager, directory = processes
+    started = manager.exec({"command": "cat", "stdin": True, "workingDir": str(directory)})
+    payload = bytes(range(256)) * 1024
+    manager.write_stdin(started.pid, payload)
+    manager.close_stdin(started.pid)
+    manager.wait(started.pid, max_wait=5000, interval=10)
+    output = bytearray()
+    while True:
+        chunk = manager._call("readStream", identifier=started.pid, stream="stdout", offset=len(output))
+        output.extend(base64.b64decode(chunk["data"]))
+        if chunk["eof"]:
+            break
+    assert output == payload
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"stream": "../state"},
+        {"offset": -1},
+        {"offset": True},
+        {"limit": 0},
+        {"limit": 65537},
+    ],
+)
+def test_process_output_rejects_invalid_streams_and_bounds(processes, values):
+    manager, directory = processes
+    started = manager.exec({"command": "true", "workingDir": str(directory)})
+    request = {"identifier": started.pid, "stream": "stdout", "offset": 0, "limit": 113, **values}
+    with pytest.raises(RuntimeError, match=r"Invalid process (stream|output bounds)"):
+        manager._call("readStream", **request)
 
 
 def test_background_process_holds_an_arker_run_until_it_finishes(processes):
