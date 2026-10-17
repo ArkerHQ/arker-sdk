@@ -14,9 +14,14 @@ vendor skips). TypeScript typecheck, unit/build and isolated packed consumers
 pass; packed SHA-256:
 `c1ba328eaeb2c5e1cac7c05ec486bc088a617b8ffb6d50621f5fe0b5393ffe60`.
 An additional ordered-policy preservation assertion and TypeScript typecheck
-also pass. Previous live fingerprints below predate these source changes and
-must not be presented as current-source evidence. Strict API parity remains
-unestablished, not green.
+also pass. Matching-source cohorts at `ab59123` pass **27 Python / 22 Node**
+cases (25/21 differential and 2/1 Arker-only). Fingerprints: Python
+`1ddfc1316bab8d7cf2327e3f007896dbb93fc075d0bf89aded5b6791f66de991`, Node
+`f8256fdf93c3dfd918324bcec952fecc1be5c721af418cd8282676e241aa365c`.
+Both strict gates were invoked and remain **RED, exit 1**:
+**100/1,138 Python; 51/1,048 Node** verified. These scenarios run against
+feature release `2a5419e`, not the new guard backend, and do not certify guard
+enforcement. Previous fingerprints below are historical, not current evidence.
 
 ## Previous Blaxel fetch checkpoint
 
