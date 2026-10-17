@@ -2,6 +2,21 @@
 
 ## Current validation
 
+The private Unix-socket SDK checkpoint adds Python `VM.connect_unix` and Node
+`VM.connectUnix`, sharing the existing owner-authenticated binary/EOF stream
+transport. Its new unit cases check exact control-character path encoding,
+UTF-8 byte limits, authentication, framing and rejection before network access.
+Python's vendor unit profile passes **456 tests**; the full TypeScript
+typecheck/test/build/isolated-consumer gate and OpenAPI artifact check pass.
+Packed SHA-256:
+`672abdc49389ae3b2a921712c8fc507fe4f9b4a2574979a6f6e972188f5f00c5`.
+Backend Linux compilation and live transport validation are still in progress.
+This does not install a native daemon or establish additional provider parity.
+The source change invalidates prior differential fingerprints; the cohorts
+below certify their recorded checkpoints, not this new SDK source.
+
+## Previous literal-path checkpoint
+
 Literal filesystem paths now survive both shared TypeScript shell operations
 and Python Blaxel listings. Three leading-dash mkdir/list/remove regressions
 failed before adding option terminators. Python's NUL-delimited listing also
