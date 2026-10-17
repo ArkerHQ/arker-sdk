@@ -93,6 +93,9 @@ def worker(request, ready_fd):
         "stdin": bool(request.get("stdin")),
         "_identity": None,
         "_request_id": request.get("_requestId"),
+        "_preserveDescendants": request.get("preserveDescendants") is True,
+        "_workerPid": os.getpid(),
+        "_workerIdentity": identity(os.getpid()),
     }
     with (
         (directory / "stdout").open("ab", buffering=0) as stdout,
@@ -100,6 +103,12 @@ def worker(request, ready_fd):
     ):
         child = None
         try:
+            if request.get("preserveDescendants"):
+                import ctypes
+
+                # Adopt orphaned descendants even when they double-fork or setsid.
+                if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
+                    raise OSError(ctypes.get_errno(), "Cannot supervise detached process descendants")
             child = subprocess.Popen(
                 request.get("argv", command),
                 shell="argv" not in request,
@@ -167,12 +176,23 @@ def worker(request, ready_fd):
         finally:
             if ready_fd >= 0:
                 os.close(ready_fd)
+            if request.get("preserveDescendants"):
+                while True:
+                    try:
+                        os.waitpid(-1, 0)
+                    except ChildProcessError:
+                        break
+                    except InterruptedError:
+                        continue
+            (directory / "worker-complete").touch()
 
 
 def dispatch(request):
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     action = request["action"]
     if action == "exec":
+        if "preserveDescendants" in request and type(request["preserveDescendants"]) is not bool:
+            raise ValueError("Invalid descendant supervision option")
         if "argv" in request and (
             not isinstance(request["argv"], list)
             or not request["argv"]
@@ -280,7 +300,15 @@ if __name__ == "__main__":
             print(json.dumps({"result": current}), flush=True)
             if sys.argv[1] == "supervise":
                 directory = locate(current["name"])
-                while json.loads((directory / "state").read_text())["status"] not in TERMINAL:
+                while True:
+                    state = json.loads((directory / "state").read_text())
+                    if state.get("_preserveDescendants"):
+                        if (directory / "worker-complete").exists():
+                            break
+                        if identity(state["_workerPid"]) != state["_workerIdentity"]:
+                            raise RuntimeError("Process supervisor exited before its descendants completed")
+                    elif state["status"] in TERMINAL:
+                        break
                     if (directory / "error").exists():
                         raise RuntimeError(json.loads((directory / "error").read_text())["error"])
                     time.sleep(0.02)

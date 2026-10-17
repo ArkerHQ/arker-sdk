@@ -2,6 +2,27 @@
 
 ## Current validation
 
+The latest Modal descendant-lifetime fix keeps the managed Arker run alive
+until a Linux subreaper has reaped detached descendants, while the native
+process wait/poll still reports the foreground exit immediately. Before this
+fix, the VM went idle after foreground completion and a delayed child did not
+make wall-clock progress until guest execution resumed. Native Modal completed
+the child's delayed output/file write during that interval. The new three-route
+programs in both languages now agree, including the delayed output and file.
+Local regressions cover ordinary backgrounding and double-fork/setsid adoption.
+This supervision path requires Python's ctypes and Linux PR_SET_CHILD_SUBREAPER;
+it is not arbitrary-image process support.
+
+Fresh source-matched cohorts again pass **25 Python and 18 Node live tests**.
+Python reports **100/1,013** verified (913 unverified), Node **51/967** (916
+unverified), both strict exit 1. Their current fingerprints are
+`506a4478bd847417383196328118ea09b4c3d90ee35f67c246565b99d2683476`
+and `efe7224bbd37f550434a380d88ff1893d2f56dfa4d86dab96c9f77e329faba25`.
+All **439 vendor Python unit tests** pass; lean passes 431 with eight optional
+vendor skips. Ruff and the complete TypeScript typecheck/test/build/consumer
+pipeline pass. Latest packed SHA-256:
+`43957de1d76750cd72e2253407457d4448f74be96c71e74b0098159acf99de5c`.
+
 The latest shared-supervisor change executes Modal argv directly in both
 languages instead of through an extra shell. Three regressions failed before
 the fix: missing executable, missing cwd, and literal argv/signal identity.

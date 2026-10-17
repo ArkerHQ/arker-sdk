@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { ModalClient as Native, ContainerProcess } from "modal";
 import { ModalClient as Shim } from "../src/modal.js";
 import { Arker } from "../src/index.js";
@@ -80,6 +81,12 @@ async function program(
         assert.equal(await failure.stdout.readText(), "");
         assert.ok((await failure.stderr.readText()).includes(diagnostic));
       }
+      const descendant = await sandbox.exec(["sh", "-c", "(sleep 1; printf late; touch /tmp/arker-descendant-probe)& exit 0"]);
+      assert.equal(await descendant.wait(), 0);
+      await delay(2000);
+      assert.equal(await descendant.stdout.readText(), "late");
+      const marker = await sandbox.exec(["sh", "-c", "test -e /tmp/arker-descendant-probe"]);
+      assert.equal(await marker.wait(), 0);
     } finally {
       await sandbox.terminate();
       terminated();

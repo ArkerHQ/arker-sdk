@@ -10,6 +10,7 @@ PROGRAM = r"""
 from modal import Sandbox
 from modal.container_process import ContainerProcess
 from modal.exception import InvalidError
+import time
 
 def program(identifier):
     sandbox = Sandbox.from_id(identifier)
@@ -47,6 +48,12 @@ def program(identifier):
         assert process.wait() == 128
         assert process.stdout.read() == ""
         assert diagnostic in process.stderr.read()
+    descendant = sandbox.exec("sh", "-c", "(sleep 1; printf late; touch /tmp/arker-descendant-probe)& exit 0")
+    assert descendant.wait() == 0
+    time.sleep(2)
+    assert descendant.stdout.read() == "late"
+    marker = sandbox.exec("sh", "-c", "test -e /tmp/arker-descendant-probe")
+    assert marker.wait() == 0
 """
 
 

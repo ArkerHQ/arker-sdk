@@ -171,6 +171,54 @@ def test_invalid_argv_and_spawn_failure_options_do_not_start_a_process(processes
     assert not (directory / "should-not-exist").exists()
 
 
+@pytest.mark.parametrize("double_fork", [False, True])
+def test_preserved_descendants_keep_the_supervisor_run_alive(processes, double_fork):
+    manager, directory = processes
+    release = directory / "release-descendant"
+    marker = directory / "descendant-finished"
+    argv = (
+        [
+            "python3",
+            "-c",
+            "import os,sys,time\n"
+            "if os.fork(): os._exit(0)\n"
+            "os.setsid()\n"
+            "if os.fork(): os._exit(0)\n"
+            "while not os.path.exists(sys.argv[1]): time.sleep(0.01)\n"
+            "os.write(1,b'late'); open(sys.argv[2],'w').close()\n",
+            str(release),
+            str(marker),
+        ]
+        if double_fork
+        else [
+            "sh",
+            "-c",
+            '(while test ! -e "$1"; do sleep 0.01; done; printf late; touch "$2") & exit 0',
+            "sh",
+            str(release),
+            str(marker),
+        ]
+    )
+    try:
+        current = manager.exec(
+            {
+                "command": "detached descendant",
+                "argv": argv,
+                "workingDir": str(directory),
+                "preserveDescendants": True,
+            }
+        )
+        manager.wait(current.pid, max_wait=5000, interval=10)
+        supervisor = next(iter(manager._vm.runs.values()))[0]
+        with pytest.raises(subprocess.TimeoutExpired):
+            supervisor.wait(timeout=0.5)
+    finally:
+        release.touch()
+    supervisor.wait(timeout=5)
+    assert marker.exists()
+    assert manager.get(current.pid).stdout == "late"
+
+
 def test_process_output_supports_bounded_binary_reads_at_byte_offsets(processes):
     manager, directory = processes
     started = manager.exec(

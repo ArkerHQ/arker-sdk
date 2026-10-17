@@ -227,6 +227,7 @@ class Sandbox(UnsupportedMixin):
                     "argv": list(command),
                     "env": {key: value for key, value in (environment or {}).items() if value is not None},
                     "spawnFailureExitCode": 128,
+                    "preserveDescendants": True,
                     "workingDir": workdir or "/",
                     "stdin": True,
                     **({"timeout": milliseconds} if milliseconds is not None else {}),
