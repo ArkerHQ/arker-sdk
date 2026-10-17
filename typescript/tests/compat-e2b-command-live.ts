@@ -7,7 +7,7 @@ import { Sandbox as Shim } from "../src/e2b.js";
 import { recordEvidence } from "../scripts/compat-evidence.js";
 import { traceVendor } from "./compat-trace.js";
 
-async function program(Sandbox: { create(): Promise<Native | Shim>; connect(id: string): Promise<Native | Shim> }) {
+async function program(Sandbox: { create(): Promise<Native | Shim>; connect(id: string): Promise<Native | Shim>; kill(id: string): Promise<boolean> }) {
   const sandbox = await Sandbox.create();
   try {
     const connectedSandbox = await Sandbox.connect(sandbox.sandboxId);
@@ -70,8 +70,9 @@ async function program(Sandbox: { create(): Promise<Native | Shim>; connect(id: 
     assert.equal(await sandbox.commands.kill(2147483647), false);
     await assert.rejects(sandbox.commands.connect(2147483647), NotFoundError);
   } finally {
-    assert.equal(await sandbox.kill(), true);
+    assert.equal(await Sandbox.kill(sandbox.sandboxId), true);
     assert.equal(await sandbox.kill(), false);
+    assert.equal(await Sandbox.kill(sandbox.sandboxId), false);
   }
 }
 

@@ -26,6 +26,18 @@ from ._compat_process import GuestProcessError, GuestProcesses
 from .computer import VM, ArkerError
 
 
+class _InstanceOrClassMethod:
+    def __init__(self, method):
+        self.method = method
+
+    def __get__(self, instance, owner):
+        return (
+            self.method.__get__(instance, owner)
+            if instance is not None
+            else getattr(owner, f"_class_{self.method.__name__}")
+        )
+
+
 @dataclass(frozen=True)
 class _CommandResult(_CommonCommandResult):
     error: str | None = None
@@ -327,14 +339,14 @@ class Sandbox(UnsupportedMixin):
         )
 
     @classmethod
-    def connect(cls, sandbox_id: str, **kwargs: Any) -> Sandbox:
+    def _lookup(cls, sandbox_id: str, kwargs: dict[str, Any]):
         arker_config = kwargs.pop("arker", None) or {}
         router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
         if router_path:
             arker_config = {**arker_config, "router_config_path": router_path}
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
-            raise TypeError(f"Sandbox.connect received unsupported option(s): {unsupported}")
+            raise TypeError(f"Sandbox lookup received unsupported option(s): {unsupported}")
         native = cls._native_sandbox()
         found = routed_get(
             sandbox_id,
@@ -345,6 +357,11 @@ class Sandbox(UnsupportedMixin):
                 "e2b": lambda: get_or_none(lambda: native.get_info(sandbox_id)) if native is not None else None,
             },
         )
+        return found, native
+
+    @classmethod
+    def connect(cls, sandbox_id: str, **kwargs: Any) -> Sandbox:
+        found, native = cls._lookup(sandbox_id, kwargs)
         if found is not None:
             provider, result = found
             return cls(
@@ -359,6 +376,17 @@ class Sandbox(UnsupportedMixin):
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         self.kill()
 
+    @classmethod
+    def _class_kill(cls, sandbox_id: str | Sandbox, **kwargs: Any) -> bool:
+        if isinstance(sandbox_id, cls):
+            return sandbox_id.kill(**kwargs)
+        found, native = cls._lookup(sandbox_id, kwargs)
+        if found is None:
+            return False
+        provider, result = found
+        return native.kill(sandbox_id) if provider == "e2b" else cls(vm=result).kill()
+
+    @_InstanceOrClassMethod
     def kill(self) -> bool:
         if self._vm is not None:
             try:

@@ -55,7 +55,7 @@
     "smoke": "bun tests/conformance/fork-run-sync.ts",
     "test": "bun run generate:validators && bun test tests/typed-errors.test.ts && bun run test:port && bun tests/unit.ts && bun tests/compat.ts && bun tests/compat-router.ts && bun tests/compat-coverage.ts && bun run build && bun tests/http2.ts",
     "test:port": "bun build tests/port-stream.test.ts --target=node --external=ws --outfile=node_modules/.cache/port-tests.cjs --format=cjs && node node_modules/.cache/port-tests.cjs && bun test tests/port-stream.test.ts && bun run test:private-fetch && bun run test:e2b-handles",
-    "test:e2b-handles": "bun build tests/e2b-command-handle.test.ts --target=node --external=e2b --outfile=node_modules/.cache/e2b-handle-tests.cjs --format=cjs && node node_modules/.cache/e2b-handle-tests.cjs",
+    "test:e2b-handles": "bun build tests/e2b-command-handle.test.ts tests/e2b-lifecycle.test.ts --target=node --external=e2b --outdir=node_modules/.cache/e2b-tests --format=cjs && node node_modules/.cache/e2b-tests/e2b-command-handle.test.js && node node_modules/.cache/e2b-tests/e2b-lifecycle.test.js",
     "test:private-fetch": "bun build tests/private-fetch.test.ts --target=node --outfile=node_modules/.cache/private-fetch-tests.cjs --format=cjs && node node_modules/.cache/private-fetch-tests.cjs",
     "coverage:compat": "bun scripts/compat-coverage.ts",
     "test:compat": "bun tests/compat.ts",

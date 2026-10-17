@@ -17,7 +17,7 @@ import {
   resolveCompatPath,
   shellQuote,
 } from "./compat/common.js";
-import { createCompatSdk } from "./compat/runtime.js";
+import { createCompatSdk, createCompatRouter } from "./compat/runtime.js";
 import { GuestProcesses, GuestProcessError } from "./compat/guest-process.js";
 import { e2bCommandHandle, e2bProcessError } from "./compat/e2b-command.js";
 
@@ -42,7 +42,7 @@ interface NativeSandbox {
 
 const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess"] as const;
 
-function sdk(routerConfigPath?: string) {
+function routingOptions(routerConfigPath?: string) {
   const fallbackProvider = Object.assign(
     createE2BProvider({ nativeSdk: { Sandbox: VendorSandbox, NotFoundError, CommandExitError } }),
     {
@@ -57,10 +57,14 @@ function sdk(routerConfigPath?: string) {
       },
     },
   );
-  return createCompatSdk({
+  return {
     fallbackProvider,
     routerConfigPath,
-  });
+  };
+}
+
+function sdk(routerConfigPath?: string) {
+  return createCompatSdk(routingOptions(routerConfigPath));
 }
 
 export class Sandbox {
@@ -222,6 +226,14 @@ export class Sandbox {
     const box = await sdk(opts?.routerConfigPath).sandbox.getById(sandboxId);
     if (!box) throw new Error(`Sandbox ${sandboxId} not found`);
     return Sandbox.wrap(box);
+  }
+
+  static async kill(sandboxId: string, opts?: Pick<CreateOptions, "routerConfigPath">): Promise<boolean> {
+    assertSupportedObjectKeys(opts, ["routerConfigPath"], "e2b", "Sandbox.kill");
+    const owner = await createCompatRouter(routingOptions(opts?.routerConfigPath)).getOwner(sandboxId);
+    if (!owner) return false;
+    if (owner.provider === "e2b") return VendorSandbox.kill(sandboxId);
+    return (await Sandbox.wrap(owner.instance)).kill();
   }
 
   getHost(port: number): string {

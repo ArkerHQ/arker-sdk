@@ -67,12 +67,14 @@ finally:
     try:
         with sandbox as entered:
             assert entered is sandbox
+            assert Sandbox.kill(sandbox.sandbox_id) is True
             raise RuntimeError("context sentinel")
     except RuntimeError as error:
         assert str(error) == "context sentinel"
     else:
         raise AssertionError("Context manager suppressed application error")
     assert sandbox.kill() is False
+    assert Sandbox.kill(sandbox_id=sandbox.sandbox_id) is False
 """
 
 

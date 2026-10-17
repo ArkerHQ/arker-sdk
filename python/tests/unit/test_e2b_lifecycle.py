@@ -77,3 +77,29 @@ def test_connect_resolves_native_handle_after_native_ownership_wins(monkeypatch)
     monkeypatch.setattr(shim, "routed_get", lambda identifier, provider, config, getters: ("e2b", getters["e2b"]()))
     assert shim.Sandbox.connect("native-id").sandbox_id == "native-id"
     assert calls == ["info", "connect"]
+
+
+@pytest.mark.parametrize("owner", ["e2b", "arker", None])
+def test_static_kill_uses_shared_ownership_without_connecting(monkeypatch, owner):
+    calls = []
+    native = types.SimpleNamespace(
+        get_info=lambda identifier: calls.append("info") or object(),
+        connect=lambda identifier: pytest.fail("Deletion must not connect"),
+        kill=lambda identifier: calls.append(("native-kill", identifier)) or True,
+    )
+    vm = types.SimpleNamespace(
+        id="shared-id",
+        refresh=lambda: None,
+        delete=lambda: calls.append("arker-kill") or types.SimpleNamespace(deleted=True),
+    )
+    monkeypatch.setattr(shim.Sandbox, "_native_sandbox", staticmethod(lambda: native))
+
+    def lookup(identifier, provider, config, getters):
+        assert identifier == "shared-id"
+        if owner == "e2b":
+            return owner, getters[owner]()
+        return (owner, vm) if owner else None
+
+    monkeypatch.setattr(shim, "routed_get", lookup)
+    assert shim.Sandbox.kill(sandbox_id="shared-id") is (owner is not None)
+    assert calls == (["info", ("native-kill", "shared-id")] if owner == "e2b" else ["arker-kill"] if owner else [])

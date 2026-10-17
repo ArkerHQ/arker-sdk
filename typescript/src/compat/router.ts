@@ -301,7 +301,9 @@ function retryable(error: unknown): boolean {
   return true;
 }
 
-export function createRoutedProvider(providers: Provider[], routerConfigPath?: string): Provider {
+export function createRoutedProvider(providers: Provider[], routerConfigPath?: string): Provider & {
+  getOwner(id: string): Promise<{ provider: string; instance?: any } | null>;
+} {
   const byName = new Map(providers.map((provider) => [provider.name!, provider]));
   if (byName.size !== providers.length || byName.has(undefined as any)) throw new Error("compatibility providers need unique names");
   let cache: RouteCache = new MemoryRouteCache();
@@ -392,6 +394,10 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
 
   return {
     name: "arker-compat-router",
+    async getOwner(id: string) {
+      const located = await find(id);
+      return located ? { provider: located.provider.name!, instance: located.instance } : null;
+    },
     instances: {
       async create(options?: unknown) {
         const router = await configured;
