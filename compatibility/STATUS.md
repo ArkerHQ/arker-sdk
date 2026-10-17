@@ -2,6 +2,47 @@
 
 ## Current validation
 
+The `e43dcaa` process checkpoint translates native Blaxel execution timeout
+seconds to internal milliseconds and translates ComputeSDK milliseconds back
+to native seconds. Live differential tests then exposed signal exit code
+137 versus native -1; the shared runner now supports Blaxel's convention without
+changing explicit positive exit codes or other providers' conventions. Unit
+regressions failed before both fixes. The first live checkpoint at `1c7ab21`
+had **25 Python passes / two failures**; that evidence is retained.
+
+Current gates pass **466 Python vendor tests / 457 lean tests** (nine optional
+vendor skips), full TypeScript typecheck/test/build/isolated-consumer gates,
+and all SDK CI/CodeQL checks. Matching-source cohorts against isolated backend
+`c14166a` pass **27 Python / 22 Node** cases (25/21 differential, 2/1 Arker-only),
+including the new timeout assertions. Fingerprints: Python
+`ace0a190770e60ba63a1a2c0c82754da414dd882cc1cfc26b852c09bfa6bc492`, Node
+`ae63b8ee881af515873f0947acbff2ee6277668f49b5c7c7825df0a7b3b968b7`.
+Both strict gates were invoked and remain **RED, exit 1: 100/1,138 Python;
+51/1,048 Node verified**. Full API equivalence remains false.
+
+Current npm artifact SHA-256:
+`535b80a9e3d3328183ab8f076b112c46440cf5bf0b76576efcc2d1a7d237864c`.
+It passes live ESM and CommonJS probes in the existing E2B-only consumer:
+image-parent inheritance, create/default cwd, NUL-containing filesystem data,
+fresh shells, native command-error identity and deletion. All owned parents
+and children were removed. This is supplemental Arker-only evidence, not
+additional native API coverage. Immutable Python wheel SHA-256:
+`549a5320197461be5f95fd4489bfb9e2d8f92cff0e69eb52fe1487c4655cea46`;
+it passes **627 harness unit tests**.
+
+Backend `c14166a` passes **12/12 live outbound-guard tests**, zero skips/errors,
+after the preceding five-pass/seven-failure run found guards dropped during
+encrypted storage. Current transport rerun remains **RED: 100 passed / one
+fixture error**, an unanswered POST fork. Idempotency-key reconciliation owns
+cleanup; the fresh isolated case passes, but the root cause is unresolved.
+The router did not restart; 800 bounded read-only health requests across both
+HTTP clients/reuse modes passed without explaining the failure. The retained
+protocol-201 guest passes Python and Node binary Unix transport with boot ID,
+agent PID/start time and binary hash unchanged. No worker/agent restart or
+retry waiver is credited as a fix.
+
+## Previous creation-routing checkpoint
+
 The creation-routing checkpoint replaces error-name/status heuristics with an
 explicit local-preflight refusal type. Opaque exceptions, wrapped opaque
 failures, and HTTP 429 reproduced duplicate fallback in both languages before
