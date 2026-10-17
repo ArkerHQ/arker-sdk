@@ -341,6 +341,15 @@ export type ListPoolWorkersResponse = ApiSchema<"ListPoolWorkersResponse">;
 export type Worker = ApiSchema<"Worker">;
 export type CreatePoolOptions = CreatePoolRequest;
 
+// ── API keys ────────────────────────────────────────────────────────
+export type ApiKey = ApiSchema<"ApiKey">;
+export type ApiKeyScope = ApiSchema<"ApiKeyScope">;
+export type ApiKeyVmScope = ApiSchema<"ApiKeyVmScope">;
+export type ApiKeyPoolScope = ApiSchema<"ApiKeyPoolScope">;
+export type CreatedApiKey = ApiSchema<"CreatedApiKey">;
+export type CreateApiKeyRequest = ApiSchema<"CreateApiKeyRequest">;
+export type ListApiKeysResponse = ApiSchema<"ListApiKeysResponse">;
+
 // ── Mounts ──────────────────────────────────────────────────────────
 export type Mount = ApiSchema<"Mount">;
 export type ListMountsResponse = ApiSchema<"ListMountsResponse">;
@@ -901,6 +910,26 @@ export class Arker {
 
   async listPoolWorkers(poolId: string): Promise<ListPoolWorkersResponse> {
     return this._request("GET", `/v1/pools/${pathSegment(poolId)}/workers`);
+  }
+
+  // ── API keys (org-scoped, control plane) ──────────────────────────
+  /**
+   * Create a key with your role. `scopes` is 1 to 16 `{ vm_id }` or one
+   * `{ pool_id }`; omitted or `[]` is the whole organization. The returned
+   * `key` is shown only once.
+   */
+  async createApiKey(request: CreateApiKeyRequest = {}): Promise<CreatedApiKey> {
+    return this._request("POST", "/v1/api-keys", request, this.controlBaseUrl);
+  }
+
+  /** List the organization's unrevoked keys, newest first. A key limited to a pool sees that pool's keys only. */
+  async listApiKeys(): Promise<ListApiKeysResponse> {
+    return this._request("GET", "/v1/api-keys", undefined, this.controlBaseUrl);
+  }
+
+  /** Revoke a key; requests with it are refused from then on. */
+  async revokeApiKey(apiKeyId: string): Promise<void> {
+    await this._request("DELETE", `/v1/api-keys/${pathSegment(apiKeyId)}`, undefined, this.controlBaseUrl);
   }
 
   /** @internal */

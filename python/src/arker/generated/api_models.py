@@ -264,8 +264,8 @@ class Mount:
     filesystem_id: str
     path: str
     region: str | None = None
-    status: Literal['attaching', 'mounted', 'failed'] | None = None
-    status_detail: str | None = None
+    state: Literal['attaching', 'mounted', 'failed'] | None = None
+    state_detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1543,10 +1543,10 @@ class UpdatePoolRequest:
 WorkerKind: TypeAlias = Literal['arkerd', 'blast']
 
 
-WorkerState: TypeAlias = Literal['bootstrapping', 'active', 'draining', 'left']
+WorkerHeartbeatState: TypeAlias = Literal['bootstrapping', 'active', 'draining', 'left']
 
 
-WorkerStatus: TypeAlias = Literal[
+WorkerState: TypeAlias = Literal[
     'bootstrapping', 'running', 'draining', 'unreachable', 'left'
 ]
 
@@ -1562,7 +1562,7 @@ class WorkerResources:
 @dataclass(frozen=True)
 class Worker:
     worker_id: str
-    status: WorkerStatus
+    state: WorkerState
     resources_provisioned: PoolResources
     resources_reserved: PoolResources
     last_seen_at: str
@@ -1571,6 +1571,11 @@ class Worker:
 @dataclass(frozen=True)
 class ListPoolWorkersResponse:
     workers: list[Worker]
+
+
+@dataclass(frozen=True)
+class WorkerVmActivity:
+    forks: int
 
 
 @dataclass(frozen=True)
@@ -1599,7 +1604,7 @@ class WorkerStorage:
 class WorkerHeartbeatResponse:
     worker_id: str
     heartbeat_interval_ms: int
-    desired_state: WorkerState
+    desired_state: WorkerHeartbeatState
     tunnel_url: str
     storage: WorkerStorage
     upgrade_release_id: str | None = None
@@ -1627,45 +1632,14 @@ class WorkerRunRecord:
     stderr: str | None
 
 
-ApiKeyRole: TypeAlias = Literal['admin', 'developer', 'member', 'viewer']
-
-
-ApiKeyAction: TypeAlias = Literal['join']
+@dataclass(frozen=True)
+class ApiKeyVmScope:
+    vm_id: str
 
 
 @dataclass(frozen=True)
-class ApiKey:
-    api_key_id: str
-    role: ApiKeyRole
-    vm_id: str | None
-    pool_id: str | None
-    action: ApiKeyAction | None
-    created_at: str
-
-
-@dataclass(frozen=True)
-class CreatedApiKey:
-    api_key_id: str
-    role: ApiKeyRole
-    vm_id: str | None
-    pool_id: str | None
-    action: ApiKeyAction | None
-    created_at: str
-    key: str
-
-
-@dataclass(frozen=True)
-class CreateApiKeyRequest:
-    name: str | None = None
-    role: ApiKeyRole | None = None
-    vm_id: str | None = None
-    pool_id: str | None = None
-    action: ApiKeyAction | None = None
-
-
-@dataclass(frozen=True)
-class ListApiKeysResponse:
-    api_keys: list[ApiKey]
+class ApiKeyPoolScope:
+    pool_id: str
 
 
 @dataclass(frozen=True)
@@ -2058,11 +2032,42 @@ class WorkerHeartbeat:
     kind: WorkerKind
     version: str
     platform: PoolPlatform
-    state: WorkerState
+    state: WorkerHeartbeatState
     resources: WorkerResources
     free: WorkerResources
     golden_env: dict[str, str] | None = None
     goldens: WorkerGoldens | None = None
+    vm_activity: dict[str, WorkerVmActivity] | None = None
+    cached_record_ids: list[str] | None = None
+
+
+ApiKeyScope: TypeAlias = ApiKeyVmScope | ApiKeyPoolScope
+
+
+@dataclass(frozen=True)
+class ApiKey:
+    api_key_id: str
+    scopes: list[ApiKeyScope]
+    created_at: str
+
+
+@dataclass(frozen=True)
+class CreatedApiKey:
+    api_key_id: str
+    scopes: list[ApiKeyScope]
+    created_at: str
+    key: str
+
+
+@dataclass(frozen=True)
+class CreateApiKeyRequest:
+    name: str | None = None
+    scopes: list[ApiKeyScope] | None = None
+
+
+@dataclass(frozen=True)
+class ListApiKeysResponse:
+    api_keys: list[ApiKey]
 
 
 @dataclass(frozen=True)

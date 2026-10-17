@@ -23,7 +23,7 @@ import threading
 import time
 import types
 import urllib.parse
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from importlib.resources import files as package_files
 from typing import (
@@ -42,9 +42,11 @@ from jsonschema.exceptions import ValidationError as SchemaValidationError
 from pydantic import TypeAdapter, ValidationError
 
 from .generated.api_models import (
+    ApiKeyScope,
     BackgroundRunResponse,
     CancelRunResponse,
     CompletedRunResponse,
+    CreatedApiKey,
     CreatePoolRequest,
     CreateSessionRequest,
     DeleteFilesystemResponse,
@@ -54,6 +56,7 @@ from .generated.api_models import (
     ErrorBody,
     Filesystem,
     FilesystemCreateRequest,
+    ListApiKeysResponse,
     ListFilesystemsParameters,
     ListFilesystemsResponse,
     ListMountsParameters,
@@ -639,6 +642,30 @@ class Arker:
                 f"/v1/pools/{_segment(pool_id)}/workers",
             ),
         )
+
+    # ── API keys (org-scoped, control-plane) ────────────────────────────
+    def create_api_key(
+        self,
+        *,
+        name: str | None = None,
+        scopes: Sequence[ApiKeyScope | dict[str, str]] | None = None,
+    ) -> CreatedApiKey:
+        """Create a key with your role. ``scopes`` is 1 to 16 ``{"vm_id"}`` or one
+        ``{"pool_id"}``; omitted or empty is the whole organization. The returned
+        ``key`` is shown only once."""
+        request = {"name": name, "scopes": None if scopes is None else list(scopes)}
+        payload = self._request("POST", "/v1/api-keys", request, base_url=self._control_base_url)
+        return _decode_model(CreatedApiKey, payload)
+
+    def list_api_keys(self) -> ListApiKeysResponse:
+        """List the organization's unrevoked keys, newest first. A key limited to a
+        pool sees that pool's keys only."""
+        payload = self._request("GET", "/v1/api-keys", base_url=self._control_base_url)
+        return _decode_model(ListApiKeysResponse, payload)
+
+    def revoke_api_key(self, api_key_id: str) -> None:
+        """Revoke a key; requests with it are refused from then on."""
+        self._request("DELETE", f"/v1/api-keys/{_segment(api_key_id)}", base_url=self._control_base_url)
 
     def _request(
         self,

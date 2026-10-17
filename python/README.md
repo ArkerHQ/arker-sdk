@@ -75,8 +75,9 @@ is `creating` until `resources_reserved` first reaches `resources`, then
 `active`; `reason` says what needs attention. A `byoc` pool (provider `aws`)
 needs setup: open `byoc.setup_url` in the specified AWS account and create the
 CloudFormation stack. A `self_hosted` pool's platform is set by its first
-worker; workers join with an API key of the pool with action `join`. Only
-`managed` pools take commitments.
+worker; workers join with an API key limited to the pool,
+`ar.create_api_key(name=..., scopes=[{"pool_id": pool_id}])`.
+Only `managed` pools take commitments.
 
 Commitments last at least 24 hours, cannot overlap, and new commitments cannot
 start in the past. Started commitments must remain unchanged, including expired

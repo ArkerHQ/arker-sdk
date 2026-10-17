@@ -2461,7 +2461,7 @@
           "Pools"
         ],
         "summary": "Join a pool or heartbeat",
-        "description": "Join the pool, or keep the worker in it. The first worker of a `self_hosted` pool sets its platform; the heartbeat's `platform` must be the pool's and its `kind` one the pool takes; a retired worker id is refused. Authenticate with an API key of this pool with action `join`. A worker id the pool has not seen gets 429 `quota_exceeded` while the pool has as many workers as its `pool_workers` quota allows; it joins once another leaves.",
+        "description": "Join the pool, or keep the worker in it. The first worker of a `self_hosted` pool sets its platform; the heartbeat's `platform` must be the pool's and its `kind` one the pool takes; a retired worker id is refused. Authenticate with an API key limited to this pool. A worker id the pool has not seen gets 429 `quota_exceeded` while the pool has as many workers as its `pool_workers` quota allows; it joins once another leaves.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2528,7 +2528,7 @@
           "Pools"
         ],
         "summary": "Open the worker tunnel",
-        "description": "Upgrade to a WebSocket with subprotocol `worker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API; a fork names the VM id to use in header `x-vm-id`. Requires the worker to have joined. Authenticate with an API key of this pool with action `join`.",
+        "description": "Upgrade to a WebSocket with subprotocol `worker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API; a fork names the VM id to use in header `x-vm-id`. Requires the worker to have joined. Authenticate with an API key limited to this pool.",
         "responses": {
           "101": {
             "description": "Switching to the tunnel."
@@ -2581,7 +2581,7 @@
           "Pools"
         ],
         "summary": "Record a worker's VM",
-        "description": "Record the VM as it is now; send it again on every change. Arker lists the VM from this record. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with an API key of this pool with action `join`.",
+        "description": "Record the VM as it is now; send it again on every change. Arker lists the VM from this record. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with an API key limited to this pool.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2631,7 +2631,7 @@
           "Pools"
         ],
         "summary": "Forget a worker's VM",
-        "description": "Record that the VM is gone. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with an API key of this pool with action `join`.",
+        "description": "Record that the VM is gone. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with an API key limited to this pool.",
         "responses": {
           "204": {
             "description": "The VM is recorded as deleted."
@@ -2688,7 +2688,7 @@
           "Pools"
         ],
         "summary": "Record a run",
-        "description": "Record a run when it starts and again when it ends. Arker answers `listRuns` and `getRun` for the VM from these records. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with an API key of this pool with action `join`.",
+        "description": "Record a run when it starts and again when it ends. Arker answers `listRuns` and `getRun` for the VM from these records. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with an API key limited to this pool.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2740,7 +2740,7 @@
           "API keys"
         ],
         "summary": "List API keys",
-        "description": "List the organization's unrevoked API keys, newest first. A key limited to a pool manages that pool's keys only; a key limited to a VM or to an action manages none.",
+        "description": "List the organization's unrevoked API keys, newest first.",
         "responses": {
           "200": {
             "description": "The API keys.",
@@ -2775,7 +2775,7 @@
           "API keys"
         ],
         "summary": "Create an API key",
-        "description": "Create an API key, optionally limited to one VM or one pool and to one action. The key is returned only once. A key limited to a pool manages that pool's keys only; a key limited to a VM or to an action manages none.",
+        "description": "Create an API key for the whole organization (the default), for VMs, or for one pool. The key has its creator's role and is returned only once.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2809,9 +2809,6 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
-          "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
-          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -2836,7 +2833,7 @@
           "API keys"
         ],
         "summary": "Revoke an API key",
-        "description": "Revoke an API key; requests with it are refused from then on. Viewers cannot revoke keys. A key limited to a pool manages that pool's keys only; a key limited to a VM or to an action manages none.",
+        "description": "Revoke an API key; requests with it are refused from then on. Viewers cannot revoke keys.",
         "responses": {
           "204": {
             "description": "The key is revoked."
@@ -6470,8 +6467,8 @@
               "null"
             ]
           },
-          "status": {
-            "description": "Mount status. Creating a mount returns `attaching`; poll this resource for the outcome.\n\n`attaching` \u2014 the mount is pending. A stopped VM remains in this state until it resumes.\n\n`mounted` \u2014 the filesystem is available in the VM.\n\n`failed` \u2014 the VM cannot mount the filesystem. `status_detail` explains the cause. Transient errors remain in `attaching` while the service retries them.",
+          "state": {
+            "description": "Mount state. Creating a mount returns `attaching`; poll this resource for the outcome.\n\n`attaching` \u2014 the mount is pending. A stopped VM remains in this state until it resumes.\n\n`mounted` \u2014 the filesystem is available in the VM.\n\n`failed` \u2014 the VM cannot mount the filesystem. `state_detail` explains the cause. Transient errors remain in `attaching` while the service retries them.",
             "type": [
               "string",
               "null"
@@ -6483,8 +6480,8 @@
               null
             ]
           },
-          "status_detail": {
-            "description": "Why the mount will not converge. Present only when `status` is `failed`.",
+          "state_detail": {
+            "description": "Why the mount will not converge. Present only when `state` is `failed`.",
             "type": [
               "string",
               "null"
@@ -11495,7 +11492,7 @@
           "resources_reserved",
           "resources_provisioned"
         ],
-        "description": "A pool of BLAST workers you run. Workers join with an API key of the pool with action `join`.",
+        "description": "A pool of BLAST workers you run. Workers join with an API key limited to the pool.",
         "properties": {
           "pool_id": {
             "type": "string",
@@ -11770,7 +11767,7 @@
         ],
         "description": "The software the worker runs. A `self_hosted` pool takes `blast` workers only, and a `byoc` pool takes `arkerd` workers only."
       },
-      "WorkerState": {
+      "WorkerHeartbeatState": {
         "type": "string",
         "enum": [
           "bootstrapping",
@@ -11780,7 +11777,7 @@
         ],
         "description": "`bootstrapping` is still starting and takes no VMs yet; `active` takes new VMs; `draining` keeps its VMs but takes no new ones; `left` has handed back its VMs and left the pool for good, and its id cannot rejoin. A worker that stops without leaving keeps its id and rejoins as `active`."
       },
-      "WorkerStatus": {
+      "WorkerState": {
         "type": "string",
         "enum": [
           "bootstrapping",
@@ -11827,7 +11824,7 @@
         "additionalProperties": false,
         "required": [
           "worker_id",
-          "status",
+          "state",
           "resources_provisioned",
           "resources_reserved",
           "last_seen_at"
@@ -11837,8 +11834,8 @@
             "type": "string",
             "description": "Worker identifier."
           },
-          "status": {
-            "$ref": "#/components/schemas/WorkerStatus"
+          "state": {
+            "$ref": "#/components/schemas/WorkerState"
           },
           "resources_provisioned": {
             "$ref": "#/components/schemas/PoolResources",
@@ -11896,7 +11893,7 @@
             "description": "The platform the worker serves; a BLAST worker's `blast-<arch>` is `smolvm-<arch>`. The first worker of a `self_hosted` pool sets the pool's platform; every other must match it."
           },
           "state": {
-            "$ref": "#/components/schemas/WorkerState"
+            "$ref": "#/components/schemas/WorkerHeartbeatState"
           },
           "resources": {
             "$ref": "#/components/schemas/WorkerResources",
@@ -11916,6 +11913,35 @@
           "goldens": {
             "$ref": "#/components/schemas/WorkerGoldens",
             "description": "For a `byoc` pool's arkerd worker: the goldens it cannot serve current. Absent while it serves each of its goldens from a generation baked for it."
+          },
+          "vm_activity": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/WorkerVmActivity"
+            },
+            "description": "For a `byoc` pool's arkerd worker: its VMs forked often enough to prewarm on the pool's other workers, by VM id. Arker ignores a VM that is not in the worker's pool."
+          },
+          "cached_record_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "For a `byoc` pool's arkerd worker: the records it holds, so Arker does not ask it to prewarm one again."
+          }
+        }
+      },
+      "WorkerVmActivity": {
+        "type": "object",
+        "required": [
+          "forks"
+        ],
+        "description": "One VM's recent activity on the worker that reports it.",
+        "properties": {
+          "forks": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "Forks of the VM within the activity window."
           }
         }
       },
@@ -12024,7 +12050,7 @@
             "description": "Send the next heartbeat after this long."
           },
           "desired_state": {
-            "$ref": "#/components/schemas/WorkerState",
+            "$ref": "#/components/schemas/WorkerHeartbeatState",
             "description": "The state Arker wants the worker in. `left` once the pool is deleting."
           },
           "tunnel_url": {
@@ -12170,68 +12196,68 @@
           }
         }
       },
-      "ApiKeyRole": {
-        "type": "string",
-        "enum": [
-          "admin",
-          "developer",
-          "member",
-          "viewer"
+      "ApiKeyScope": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ApiKeyVmScope"
+          },
+          {
+            "$ref": "#/components/schemas/ApiKeyPoolScope"
+          }
         ],
-        "description": "The organization role the key acts with. `viewer` keys cannot change anything."
+        "description": "A VM or a pool an API key is limited to."
       },
-      "ApiKeyAction": {
-        "type": "string",
-        "enum": [
-          "join"
+      "ApiKeyVmScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "vm_id"
         ],
-        "description": "The one action the key allows. `join`: a worker joins the `self_hosted` pool in `pool_id` and serves it."
+        "description": "A VM the key acts on.",
+        "properties": {
+          "vm_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "The VM."
+          }
+        }
+      },
+      "ApiKeyPoolScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pool_id"
+        ],
+        "description": "The pool the key acts on.",
+        "properties": {
+          "pool_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The pool. The key manages the pool, forks into it by default, and lists only its VMs and runs; the workers of a `self_hosted` pool call with it."
+          }
+        }
       },
       "ApiKey": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "api_key_id",
-          "role",
-          "vm_id",
-          "pool_id",
-          "action",
+          "scopes",
           "created_at"
         ],
-        "description": "An API key. Without `vm_id` or `pool_id` it acts on the whole organization.",
+        "description": "An API key. It acts with the role of the user or key that created it, limited by `scopes`.",
         "properties": {
           "api_key_id": {
             "type": "string",
             "description": "API key identifier; starts with the `name` given at creation."
           },
-          "role": {
-            "$ref": "#/components/schemas/ApiKeyRole"
-          },
-          "vm_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The one VM the key acts on, or null."
-          },
-          "pool_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The one pool the key acts on: managing it and forking into it, or null."
-          },
-          "action": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ApiKeyAction"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The one action the key allows, or null for any its role allows."
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyScope"
+            },
+            "description": "What the key is limited to: VMs, or one pool. `[]` is the whole organization."
           },
           "created_at": {
             "type": "string",
@@ -12245,10 +12271,7 @@
         "additionalProperties": false,
         "required": [
           "api_key_id",
-          "role",
-          "vm_id",
-          "pool_id",
-          "action",
+          "scopes",
           "created_at",
           "key"
         ],
@@ -12258,34 +12281,12 @@
             "type": "string",
             "description": "API key identifier; starts with the `name` given at creation."
           },
-          "role": {
-            "$ref": "#/components/schemas/ApiKeyRole"
-          },
-          "vm_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The one VM the key acts on, or null."
-          },
-          "pool_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The one pool the key acts on: managing it and forking into it, or null."
-          },
-          "action": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ApiKeyAction"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The one action the key allows, or null for any its role allows."
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyScope"
+            },
+            "description": "What the key is limited to: VMs, or one pool. `[]` is the whole organization."
           },
           "created_at": {
             "type": "string",
@@ -12301,7 +12302,7 @@
       "CreateApiKeyRequest": {
         "type": "object",
         "additionalProperties": false,
-        "description": "At most one of `vm_id` and `pool_id`.",
+        "description": "A new key has its creator's role.",
         "properties": {
           "name": {
             "type": "string",
@@ -12309,31 +12310,14 @@
             "maxLength": 255,
             "description": "A label that starts `api_key_id`: lowercased, other characters than `a-z0-9_-` as `-`, cut to 13 characters."
           },
-          "role": {
-            "$ref": "#/components/schemas/ApiKeyRole",
-            "description": "Defaults to the caller's role, and cannot exceed it."
-          },
-          "vm_id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64,
-            "description": "Limit the key to this VM of the organization."
-          },
-          "pool_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Limit the key to this pool of the organization."
-          },
-          "action": {
-            "$ref": "#/components/schemas/ApiKeyAction",
-            "description": "Limit the key to this action. `join` requires the `pool_id` of a `self_hosted` pool."
+          "scopes": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyScope"
+            },
+            "description": "What the key is limited to: 1 to 16 VMs of the organization, or one of its pools. Omitted or `[]` is the whole organization. Only admins create a key limited to a pool."
           }
-        },
-        "not": {
-          "required": [
-            "vm_id",
-            "pool_id"
-          ]
         }
       },
       "ListApiKeysResponse": {
