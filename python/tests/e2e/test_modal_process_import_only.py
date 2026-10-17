@@ -38,6 +38,15 @@ def program(identifier):
     process = sandbox.exec("sh", "-c", 'printf "%s|%s" "${VALUE-unset}" "$1"', "sh", "literal value")
     assert process.stdout.read() == "unset|literal value"
     assert process.wait() == 0
+    for command, options, diagnostic in [
+        (("arker-certainly-missing-executable",), {}, "arker-certainly-missing-executable"),
+        (("pwd",), {"workdir":"/arker-certainly-missing-directory"}, "/arker-certainly-missing-directory"),
+    ]:
+        process = sandbox.exec(*command, timeout=5, **options)
+        assert isinstance(process, ContainerProcess)
+        assert process.wait() == 128
+        assert process.stdout.read() == ""
+        assert diagnostic in process.stderr.read()
 """
 
 
@@ -90,7 +99,7 @@ def test_modal_process_import_only(provider, shim, tmp_path, monkeypatch):
                 "modal",
                 "sync",
                 "reference" if not shim else "arker" if provider == "arker" else "native",
-                "import-only-process-binary-env-none",
+                "import-only-process-binary-env-startup",
                 [
                     "Sandbox.from_id",
                     "Sandbox.object_id",

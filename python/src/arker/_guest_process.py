@@ -81,6 +81,19 @@ def worker(request, ready_fd):
     if cwd == "/blaxel":
         Path(cwd).mkdir(parents=True, exist_ok=True)
     environment = {**os.environ, **(request.get("env") or {})}
+    state = {
+        "name": request["name"],
+        "command": command,
+        "workingDir": cwd,
+        "pid": request["name"],
+        "status": "running",
+        "exitCode": 0,
+        "startedAt": timestamp(),
+        "completedAt": "",
+        "stdin": bool(request.get("stdin")),
+        "_identity": None,
+        "_request_id": request.get("_requestId"),
+    }
     with (
         (directory / "stdout").open("ab", buffering=0) as stdout,
         (directory / "stderr").open("ab", buffering=0) as stderr,
@@ -88,9 +101,9 @@ def worker(request, ready_fd):
         child = None
         try:
             child = subprocess.Popen(
-                command,
-                shell=True,
-                executable="/bin/sh",
+                request.get("argv", command),
+                shell="argv" not in request,
+                executable=None if "argv" in request else "/bin/sh",
                 cwd=cwd,
                 env=environment,
                 stdout=stdout,
@@ -98,19 +111,7 @@ def worker(request, ready_fd):
                 stdin=subprocess.PIPE if request.get("stdin") else subprocess.DEVNULL,
                 start_new_session=True,
             )
-            state = {
-                "name": request["name"],
-                "command": command,
-                "workingDir": cwd,
-                "pid": str(child.pid),
-                "status": "running",
-                "exitCode": 0,
-                "startedAt": timestamp(),
-                "completedAt": "",
-                "stdin": bool(request.get("stdin")),
-                "_identity": identity(child.pid),
-                "_request_id": request.get("_requestId"),
-            }
+            state.update(pid=str(child.pid), _identity=identity(child.pid))
             write_json(directory / "state", state)
             os.write(ready_fd, b"1")
             os.close(ready_fd)
@@ -151,6 +152,13 @@ def worker(request, ready_fd):
             state["completedAt"] = timestamp()
             write_json(directory / "state", state)
         except Exception as error:
+            if child is None and isinstance(error, OSError) and "spawnFailureExitCode" in request:
+                code = request["spawnFailureExitCode"]
+                stderr.write((str(error) + "\n").encode())
+                state.update(status="failed", exitCode=code, _returnCode=code, completedAt=timestamp())
+                write_json(directory / "state", state)
+                os.write(ready_fd, b"1")
+                return
             if child is not None and child.poll() is None:
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(child.pid, signal.SIGKILL)
@@ -165,6 +173,16 @@ def dispatch(request):
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     action = request["action"]
     if action == "exec":
+        if "argv" in request and (
+            not isinstance(request["argv"], list)
+            or not request["argv"]
+            or not all(isinstance(part, str) for part in request["argv"])
+        ):
+            raise ValueError("Process argv must be a nonempty list of strings")
+        if "spawnFailureExitCode" in request and (
+            type(request["spawnFailureExitCode"]) is not int or not 1 <= request["spawnFailureExitCode"] <= 255
+        ):
+            raise ValueError("Invalid process spawn-failure exit code")
         if request.get("name") is None:
             request["name"] = uuid.uuid4().hex
         if not isinstance(request["name"], str) or not request["name"]:

@@ -121,6 +121,56 @@ def test_missing_process_has_a_structured_code_instead_of_message_matching(proce
     assert getattr(raised.value, "code", None) == "process_not_found"
 
 
+@pytest.mark.parametrize("missing_cwd", [False, True])
+def test_argv_start_failure_can_be_observed_as_a_terminal_process(processes, missing_cwd):
+    manager, directory = processes
+    current = manager.exec(
+        {
+            "command": "missing startup",
+            "argv": ["pwd"] if missing_cwd else ["arker-certainly-missing-executable"],
+            "workingDir": str(directory / "missing") if missing_cwd else str(directory),
+            "spawnFailureExitCode": 128,
+        }
+    )
+    assert current.status == "failed"
+    assert current.exit_code == 128
+    assert current.stdout == ""
+    assert "No such file or directory" in current.stderr
+    assert manager.get(current.pid).exit_code == 128
+
+
+def test_argv_execution_does_not_invoke_an_outer_shell(processes):
+    manager, directory = processes
+    current = manager.exec(
+        {
+            "command": "literal argv",
+            "argv": ["sh", "-c", 'printf "%s" "$1"; kill -TERM $$', "sh", "literal ; $HOME"],
+            "workingDir": str(directory),
+        }
+    )
+    finished = manager.wait(current.pid, max_wait=5000, interval=10)
+    assert finished.stdout == "literal ; $HOME"
+    assert manager.get(current.pid, raw_exit_code=True).exit_code == -15
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"argv": []},
+        {"argv": "pwd"},
+        {"argv": [None]},
+        {"spawnFailureExitCode": True},
+        {"spawnFailureExitCode": 0},
+        {"spawnFailureExitCode": 256},
+    ],
+)
+def test_invalid_argv_and_spawn_failure_options_do_not_start_a_process(processes, options):
+    manager, directory = processes
+    with pytest.raises(RuntimeError):
+        manager.exec({"command": "touch should-not-exist", "workingDir": str(directory), **options})
+    assert not (directory / "should-not-exist").exists()
+
+
 def test_process_output_supports_bounded_binary_reads_at_byte_offsets(processes):
     manager, directory = processes
     started = manager.exec(

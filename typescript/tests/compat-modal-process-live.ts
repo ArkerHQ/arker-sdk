@@ -70,6 +70,16 @@ async function program(
       await reader.cancel();
       await cancel.stdin.close();
       assert.equal(await cancel.wait(), 0);
+      for (const [args, options, diagnostic] of [
+        [["arker-certainly-missing-executable"], {}, "arker-certainly-missing-executable"],
+        [["pwd"], { workdir: "/arker-certainly-missing-directory" }, "/arker-certainly-missing-directory"],
+      ] as const) {
+        const failure = await sandbox.exec([...args], { ...options, timeoutMs: 5000 });
+        assert.ok(failure instanceof ContainerProcess);
+        assert.equal(await failure.wait(), 128);
+        assert.equal(await failure.stdout.readText(), "");
+        assert.ok((await failure.stderr.readText()).includes(diagnostic));
+      }
     } finally {
       await sandbox.terminate();
       terminated();

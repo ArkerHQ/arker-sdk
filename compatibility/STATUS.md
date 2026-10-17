@@ -2,6 +2,27 @@
 
 ## Current validation
 
+The latest shared-supervisor change executes Modal argv directly in both
+languages instead of through an extra shell. Three regressions failed before
+the fix: missing executable, missing cwd, and literal argv/signal identity.
+Startup failures now return terminal native process handles with exit 128;
+the OS diagnostics still differ from Modal's runtime-specific stderr wording.
+The live checks assert exit status, handle type, empty stdout and the relevant
+diagnostic path, not exact diagnostic equality.
+
+Fresh matching-source cohorts pass **25 Python and 18 Node live tests**, using
+all four native credentials and the isolated Arker environment. Python verifies
+**100/1,013** entries (913 unverified), Node **51/967** (916 unverified); both
+strict gates exit 1. Fingerprints are
+`f747a04f507ab724c5436c2702e2f86754a92e7ed034be35714ae977e2e3d9fe`
+and `b5b0dd1ce42dee214d87a89e0dc3264182e473a5cc5fd9c76cadcae24269278a`.
+All **437 vendor Python unit tests** pass; the lean environment passes 429
+with eight optional-vendor skips. Ruff, exact TypeScript CI typecheck, full
+test/build and isolated packed-consumer gates pass. Packed SHA-256:
+`20b37d5a3f43d37dd561c9a6551719beb3033e09029b2d1d881b761d748b3f68`.
+The retained protocol-201 VM also passes Python binary/half-close and three
+Node echo probes again. None of this establishes full API equivalence.
+
 The latest Python Modal native-route regression preserves the original process
 object, all native exec keyword arguments and terminate(wait=True)'s exit
 status. Four regression cases failed before the fix. An initial env=None fix
@@ -42,11 +63,12 @@ Sandbox.create.aio/exec.aio, PTY, secrets, timeout equivalence, descendants'
 late-output EOF, stdin-offset idempotence and arbitrary Python-free images
 remain unverified or unsupported.
 
-A separate real Modal startup-error comparison is RED. Native Modal returns
+A preceding real Modal startup-error comparison was RED. Native Modal returns
 a process with exit 128 for both a missing executable and missing working
 directory. Arker returns exit 127 for the executable and raises GuestProcessError
 for the directory, with different diagnostics. Both probe sandboxes were cleaned.
-The 25-case stream cohort does not certify these error paths.
+The initial 25-case stream cohort did not certify these error paths. The latest
+argv change fixes their process/exit-status behavior, not exact diagnostics.
 
 The branch includes SDK main at 2ec474e. Frozen commit e2dc4cc runtime-scoped differential
 reports verify **86/975 Python** entries on CPython 3.12.14/Linux/aarch64 and

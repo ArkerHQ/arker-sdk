@@ -101,7 +101,7 @@ export class Sandbox {
     if (!this.#processes) throw new Error("Native Modal sandbox instance is unavailable");
     if (!argv.length || argv.some(arg => typeof arg !== "string")) throw new TypeError("Modal exec requires a nonempty array of string arguments");
     const current = await this.#processes.exec({
-      command: "exec " + argv.map(shellQuote).join(" "), workingDir: runOptions.cwd ?? "/", env: runOptions.env ?? {},
+      command: argv.map(shellQuote).join(" "), argv, spawnFailureExitCode: 128, workingDir: runOptions.cwd ?? "/", env: runOptions.env ?? {},
       stdin: true, ...(runOptions.timeout !== undefined ? { timeout: runOptions.timeout } : {}),
     });
     return opts?.mode === "binary"

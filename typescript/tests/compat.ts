@@ -351,11 +351,12 @@ async function testModalSurface(): Promise<void> {
     assert.equal(await proc.stderr.readText(), "stderr:echo modal");
     assert.equal(await proc.wait(), 7);
     assert.deepEqual(requests[0], {
-      command: "exec sh -c 'echo modal'", workingDir: "/workspace", env: { FOO: "bar" }, timeout: 456, stdin: true,
+      command: "sh -c 'echo modal'", argv: ["sh", "-c", "echo modal"], spawnFailureExitCode: 128, workingDir: "/workspace", env: { FOO: "bar" }, timeout: 456, stdin: true,
     });
 
     await sandbox.exec(["node", "script with space.js", "arg"]);
-    assert.equal((requests[1] as any).command, "exec node 'script with space.js' arg");
+    assert.equal((requests[1] as any).command, "node 'script with space.js' arg");
+    assert.deepEqual((requests[1] as any).argv, ["node", "script with space.js", "arg"]);
 
     await sandbox.terminate();
     assert.equal(box.destroyed, true);
