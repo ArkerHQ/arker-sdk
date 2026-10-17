@@ -6,14 +6,25 @@ The private Unix-socket SDK checkpoint adds Python `VM.connect_unix` and Node
 `VM.connectUnix`, sharing the existing owner-authenticated binary/EOF stream
 transport. Its new unit cases check exact control-character path encoding,
 UTF-8 byte limits, authentication, framing and rejection before network access.
-Python's vendor unit profile passes **456 tests**; the full TypeScript
+Python's vendor unit profile passes **457 tests**; the full TypeScript
 typecheck/test/build/isolated-consumer gate and OpenAPI artifact check pass.
 Packed SHA-256:
 `672abdc49389ae3b2a921712c8fc507fe4f9b4a2574979a6f6e972188f5f00c5`.
-Backend Linux compilation and live transport validation are still in progress.
+Backend Linux Clippy passes; full Rust and live transport validation are in progress.
 This does not install a native daemon or establish additional provider parity.
-The source change invalidates prior differential fingerprints; the cohorts
-below certify their recorded checkpoints, not this new SDK source.
+
+Matching-source live cohorts at `6124bf2` pass **25 Python/18 Node differential
+cases**, plus **two Python/one Node Arker-only image/policy cases**. Both strict
+inventories remain red: **100/1,138 Python** and **51/1,048 Node** verified.
+Fingerprints are Python
+`aa29c8c2bcc3faf0f7e549a0dfc29155373eb7199b58df226934a72e247470ba`
+and Node `f131d3b402ce4307d395aeb7848ea6f9a98fa452369786658ee9eb3956ddac76`.
+These run against the preceding feature release and do not certify the new
+Unix endpoint. A first attempt omitted the required evidence run ID and failed
+recording (24 Python failures, three passes; Node stopped at the first case).
+New regressions failed before adding import-time preflight checks in both
+languages, preventing paid calls under incomplete evidence configuration.
+The corrected cohorts above use an explicit run ID and preserve source identity.
 
 ## Previous literal-path checkpoint
 
