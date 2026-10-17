@@ -222,6 +222,26 @@ class FileSystem:
         raise AttributeError(f"fs.{name} is not supported by the Arker compatibility layer for blaxel")
 
 
+class _AsyncNetwork:
+    def __init__(self, vm: VM):
+        self._vm = vm
+
+    async def fetch(self, port: int, path: str = "/", method: str = "GET", **kwargs):
+        from ._compat_network import afetch
+
+        return await afetch(self._vm, port, path, method=method, **kwargs)
+
+
+class _Network:
+    def __init__(self, vm: VM):
+        self._vm = vm
+
+    def fetch(self, port: int, path: str = "/", method: str = "GET", **kwargs):
+        from ._compat_network import fetch
+
+        return fetch(self._vm, port, path, method=method, **kwargs)
+
+
 class SyncSandboxInstance(UnsupportedMixin):
     _compat_name = "blaxel"
 
@@ -238,6 +258,12 @@ class SyncSandboxInstance(UnsupportedMixin):
         self.metadata = SandboxMetadata(name=vm.name or vm.id) if vm is not None else metadata
         self.process = Process(vm, getattr(native, "process", None))
         self.fs = FileSystem(vm, getattr(native, "fs", getattr(native, "filesystem", None)))
+        self.network = getattr(native, "network", None) if native is not None else _Network(vm)
+
+    def fetch(self, port: int, path: str = "/", method: str = "GET", **kwargs):
+        if self._native is not None:
+            return self._native.fetch(port, path, method=method, **kwargs)
+        return self.network.fetch(port, path, method=method, **kwargs)
 
     @staticmethod
     def _native_class() -> Any | None:
@@ -421,6 +447,12 @@ class SandboxInstance:
         self.id = sandbox.id
         self.process = native.process if native is not None else _AsyncProcess(sandbox.process)
         self.fs = native.fs if native is not None else _AsyncComponent(sandbox.fs)
+        self.network = native.network if native is not None else _AsyncNetwork(sandbox._vm)
+
+    async def fetch(self, port: int, path: str = "/", method: str = "GET", **kwargs):
+        if self._native is not None:
+            return await self._native.fetch(port, path, method=method, **kwargs)
+        return await self.network.fetch(port, path, method=method, **kwargs)
 
     @classmethod
     async def _wrap(cls, sandbox: SyncSandboxInstance) -> SandboxInstance:

@@ -20,11 +20,16 @@ async function dependencyManifest(name: string, directory: string): Promise<stri
   }
 }
 
+export function runtimeInfo() {
+  return { node: process.versions.node, bun: process.versions.bun ?? null, platform: process.platform, architecture: process.arch };
+}
+
 export async function implementationFingerprint(read: (path: string) => Promise<Uint8Array> = readFile): Promise<string> {
   const root = fileURLToPath(new URL("../src", import.meta.url));
   const paths: string[] = [
     resolve(root, "../../bun.lock"), resolve(root, "../package.json"),
     resolve(root, "../../python/src/arker/_guest_process.py"),
+    resolve(root, "../../compatibility/http-service.py"),
     resolve(root, "../scripts/compat-evidence.ts"), resolve(root, "../scripts/compat-coverage.ts"),
   ];
   for (const name of ["computesdk", "@computesdk/e2b", "@computesdk/daytona", "@computesdk/modal", "@computesdk/blaxel"]) {
@@ -58,6 +63,7 @@ export async function implementationFingerprint(read: (path: string) => Promise<
   }
   await visit(root);
   const hash = createHash("sha256");
+  hash.update(JSON.stringify(runtimeInfo()) + "\0");
   for (const path of paths.sort()) {
     hash.update(relative(resolve(root, "../.."), path) + "\0");
     hash.update(await read(path));
@@ -86,24 +92,45 @@ export function verifiedScenarios(api: string, evidence: any[], version: string,
     .map(([key]) => (JSON.parse(key) as string[]).join(":")).sort();
 }
 
+export function captureEvidenceSnapshot(readFingerprint = implementationFingerprint) {
+  const started = readFingerprint();
+  return async () => {
+    const fingerprint = await started;
+    return { fingerprint, changed: fingerprint !== await readFingerprint() };
+  };
+}
+
+const finishSnapshot = captureEvidenceSnapshot();
+const packages = { blaxel: "@blaxel/core", e2b: "e2b", modal: "modal", daytona: "@daytona/sdk" };
+async function vendorVersion(provider: keyof typeof packages): Promise<string> {
+  return JSON.parse(await readFile(new URL(`../node_modules/${packages[provider]}/package.json`, import.meta.url), "utf8")).version;
+}
+const initialVersions = Promise.all((Object.keys(packages) as Array<keyof typeof packages>).map(async (provider) => (
+  [provider, await vendorVersion(provider)] as const
+))).then(Object.fromEntries);
+
 export async function recordEvidence(provider: "blaxel" | "e2b" | "modal" | "daytona", route: string, scenario: string, apis: string[], outcome: string): Promise<void> {
   const output = process.env.COMPAT_COVERAGE_EVIDENCE;
   if (!output) return;
   if (!process.env.COMPAT_COVERAGE_RUN) throw new Error("COMPAT_COVERAGE_RUN is required when recording evidence");
-  const packages = { blaxel: "@blaxel/core", e2b: "e2b", modal: "modal", daytona: "@daytona/sdk" };
-  const version = JSON.parse(await readFile(new URL(`../node_modules/${packages[provider]}/package.json`, import.meta.url), "utf8")).version;
+  const version = await vendorVersion(provider);
   if (route === "native") {
     const providerDirectory = fileURLToPath(new URL(`../node_modules/@computesdk/${provider}`, import.meta.url));
     const nativeManifest = await dependencyManifest(packages[provider], providerDirectory);
     const nativeVersion = JSON.parse(await readFile(nativeManifest, "utf8")).version;
     if (nativeVersion !== version) throw new Error(`Reference ${provider} ${version} differs from provider dependency ${nativeVersion}`);
   }
+  const snapshot = await finishSnapshot();
+  const fingerprint = snapshot.fingerprint;
+  const versions = await initialVersions;
+  const changed = snapshot.changed || versions[provider] !== version;
   await appendFile(output, JSON.stringify({
     provider,
     run: process.env.COMPAT_COVERAGE_RUN,
-    scenario, route, outcome,
-    implementation_fingerprint: await implementationFingerprint(),
-    vendor_version: version,
+    scenario, route, outcome: changed ? "failed" : outcome,
+    implementation_fingerprint: fingerprint,
+    vendor_version: versions[provider],
     apis: apis.map((api) => `typescript:${provider}:async:${api}`),
   }) + "\n", { mode: 0o600 });
+  if (changed) throw new Error("Implementation changed during the live compatibility scenario");
 }

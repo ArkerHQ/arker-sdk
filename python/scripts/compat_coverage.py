@@ -13,6 +13,8 @@ import importlib
 import importlib.metadata
 import inspect
 import json
+import platform
+import sys
 import textwrap
 import typing
 from collections import Counter
@@ -63,6 +65,15 @@ ROOTS = {
 }
 
 
+def runtime_info():
+    return {
+        "version": platform.python_version(),
+        "implementation": platform.python_implementation(),
+        "platform": sys.platform,
+        "architecture": platform.machine(),
+    }
+
+
 def implementation_fingerprint():
     root = Path(__file__).resolve().parents[1]
     paths = [
@@ -70,10 +81,12 @@ def implementation_fingerprint():
         root / "pyproject.toml",
         root / "uv.lock",
         root.parent / "compatibility" / "requirements.txt",
+        root.parent / "compatibility" / "http-service.py",
         root / "scripts" / "compat_coverage.py",
         *root.joinpath("tests", "e2e").glob("*.py"),
     ]
     digest = hashlib.sha256()
+    digest.update(json.dumps(runtime_info(), sort_keys=True).encode() + b"\0")
     for path in sorted(paths):
         digest.update(str(path.relative_to(root.parent)).encode() + b"\0")
         digest.update(path.read_bytes() + b"\0")
@@ -223,6 +236,7 @@ def main() -> None:
     report = {
         "schema_version": 1,
         "language": "python",
+        "runtime": runtime_info(),
         "scope": (
             "Public methods and properties of sandbox/client roots and statically discoverable service objects, "
             "depth 2; signatures are recorded separately from behavioral evidence."

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import socket
 import threading
+from contextlib import suppress
 
 from typing_extensions import Self
 
@@ -82,6 +83,16 @@ class PortStream:
         if not self._closed:
             self._closed = True
             self._websocket.close()
+
+    def abort(self) -> None:
+        """Close immediately and wake concurrent reads, without a close handshake."""
+        if not self._closed:
+            self._closed = True
+            with suppress(OSError):
+                try:
+                    self._websocket.abort()
+                finally:
+                    self._websocket.shutdown()
 
     def __enter__(self) -> Self:
         return self

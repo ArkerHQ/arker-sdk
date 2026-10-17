@@ -35,6 +35,11 @@ artifacts. Native-route evidence refuses a different SDK version inside its
 ComputeSDK provider than the direct native reference. Tests of locally linked,
 unreleased provider builds therefore do not certify the registry releases.
 
+Fingerprints include the host runtime and architecture. A Node report does not
+certify Bun, or another Node version. Live recorders snapshot source and vendor
+versions before execution and invalidate evidence if either changes mid-run.
+The HTTP origin shared by Python and TypeScript is fingerprinted too.
+
 `unverified` includes missing methods, partial implementations, vendor-only
 delegation, and methods without recorded differential scenarios. An exposed
 method or explicit unsupported error does not grant behavioral coverage. One
@@ -52,13 +57,17 @@ export COMPAT_COVERAGE_RUN="$(date -u +%Y%m%dT%H%M%SZ)"
 cd python
 uv pip install -r ../compatibility/requirements.txt
 COMPAT_COVERAGE_EVIDENCE=/tmp/python-compat.jsonl \
-  uv run pytest tests/e2e/test_blaxel_import_only.py
+uv run pytest tests/e2e/test_blaxel_import_only.py
+COMPAT_COVERAGE_EVIDENCE=/tmp/python-compat.jsonl \
+  uv run pytest tests/e2e/test_blaxel_fetch_import_only.py
 uv run python scripts/compat_coverage.py \
   --evidence /tmp/python-compat.jsonl --output /tmp/python-coverage.json
 cd ../typescript
 bun install
 COMPAT_COVERAGE_EVIDENCE=/tmp/typescript-compat.jsonl \
-  bun tests/compat-blaxel-import-live.ts
+bun tests/compat-blaxel-import-live.ts
+COMPAT_COVERAGE_EVIDENCE=/tmp/typescript-compat.jsonl \
+  bun tests/compat-blaxel-fetch-live.ts
 bun scripts/compat-coverage.ts \
   --evidence /tmp/typescript-compat.jsonl --output /tmp/typescript-coverage.json
 ```
@@ -66,6 +75,11 @@ bun scripts/compat-coverage.ts \
 Both reporters accept `--fail-on-unverified` as a strict scenario-coverage gate.
 It currently fails: full coverage has not been achieved. Existing tests without
 instrumentation do not receive retrospective coverage.
+
+For the Node integration profile, run the TypeScript programs and reporter with
+`npx -y tsx@4.20.6` instead of Bun. Mixing runtimes correctly invalidates evidence.
+Python private HTTP requires the native Blaxel SDK's HTTP dependencies, or
+`pip install 'arker[blaxel]'` for Arker-only HTTP use.
 
 The guest process protocol is authored in `python/src/arker/_guest_process.py`;
 the TypeScript build generates an embedded copy. State stays on the VM, allowing

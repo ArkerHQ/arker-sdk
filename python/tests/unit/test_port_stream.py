@@ -28,6 +28,30 @@ class Socket:
         self.closed = True
 
 
+@pytest.mark.parametrize("already_disconnected", [False, True])
+def test_abort_is_idempotent_and_preserves_cancellation_on_disconnect(already_disconnected):
+    calls = []
+
+    class ClosingSocket(Socket):
+        def abort(self):
+            calls.append("abort")
+            if already_disconnected:
+                raise OSError("already disconnected")
+
+        def shutdown(self):
+            calls.append("shutdown")
+            self.closed = True
+
+    sock = ClosingSocket()
+    stream = PortStream(sock)
+    stream.abort()
+    stream.abort()
+    assert calls == ["abort", "shutdown"]
+    assert sock.closed
+    with pytest.raises(BrokenPipeError):
+        stream.sendall(b"closed")
+
+
 def test_private_port_headers_frames_and_half_close(monkeypatch):
     sock = Socket()
     calls = []

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import guestSource from "../src/compat/guest-process.generated.js";
-import { implementationFingerprint, verifiedScenarios } from "../scripts/compat-evidence.js";
+import { captureEvidenceSnapshot, implementationFingerprint, runtimeInfo, verifiedScenarios } from "../scripts/compat-evidence.js";
 import { Template } from "../src/e2b.js";
 import { Template as NativeTemplate } from "e2b";
 import { Image as DaytonaImage } from "../src/daytona.js";
@@ -38,7 +38,12 @@ for (const options of [{ run: "" }, { scenario: null }, { route: "other" }, { ou
   assert.throws(() => verifiedScenarios("process.exec", [event("arker", options)], "1", "current"), /Invalid compatibility evidence/);
 }
 const fingerprint = await implementationFingerprint();
-for (const name of ["compat-evidence.ts", "compat-coverage.ts", "compat-trace.ts", "compat-blaxel-import-live.ts", "dist/index.mjs"]) {
+assert.equal(runtimeInfo().node, process.versions.node);
+const snapshots = ["before", "after"];
+const finishSnapshot = captureEvidenceSnapshot(async () => snapshots.shift()!);
+assert.deepEqual(await finishSnapshot(), { fingerprint: "before", changed: true });
+assert.deepEqual(await captureEvidenceSnapshot(async () => "stable")(), { fingerprint: "stable", changed: false });
+for (const name of ["compat-evidence.ts", "compat-coverage.ts", "compat-trace.ts", "compat-blaxel-import-live.ts", "http-service.py", "dist/index.mjs"]) {
   const changed = await implementationFingerprint(async (path) => {
     const content = await readFile(path);
     return path.endsWith(`/${name}`) ? Buffer.concat([content, Buffer.from("\n// changed harness\n")]) : content;

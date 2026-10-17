@@ -85,7 +85,9 @@ def test_malformed_current_evidence_fails_closed(field, value):
         coverage.verified_scenarios("process.exec", [event], "1", "current")
 
 
-@pytest.mark.parametrize("name", ["compat_coverage.py", "compat_evidence.py", "test_blaxel_import_only.py"])
+@pytest.mark.parametrize(
+    "name", ["compat_coverage.py", "compat_evidence.py", "test_blaxel_import_only.py", "http-service.py"]
+)
 def test_evidence_fingerprint_includes_measurement_and_scenario_code(monkeypatch, name):
     original = Path.read_bytes
     before = coverage.implementation_fingerprint()
@@ -96,6 +98,34 @@ def test_evidence_fingerprint_includes_measurement_and_scenario_code(monkeypatch
 
     monkeypatch.setattr(Path, "read_bytes", changed)
     assert coverage.implementation_fingerprint() != before
+
+
+def test_evidence_fingerprint_distinguishes_runtime_profiles(monkeypatch):
+    before = coverage.implementation_fingerprint()
+    monkeypatch.setattr(coverage, "runtime_info", lambda: {"version": "different-runtime"})
+    assert coverage.implementation_fingerprint() != before
+
+
+@pytest.mark.parametrize("change", ["source", "vendor"])
+def test_evidence_rejects_sources_changed_during_a_live_scenario(monkeypatch, tmp_path, change):
+    import runpy
+
+    monkeypatch.setattr(coverage.importlib.metadata, "version", lambda _: "1")
+    path = Path(__file__).resolve().parents[1] / "e2e" / "compat_evidence.py"
+    helper = runpy.run_path(str(path))
+    output = tmp_path / "evidence.jsonl"
+    monkeypatch.setenv("COMPAT_COVERAGE_EVIDENCE", str(output))
+    monkeypatch.setenv("COMPAT_COVERAGE_RUN", "changed-while-running")
+    if change == "source":
+        monkeypatch.setattr(runpy, "run_path", lambda _: {"implementation_fingerprint": lambda: "changed"})
+    else:
+        monkeypatch.setattr(coverage.importlib.metadata, "version", lambda _: "2")
+    with pytest.raises(RuntimeError, match="changed during"):
+        helper["record"]("blaxel", "sync", "arker", "fetch", ["SandboxInstance.fetch"], "passed")
+    event = json.loads(output.read_text())
+    assert event["outcome"] == "failed"
+    assert event["implementation_fingerprint"] != "changed"
+    assert event["vendor_version"] == "1"
 
 
 def test_empty_vendor_surfaces_cannot_pass_the_strict_gate(monkeypatch, capsys):

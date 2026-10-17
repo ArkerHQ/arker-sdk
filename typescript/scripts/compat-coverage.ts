@@ -1,7 +1,7 @@
 import ts from "typescript";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { implementationFingerprint, verifiedScenarios } from "./compat-evidence.js";
+import { implementationFingerprint, runtimeInfo, verifiedScenarios } from "./compat-evidence.js";
 
 const roots = [
   ["e2b", "e2b", "Sandbox", "../src/e2b.js"],
@@ -130,6 +130,7 @@ for (const row of rows.values()) counts[row.status] = (counts[row.status] ?? 0) 
 const report = {
   schema_version: 1,
   language: "typescript",
+  runtime: runtimeInfo(),
   scope: "Public sandbox/client methods and properties, static methods, and connected service objects to depth 2; exposed declarations do not count as behavioral verification.",
   vendor_versions: vendorVersions,
   implementation_fingerprint: fingerprint,

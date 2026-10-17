@@ -1,5 +1,5 @@
 import { blaxel as createBlaxelProvider } from "@computesdk/blaxel";
-import { SandboxInstance as NativeBlaxelSandbox } from "@blaxel/core";
+import { SandboxInstance as NativeBlaxelSandbox, settings as blaxelSettings } from "@blaxel/core";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import type { VM } from "./index.js";
 
@@ -7,6 +7,7 @@ import { assertSupportedObjectKeys, CompatibilityNotFoundError, guardUnsupported
 import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
 import { GuestProcesses } from "./compat/guest-process.js";
+import { privateFetch } from "./compat/private-fetch.js";
 
 export interface BlaxelCompatConfig {
   apiKey?: string;
@@ -76,7 +77,7 @@ export class SandboxInstance {
   readonly id: string;
   readonly provider: string;
   readonly metadata: NativeBlaxelSandbox["metadata"];
-  declare readonly network: NativeBlaxelSandbox["network"];
+  readonly network: NativeBlaxelSandbox["network"];
   declare readonly previews: NativeBlaxelSandbox["previews"];
   declare readonly schedules: NativeBlaxelSandbox["schedules"];
   declare readonly sessions: NativeBlaxelSandbox["sessions"];
@@ -91,7 +92,6 @@ export class SandboxInstance {
   declare readonly errors: NativeBlaxelSandbox["errors"];
   declare readonly h2Domain: NativeBlaxelSandbox["h2Domain"];
   declare readonly expiresIn: NativeBlaxelSandbox["expiresIn"];
-  declare readonly fetch: NativeBlaxelSandbox["fetch"];
   declare readonly snapshot: NativeBlaxelSandbox["snapshot"];
   declare readonly listSnapshots: NativeBlaxelSandbox["listSnapshots"];
   declare readonly deleteSnapshot: NativeBlaxelSandbox["deleteSnapshot"];
@@ -109,6 +109,8 @@ export class SandboxInstance {
   private constructor(box: UniversalSandbox, native?: NativeBlaxelSandbox) {
     this.#box = box;
     this.#native = native;
+    const network = guardUnsupported({ fetch: this.fetch.bind(this) }, "blaxel");
+    this.network = native?.network ?? network as unknown as NativeBlaxelSandbox["network"];
     this.id = box.sandboxId;
     this.provider = box.provider;
     this.metadata = (native?.metadata ?? { name: box.sandboxId }) as NativeBlaxelSandbox["metadata"];
@@ -190,6 +192,12 @@ export class SandboxInstance {
       },
     }) as BlaxelCompatFileSystem;
     return guardUnsupported(this, "blaxel", native);
+  }
+
+  async fetch(port: number, path = "/", init?: RequestInit): Promise<Response> {
+    if (this.#native) return this.#native.fetch(port, path, init);
+    const vm = (this.#box as unknown as { getInstance(): VM }).getInstance();
+    return privateFetch(vm, port, path, init, blaxelSettings.disableH2 ? "fetch" : "blaxel-h2");
   }
 
   private static async wrap(box: UniversalSandbox): Promise<SandboxInstance> {

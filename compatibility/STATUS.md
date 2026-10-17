@@ -1,37 +1,36 @@
 # Recorded coverage baseline
 
-## Current-main validation
+## Current validation
 
-Before synchronizing the new private-port OpenAPI contract, differential runs after the private-port and mkdir changes restored
-38/944 Python and 19/928 TypeScript scenario-verified entries for these sources
-and the draft linked provider profile. The generated-contract sync invalidates
-these fingerprints until the scenarios are rerun. Both strict gates exit 1, with 906 and
-909 unverified entries respectively. The new transport has 15 passing Python unit cases and four passing Node test
-groups, including binary framing, independent half-close, refused upgrades,
-malformed frames and cleanup. It requires the draft backend private-port API;
-it has not yet been validated against a feature deployment or integrated into
-Blaxel fetch. Bun's WebSocket adapter exposes chunked upgrade error bodies
-without decoding their transfer framing in a local reproduction; preserving
-those typed errors under Bun remains unverified. Node's chunked-refusal test
-passes. None of these transport unit tests grants vendor API parity credit.
+The branch includes SDK main at 2ec474e. Fresh runtime-scoped differential
+reports verify **44/944 Python** entries on CPython 3.12.14/Linux/aarch64 and
+**21/928 TypeScript** entries on Node 22.23.3/Linux/arm64. The Node profile uses
+the locally linked draft ComputeSDK providers from computesdk #6, not published
+provider releases. Both inventories are complete in their declared scope.
+The strict gates still exit 1: **900 Python and 907 TypeScript** entries remain
+unverified. Neither method counts nor these scenarios establish full equivalence.
 
-On 2026-10-17 the branch was merged with SDK `main` at `2ec474e`.
-Fresh differential runs on current implementation sources establish **38/944
-Python** scenario-verified entries. TypeScript establishes **19/928** only when
-using the locally linked draft ComputeSDK provider builds from computesdk #6.
-After restoring the committed published dependencies, those integration
-fingerprints correctly become stale: **0/928 TypeScript** entries are verified
-for the published dependency profile. Both inventories are complete within
-their declared bounded scope, and both strict gates return exit code 1.
-Neither the draft integration profile nor historical results certify the
-published packages or complete API equivalence.
+The unchanged files/process programs and new private HTTP programs passed all
+twelve Python cases. Node passed the three files/process routes and six HTTP
+cases: original Blaxel, shim on Blaxel, and shim on Arker, with both H2 and
+explicitly disabled-H2 profiles. HTTP coverage includes every byte value,
+both application auth headers, repeated-header normalization, chunked and HEAD
+responses, manual redirects, streaming abort, and cleanup. Arker's HTTP cases
+run with inbound and outbound denied. They require the draft backend private
+port API, not a public ingress exception. Fresh feature tests passed all 58
+private-port/HTTPS/HTTP2/WebSocket cases with zero skips.
 
-Post-merge local validation passes: 324 Python unit tests and lint, plus the full
-TypeScript test/build/typecheck pipeline. New evidence-validator regressions
-first failed in both languages, demonstrating that colon-delimited run/scenario
-keys could combine unrelated runs. Tuple keys now isolate those runs; malformed
-current evidence also fails closed. These are harness tests, not live parity
-credit.
+Local validation passes 357 Python unit tests and lint, and the full TypeScript
+test/build/typecheck pipeline. Source/vendor snapshots now reject changes during
+a scenario; runtime profiles are included in fingerprints. Existing evidence
+grouping tests also reject collisions and malformed events. These measurement
+tests do not grant vendor parity credit.
+
+Older guest agents still require validation of the separate framed relay helper
+under development in arker-app #4260. A retained old-release VM reproduced a
+503; fresh guests passed. Bun's chunked WebSocket-upgrade refusal decoding also
+remains unverified. Node's chunked-refusal tests pass. Published dependencies
+and other runtimes are separate profiles and are not certified by Node's report.
 
 Evidence fingerprints include the scenario and measurement sources, not just
 production files and dependency manifests. Changing a test or its tracer also
@@ -139,8 +138,10 @@ instrumented API counts above.
   provider currently rejects. Arker permits multiple VM rows under one name,
   so a local shim lock is not a distributed correctness fix.
 - Release the ComputeSDK provider fixes before the migration SDK release.
-- Implement Arker-backed Blaxel fetch. Supporting both application auth headers
-  simultaneously also needs a non-conflicting platform-authentication channel.
+- Complete private HTTP option/session coverage, including native async
+  persistent cookies and timeout defaults. Requests currently open separate
+  HTTP clients. External redirects and fetch integrity checks are not yet
+  implemented. Native root-relative redirect behavior also needs coverage.
 - Translate and differentially validate Blaxel's current `network` configuration.
   The pinned SDK includes proxy domain filtering and optional enforced firewall
   rulesets; absence of translation is a shim gap, not an absent vendor feature.
