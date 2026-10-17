@@ -43,6 +43,12 @@ try {
     const details = error.body.details;
     assert(details && typeof details === "object" && "reason" in details);
     assert.equal(details.reason, "image_pull_failed");
+    assert.equal(error.body.code, "operation_failed");
+    if (error.body.code !== "operation_failed") assert.fail("expected typed operation failure");
+    assert.equal(error.body.recovery.work, "unknown");
+    const diagnostic = JSON.stringify(error.raw);
+    assert.ok(!diagnostic.includes(password));
+    assert.ok(!diagnostic.includes(Buffer.from(`${username}:${password}-wrong`).toString("base64")));
   }
   Arker.prototype.fork = async function (request) {
     assert(request.source_vm_id);

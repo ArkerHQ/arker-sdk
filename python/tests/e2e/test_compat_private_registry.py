@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 import os
 from contextlib import ExitStack
 
@@ -56,6 +58,11 @@ def test_private_image_auth_is_import_only_and_children_are_independent(monkeypa
         assert refused.value.status == 422
         assert refused.value.code == "operation_failed"
         assert refused.value.body.details.reason == "image_pull_failed"
+        assert refused.value.body.recovery.work == "unknown"
+        diagnostic = json.dumps(refused.value.raw)
+        assert credentials["password"] not in diagnostic
+        encoded_auth = base64.b64encode(f"{credentials['username']}:{credentials['password']}-wrong".encode()).decode()
+        assert encoded_auth not in diagnostic
         monkeypatch.setattr(Arker, "fork", observed_fork)
         children = []
         for _ in range(3):
