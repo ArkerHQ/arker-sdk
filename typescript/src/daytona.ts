@@ -1,4 +1,5 @@
 import { daytona as createDaytonaProvider } from "@computesdk/daytona";
+import { ArkerError } from "./index.js";
 
 import { assertSupportedObjectKeys, guardUnsupported, nativeInstance, type UniversalSandbox } from "./compat/common.js";
 import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
@@ -30,6 +31,9 @@ const DAYTONA_CONFIG_KEYS = ["apiKey", "arker", "routerConfigPath"] as const;
 const DAYTONA_CREATE_OPTION_KEYS = ["image", "snapshot", "envVars", "name", "language", "resources", "networkBlockAll", "networkAllowList", "domainAllowList"] as const;
 
 function arkerCreateOptions(options: Record<string, unknown>): Record<string, unknown> {
+  if (options.image !== undefined && typeof options.image !== "string") {
+    throw new ArkerError("unsupported_operation", "Daytona Image builders are not supported on Arker; use a published image reference or route to Daytona", 422);
+  }
   const { resources, ...rest } = options;
   if (resources === undefined) return rest;
   if (typeof resources !== "object" || resources === null || Array.isArray(resources)) throw new TypeError("Daytona resources must be an object");
@@ -105,7 +109,7 @@ export class Daytona {
     assertSupportedObjectKeys(params, DAYTONA_CREATE_OPTION_KEYS, "daytona", "Daytona.create");
     const source = params ?? {};
     const request = {
-      ...(typeof source.image === "string" ? { image: source.image } : {}),
+      ...(source.image !== undefined ? { image: source.image } : {}),
       ...(typeof source.snapshot === "string" ? { snapshotId: source.snapshot } : {}),
       ...(source.envVars && typeof source.envVars === "object" ? { envs: source.envVars as Record<string, string> } : {}),
       ...(typeof source.name === "string" ? { name: source.name } : {}),

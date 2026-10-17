@@ -5,6 +5,7 @@ import type { CommandResult, FileEntry, RunCommandOptions, SandboxInfo, SandboxI
 import { Daytona } from "../src/daytona.js";
 import { Sandbox as E2BSandbox } from "../src/e2b.js";
 import { CommandExitError } from "e2b";
+import { Image as DaytonaImage } from "@daytona/sdk";
 import { ArkerError } from "../src/index.js";
 import { SandboxInstance as BlaxelSandbox } from "../src/blaxel.js";
 import { ModalClient } from "../src/modal.js";
@@ -202,6 +203,24 @@ async function testDaytonaGetNotFound(): Promise<void> {
   } finally {
     fake.cleanup();
   }
+}
+
+async function testDaytonaImageBuilderIsNotDiscarded(): Promise<void> {
+  const image = DaytonaImage.base("alpine:3.21").runCommands("echo expected-image");
+  const fake = installFakeCompute(new FakeSandbox("native-image", "daytona"));
+  try {
+    await new Daytona().create({ image });
+    assert.equal((fake.createCalls[0] as any).image, image);
+  } finally {
+    fake.cleanup();
+  }
+  let requests = 0;
+  const client = new Daytona({ arker: {
+    apiKey: "ark-test", source: "ubuntu", baseUrl: "https://arker.invalid/api",
+    fetch: async () => { requests++; throw new Error("Must not boot a substituted image"); },
+  } });
+  await assert.rejects(() => client.create({ image }), /Daytona Image builders.*not supported on Arker/);
+  assert.equal(requests, 0);
 }
 
 async function testE2BSurface(): Promise<void> {
@@ -437,6 +456,10 @@ async function testInternalArkerProviderImageAndResources(): Promise<void> {
     { vm_id: "vm_image", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] },
   );
   const provider = createArkerComputeProvider({ apiKey: "ark-key", baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false });
+  await assert.rejects(
+    () => provider.sandbox.create({ image: DaytonaImage.base("alpine:3.21") } as any),
+    /image must be a published image reference/,
+  );
   await provider.sandbox.create({ image: "ubuntu:24.04", cpu: 4, memory: 8192, diskMiB: 20480, name: "image-box" });
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), {
     image: "ubuntu:24.04",
@@ -648,6 +671,7 @@ async function testInternalArkerProviderRequiresSource(): Promise<void> {
 await testDaytonaSurface();
 await testNativeProviderExtensionsAreDelegated();
 await testDaytonaGetNotFound();
+await testDaytonaImageBuilderIsNotDiscarded();
 await testE2BSurface();
 await testE2BNativeErrorIdentity();
 await testModalSurface();

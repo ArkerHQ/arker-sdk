@@ -2,7 +2,7 @@
 
 ## Current validation
 
-The branch includes SDK main at 2ec474e. Fresh runtime-scoped differential
+The branch includes SDK main at 2ec474e. Frozen commit 6389e30 runtime-scoped differential
 reports verify **79/975 Python** entries on CPython 3.12.14/Linux/aarch64 and
 **36/938 TypeScript** entries on Node 22.23.3/Linux/arm64. The latest Node profile
 uses a clean install of published dependencies, with no local provider links.
@@ -83,6 +83,20 @@ new in-shim bridge uses the embedding SDK directly and still participates in
 ComputeSDK routing. Attestation checks the dependency actually used by that
 bridge; the mismatch was not waived. The refreshed 12-program Node cohort
 passed with all four provider packages restored to published installs.
+
+A subsequent Daytona image regression failed because the TypeScript shim
+discarded native Image builders. The shim now forwards the original object to
+the native adapter. Arker rejects builders before making a VM request, rather
+than silently booting a configured fallback image. The shared Arker adapter
+also rejects non-string or empty image values. Regression and full local tests
+pass; these subsequent edits require a refreshed Node live fingerprint.
+
+A real E2B identity probe is RED: the default native sandbox runs as uid/gid
+1000 (user), with HOME=/home/user, USER=user and LOGNAME=user; Arker runs the
+command as root with root environment variables. Both report /home/user as cwd.
+Matching directories does not establish matching permissions or process
+identity. The probe deleted both disposable sandboxes. This is a deployment
+blocker, not a cosmetic output difference.
 
 A named Blaxel regression then failed on the published-provider route: it
 discarded the requested name and returned a UUID. The in-shim adapter preserves

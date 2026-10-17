@@ -355,6 +355,9 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
         }
         const sourceVmId = options?.snapshotId || config.sourceVmId || env("ARKER_SOURCE_VM");
         const sourceVmName = options?.templateId || config.sourceVmName || config.source || env("ARKER_SOURCE");
+        if (values.image !== undefined && (typeof values.image !== "string" || !values.image.trim())) {
+          throw new ArkerError("unsupported_operation", "Arker image must be a published image reference, not a provider-specific image builder", 422);
+        }
         const image = typeof values.image === "string" ? values.image : undefined;
         if (!sourceVmId && !sourceVmName && !image) {
           throw new Error("Arker source is required; pass templateId, snapshotId, image, configure source, or set ARKER_SOURCE");
