@@ -31,6 +31,19 @@ async function program(SandboxInstance: typeof Native | typeof Shim): Promise<vo
       waitForCompletion: true,
     });
     assert.equal(isolated.stdout, "/blaxel:unset");
+    await sandbox.process.exec({
+      command: "sleep 0.2; printf within-deadline", name: "seconds-timeout", timeout: 1,
+      waitForCompletion: false,
+    });
+    const withinDeadline = await sandbox.process.wait("seconds-timeout", { maxWait: 10_000, interval: 100 });
+    assert.deepEqual([withinDeadline.status, withinDeadline.exitCode, withinDeadline.stdout],
+      ["completed", 0, "within-deadline"]);
+    await sandbox.process.exec({
+      command: "while :; do sleep 1; done", name: "execution-deadline", timeout: 1,
+      waitForCompletion: false,
+    });
+    const expired = await sandbox.process.wait("execution-deadline", { maxWait: 10_000, interval: 100 });
+    assert.deepEqual([expired.status, expired.exitCode], ["killed", -1]);
     const failed = await sandbox.process.exec({
       command: "printf failure-out; printf failure-err >&2; exit 17", waitForCompletion: true,
     });

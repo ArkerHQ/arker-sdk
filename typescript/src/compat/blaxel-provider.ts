@@ -174,7 +174,7 @@ const provider = defineProvider<SandboxInstance, Config>({
           ...(options?.cwd !== undefined ? { workingDir: options.cwd } : {}),
           ...(options?.env !== undefined ? { env: options.env } : {}),
           ...(options?.timeout !== undefined
-            ? { timeout: options.timeout }
+            ? { timeout: options.timeout / 1000 }
             : {}),
           ...(options?.onStdout ? { onStdout: options.onStdout } : {}),
           ...(options?.onStderr ? { onStderr: options.onStderr } : {}),

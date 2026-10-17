@@ -126,6 +126,8 @@ class Process:
                 raise TypeError("process.exec requires a command string or list")
             request["command"] = command
             request.pop("cmd", None)
+            if request.get("timeout") is not None:
+                request["timeout"] *= 1000
             return self._guest.exec(request)
         return run_command(self._vm, command, timeout=timeout)
 

@@ -6,6 +6,47 @@ import { once } from "node:events";
 import { SandboxInstance as Native, settings } from "@blaxel/core";
 import { SandboxInstance as Shim } from "../src/blaxel.js";
 import { createNativeBlaxelProvider } from "../src/compat/blaxel-provider.js";
+import { GuestProcesses } from "../src/compat/guest-process.js";
+
+test("Arker Blaxel process converts execution timeout seconds to internal milliseconds", async () => {
+  const original = GuestProcesses.prototype.exec;
+  const captured: unknown[] = [];
+  GuestProcesses.prototype.exec = async function (request) {
+    captured.push(request.timeout);
+    return {} as Awaited<ReturnType<typeof original>>;
+  };
+  try {
+    const box = { provider: "arker", sandboxId: "vm-test", getInstance: () => ({}) };
+    const sandbox = Reflect.construct(Shim, [box]) as Shim;
+    for (const timeout of [1, 0, undefined]) {
+      await sandbox.process.exec({ command: "true", ...(timeout === undefined ? {} : { timeout }) });
+    }
+    assert.deepEqual(captured, [1000, 0, undefined]);
+  } finally {
+    GuestProcesses.prototype.exec = original;
+  }
+});
+
+test("native Blaxel adapter converts ComputeSDK command milliseconds to seconds", async () => {
+  const captured: unknown[] = [];
+  const instance = { metadata: { name: "timeout-test" }, process: { exec: async (request: { timeout?: number }) => {
+    captured.push(request.timeout);
+    return { stdout: "", stderr: "", exitCode: 0 };
+  } } } as unknown as Native;
+  const provider = createNativeBlaxelProvider({ apiKey: "bl_test", workspace: "test" });
+  const original = Native.get;
+  Native.get = async () => instance;
+  try {
+    const sandbox = await provider.instances.getById("timeout-test");
+    assert(sandbox);
+    for (const timeout of [1000, 0, undefined]) {
+      await sandbox.runCommand("true", timeout === undefined ? {} : { timeout });
+    }
+    assert.deepEqual(captured, [1, 0, undefined]);
+  } finally {
+    Native.get = original;
+  }
+});
 
 test("Arker Blaxel fetch preserves regionless and creation-time transport selection", async () => {
   const previousH2 = settings.config.disableH2;

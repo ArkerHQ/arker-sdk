@@ -520,9 +520,17 @@ def test_blaxel_typed_request_and_directory_attributes(monkeypatch) -> None:
         assert listing.files[0].path == "/blaxel/probe.txt"
         assert listing.subdirectories[0].name == "nested"
         sandbox.process.exec({"command": "sleep 10", "waitForCompletion": False})
+        sandbox.process.exec({"command": "true", "timeout": 0})
         sandbox.delete()
-    assert captured[0] == {"command": "printf typed", "workingDir": "/tmp", "waitForCompletion": True, "timeout": 1500}
+    assert captured[0] == {
+        "command": "printf typed",
+        "workingDir": "/tmp",
+        "waitForCompletion": True,
+        "timeout": 1500000,
+    }
     assert captured[1]["waitForCompletion"] is False
+    assert "timeout" not in captured[1]
+    assert captured[2]["timeout"] == 0
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Exercises the Linux guest directory command")

@@ -35,6 +35,20 @@ try:
         wait_for_completion=True,
     ))
     assert isolated.stdout == "/blaxel:unset", isolated.stdout
+    sandbox.process.exec(ProcessRequestWithLog(
+        command="sleep 0.2; printf within-deadline", name="seconds-timeout", timeout=1,
+        wait_for_completion=False,
+    ))
+    within_deadline = sandbox.process.wait("seconds-timeout", max_wait=10000, interval=100)
+    assert (within_deadline.status, within_deadline.exit_code, within_deadline.stdout) == (
+        "completed", 0, "within-deadline",
+    )
+    sandbox.process.exec(ProcessRequestWithLog(
+        command="while :; do sleep 1; done", name="execution-deadline", timeout=1,
+        wait_for_completion=False,
+    ))
+    expired = sandbox.process.wait("execution-deadline", max_wait=10000, interval=100)
+    assert (expired.status, expired.exit_code) == ("killed", -1)
     failed = sandbox.process.exec(ProcessRequestWithLog(
         command="printf failure-out; printf failure-err >&2; exit 17", wait_for_completion=True,
     ))
