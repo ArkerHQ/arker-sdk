@@ -9910,15 +9910,14 @@
               },
               "details": {
                 "$ref": "#/components/schemas/OperationFailedDetails"
+              },
+              "recovery": {
+                "$ref": "#/components/schemas/RecoveryContext"
               }
             },
             "required": [
               "code",
-              "details"
-            ]
-          },
-          {
-            "required": [
+              "details",
               "recovery"
             ]
           }

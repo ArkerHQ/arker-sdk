@@ -1087,6 +1087,7 @@ class ActionRequired(ErrorMetadata):
 
 @dataclass(frozen=True)
 class OperationFailed(ErrorMetadata):
+    recovery: RecoveryContext
     code: Literal['operation_failed'] = field(kw_only=True)
     details: OperationFailedDetails = field(kw_only=True)
 

@@ -2574,7 +2574,8 @@ export interface components {
             /** @constant */
             code: "operation_failed";
             details: components["schemas"]["OperationFailedDetails"];
-        } & unknown & {
+            recovery: components["schemas"]["RecoveryContext"];
+        } & {
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
