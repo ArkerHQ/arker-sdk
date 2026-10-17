@@ -22,8 +22,12 @@ the explicit `source_vm_id` setting for a parent ID.
 
 Both adapters accept an Arker `policies` configuration passed to the fork API.
 Named policy secrets are host-side values, not guest environment variables.
-Provider network constraints replace configured network rules, preserving the
-named secret map; a block-all constraint must not inherit an allow rule.
+Provider network constraints add independent outbound guards that intersect
+the existing policy. They preserve configured inbound/lifecycle rules and
+secret rewrites; even an inherited allow cannot bypass a block-all guard.
+An explicitly configured deprecated ordered policy list still replaces the
+parent policy, while the new guard constrains that replacement. This requires
+the matching backend guard API and is not yet live-certified or published.
 Registry credentials are configured as `registry_auth` in Python or
 `registryAuth` in TypeScript, with `username` and `password`. They are sent only
 for an image import, never for a child fork from an existing VM. Keep these
