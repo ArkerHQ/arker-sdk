@@ -1,7 +1,49 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { createServer } from "node:http";
+import { connect } from "node:net";
+import { once } from "node:events";
 import { SandboxInstance as Native, settings } from "@blaxel/core";
+import { SandboxInstance as Shim } from "../src/blaxel.js";
 import { createNativeBlaxelProvider } from "../src/compat/blaxel-provider.js";
+
+test("Arker Blaxel fetch preserves regionless and creation-time transport selection", async () => {
+  const previousH2 = settings.config.disableH2;
+  const previousEnvironment = process.env.BL_REGION;
+  delete process.env.BL_REGION;
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-length": "0" });
+    response.end();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address !== "string");
+  const vm = { connectPort: async () => connect(address.port, "127.0.0.1") };
+  const box = { provider: "arker", sandboxId: "vm-test", getInstance: () => vm };
+  try {
+    for (const [region, initiallyDisabled, finallyDisabled, hasBody] of [
+      [undefined, false, false, false],
+      ["us-pdx-1", false, false, true],
+      ["us-pdx-1", false, true, false],
+      ["us-pdx-1", true, false, false],
+    ] as const) {
+      settings.config.disableH2 = initiallyDisabled;
+      const sandbox = Reflect.construct(Shim, [box, undefined, { region, disableH2: initiallyDisabled }]) as Shim;
+      settings.config.disableH2 = finallyDisabled;
+      const response = await sandbox.fetch(8080, "/head", { method: "HEAD" });
+      assert.equal(response.body !== null, hasBody,
+        `region=${region}, initial H2 disabled=${initiallyDisabled}, current=${finallyDisabled}`);
+      assert.equal((await response.arrayBuffer()).byteLength, 0);
+    }
+  } finally {
+    settings.config.disableH2 = previousH2;
+    if (previousEnvironment === undefined) delete process.env.BL_REGION;
+    else process.env.BL_REGION = previousEnvironment;
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
 
 test("in-shim Blaxel creation preserves names, credentials, network inputs and strict/get-or-create flags", async () => {
   const previous = {

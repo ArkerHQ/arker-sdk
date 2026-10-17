@@ -73,6 +73,15 @@ function makeSdk(config: BlaxelCompatConfig = {}): CompatSdk {
   });
 }
 
+interface FetchProfile {
+  region?: string;
+  disableH2: boolean;
+}
+
+function fetchProfile(region?: string): FetchProfile {
+  return { region: region || blaxelSettings.region, disableH2: blaxelSettings.disableH2 };
+}
+
 export class SandboxInstance {
   readonly id: string;
   readonly provider: string;
@@ -102,13 +111,15 @@ export class SandboxInstance {
   declare readonly unarchive: NativeBlaxelSandbox["unarchive"];
   #box: UniversalSandbox;
   #native?: NativeBlaxelSandbox;
+  #h2Eligible: boolean;
 
   readonly process: BlaxelCompatProcess;
   readonly fs: BlaxelCompatFileSystem;
 
-  private constructor(box: UniversalSandbox, native?: NativeBlaxelSandbox) {
+  private constructor(box: UniversalSandbox, native?: NativeBlaxelSandbox, profile = fetchProfile()) {
     this.#box = box;
     this.#native = native;
+    this.#h2Eligible = Boolean(profile.region) && !profile.disableH2;
     const network = guardUnsupported({ fetch: this.fetch.bind(this) }, "blaxel");
     this.network = native?.network ?? network as unknown as NativeBlaxelSandbox["network"];
     this.id = box.sandboxId;
@@ -198,15 +209,16 @@ export class SandboxInstance {
   async fetch(port: number, path = "/", init?: RequestInit): Promise<Response> {
     if (this.#native) return this.#native.fetch(port, path, init);
     const vm = (this.#box as unknown as { getInstance(): VM }).getInstance();
-    return privateFetch(vm, port, path, init, blaxelSettings.disableH2 ? "fetch" : "blaxel-h2");
+    return privateFetch(vm, port, path, init, this.#h2Eligible && !blaxelSettings.disableH2 ? "blaxel-h2" : "fetch");
   }
 
-  private static async wrap(box: UniversalSandbox): Promise<SandboxInstance> {
-    if (box.provider !== "blaxel") return new SandboxInstance(box);
+  private static async wrap(box: UniversalSandbox, profile?: FetchProfile): Promise<SandboxInstance> {
+    if (box.provider !== "blaxel") return new SandboxInstance(box, undefined, profile);
     return new SandboxInstance(box, nativeInstance(box) as NativeBlaxelSandbox);
   }
 
   static async create(options: BlaxelCreateOptions = {}, callOptions: BlaxelCreateCallOptions = {}): Promise<SandboxInstance> {
+    const profile = fetchProfile(options.region);
     const box = await makeSdk(callOptions).sandbox.create({
       name: options.name,
       image: options.image,
@@ -231,7 +243,7 @@ export class SandboxInstance {
         throw error;
       }
     }
-    return SandboxInstance.wrap(box);
+    return SandboxInstance.wrap(box, profile);
   }
 
   static async createIfNotExists(

@@ -23,7 +23,7 @@ async function program(
   console.log(
     "FETCH created",
     sandbox.metadata.name,
-    settings.disableH2 ? "fallback" : "h2",
+    settings.disableH2 || !settings.region ? "fallback" : "h2",
   );
   try {
     await configure(sandbox);
@@ -78,7 +78,7 @@ async function program(
       await redirect.body?.cancel();
       const head = await sandbox.fetch(18082, "/head", { method: "HEAD" });
       assert.equal(head.status, 200);
-      if (settings.disableH2) assert.equal(head.body, null);
+      if (settings.disableH2 || !settings.region) assert.equal(head.body, null);
       else assert.notEqual(head.body, null);
       console.log("FETCH HEAD body", sandbox.metadata.name);
       assert.equal((await head.arrayBuffer()).byteLength, 0);
@@ -142,8 +142,15 @@ assert(process.env.BL_REGION, "BL_REGION is required to exercise Blaxel H2 rathe
 const directory = await mkdtemp(join(tmpdir(), "compat-private-fetch-"));
 const previous = process.env.COMPUTESDK_ROUTER_CONFIG;
 const previousH2 = settings.config.disableH2;
+const previousRegion = process.env.BL_REGION;
 try {
-  for (const disableH2 of [false, true]) {
+  for (const [mode, disableH2, region] of [
+    ["h2", false, previousRegion],
+    ["fallback", true, previousRegion],
+    ["regionless", false, undefined],
+  ] as const) {
+    if (region === undefined) delete process.env.BL_REGION;
+    else process.env.BL_REGION = region;
     settings.config.disableH2 = disableH2;
     for (const [provider, constructor] of [
       ["blaxel", Native],
@@ -167,7 +174,7 @@ try {
           traceVendor(constructor, "SandboxInstance.static", called),
           async (sandbox) => {
             if (provider === "blaxel") {
-              assert.equal(Boolean(sandbox.h2Domain), !disableH2,
+              assert.equal(Boolean(sandbox.h2Domain), Boolean(region) && !disableH2,
                 "Native sandbox did not select the requested H2/Fetch profile");
             }
             assert.equal(
@@ -199,7 +206,7 @@ try {
             : provider === "arker"
               ? "arker"
               : "native",
-          "import-only-private-fetch-" + (disableH2 ? "fallback" : "h2"),
+          "import-only-private-fetch-" + mode,
           [...called].sort(),
           outcome,
         );
@@ -214,6 +221,8 @@ try {
   }
 } finally {
   settings.config.disableH2 = previousH2;
+  if (previousRegion === undefined) delete process.env.BL_REGION;
+  else process.env.BL_REGION = previousRegion;
   if (previous === undefined) delete process.env.COMPUTESDK_ROUTER_CONFIG;
   else process.env.COMPUTESDK_ROUTER_CONFIG = previous;
   await rm(directory, { recursive: true });
