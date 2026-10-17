@@ -14,7 +14,13 @@ HOME while preserving another explicit environment value, and was deleted.
 An initial manual probe omitted Modal stdin.drain()
 and blocked; the checked-in program uses the documented flush operation.
 The frozen reports below predate this source change and are not current-source
-parity certification.
+parity certification. The Python inventory now explicitly includes returned
+Modal ContainerProcess and stdin/stdout/stderr sync/async surfaces, which the
+Sandbox.exec annotation does not expose. Its denominator is **1,013**, up by
+38; a regression prevents removing these roots. The fresh report without a new
+full live cohort has zero verified entries and exits 1 as required. All 423
+current Python vendor unit tests pass. This expansion does not retroactively
+grant coverage to earlier evidence.
 
 The branch includes SDK main at 2ec474e. Frozen commit e2dc4cc runtime-scoped differential
 reports verify **86/975 Python** entries on CPython 3.12.14/Linux/aarch64 and

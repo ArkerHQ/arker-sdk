@@ -15,6 +15,15 @@ coverage = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(coverage)
 
 
+def test_inventory_includes_modal_returned_process_and_stream_surfaces():
+    roots = {(style, prefix, native) for style, prefix, native, _ in coverage.ROOTS["modal"]}
+    for style in ("sync", "async"):
+        assert (style, "ContainerProcess", "modal.container_process:ContainerProcess") in roots
+        assert (style, "ContainerProcess.stdout", "modal.io_streams:StreamReader") in roots
+        assert (style, "ContainerProcess.stderr", "modal.io_streams:StreamReader") in roots
+        assert (style, "ContainerProcess.stdin", "modal.io_streams:StreamWriter") in roots
+
+
 def test_inventory_includes_public_context_and_iteration_protocols():
     class Native:
         def __enter__(self): ...
