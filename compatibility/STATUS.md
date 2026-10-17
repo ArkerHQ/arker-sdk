@@ -9,9 +9,21 @@ the fix; those regressions and safe-preflight fallback now pass. Python profiles
 pass **464 vendor tests / 455 lean tests** (nine optional-vendor skips). Full
 TypeScript typecheck/test/build/isolated-consumer gates pass; packed SHA-256:
 `e0240b98086297795fafa6ad09f8799fff4829cae0f198fedc81538af57e6606`.
-This source change invalidates the preceding live fingerprints. New cohorts
-are required; neither generic remote-error failover nor full API parity is
-established.
+Fresh matching-source cohorts at `54ed65c` pass **27 Python / 22 Node**
+cases (25/21 differential and 2/1 Arker-only). Fingerprints: Python
+`967e077fedcf67d57fba20b686aea4ba8236451665290229a6815ac4445e13f3`, Node
+`6068cf0fe57494ea5d9bb7dd6c5220cb2981ad7ab3ac6d6989c465816ecba6a1`.
+Both strict gates remain **RED, exit 1: 100/1,138 Python; 51/1,048 Node**
+verified. These pre-deployment cohorts do not certify the new guard backend.
+
+The exact packed npm artifact also passes supplemental live ESM and CommonJS
+checks from a clean E2B-only consumer: image-parent inheritance, E2B create,
+default cwd, NUL-containing filesystem data, fresh shells, native command-error
+identity and deletion. All owned parents/children were removed. The first
+probe incorrectly supplied an unsupported `arker` create option and failed
+before VM creation; that evidence is retained separately. These probes are
+Arker-only, not additional native differential coverage. Neither generic
+remote-error failover nor full API parity is established.
 
 ## Previous outbound-guard SDK checkpoint
 
