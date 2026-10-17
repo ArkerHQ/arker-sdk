@@ -572,7 +572,11 @@ async function testSharedForkPolicySecretsAndRegistry(): Promise<void> {
   const [child, image] = fetch.calls.map(call => JSON.parse(call.body!));
   assert.equal(child.source_vm_id, "vm_image_parent");
   assert.equal(child.registry_auth, undefined);
-  assert.deepEqual(child.policies, { secrets: policies.secrets, policies: [{ type: "outbound", action: "deny" }] });
+  assert.deepEqual(child.policies.secrets, policies.secrets);
+  assert.deepEqual(child.policies.rules.inherited, policies.rules.inherited);
+  const guards = Object.entries(child.policies.rules).filter(([, rule]: any) => rule.type === "outbound_guard");
+  assert.equal(guards.length, 1);
+  assert.deepEqual(guards[0]![1], { type: "outbound_guard", allow: [] });
   assert.deepEqual(image.registry_auth, registryAuth);
   assert.deepEqual(image.policies, policies);
   assert.equal(image.source_vm_id, undefined);
@@ -609,13 +613,44 @@ async function testInternalArkerProviderPolicyReplacement(): Promise<void> {
     outboundCidrAllowlist: ["203.0.113.0/24"],
   } as any);
   const body = JSON.parse(fetch.calls[0]!.body!);
-  assert.deepEqual(body.policies, {
-    policies: [
-      { type: "outbound", match: { hosts: ["api.example.com"], ports: [443] }, action: "allow" },
-      { type: "outbound", match: { ips: ["203.0.113.0/24"] }, action: "allow" },
-      { type: "outbound", action: "deny" },
+  assert.equal(Object.keys(body.policies.rules).length, 1);
+  assert.deepEqual(Object.values(body.policies.rules)[0], {
+    type: "outbound_guard",
+    allow: [
+      { hosts: ["api.example.com"], ports: [443] },
+      { ips: ["203.0.113.0/24"] },
     ],
   });
+}
+
+async function testOrderedPolicyControlsSurviveNativeNetworkRestrictions(): Promise<void> {
+  const fetch = new FakeFetch();
+  for (const id of ["vm_first", "vm_second"]) {
+    fetch.addJson((method, url) => method === "POST" && url.endsWith("/v1/fork"), 200,
+      { vm_id: id, owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] });
+  }
+  const policies = {
+    secrets: { TOKEN: "synthetic-only" },
+    policies: [{ type: "inbound", action: "deny" }],
+  } as any;
+  const original = structuredClone(policies);
+  const provider = createArkerComputeProvider({ apiKey: "test", source: "parent", policies,
+    baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false });
+  await provider.sandbox.create({ blockNetwork: true });
+  await provider.sandbox.create({ blockNetwork: true });
+  const identifiers: string[] = [];
+  for (const call of fetch.calls) {
+    const written = JSON.parse(call.body!).policies;
+    assert.deepEqual(written.policies, policies.policies);
+    assert.deepEqual(written.secrets, policies.secrets);
+    assert.equal(Object.keys(written.rules).length, 1);
+    const [id, guard] = Object.entries(written.rules)[0]!;
+    assert.match(id, /^[a-z0-9][a-z0-9._-]{0,63}$/);
+    assert.deepEqual(guard, { type: "outbound_guard", allow: [] });
+    identifiers.push(id);
+  }
+  assert.notEqual(identifiers[0], identifiers[1]);
+  assert.deepEqual(policies, original);
 }
 
 async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
@@ -778,6 +813,7 @@ await testInternalArkerProviderSourceProvenance();
 await testSharedForkPolicySecretsAndRegistry();
 await testDaytonaResourceUnits();
 await testInternalArkerProviderPolicyReplacement();
+await testOrderedPolicyControlsSurviveNativeNetworkRestrictions();
 await testInternalArkerProviderRequiresSource();
 await testBlaxelCreateIfNotExistsAndTtl();
 await testBlaxelInitializationFailureDeletesCreatedVm();

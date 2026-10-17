@@ -11039,6 +11039,9 @@
                   "$ref": "#/components/schemas/LifecycleRule"
                 },
                 {
+                  "$ref": "#/components/schemas/OutboundGuardRule"
+                },
+                {
                   "type": "null"
                 }
               ]
@@ -11064,7 +11067,7 @@
             "items": {
               "$ref": "#/components/schemas/PolicyEntry"
             },
-            "description": "Deprecated: an ordered rule list that replaces the whole policy, first match wins. An empty list clears it. Use `rules`. Cannot be combined with `rules`."
+            "description": "Deprecated: an ordered rule list that replaces the whole policy, first match wins. An empty list clears it. Use `rules`. Only outbound guards may accompany this replacement in `rules`; their ids must not collide with the generated `rule-0`, `rule-1`, ... ids."
           }
         }
       },
@@ -11102,6 +11105,61 @@
           }
         }
       },
+      "OutboundGuardScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A connection-layer permission scope. Present fields AND together; values within a field OR together. Hosts and IPs are mutually exclusive. No fields means any destination and port. Named-destination scopes permit DNS through Arker's guest resolvers, but another independent IP-only guard must also admit that resolver.",
+        "properties": {
+          "hosts": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" },
+            "description": "Label-boundary suffix match on the request host: `github.com` matches `api.github.com`, not `evilgithub.com`."
+          },
+          "ips": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" },
+            "description": "IPs or CIDRs. Outbound rules match destination IPs; inbound rules match the caller source IP."
+          },
+          "ports": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Single ports and/or inclusive [start, end] ranges, e.g. [80, 443, [1000, 2000]]. Absent = any port; an empty list is refused. Inbound allow rules require one or more individual ports and reject ranges.",
+            "items": {
+              "oneOf": [
+                { "type": "integer", "minimum": 1, "maximum": 65535, "format": "uint16" },
+                {
+                  "type": "array",
+                  "description": "Inclusive [start, end] port range.",
+                  "items": { "type": "integer", "minimum": 1, "maximum": 65535, "format": "uint16" },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              ]
+            }
+          }
+        }
+      },
+      "OutboundGuardRule": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "allow"],
+        "description": "An independent outbound permission floor, not a ranked allow rule. A connection must match at least one scope in each guard AND be admitted by the ordinary outbound policy. An empty allow list denies all outbound traffic. Guards preserve inbound, lifecycle and secret-rewrite rules, and apply again to the final proxy destination after host rewriting. With no ranked network rules, the base is open and the guards alone constrain it. At most 64 guards and 65,536 projected scopes are supported; excessive intersection work fails closed.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["outbound_guard"],
+            "description": "Fixed rule family for an independent outbound permission floor."
+          },
+          "allow": {
+            "type": "array",
+            "maxItems": 256,
+            "description": "Alternative permitted scopes within this floor. An empty list denies all outbound traffic; every independent floor must admit a flow.",
+            "items": { "$ref": "#/components/schemas/OutboundGuardScope" }
+          }
+        }
+      },
       "PolicyRules": {
         "type": "object",
         "propertyNames": {
@@ -11117,10 +11175,13 @@
             },
             {
               "$ref": "#/components/schemas/LifecycleRule"
+            },
+            {
+              "$ref": "#/components/schemas/OutboundGuardRule"
             }
           ]
         },
-        "description": "The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With rules, unmatched outbound traffic is denied. If no inbound rules are present, inbound access keeps the authenticated default; explicit inbound allow rules restrict exposure to their listed ports."
+        "description": "The VM's policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Ranked network rules are evaluated highest priority first; the first match decides, and unmatched outbound traffic is denied. With no ranked network rules, the outbound base is open. Every outbound_guard independently constrains that base or ranked decision; no allow or rewrite bypasses a guard. Schedule rules do not change network permissions. With no inbound rules, inbound access keeps the authenticated default; explicit inbound allows restrict exposure to their listed ports."
       },
       "SshKeyInput": {
         "type": "object",

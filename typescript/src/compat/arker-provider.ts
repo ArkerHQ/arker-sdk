@@ -70,22 +70,16 @@ function networkPolicies(values: Record<string, unknown>): ForkOptions["policies
     throw new ArkerError("bad_request", "block-all network policy cannot be combined with outbound allowlists", 400);
   }
   if (!blockAll && domains.length === 0 && cidrs.length === 0) return undefined;
-  const policies: Array<Record<string, unknown>> = [];
+  const allow: Array<Record<string, unknown>> = [];
   if (domains.length > 0) {
     const modalDomainPolicy = values.outboundDomainAllowlist !== undefined;
-    policies.push({
-      type: "outbound",
-      match: { hosts: domains, ...(modalDomainPolicy ? { ports: [443] } : {}) },
-      action: "allow",
-    });
+    allow.push({ hosts: domains, ...(modalDomainPolicy ? { ports: [443] } : {}) });
   }
   if (cidrs.length > 0) {
-    policies.push({ type: "outbound", match: { ips: cidrs }, action: "allow" });
+    allow.push({ ips: cidrs });
   }
-  policies.push({ type: "outbound", action: "deny" });
-  // Fork policy updates normally merge with the source VM. The ordered form
-  // replaces inherited rules so provider allowlists cannot be bypassed.
-  return { policies } as ForkOptions["policies"];
+  // Unique floor ids preserve every inherited restriction across later forks.
+  return { rules: { [`computesdk-egress-${randomUUID()}`]: { type: "outbound_guard", allow } } } as ForkOptions["policies"];
 }
 
 function toFileEntries(stdout: string): FileEntry[] {
@@ -377,8 +371,10 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
             ? { source_vm_id: sourceVmId }
             : { source_vm_name: sourceVmName! };
         const network = networkPolicies(values);
-        const policies = config.policies || network ? { ...config.policies, ...network } : undefined;
-        if (network && policies) delete policies.rules;
+        const policies = config.policies || network ? {
+          ...config.policies,
+          ...(network ? { rules: { ...config.policies?.rules, ...network.rules } } : {}),
+        } : undefined;
         const request: ForkOptions = {
           ...sourceRequest,
           ...(options?.name ? { name: options.name } : {}),

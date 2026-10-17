@@ -2,6 +2,24 @@
 
 ## Current validation
 
+The outbound-guard checkpoint replaces destructive native-network translation
+with independent egress permission floors in both languages. Configured keyed
+rules are merged, ordered replacements retain their replacement semantics,
+and policy secrets are preserved. New regressions reproduced rule loss before
+the fix and now pass for both configured policy forms. This requires the
+matching backend guard API; it is not yet deployed or live-certified.
+
+Python unit profiles pass **460 vendor tests / 451 lean tests** (nine optional
+vendor skips). TypeScript typecheck, unit/build and isolated packed consumers
+pass; packed SHA-256:
+`c1ba328eaeb2c5e1cac7c05ec486bc088a617b8ffb6d50621f5fe0b5393ffe60`.
+An additional ordered-policy preservation assertion and TypeScript typecheck
+also pass. Previous live fingerprints below predate these source changes and
+must not be presented as current-source evidence. Strict API parity remains
+unestablished, not green.
+
+## Previous Blaxel fetch checkpoint
+
 The `3272a84` checkpoint fixes Blaxel fetch transport selection: regionless
 creation uses Fetch semantics, while H2 eligibility is captured at creation
 and still honors a later disable flag. A local regression failed before the

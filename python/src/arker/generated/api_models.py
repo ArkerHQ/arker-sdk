@@ -1375,6 +1375,19 @@ class Auth:
 
 
 @dataclass(frozen=True)
+class OutboundGuardScope:
+    hosts: list[str] | None = None
+    ips: list[str] | None = None
+    ports: list[int | list[Port]] | None = None
+
+
+@dataclass(frozen=True)
+class OutboundGuardRule:
+    type: Literal['outbound_guard']
+    allow: list[OutboundGuardScope]
+
+
+@dataclass(frozen=True)
 class SshKeyInput:
     public_key: str
     name: str | None = None
@@ -2146,12 +2159,17 @@ class SyncCommitWriteResult:
 
 @dataclass(frozen=True)
 class PolicyUpdate:
-    rules: dict[str, PolicyRule | ScheduleRule | LifecycleRule | None] | None = None
+    rules: (
+        dict[str, PolicyRule | ScheduleRule | LifecycleRule | OutboundGuardRule | None]
+        | None
+    ) = None
     secrets: dict[str, str | None] | None = None
     policies: list[PolicyEntry] | None = None
 
 
-PolicyRules: TypeAlias = dict[str, PolicyRule | ScheduleRule | LifecycleRule]
+PolicyRules: TypeAlias = dict[
+    str, PolicyRule | ScheduleRule | LifecycleRule | OutboundGuardRule
+]
 
 
 @dataclass(frozen=True)

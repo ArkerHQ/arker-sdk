@@ -12,7 +12,7 @@ import httpx2 as httpx
 import pytest
 
 import arker.computer as sdk
-from arker._compat import arker_create, arker_source
+from arker._compat import arker_create, arker_source, compat_network_policies
 from arker.blaxel import SyncSandboxInstance as BlaxelSandbox
 from arker.daytona import Daytona
 from arker.e2b import Sandbox as E2BSandbox
@@ -174,6 +174,36 @@ def test_shared_fork_preserves_legacy_named_source_environment(monkeypatch):
     assert json.loads(t.calls[0]["body"])["source_vm_name"] == "legacy-source-name"
 
 
+@pytest.mark.parametrize("ordered", [False, True])
+def test_native_network_floor_preserves_configured_policy_controls(monkeypatch, ordered):
+    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
+    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+    base = [{"type": "inbound", "action": "deny"}]
+    controls = {"policies": base} if ordered else {"rules": {"private-ingress": base[0]}}
+    controls["secrets"] = {"TOKEN": "synthetic-only"}
+    original = json.loads(json.dumps(controls))
+    t = FakeTransport()
+    for vm_id in ("vm_one", "vm_two"):
+        t.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, vm_payload(vm_id))
+    with use_transport(t):
+        for _ in range(2):
+            arker_create({"policies": controls}, policies=compat_network_policies(block_all=True))
+    guard_ids = []
+    for call in t.calls:
+        written = json.loads(call["body"])["policies"]
+        assert written["secrets"] == controls["secrets"]
+        if ordered:
+            assert written["policies"] == base
+        else:
+            assert written["rules"]["private-ingress"] == base[0]
+        guards = {key: value for key, value in written["rules"].items() if value["type"] == "outbound_guard"}
+        assert len(guards) == 1
+        assert next(iter(guards.values())) == {"type": "outbound_guard", "allow": []}
+        guard_ids.append(next(iter(guards)))
+    assert guard_ids[0] != guard_ids[1]
+    assert controls == original
+
+
 @pytest.mark.parametrize(
     "create",
     [
@@ -192,10 +222,11 @@ def test_provider_block_network_options_translate_to_arker_policy(monkeypatch, c
         create()
 
     body = json.loads(t.calls[0]["body"])
-    assert body["policies"] == {"policies": [{"type": "outbound", "action": "deny"}]}
+    assert len(body["policies"]["rules"]) == 1
+    assert next(iter(body["policies"]["rules"].values())) == {"type": "outbound_guard", "allow": []}
 
 
-def test_allowlist_policies_replace_inherited_rules_and_preserve_order(monkeypatch) -> None:
+def test_allowlist_policies_intersect_inherited_rules(monkeypatch) -> None:
     monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
     monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
     t = FakeTransport()
@@ -208,20 +239,13 @@ def test_allowlist_policies_replace_inherited_rules_and_preserve_order(monkeypat
         )
 
     body = json.loads(t.calls[0]["body"])
-    assert body["policies"] == {
-        "policies": [
-            {
-                "type": "outbound",
-                "match": {"hosts": ["api.example.com"], "ports": [443]},
-                "action": "allow",
-            },
-            {
-                "type": "outbound",
-                "match": {"ips": ["203.0.113.0/24"]},
-                "action": "allow",
-            },
-            {"type": "outbound", "action": "deny"},
-        ]
+    assert len(body["policies"]["rules"]) == 1
+    assert next(iter(body["policies"]["rules"].values())) == {
+        "type": "outbound_guard",
+        "allow": [
+            {"hosts": ["api.example.com"], "ports": [443]},
+            {"ips": ["203.0.113.0/24"]},
+        ],
     }
 
 

@@ -6,6 +6,7 @@ import os
 import queue
 import shlex
 import threading
+import uuid
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -109,7 +110,10 @@ def arker_create(
     if policies is not None:
         if "policies" in policies:
             fork_policies.pop("rules", None)
+        rules = {**fork_policies.get("rules", {}), **policies.get("rules", {})}
         fork_policies.update(policies)
+        if rules:
+            fork_policies["rules"] = rules
     if fork_policies:
         request["policies"] = fork_policies
     return arker_client(config).fork(**request)
@@ -133,30 +137,17 @@ def compat_network_policies(
         raise ValueError("block-all network policy cannot be combined with outbound allowlists")
     if not block_all and not domain_values and not cidr_values:
         return None
-    policies: list[dict[str, Any]] = []
+    allow: list[dict[str, Any]] = []
     if domain_values:
         match: dict[str, Any] = {"hosts": domain_values}
         if domain_ports:
             match["ports"] = domain_ports
-        policies.append(
-            {
-                "type": "outbound",
-                "match": match,
-                "action": "allow",
-            }
-        )
+        allow.append(match)
     if cidr_values:
-        policies.append(
-            {
-                "type": "outbound",
-                "match": {"ips": cidr_values},
-                "action": "allow",
-            }
-        )
-    policies.append({"type": "outbound", "action": "deny"})
-    # The ordered form replaces the source VM's inherited policy. A keyed
-    # update would merge and could let an inherited rule override the shim.
-    return {"policies": policies}
+        allow.append({"ips": cidr_values})
+    # Independent floors intersect inherited permissions without discarding
+    # inbound, lifecycle, or credential-injection rules.
+    return {"rules": {f"computesdk-egress-{uuid.uuid4().hex}": {"type": "outbound_guard", "allow": allow}}}
 
 
 def arker_get(vm_id: str, config: dict[str, Any] | None = None) -> VM | None:
