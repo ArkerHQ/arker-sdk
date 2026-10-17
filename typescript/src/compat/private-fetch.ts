@@ -115,6 +115,36 @@ function bodyLength(body: BodyInit | null | undefined): number | undefined {
   return undefined;
 }
 
+export function abortAwareBody(
+  source: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        try {
+          signal.throwIfAborted();
+          const result = await reader.read();
+          signal.throwIfAborted();
+          if (result.done) controller.close();
+          else controller.enqueue(result.value);
+        } catch (error) {
+          controller.error(signal.aborted ? signal.reason : error);
+        }
+      },
+      async cancel(reason) {
+        try {
+          await reader.cancel(reason);
+        } catch (error) {
+          throw signal.aborted ? signal.reason : error;
+        }
+      },
+    },
+    { highWaterMark: 0 },
+  );
+}
+
 async function exchange(
   vm: Connector,
   port: number,
@@ -174,7 +204,10 @@ async function exchange(
           try {
             const body = noBody
               ? null
-              : (Readable.toWeb(message) as ReadableStream<Uint8Array>);
+              : abortAwareBody(
+                  Readable.toWeb(message) as ReadableStream<Uint8Array>,
+                  request.signal,
+                );
             const response =
               mode === "blaxel-h2"
                 ? new Response(body, { status, headers: responseHeaders })

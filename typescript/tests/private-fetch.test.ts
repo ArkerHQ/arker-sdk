@@ -3,7 +3,31 @@ import { createServer } from "node:http";
 import { connect } from "node:net";
 import { once } from "node:events";
 import { test } from "node:test";
-import { privateFetch } from "../src/compat/private-fetch.js";
+import { abortAwareBody, privateFetch } from "../src/compat/private-fetch.js";
+
+test("aborted HTTP bodies preserve the abort reason across relay reset races", async () => {
+  for (const aborted of [false, true]) {
+    const controller = new AbortController();
+    let fail!: (reason: Error) => void;
+    const source = new ReadableStream<Uint8Array>({
+      start(stream) {
+        fail = (reason) => stream.error(reason);
+      },
+    });
+    const body = abortAwareBody(source, controller.signal);
+    const reader = body.getReader();
+    const pending = reader.read();
+    await Promise.resolve();
+    if (aborted) controller.abort();
+    const reset = Object.assign(new Error("aborted"), { code: "ECONNRESET" });
+    fail(reset);
+    await assert.rejects(pending, aborted ? { name: "AbortError" } : reset);
+    await assert.rejects(
+      reader.cancel(),
+      aborted ? { name: "AbortError" } : reset,
+    );
+  }
+});
 
 test("private HTTP preserves binary bodies, credentials, errors and streaming cleanup", async () => {
   const sockets = new Set<any>();
@@ -139,6 +163,16 @@ test("private HTTP preserves binary bodies, credentials, errors and streaming cl
     assert.equal(h2Redirect.redirected, false);
     await h2Redirect.body!.cancel();
     const abort = new AbortController();
+    // A relay can report socket closure before the request's abort listener runs.
+    abort.signal.addEventListener(
+      "abort",
+      () => {
+        streams
+          .at(-1)
+          .destroy(Object.assign(new Error("aborted"), { code: "ECONNRESET" }));
+      },
+      { once: true },
+    );
     const waiting = await privateFetch(vm, 8080, "/quiet", {
       signal: abort.signal,
     });

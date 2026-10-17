@@ -1,6 +1,7 @@
 """Isolated HTTP origin shared by both languages' live compatibility scenarios."""
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -25,6 +26,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        if self.path.startswith("/cookies/"):
+            body = self.headers.get("Cookie", "").encode()
+            self.send_response(200)
+            if self.path == "/cookies/set":
+                self.send_header("Set-Cookie", "compat-session=kept; Secure; HttpOnly")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path in ("/redirect", "/root-redirect"):
             self.send_response(302)
             self.send_header("Location", "chunked" if self.path == "/redirect" else "/chunked")
@@ -47,5 +57,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 server = ThreadingHTTPServer(("0.0.0.0", 18082), Handler)
+second = ThreadingHTTPServer(("0.0.0.0", 18083), Handler)
+Thread(target=second.serve_forever, daemon=True).start()
 print("fetch-service-ready", flush=True)
 server.serve_forever()

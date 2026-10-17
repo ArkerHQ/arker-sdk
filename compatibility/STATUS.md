@@ -15,16 +15,25 @@ twelve Python cases. Node passed the three files/process routes and six HTTP
 cases: original Blaxel, shim on Blaxel, and shim on Arker, with both H2 and
 explicitly disabled-H2 profiles. HTTP coverage includes every byte value,
 both application auth headers, repeated-header normalization, chunked and HEAD
-responses, manual redirects, streaming abort, and cleanup. Arker's HTTP cases
+responses, manual redirects, streaming abort, and cleanup. Python additionally
+preserves the native async client's cookies, 300-second default request timeout
+and 10-second connect timeout. Default cookie paths isolate different service
+ports; idle connections do not retain VM activity leases. Arker's HTTP cases
 run with inbound and outbound denied. They require the draft backend private
 port API, not a public ingress exception. Fresh feature tests passed all 58
 private-port/HTTPS/HTTP2/WebSocket cases with zero skips.
 
-Local validation passes 357 Python unit tests and lint, and the full TypeScript
+Local validation passes 358 Python unit tests and lint, and the full TypeScript
 test/build/typecheck pipeline. Source/vendor snapshots now reject changes during
 a scenario; runtime profiles are included in fingerprints. Existing evidence
 grouping tests also reject collisions and malformed events. These measurement
 tests do not grant vendor parity credit.
+
+A fresh Node HTTP rerun exposed a reset/abort race after an earlier passing
+cohort: the body could expose ECONNRESET instead of AbortError. A deterministic
+regression fails without preserving the caller's abort reason and passes with
+the fix on Node and Bun. All nine Node live programs passed again afterward.
+This is bounded evidence, not proof that every cancellation interleaving works.
 
 Older guest agents still require validation of the separate framed relay helper
 under development in arker-app #4260. A retained old-release VM reproduced a

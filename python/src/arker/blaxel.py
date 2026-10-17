@@ -225,11 +225,24 @@ class FileSystem:
 class _AsyncNetwork:
     def __init__(self, vm: VM):
         self._vm = vm
+        self._client = None
+
+    def get_client(self):
+        from ._compat_network import async_client
+
+        if self._client is None:
+            self._client = async_client(self._vm)
+        return self._client
+
+    async def aclose(self):
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     async def fetch(self, port: int, path: str = "/", method: str = "GET", **kwargs):
-        from ._compat_network import afetch
+        from ._compat_network import request_path
 
-        return await afetch(self._vm, port, path, method=method, **kwargs)
+        return await self.get_client().request(method, request_path(port, path), **kwargs)
 
 
 class _Network:
@@ -478,7 +491,11 @@ class SandboxInstance:
         if isinstance(self, str):
             await asyncio.to_thread(SyncSandboxInstance.delete, self)
             return
-        await asyncio.to_thread(self._sandbox.delete)
+        try:
+            if self._native is None:
+                await self.network.aclose()
+        finally:
+            await asyncio.to_thread(self._sandbox.delete)
 
     def __getattr__(self, name: str) -> Any:
         if self._native is not None:

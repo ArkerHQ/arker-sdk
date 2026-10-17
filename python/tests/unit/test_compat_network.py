@@ -31,9 +31,18 @@ def service():
             self.wfile.write(body)
 
         def do_GET(self):
+            if self.path.startswith("/cookies/"):
+                body = self.headers.get("Cookie", "").encode()
+                self.send_response(200)
+                if self.path == "/cookies/set":
+                    self.send_header("Set-Cookie", "compat-session=kept; Secure; HttpOnly")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if self.path in ("/redirect", "/outside"):
                 self.send_response(302)
-                self.send_header("Location", "/result" if self.path == "/redirect" else "http://example.com/")
+                self.send_header("Location", "result" if self.path == "/redirect" else "http://example.com/")
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
@@ -210,3 +219,18 @@ def test_async_cancellation_before_upgrade_disposes_the_late_connection():
         asyncio.run(run())
     finally:
         proceed.set()
+
+
+def test_async_cookie_state_is_persistent_but_default_cookie_paths_are_port_scoped(service):
+    sync, _ = service
+
+    async def run():
+        box = SandboxInstance(sync)
+        await box.fetch(8080, "/cookies/set")
+        assert (await box.fetch(8080, "/cookies/check")).text == "compat-session=kept"
+        assert (await box.fetch(8081, "/cookies/check")).text == ""
+        assert box.network.get_client().timeout.connect == 10
+        assert box.network.get_client().timeout.read == 300
+        await box.network.aclose()
+
+    asyncio.run(run())

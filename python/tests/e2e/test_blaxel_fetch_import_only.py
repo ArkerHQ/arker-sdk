@@ -40,6 +40,10 @@ try:
     assert chunked.status_code == 418, (chunked.status_code, chunked.url.path)
     assert chunked.content == b"eof\\x00\\xff\\x01"
     assert len(chunked.history) == 1
+    sandbox.network.fetch(18082, "/cookies/set")
+    cookie = sandbox.network.fetch(18082, "/cookies/check")
+    assert cookie.text == ("compat-session=kept" if asynchronous else "")
+    assert sandbox.network.fetch(18083, "/cookies/check").text == ""
 finally:
     sandbox.delete()
 """
@@ -89,6 +93,7 @@ def test_fetch_import_only(provider, shim, asynchronous, tmp_path, monkeypatch):
             )
 
     namespace = {
+        "asynchronous": asynchronous,
         "sandbox_name": f"arker-fetch-{uuid.uuid4().hex[:12]}",
         "server_source": SERVER,
         "__compat_trace__": trace,

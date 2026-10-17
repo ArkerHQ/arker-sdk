@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import re
 import threading
 from contextlib import contextmanager, suppress
 
@@ -57,12 +59,11 @@ class _PortNetworkStream(httpcore.NetworkStream):
 
 
 class _Backend(httpcore.NetworkBackend):
-    def __init__(self, vm, port):
+    def __init__(self, vm):
         self.vm = vm
-        self.port = port
 
     def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
-        if host != "localhost" or port != self.port:
+        if host != "localhost" or not 1 <= port <= 65535:
             raise httpcore.UnsupportedProtocol("Redirect outside the requested private sandbox service is unsupported")
         return _PortNetworkStream(self.vm.connect_port(port, timeout=timeout if timeout is not None else 300))
 
@@ -80,12 +81,13 @@ class _ResponseStream(httpx.SyncByteStream):
 
 
 class _Transport(httpx.BaseTransport):
-    def __init__(self, vm, port):
-        self.pool = httpcore.ConnectionPool(network_backend=_Backend(vm, port), max_connections=1)
+    def __init__(self, vm):
+        self.origin = _origin(vm)
+        self.pool = httpcore.ConnectionPool(network_backend=_Backend(vm))
 
     def handle_request(self, request):
         with _http_errors():
-            response = self.pool.handle_request(_core_request(request))
+            response = self.pool.handle_request(_core_request(request, self.origin))
         return httpx.Response(
             status_code=response.status,
             headers=response.headers,
@@ -97,14 +99,19 @@ class _Transport(httpx.BaseTransport):
         self.pool.close()
 
 
-def _core_request(request):
+def _core_request(request, origin):
+    if (request.url.scheme, request.url.host, request.url.port) != (origin.scheme, origin.host, origin.port):
+        raise httpcore.UnsupportedProtocol("Redirect outside the requested private sandbox service is unsupported")
+    target = re.fullmatch(rb"/port/([1-9][0-9]{0,4})(/.*)", request.url.raw_path)
+    if target is None or int(target[1]) > 65535:
+        raise httpcore.UnsupportedProtocol("Redirect outside the requested private sandbox service is unsupported")
     return httpcore.Request(
         method=request.method,
         url=httpcore.URL(
-            scheme=request.url.raw_scheme,
-            host=request.url.raw_host,
-            port=request.url.port,
-            target=request.url.raw_path,
+            scheme=b"http",
+            host=b"localhost",
+            port=int(target[1]),
+            target=target[2],
         ),
         headers=request.headers.raw,
         content=request.stream,
@@ -112,17 +119,26 @@ def _core_request(request):
     )
 
 
-def _url(port, path):
+def _origin(vm):
+    hostname = getattr(vm, "hostname", None)
+    if not isinstance(hostname, str) or not hostname:
+        label = hashlib.sha256(vm.id.encode()).hexdigest()[:32]
+        hostname = f"{label}.private.arker.invalid"
+    scheme = "http" if str(getattr(vm, "base_url", "")).startswith("http://") else "https"
+    return httpx.URL(f"{scheme}://{hostname}")
+
+
+def request_path(port, path):
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise ValueError("port must be an integer from 1 through 65535")
     normalized = path if path.startswith("/") else f"/{path}"
-    return f"http://localhost:{port}{normalized}"
+    return f"/port/{port}{normalized}"
 
 
 def fetch(vm, port: int, path: str = "/", method: str = "GET", **kwargs):
-    url = _url(port, path)
-    with httpx.Client(transport=_Transport(vm, port), trust_env=False) as client:
-        return client.request(method, url, **kwargs)
+    path = request_path(port, path)
+    with httpx.Client(base_url=_origin(vm), transport=_Transport(vm), trust_env=False) as client:
+        return client.request(method, path, **kwargs)
 
 
 class _AsyncPortNetworkStream(httpcore.AsyncNetworkStream):
@@ -150,8 +166,8 @@ class _AsyncPortNetworkStream(httpcore.AsyncNetworkStream):
 
 
 class _AsyncBackend(httpcore.AsyncNetworkBackend):
-    def __init__(self, vm, port):
-        self.sync = _Backend(vm, port)
+    def __init__(self, vm):
+        self.sync = _Backend(vm)
 
     async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
         cancelled = threading.Event()
@@ -167,6 +183,7 @@ class _AsyncBackend(httpcore.AsyncNetworkBackend):
             return _AsyncPortNetworkStream(await asyncio.shield(pending))
         except asyncio.CancelledError:
             cancelled.set()
+
             # A websocket handshake already in a worker thread cannot be cancelled.
             # Dispose its result even when cancellation precedes the upgrade.
             def dispose(task):
@@ -191,12 +208,18 @@ class _AsyncResponseStream(httpx.AsyncByteStream):
 
 
 class _AsyncTransport(httpx.AsyncBaseTransport):
-    def __init__(self, vm, port):
-        self.pool = httpcore.AsyncConnectionPool(network_backend=_AsyncBackend(vm, port), max_connections=1)
+    def __init__(self, vm):
+        self.origin = _origin(vm)
+        # Keep cookies/auth on the client, but never retain idle VM activity leases.
+        self.pool = httpcore.AsyncConnectionPool(
+            network_backend=_AsyncBackend(vm),
+            max_connections=100,
+            max_keepalive_connections=0,
+        )
 
     async def handle_async_request(self, request):
         with _http_errors():
-            response = await self.pool.handle_async_request(_core_request(request))
+            response = await self.pool.handle_async_request(_core_request(request, self.origin))
         return httpx.Response(
             status_code=response.status,
             headers=response.headers,
@@ -208,7 +231,10 @@ class _AsyncTransport(httpx.AsyncBaseTransport):
         await self.pool.aclose()
 
 
-async def afetch(vm, port: int, path: str = "/", method: str = "GET", **kwargs):
-    url = _url(port, path)
-    async with httpx.AsyncClient(transport=_AsyncTransport(vm, port), trust_env=False) as client:
-        return await client.request(method, url, **kwargs)
+def async_client(vm):
+    return httpx.AsyncClient(
+        base_url=_origin(vm),
+        transport=_AsyncTransport(vm),
+        trust_env=False,
+        timeout=httpx.Timeout(300, connect=10),
+    )
