@@ -32,7 +32,9 @@ async function program(SandboxInstance: typeof Native | typeof Shim): Promise<vo
       command: "printf failure-out; printf failure-err >&2; exit 17", waitForCompletion: true,
     });
     assert.deepEqual([failed.stdout, failed.stderr, failed.exitCode, failed.status], ["failure-out", "failure-err", 17, "failed"]);
-    await sandbox.fs.mkdir("/blaxel/import-only");
+    assert.deepEqual(await sandbox.fs.mkdir("/blaxel/import-only"), {
+      message: "Directory created successfully", path: "/blaxel/import-only",
+    });
     await sandbox.fs.write("/blaxel/import-only/probe.txt", "first");
     await sandbox.fs.write("/blaxel/import-only/probe.txt", "second");
     assert.equal(await sandbox.fs.read("/blaxel/import-only/probe.txt"), "second");

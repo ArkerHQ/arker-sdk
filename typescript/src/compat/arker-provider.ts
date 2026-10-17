@@ -340,9 +340,12 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
           "name", "image", "memory", "memoryMiB", "cpu", "vcpus", "diskMiB", "snapshotId", "templateId",
           "networkPolicy", "networkPolicies", "internetAccess", "autoStopInterval", "allowInternetAccess",
           "networkBlockAll", "blockNetwork", "domainAllowList", "outboundDomainAllowlist", "networkAllowList",
-          "outboundCidrAllowlist",
+          "outboundCidrAllowlist", "createIfNotExist",
         ]);
         const unsupported = Object.keys(values).filter((key) => !supported.has(key) && values[key] !== undefined);
+        if (values.createIfNotExist !== undefined && values.createIfNotExist !== false) {
+          unsupported.push("createIfNotExist");
+        }
         if (unsupported.length > 0) {
           throw new ArkerError(
             "unsupported_operation",

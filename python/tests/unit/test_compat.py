@@ -500,6 +500,20 @@ def test_blaxel_binary_files_preserve_every_byte_and_local_path_semantics(tmp_pa
     assert fs.read_binary("empty") == b""
 
 
+def test_blaxel_mkdir_returns_native_success_on_both_routes(monkeypatch) -> None:
+    from arker._compat import CommandResult
+    from arker.blaxel import FileSystem
+
+    native_response = object()
+    native = types.SimpleNamespace(mkdir=lambda path: native_response)
+    assert FileSystem(native=native).mkdir("relative") is native_response
+    monkeypatch.setattr("arker.blaxel.run_command", lambda *_: CommandResult(stdout="", stderr="", exit_code=0))
+    assert FileSystem(vm=object()).mkdir("relative").to_dict() == {
+        "message": "Directory created successfully",
+        "path": "/blaxel/relative",
+    }
+
+
 def test_blaxel_remove_is_nonrecursive_unless_requested(monkeypatch) -> None:
     from arker._compat import CommandResult
     from arker.blaxel import FileSystem

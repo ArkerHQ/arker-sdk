@@ -25,6 +25,7 @@ export interface BlaxelCreateOptions {
   region?: string;
   ports?: Array<{ target: number; protocol?: string }>;
   labels?: Record<string, string>;
+  network?: NonNullable<NativeBlaxelSandbox["spec"]>["network"];
   safe?: boolean;
   timeout?: number;
 }
@@ -164,7 +165,11 @@ export class SandboxInstance {
         await writeFile(destinationPath, bytes);
         await chmod(destinationPath, mode);
       },
-      mkdir: (path) => box.filesystem.mkdir(this.provider === "arker" ? resolveCompatPath(path, "/blaxel") : path),
+      mkdir: async (path) => {
+        const resolved = resolveCompatPath(path, "/blaxel");
+        await box.filesystem.mkdir(resolved);
+        return { message: "Directory created successfully", path: resolved };
+      },
       ls: async (path) => {
         const entries = await box.filesystem.readdir(this.provider === "arker" ? resolveCompatPath(path, "/blaxel") : path);
         return {
@@ -203,8 +208,9 @@ export class SandboxInstance {
       ...(options.region !== undefined ? { region: options.region } : {}),
       ...(options.ports !== undefined ? { ports: options.ports } : {}),
       ...(options.labels !== undefined ? { labels: options.labels } : {}),
+      ...(options.network !== undefined ? { network: options.network } : {}),
       ...((callOptions.safe ?? options.safe) !== undefined ? { safe: callOptions.safe ?? options.safe } : {}),
-      ...(callOptions.createIfNotExist !== undefined ? { createIfNotExist: callOptions.createIfNotExist } : {}),
+      createIfNotExist: callOptions.createIfNotExist ?? false,
       ...((callOptions.timeout ?? options.timeout) !== undefined
         ? { creationTimeout: callOptions.timeout ?? options.timeout }
         : {}),

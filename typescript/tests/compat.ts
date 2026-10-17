@@ -462,6 +462,7 @@ async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
       region: "us-pdx-1",
       ports: [{ target: 3000, protocol: "HTTP" }],
       labels: { env: "test" },
+      network: { firewall: { rulesets: ["proxy"] }, allowedDomains: ["example.com"], proxy: { routing: [] } },
     });
     assert.deepEqual(fake.createCalls[0], {
       name: "named-box", image: undefined, memory: undefined, timeout: undefined, envs: undefined, runtime: undefined,
@@ -473,8 +474,13 @@ async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
       region: "us-pdx-1",
       ports: [{ target: 3000, protocol: "HTTP" }],
       labels: { env: "test" },
+      network: { firewall: { rulesets: ["proxy"] }, allowedDomains: ["example.com"], proxy: { routing: [] } },
+      createIfNotExist: false,
     });
     await assert.rejects(() => BlaxelSandbox.create({ ttl: "eventually" }), /Invalid Blaxel ttl/);
+    const arker = createArkerComputeProvider({ apiKey: "test", baseUrl: "https://example.invalid" });
+    await assert.rejects(() => arker.sandbox.create({ network: { firewall: { rulesets: ["proxy"] } } } as any), /network/);
+    await assert.rejects(() => arker.sandbox.create({ createIfNotExist: true } as any), /createIfNotExist/);
   } finally {
     fake.cleanup();
   }
@@ -503,6 +509,9 @@ async function testBlaxelBinaryFiles(): Promise<void> {
   try {
     const sandbox = await BlaxelSandbox.create();
     const payload = Uint8Array.from({ length: 256 }, (_, i) => i);
+    assert.deepEqual(await sandbox.fs.mkdir("relative"), {
+      message: "Directory created successfully", path: "/blaxel/relative",
+    });
     await sandbox.fs.writeBinary("binary", payload);
     assert.deepEqual(new Uint8Array(await (await sandbox.fs.readBinary("binary")).arrayBuffer()), payload);
     await sandbox.fs.writeBinary("binary", new Blob([payload]));

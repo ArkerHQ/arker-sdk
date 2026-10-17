@@ -2,10 +2,10 @@
 
 ## Current-main validation
 
-The private-port client work changes implementation fingerprints. Until the
-differential scenarios are rerun on these sources, the previous 38 Python and
-19 TypeScript entries below are historical, not current-source parity credit.
-The new transport has 15 passing Python unit cases and four passing Node test
+Fresh differential runs after the private-port and mkdir changes restore
+38/944 Python and 19/928 TypeScript scenario-verified entries for these sources
+and the draft linked provider profile. Both strict gates exit 1, with 906 and
+909 unverified entries respectively. The new transport has 15 passing Python unit cases and four passing Node test
 groups, including binary framing, independent half-close, refused upgrades,
 malformed frames and cleanup. It requires the draft backend private-port API;
 it has not yet been validated against a feature deployment or integrated into
@@ -25,7 +25,7 @@ their declared bounded scope, and both strict gates return exit code 1.
 Neither the draft integration profile nor historical results certify the
 published packages or complete API equivalence.
 
-Post-merge local validation passes: 308 Python unit tests and lint, plus the full
+Post-merge local validation passes: 324 Python unit tests and lint, plus the full
 TypeScript test/build/typecheck pipeline. New evidence-validator regressions
 first failed in both languages, demonstrating that colon-delimited run/scenario
 keys could combine unrelated runs. Tuple keys now isolate those runs; malformed
@@ -63,6 +63,15 @@ child reaches a terminal state. The idle daemon is not kept active forever.
 After the fix, all nine strengthened live routes passed, including an eight-
 second period with no VM calls before reading the child's completed output.
 The new unit regressions failed before the fix; full local gates pass.
+
+Python discarded the native `mkdir` result even on its native route, and both
+Arker filesystem adapters omitted the structured success response. New unit
+regressions failed in both languages; the strengthened unchanged programs now
+assert the exact response and all nine live routes pass. TypeScript forwards
+Blaxel network configuration to the native adapter and distinguishes strict
+creation from native get-or-create. The draft ComputeSDK adapter honors the
+explicit flag; Arker still rejects atomic reconciliation and network settings
+instead of silently weakening their behavior.
 
 Current Daytona regressions additionally verify GiB-to-MiB conversion only for
 Arker creation, unchanged native resource objects, typed Python creation models,
@@ -125,6 +134,9 @@ instrumented API counts above.
 - Release the ComputeSDK provider fixes before the migration SDK release.
 - Implement Arker-backed Blaxel fetch. Supporting both application auth headers
   simultaneously also needs a non-conflicting platform-authentication channel.
+- Translate and differentially validate Blaxel's current `network` configuration.
+  The pinned SDK includes proxy domain filtering and optional enforced firewall
+  rulesets; absence of translation is a shim gap, not an absent vendor feature.
 - Establish native Daytona allowlist equivalence with an account that permits
   per-sandbox overrides. The supplied workspace rejects them. The current live
   policy matrix passes its other nine supported cases but deliberately exits 1

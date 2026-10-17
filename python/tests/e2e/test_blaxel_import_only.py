@@ -41,7 +41,8 @@ try:
     assert (failed.stdout, failed.stderr, failed.exit_code, failed.status) == (
         "failure-out", "failure-err", 17, "failed",
     )
-    sandbox.fs.mkdir("/blaxel/import-only")
+    made = sandbox.fs.mkdir("/blaxel/import-only")
+    assert made.to_dict() == {"message": "Directory created successfully", "path": "/blaxel/import-only"}
     sandbox.fs.write("/blaxel/import-only/probe.txt", "first")
     sandbox.fs.write("/blaxel/import-only/probe.txt", "second")
     assert sandbox.fs.read("/blaxel/import-only/probe.txt") == "second"

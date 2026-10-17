@@ -170,13 +170,14 @@ class FileSystem:
         destination.chmod(mode)
         return None
 
-    def mkdir(self, path: str) -> None:
+    def mkdir(self, path: str) -> Any:
+        if self._vm is None:
+            return self._native.mkdir(path)
         resolved = resolve_compat_path(path, "/blaxel")
-        result = (
-            self._native.mkdir(path) if self._vm is None else run_command(self._vm, f"mkdir -p {shlex.quote(resolved)}")
-        )
-        if isinstance(result, CommandResult) and result.exit_code != 0:
+        result = run_command(self._vm, f"mkdir -p {shlex.quote(resolved)}")
+        if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"mkdir failed with exit {result.exit_code}")
+        return success({"message": "Directory created successfully", "path": resolved})
 
     def ls(self, path: str) -> Any:
         if self._vm is None:
