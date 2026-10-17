@@ -130,6 +130,12 @@ instrumented API counts above.
 
 ## Open release requirements
 
+- E2B background CommandHandle parity is not established. The TypeScript Arker
+  route rejects background handles explicitly; Python's detached-shell path
+  still returns a command result rather than the native handle and needs
+  replacement. Default cwd checks do not establish user/UID/HOME or shell
+  identity equivalence. Foreground command scenarios do not certify these gaps.
+
 - Translate native Modal app/image handles on Arker. TypeScript now preserves
   them through ComputeSDK on native Modal routes, rather than silently using a
   default image. A live native-versus-shim test passed with Alpine 3.22 and exit
