@@ -272,6 +272,10 @@ export type PolicyWriteRequest = ApiSchema<"PolicyWriteRequest">;
 export type PolicyEntry = ApiSchema<"PolicyEntry">;
 export type PolicyMatch = ApiSchema<"PolicyMatch">;
 export type PolicyAction = ApiSchema<"PolicyAction">;
+export type PolicyRule = ApiSchema<"PolicyRule">;
+export type ScheduleRule = ApiSchema<"ScheduleRule">;
+export type PolicyUpdate = ApiSchema<"PolicyUpdate">;
+export type VmPolicies = ApiSchema<"VmPolicies">;
 export type Rewrite = ApiSchema<"Rewrite">;
 /** A `ports` element: a single port (`80`) or an inclusive `[start, end]`
  * range (`[1000, 2000]`). A `ports` list may mix the two. */
@@ -336,6 +340,15 @@ export type ListPoolsResponse = ApiSchema<"ListPoolsResponse">;
 export type ListPoolWorkersResponse = ApiSchema<"ListPoolWorkersResponse">;
 export type Worker = ApiSchema<"Worker">;
 export type CreatePoolOptions = CreatePoolRequest;
+
+// ── API keys ────────────────────────────────────────────────────────
+export type ApiKey = ApiSchema<"ApiKey">;
+export type ApiKeyScope = ApiSchema<"ApiKeyScope">;
+export type ApiKeyVmScope = ApiSchema<"ApiKeyVmScope">;
+export type ApiKeyPoolScope = ApiSchema<"ApiKeyPoolScope">;
+export type CreatedApiKey = ApiSchema<"CreatedApiKey">;
+export type CreateApiKeyRequest = ApiSchema<"CreateApiKeyRequest">;
+export type ListApiKeysResponse = ApiSchema<"ListApiKeysResponse">;
 
 // ── Mounts ──────────────────────────────────────────────────────────
 export type Mount = ApiSchema<"Mount">;
@@ -899,6 +912,26 @@ export class Arker {
     return this._request("GET", `/v1/pools/${pathSegment(poolId)}/workers`);
   }
 
+  // ── API keys (org-scoped, control plane) ──────────────────────────
+  /**
+   * Create a key with your role. `scopes` is 1 to 16 `{ vm_id }` or one
+   * `{ pool_id }`; omitted or `[]` is the whole organization. The returned
+   * `key` is shown only once.
+   */
+  async createApiKey(request: CreateApiKeyRequest = {}): Promise<CreatedApiKey> {
+    return this._request("POST", "/v1/api-keys", request, this.controlBaseUrl);
+  }
+
+  /** List the organization's unrevoked keys, newest first. A key limited to a pool sees that pool's keys only. */
+  async listApiKeys(): Promise<ListApiKeysResponse> {
+    return this._request("GET", "/v1/api-keys", undefined, this.controlBaseUrl);
+  }
+
+  /** Revoke a key; requests with it are refused from then on. */
+  async revokeApiKey(apiKeyId: string): Promise<void> {
+    await this._request("DELETE", `/v1/api-keys/${pathSegment(apiKeyId)}`, undefined, this.controlBaseUrl);
+  }
+
   /** @internal */
   async _request<T>(
     method: HttpMethod,
@@ -1019,6 +1052,7 @@ export class VM {
   readonly root_source_vm_name?: Vm["root_source_vm_name"];
   readonly worker_id?: string | null;
   readonly sessions?: Vm["sessions"];
+  readonly policies?: Vm["policies"];
 
   constructor(client: Arker, vmId: string, baseUrl = client._baseUrlFor(vmId), data?: Vm) {
     this._client = client;
@@ -1117,9 +1151,9 @@ export class VM {
    * — a Python REPL catches it, prints `KeyboardInterrupt` and keeps running —
    * so it will not free a session held by one.
    *
-   * Requires a live runtime: a VM that has been forked but never run throws
-   * `not_found` ("no running runtime to signal"), since there is no session
-   * whose foreground group could receive it.
+   * A signal is not queued: a VM that is not running throws `invalid_state`
+   * (409, requirement `running`), and a session with nothing running throws
+   * `not_found`.
    *
    * ```ts
    * await vm.signal("SIGKILL");              // default session
@@ -1628,10 +1662,11 @@ export class VM {
    * Accepts either a `PatchVmRequest` or flat resource fields
    * (`{ vcpu, memory_mib, disk_mib, vgpu }`), which are folded into
    * `resources`.
-   * `policies` is a complete replacement for the VM's network policy, the
-   * same document `setPolicies` accepts; an empty doc (`{}` or
-   * `{ policies: [] }`) clears it to allow-all. Omit it to leave the current
-   * policy unchanged.
+   * `policies` changes the VM's network policy: `rules` writes each rule by
+   * id (`null` removes one) and keeps the rules it does not name; `secrets`
+   * works the same way. An ordered `policies` list instead replaces the
+   * whole policy, and `{ policies: [] }` clears it to allow-all. Omit it to
+   * leave the current policy unchanged.
    */
   async update(
     request:

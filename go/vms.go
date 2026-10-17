@@ -162,12 +162,13 @@ type VMInfo struct {
 	MinMemoryMiB        *int                 `json:"min_memory_mib,omitempty"`
 	MaxDiskMiB          *int                 `json:"max_disk_mib,omitempty"`
 	MinDiskMiB          *int                 `json:"min_disk_mib,omitempty"`
-	// State is exactly {"idle","running"} and means "is a command in flight",
-	// not "is the VM awake": a suspended VM also reports "idle".
+	// State is "running" while a run, a terminal, or an inbound request is
+	// using the VM, and "idle" otherwise -- including while it is suspended.
 	State     string       `json:"state,omitempty"`
 	Network   *VMNetwork   `json:"network,omitempty"`
 	Resources *VMResources `json:"resources,omitempty"`
 	Sessions  []Session    `json:"sessions,omitempty"`
+	Policies  *PolicyDoc   `json:"policies,omitempty"`
 }
 
 // VM is a handle to one machine. Info is nil on a bare handle from Client.VM

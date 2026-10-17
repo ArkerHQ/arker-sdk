@@ -17,9 +17,10 @@ const (
 	runPollMaxFailures = 10
 )
 
-// RunRequest executes a command in a VM.
+// RunRequest executes a command in a VM. A request that names nothing --
+// RunRequest{} -- runs no command and resumes any pending runs.
 type RunRequest struct {
-	Command string `json:"command"`
+	Command string `json:"command,omitempty"`
 
 	// SessionIdx is FIND-OR-CREATE, and omitting it means index 0 -- where a
 	// plain run also lands. A run entering a session that holds a live
@@ -153,8 +154,7 @@ type RunRecord struct {
 	VMID        string `json:"vm_id,omitempty"`
 }
 
-// Run executes a command in this VM, restoring it first if it is suspended --
-// there is no wake endpoint and none is needed, a no-op run IS a wake.
+// Run executes a command in this VM.
 //
 // Synchronous by default. If the run outlives the server's sync window the API
 // returns a background ack, and Run then polls GetRun until the run is terminal

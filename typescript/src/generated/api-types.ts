@@ -586,7 +586,7 @@ export interface paths {
         get?: never;
         /**
          * Join a pool or heartbeat
-         * @description Join the pool, or keep the worker in it. The first worker of a `self_hosted` pool sets its platform; the heartbeat's `platform` must be the pool's and its `kind` one the pool takes; a retired worker id is refused. Authenticate with an API key of this pool with action `join`. A worker id the pool has not seen gets 429 `quota_exceeded` while the pool has as many workers as its `pool_workers` quota allows; it joins once another leaves.
+         * @description Join the pool, or keep the worker in it. The first worker of a `self_hosted` pool sets its platform; the heartbeat's `platform` must be the pool's and its `kind` one the pool takes; a retired worker id is refused. Authenticate with an API key limited to this pool. A worker id the pool has not seen gets 429 `quota_exceeded` while the pool has as many workers as its `pool_workers` quota allows; it joins once another leaves.
          */
         put: operations["heartbeatWorker"];
         post?: never;
@@ -610,7 +610,7 @@ export interface paths {
         };
         /**
          * Open the worker tunnel
-         * @description Upgrade to a WebSocket with subprotocol `worker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API; a fork names the VM id to use in header `x-vm-id`. Requires the worker to have joined. Authenticate with an API key of this pool with action `join`.
+         * @description Upgrade to a WebSocket with subprotocol `worker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API; a fork names the VM id to use in header `x-vm-id`. Requires the worker to have joined. Authenticate with an API key limited to this pool.
          */
         get: operations["openWorkerTunnel"];
         put?: never;
@@ -638,13 +638,13 @@ export interface paths {
         get?: never;
         /**
          * Record a worker's VM
-         * @description Record the VM as it is now; send it again on every change. Arker lists the VM from this record. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with an API key of this pool with action `join`.
+         * @description Record the VM as it is now; send it again on every change. Arker lists the VM from this record. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with an API key limited to this pool.
          */
         put: operations["putWorkerVm"];
         post?: never;
         /**
          * Forget a worker's VM
-         * @description Record that the VM is gone. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with an API key of this pool with action `join`.
+         * @description Record that the VM is gone. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with an API key limited to this pool.
          */
         delete: operations["deleteWorkerVm"];
         options?: never;
@@ -671,7 +671,7 @@ export interface paths {
         get?: never;
         /**
          * Record a run
-         * @description Record a run when it starts and again when it ends. Arker answers `listRuns` and `getRun` for the VM from these records. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with an API key of this pool with action `join`.
+         * @description Record a run when it starts and again when it ends. Arker answers `listRuns` and `getRun` for the VM from these records. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with an API key limited to this pool.
          */
         put: operations["putWorkerRun"];
         post?: never;
@@ -690,13 +690,13 @@ export interface paths {
         };
         /**
          * List API keys
-         * @description List the organization's unrevoked API keys, newest first. A key limited to a pool manages that pool's keys only; a key limited to a VM or to an action manages none.
+         * @description List the organization's unrevoked API keys, newest first.
          */
         get: operations["listApiKeys"];
         put?: never;
         /**
          * Create an API key
-         * @description Create an API key, optionally limited to one VM or one pool and to one action. The key is returned only once. A key limited to a pool manages that pool's keys only; a key limited to a VM or to an action manages none.
+         * @description Create an API key for the whole organization (the default), for VMs, or for one pool. The key has its creator's role and is returned only once.
          */
         post: operations["createApiKey"];
         delete?: never;
@@ -720,7 +720,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke an API key
-         * @description Revoke an API key; requests with it are refused from then on. Viewers cannot revoke keys. A key limited to a pool manages that pool's keys only; a key limited to a VM or to an action manages none.
+         * @description Revoke an API key; requests with it are refused from then on. Viewers cannot revoke keys.
          */
         delete: operations["revokeApiKey"];
         options?: never;
@@ -776,7 +776,7 @@ export interface components {
             error: components["schemas"]["ErrorBody"];
         };
         /**
-         * @description `running` while the VM is billed for compute. `idle` while it is not.
+         * @description `running` while a run, a terminal, or an inbound request is using the VM. `idle` otherwise.
          * @enum {string}
          */
         VmState: "idle" | "running";
@@ -860,7 +860,7 @@ export interface components {
             /** @description Substrings that must appear in the request body. */
             body_contains?: string[];
             /**
-             * @description `inbound` only. The VM's state (`VmState`) when the request arrives: `idle` or `running`.
+             * @description `inbound` only. The VM's state (`VmState`) when the request arrives: `idle` or `running`. A request a `deny` rule refuses because of `vm_state` receives `409 invalid_state` (requirement `running`); other refused requests receive `403`.
              * @enum {string}
              */
             vm_state?: "idle" | "running";
@@ -1189,7 +1189,7 @@ export interface components {
              */
             end_symbol?: string | null;
             /**
-             * @description Deliver a signal to the selected persistent session's foreground process group: the run holding the session or, with no run in flight, an interpreter waiting between turns or an attached terminal's foreground job. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. When nothing is running in the session, the request fails with 404 and nothing is signalled. A run made only of shell builtins starts no process of its own, so it may have nothing to signal; the request then fails with 404 as well. Use `session_id` or `session_idx` to select the session. A signal is not a run, is not queued, and will resume a VM if needed.
+             * @description Deliver a signal to the selected persistent session's foreground process group: the run holding the session or, with no run in flight, an interpreter waiting between turns or an attached terminal's foreground job. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. When nothing is running in the session, the request fails with 404 and nothing is signalled. A run made only of shell builtins starts no process of its own, so it may have nothing to signal; the request then fails with 404 as well. Use `session_id` or `session_idx` to select the session. A signal is not a run and is not queued; a VM that is not running answers `409 invalid_state`.
              * @enum {string|null}
              */
             signal?: "SIGINT" | "SIGTERM" | "SIGKILL" | "SIGHUP" | null;
@@ -1417,18 +1417,18 @@ export interface components {
             /** @description Region containing the resource or activity. */
             region?: string | null;
             /**
-             * @description Mount status. Creating a mount returns `attaching`; poll this resource for the outcome.
+             * @description Mount state. Creating a mount returns `attaching`; poll this resource for the outcome.
              *
              *     `attaching` — the mount is pending. A stopped VM remains in this state until it resumes.
              *
              *     `mounted` — the filesystem is available in the VM.
              *
-             *     `failed` — the VM cannot mount the filesystem. `status_detail` explains the cause. Transient errors remain in `attaching` while the service retries them.
+             *     `failed` — the VM cannot mount the filesystem. `state_detail` explains the cause. Transient errors remain in `attaching` while the service retries them.
              * @enum {string|null}
              */
-            status?: "attaching" | "mounted" | "failed" | null;
-            /** @description Why the mount will not converge. Present only when `status` is `failed`. */
-            status_detail?: string | null;
+            state?: "attaching" | "mounted" | "failed" | null;
+            /** @description Why the mount will not converge. Present only when `state` is `failed`. */
+            state_detail?: string | null;
         };
         ListMountsResponse: {
             /** @description Filesystem mounts matching the request. */
@@ -3106,7 +3106,7 @@ export interface components {
             isolation: components["schemas"]["PoolIsolation"][];
             byoc: components["schemas"]["PoolByoc"];
         };
-        /** @description A pool of BLAST workers you run. Workers join with an API key of the pool with action `join`. */
+        /** @description A pool of BLAST workers you run. Workers join with an API key limited to the pool. */
         SelfHostedPool: {
             /**
              * Format: uuid
@@ -3206,12 +3206,12 @@ export interface components {
          * @description `bootstrapping` is still starting and takes no VMs yet; `active` takes new VMs; `draining` keeps its VMs but takes no new ones; `left` has handed back its VMs and left the pool for good, and its id cannot rejoin. A worker that stops without leaving keeps its id and rejoins as `active`.
          * @enum {string}
          */
-        WorkerState: "bootstrapping" | "active" | "draining" | "left";
+        WorkerHeartbeatState: "bootstrapping" | "active" | "draining" | "left";
         /**
          * @description `bootstrapping` is starting and takes no VMs yet; `running` takes new VMs; `draining` keeps its VMs but takes no new ones; `unreachable` has missed its heartbeats or lost its tunnel, and its VMs answer `unavailable` until it returns; `left` has left the pool for good.
          * @enum {string}
          */
-        WorkerStatus: "bootstrapping" | "running" | "draining" | "unreachable" | "left";
+        WorkerState: "bootstrapping" | "running" | "draining" | "unreachable" | "left";
         WorkerResources: {
             /** @description vCPUs. */
             vcpu: number;
@@ -3225,7 +3225,7 @@ export interface components {
         Worker: {
             /** @description Worker identifier. */
             worker_id: string;
-            status: components["schemas"]["WorkerStatus"];
+            state: components["schemas"]["WorkerState"];
             /** @description Resources of the worker's active VMs. */
             resources_provisioned: components["schemas"]["PoolResources"];
             /** @description Resources the worker contributes to the pool. */
@@ -3247,7 +3247,7 @@ export interface components {
             version: string;
             /** @description The platform the worker serves; a BLAST worker's `blast-<arch>` is `smolvm-<arch>`. The first worker of a `self_hosted` pool sets the pool's platform; every other must match it. */
             platform: components["schemas"]["PoolPlatform"];
-            state: components["schemas"]["WorkerState"];
+            state: components["schemas"]["WorkerHeartbeatState"];
             /** @description Capacity the worker contributes. */
             resources: components["schemas"]["WorkerResources"];
             /** @description Capacity the worker has free. */
@@ -3258,6 +3258,20 @@ export interface components {
             };
             /** @description For a `byoc` pool's arkerd worker: the goldens it cannot serve current. Absent while it serves each of its goldens from a generation baked for it. */
             goldens?: components["schemas"]["WorkerGoldens"];
+            /** @description For a `byoc` pool's arkerd worker: its VMs forked often enough to prewarm on the pool's other workers, by VM id. Arker ignores a VM that is not in the worker's pool. */
+            vm_activity?: {
+                [key: string]: components["schemas"]["WorkerVmActivity"];
+            };
+            /** @description For a `byoc` pool's arkerd worker: the records it holds, so Arker does not ask it to prewarm one again. */
+            cached_record_ids?: string[];
+        };
+        /** @description One VM's recent activity on the worker that reports it. */
+        WorkerVmActivity: {
+            /**
+             * Format: uint32
+             * @description Forks of the VM within the activity window.
+             */
+            forks: number;
         };
         /** @description The goldens a worker cannot serve current, by name. */
         WorkerGoldens: {
@@ -3297,7 +3311,7 @@ export interface components {
             /** @description Send the next heartbeat after this long. */
             heartbeat_interval_ms: number;
             /** @description The state Arker wants the worker in. `left` once the pool is deleting. */
-            desired_state: components["schemas"]["WorkerState"];
+            desired_state: components["schemas"]["WorkerHeartbeatState"];
             /** @description WebSocket URL the worker keeps open so Arker can reach it; a path is relative to the endpoint the heartbeat went to. */
             tunnel_url: string;
             storage: components["schemas"]["WorkerStorage"];
@@ -3357,30 +3371,27 @@ export interface components {
             /** @description Standard error. */
             stderr: string | null;
         };
-        /**
-         * @description The organization role the key acts with. `viewer` keys cannot change anything.
-         * @enum {string}
-         */
-        ApiKeyRole: "admin" | "developer" | "member" | "viewer";
-        /**
-         * @description The one action the key allows. `join`: a worker joins the `self_hosted` pool in `pool_id` and serves it.
-         * @enum {string}
-         */
-        ApiKeyAction: "join";
-        /** @description An API key. Without `vm_id` or `pool_id` it acts on the whole organization. */
+        /** @description A VM or a pool an API key is limited to. */
+        ApiKeyScope: components["schemas"]["ApiKeyVmScope"] | components["schemas"]["ApiKeyPoolScope"];
+        /** @description A VM the key acts on. */
+        ApiKeyVmScope: {
+            /** @description The VM. */
+            vm_id: string;
+        };
+        /** @description The pool the key acts on. */
+        ApiKeyPoolScope: {
+            /**
+             * Format: uuid
+             * @description The pool. The key manages the pool, forks into it by default, and lists only its VMs and runs; the workers of a `self_hosted` pool call with it.
+             */
+            pool_id: string;
+        };
+        /** @description An API key. It acts with the role of the user or key that created it, limited by `scopes`. */
         ApiKey: {
             /** @description API key identifier; starts with the `name` given at creation. */
             api_key_id: string;
-            role: components["schemas"]["ApiKeyRole"];
-            /** @description The one VM the key acts on, or null. */
-            vm_id: string | null;
-            /**
-             * Format: uuid
-             * @description The one pool the key acts on: managing it and forking into it, or null.
-             */
-            pool_id: string | null;
-            /** @description The one action the key allows, or null for any its role allows. */
-            action: components["schemas"]["ApiKeyAction"] | null;
+            /** @description What the key is limited to: VMs, or one pool. `[]` is the whole organization. */
+            scopes: components["schemas"]["ApiKeyScope"][];
             /**
              * Format: date-time
              * @description When the key was created.
@@ -3391,16 +3402,8 @@ export interface components {
         CreatedApiKey: {
             /** @description API key identifier; starts with the `name` given at creation. */
             api_key_id: string;
-            role: components["schemas"]["ApiKeyRole"];
-            /** @description The one VM the key acts on, or null. */
-            vm_id: string | null;
-            /**
-             * Format: uuid
-             * @description The one pool the key acts on: managing it and forking into it, or null.
-             */
-            pool_id: string | null;
-            /** @description The one action the key allows, or null for any its role allows. */
-            action: components["schemas"]["ApiKeyAction"] | null;
+            /** @description What the key is limited to: VMs, or one pool. `[]` is the whole organization. */
+            scopes: components["schemas"]["ApiKeyScope"][];
             /**
              * Format: date-time
              * @description When the key was created.
@@ -3409,21 +3412,12 @@ export interface components {
             /** @description The key. Shown only in this response. */
             key: string;
         };
-        /** @description At most one of `vm_id` and `pool_id`. */
+        /** @description A new key has its creator's role. */
         CreateApiKeyRequest: {
             /** @description A label that starts `api_key_id`: lowercased, other characters than `a-z0-9_-` as `-`, cut to 13 characters. */
             name?: string;
-            /** @description Defaults to the caller's role, and cannot exceed it. */
-            role?: components["schemas"]["ApiKeyRole"];
-            /** @description Limit the key to this VM of the organization. */
-            vm_id?: string;
-            /**
-             * Format: uuid
-             * @description Limit the key to this pool of the organization.
-             */
-            pool_id?: string;
-            /** @description Limit the key to this action. `join` requires the `pool_id` of a `self_hosted` pool. */
-            action?: components["schemas"]["ApiKeyAction"];
+            /** @description What the key is limited to: 1 to 16 VMs of the organization, or one of its pools. Omitted or `[]` is the whole organization. Only admins create a key limited to a pool. */
+            scopes?: components["schemas"]["ApiKeyScope"][];
         };
         ListApiKeysResponse: {
             /** @description Unrevoked API keys, newest first. */
@@ -5405,7 +5399,6 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
-            422: components["responses"]["UnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
