@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import types
+import uuid
 from pathlib import Path
 
 import pytest
 
 from arker._compat_process import GuestProcesses
-from arker.computer import CompletedRunResult
+from arker.computer import BackgroundRunResult, CompletedRunResult
 
 
 class LocalVM:
@@ -15,6 +17,21 @@ class LocalVM:
 
     def __init__(self, directory: Path):
         self.directory = directory
+        self.calls = []
+        self.runs = {}
+
+    def create_session(self):
+        return types.SimpleNamespace(session_id=uuid.uuid4().hex)
+
+    def get_run(self, run_id):
+        process, stdout, stderr = self.runs[run_id]
+        code = process.poll()
+        return types.SimpleNamespace(
+            stdout=stdout.read_text(),
+            stderr=stderr.read_text(),
+            exit_code=code,
+            state="running" if code is None else "completed" if code == 0 else "failed",
+        )
 
     def sync(self, path, content):
         (self.directory / Path(path).name).write_text(content)
@@ -25,6 +42,20 @@ class LocalVM:
         # The production path is content-addressed in /tmp; local tests keep
         # their process state and installed agent inside the pytest directory.
         command = command.replace("/tmp/arker-compat-process-", str(self.directory / "arker-compat-process-"))
+        self.calls.append(options)
+        if options.get("time_to_background") == 0:
+            run_id = uuid.uuid4().hex
+            stdout, stderr = (self.directory / f"{run_id}.{stream}" for stream in ("out", "err"))
+            with stdout.open("w") as out, stderr.open("w") as err:
+                process = subprocess.Popen(
+                    command,
+                    shell=True,
+                    stdout=out,
+                    stderr=err,
+                    env={**os.environ, "ARKER_COMPAT_PROCESS_ROOT": str(self.directory / "processes")},
+                )
+            self.runs[run_id] = process, stdout, stderr
+            return BackgroundRunResult(run_id=run_id, session_id=options.get("session_id"))
         response = subprocess.run(
             command,
             shell=True,
@@ -49,6 +80,8 @@ def processes(tmp_path):
         if process.status == "running":
             manager.kill(process.name)
             manager.wait(process.name, max_wait=5000, interval=10)
+    for process, _, _ in manager._vm.runs.values():
+        process.wait(timeout=5)
 
 
 def test_background_reconnect_stdin_eof_and_logs(processes):
@@ -78,6 +111,15 @@ def test_background_reconnect_stdin_eof_and_logs(processes):
     assert any(item.name == "input" for item in reconnected.list())
     with pytest.raises(RuntimeError, match="stdin is closed"):
         reconnected.write_stdin("input", "late")
+
+
+def test_background_process_holds_an_arker_run_until_it_finishes(processes):
+    manager, directory = processes
+    process = manager.exec({"command": "sleep 30", "workingDir": str(directory)})
+    assert any(call.get("time_to_background") == 0 for call in manager._vm.calls)
+    assert any(run.poll() is None for run, _, _ in manager._vm.runs.values())
+    manager.kill(process.name)
+    manager.wait(process.name, max_wait=5000, interval=10)
 
 
 def test_foreground_callbacks_and_nonzero_exit(processes):

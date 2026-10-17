@@ -77,6 +77,14 @@ try:
     assert deleted.to_dict() == {"message": "File deleted successfully", "path": binary_path}
     reconnected = SyncSandboxInstance.get(sandbox_name)
     assert reconnected.fs.read("/blaxel/import-only/probe.txt") == "second"
+    import time
+    unattended_path = "/blaxel/import-only/unattended"
+    unattended = sandbox.process.exec(ProcessRequestWithLog(
+        command=f"sleep 2; printf done > {unattended_path}", name="unattended", wait_for_completion=False,
+    ))
+    assert unattended.status == "running"
+    time.sleep(8)
+    assert sandbox.fs.read(unattended_path) == "done"
     started = sandbox.process.exec(ProcessRequestWithLog(
         command="cat; printf stdin-error >&2", name="stdin-probe", stdin=True, wait_for_completion=False,
     ))

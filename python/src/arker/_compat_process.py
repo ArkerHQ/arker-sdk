@@ -12,7 +12,7 @@ from importlib.resources import files
 from typing import Any
 
 from ._compat import CommandResult, import_optional, run_command
-from .computer import VM
+from .computer import REQUEST_TIMEOUT_S, VM
 
 
 @dataclasses.dataclass(frozen=True)
@@ -79,7 +79,26 @@ class GuestProcesses:
                 self._vm.sync(self._path, self._source)
                 self._installed = True
         payload = base64.b64encode(json.dumps({"action": action, **values}).encode()).decode()
-        response = run_command(self._vm, f"python3 {shlex.quote(self._path)} call {shlex.quote(payload)}")
+        if action == "exec":
+            session = self._vm.create_session()
+            response = self._vm.run(
+                f"python3 {shlex.quote(self._path)} supervise {shlex.quote(payload)}",
+                session_id=session.session_id,
+                time_to_background=0,
+            )
+            deadline = time.monotonic() + REQUEST_TIMEOUT_S
+            while response.type == "background":
+                current = self._vm.get_run(response.run_id)
+                if "\n" in current.stdout:
+                    response = CommandResult(stdout=current.stdout.splitlines()[0], stderr=current.stderr, exit_code=0)
+                    break
+                if current.state not in {"pending", "running"}:
+                    raise RuntimeError(current.stderr or "Guest process supervisor stopped before reporting readiness")
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Guest process supervisor did not report readiness")
+                time.sleep(0.02)
+        else:
+            response = run_command(self._vm, f"python3 {shlex.quote(self._path)} call {shlex.quote(payload)}")
         try:
             parsed = json.loads(response.stdout)
         except ValueError as error:

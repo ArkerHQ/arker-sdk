@@ -59,6 +59,13 @@ async function program(SandboxInstance: typeof Native | typeof Shim): Promise<vo
     assert.deepEqual(await sandbox.fs.rm(binaryPath), { message: "File deleted successfully", path: binaryPath });
     const reconnected = await SandboxInstance.get(sandbox.metadata.name!);
     assert.equal(await reconnected.fs.read("/blaxel/import-only/probe.txt"), "second");
+    const unattendedPath = "/blaxel/import-only/unattended";
+    const unattended = await sandbox.process.exec({
+      command: `sleep 2; printf done > ${unattendedPath}`, name: "unattended", waitForCompletion: false,
+    });
+    assert.equal(unattended.status, "running");
+    await new Promise((resolve) => setTimeout(resolve, 8_000));
+    assert.equal(await sandbox.fs.read(unattendedPath), "done");
     const started = await sandbox.process.exec({
       command: "cat; printf stdin-error >&2", name: "stdin-probe", stdin: true, waitForCompletion: false,
     });

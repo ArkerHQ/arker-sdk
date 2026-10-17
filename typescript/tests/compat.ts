@@ -8,6 +8,7 @@ import { SandboxInstance as BlaxelSandbox } from "../src/blaxel.js";
 import { ModalClient } from "../src/modal.js";
 import { createArkerComputeProvider } from "../src/compat/arker-provider.js";
 import { setCompatComputeFactoryForTests } from "../src/compat/runtime.js";
+import { GuestProcesses } from "../src/compat/guest-process.js";
 
 type CapturedComputeConfig = {
   providers: Array<{ name?: string }>;
@@ -527,6 +528,23 @@ async function testBlaxelNonrecursiveRemoval(): Promise<void> {
   } finally { fake.cleanup(); }
 }
 
+async function testBackgroundProcessOwnsAnArkerRun(): Promise<void> {
+  const calls: any[] = [];
+  const vm = {
+    createSession: async () => ({ session_id: "process-session" }),
+    run: async (command: string, options: unknown) => {
+      calls.push({ command, options });
+      return { type: "background", runId: "supervisor-run" };
+    },
+    getRun: async () => ({ state: "running", stdout: JSON.stringify({ result: { name: "background", status: "running" } }) + "\n", stderr: "" }),
+  };
+  const manager = new GuestProcesses(new FakeSandbox("process-vm", "arker", vm));
+  const started = await manager.exec({ command: "sleep 30" });
+  assert.equal(started.status, "running");
+  assert.ok(calls[0].command.includes(" supervise "));
+  assert.deepEqual(calls[0].options, { session_id: "process-session", time_to_background: 0 });
+}
+
 async function testInternalArkerProviderRequiresSource(): Promise<void> {
   const previousSource = process.env.ARKER_SOURCE;
   const previousSourceVm = process.env.ARKER_SOURCE_VM;
@@ -563,5 +581,6 @@ await testBlaxelCreateIfNotExistsAndTtl();
 await testBlaxelInitializationFailureDeletesCreatedVm();
 await testBlaxelBinaryFiles();
 await testBlaxelNonrecursiveRemoval();
+await testBackgroundProcessOwnsAnArkerRun();
 
 console.log("PASS compat");

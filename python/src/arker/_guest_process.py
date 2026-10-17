@@ -231,7 +231,14 @@ if __name__ == "__main__":
         worker(payload, int(sys.argv[3]))
     else:
         try:
-            print(json.dumps({"result": dispatch(payload)}))
+            current = dispatch(payload)
+            print(json.dumps({"result": current}), flush=True)
+            if sys.argv[1] == "supervise":
+                directory = locate(current["name"])
+                while json.loads((directory / "state").read_text())["status"] not in TERMINAL:
+                    if (directory / "error").exists():
+                        raise RuntimeError(json.loads((directory / "error").read_text())["error"])
+                    time.sleep(0.02)
         except Exception as error:
             print(json.dumps({"error": str(error)}))
             sys.exit(1)

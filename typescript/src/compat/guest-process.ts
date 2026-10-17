@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { SandboxInterface } from "computesdk";
+import type { VM } from "../index.js";
 import source from "./guest-process.generated.js";
 import { shellQuote } from "./common.js";
 
@@ -38,7 +39,29 @@ export class GuestProcesses {
     });
     await this.installed;
     const payload = Buffer.from(JSON.stringify({ action, ...values })).toString("base64");
-    const response = await this.sandbox.runCommand(`python3 ${shellQuote(this.path)} call ${shellQuote(payload)}`);
+    let response: { stdout: string; stderr: string; exitCode: number };
+    if (action === "exec") {
+      const vm = (this.sandbox as unknown as { getInstance(): VM }).getInstance();
+      const session = await vm.createSession();
+      const started = await vm.run(`python3 ${shellQuote(this.path)} supervise ${shellQuote(payload)}`, {
+        session_id: session.session_id, time_to_background: 0,
+      });
+      const deadline = Date.now() + 300_000;
+      while (true) {
+        const current = await vm.getRun(started.runId);
+        if (current.stdout.includes("\n")) {
+          response = { stdout: current.stdout.split("\n", 1)[0]!, stderr: current.stderr, exitCode: 0 };
+          break;
+        }
+        if (!["pending", "running"].includes(current.state)) {
+          throw new Error(current.stderr || "Guest process supervisor stopped before reporting readiness");
+        }
+        if (Date.now() >= deadline) throw new Error("Guest process supervisor did not report readiness");
+        await delay(20);
+      }
+    } else {
+      response = await this.sandbox.runCommand(`python3 ${shellQuote(this.path)} call ${shellQuote(payload)}`);
+    }
     let parsed: { error?: string; result: T };
     try { parsed = JSON.parse(response.stdout); }
     catch { throw new Error(response.stderr || "Guest process agent returned invalid JSON"); }

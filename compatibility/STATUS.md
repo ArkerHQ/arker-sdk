@@ -13,7 +13,7 @@ their declared bounded scope, and both strict gates return exit code 1.
 Neither the draft integration profile nor historical results certify the
 published packages or complete API equivalence.
 
-Post-merge local validation passes: 307 Python unit tests and lint, plus the full
+Post-merge local validation passes: 308 Python unit tests and lint, plus the full
 TypeScript test/build/typecheck pipeline. New evidence-validator regressions
 first failed in both languages, demonstrating that colon-delimited run/scenario
 keys could combine unrelated runs. Tuple keys now isolate those runs; malformed
@@ -42,6 +42,15 @@ nonrecursive deletion fails. Both languages previously lacked binary methods
 and always deleted recursively; the new unit regressions failed before fixing
 those behaviors. Fresh live evidence: six Python and three TypeScript routes,
 zero failures. Draft provider builds remain a separate integration profile.
+
+A separate unattended-background regression failed on Arker while both native
+routes completed: without further client calls, the detached command lost its
+runtime activity and did not produce its output. Python and TypeScript now
+launch a dedicated asynchronous Arker run whose supervisor remains until the
+child reaches a terminal state. The idle daemon is not kept active forever.
+After the fix, all nine strengthened live routes passed, including an eight-
+second period with no VM calls before reading the child's completed output.
+The new unit regressions failed before the fix; full local gates pass.
 
 Current Daytona regressions additionally verify GiB-to-MiB conversion only for
 Arker creation, unchanged native resource objects, typed Python creation models,
