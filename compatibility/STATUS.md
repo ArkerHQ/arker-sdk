@@ -2,6 +2,44 @@
 
 ## Current validation
 
+The `3272a84` checkpoint fixes Blaxel fetch transport selection: regionless
+creation uses Fetch semantics, while H2 eligibility is captured at creation
+and still honors a later disable flag. A local regression failed before the
+fix and now covers four profile transitions. The full TypeScript
+typecheck/test/build/isolated-consumer pipeline passes. Packed SHA-256:
+`f173c572cea47832590ab04899108f3ce726fa3753639432e4f4e04ba4ba8cd3`.
+Python is unchanged from its **458 vendor-unit / 449 lean-unit** checkpoint
+(nine optional-vendor skips in the lean profile).
+
+Matching-source live cohorts pass **27 Python/22 Node cases**, comprising
+**25/21 differential plus 2/1 Arker-only cases**. Node explicitly verifies
+native H2 selection and separately tests disabled-H2 and regionless Fetch.
+The first attempt incorrectly assumed enabling H2 selected it without a
+region; the native SDK's actual fallback exposed the corresponding shim bug.
+Failed evidence remains separate. Current fingerprints are Python
+`b82c4d90dc85fbda5f6f5d938b79263bae777609fa01894d4921d8d803f6b6ee`
+and Node `0811e6990cec9bd170df3bf75f09211d015684dca3ee04be3c37a57b2fab53e2`.
+Both strict gates remain **RED, exit 1**: **100/1,138 Python; 51/1,048 Node**
+verified. Neither inventory establishes full core API equivalence.
+
+The permanent Python and Node authenticated-registry tests now pass against
+feature release `compat-private-port-g2a5419e5b3f9-235399e4`, including cached
+image bad-auth rejection, required typed recovery metadata, credential redaction
+and three isolated child forks. Supplemental forks also pass after deleting
+the registry fixture. All registry/parent/child test VMs were cleaned up.
+These checks are Arker-only, not native API differential coverage.
+
+That release passes **101/101 declared inbound/private transport cases** with
+zero skips/errors. A preceding run passed 100 and failed one policy PUT on a
+connection closing before a response. The failed fixture was deleted, neither
+worker nor router restarted, a fresh isolated assertion passed, then the full
+101-case rerun passed. The transport disconnect remains unexplained, not waived.
+Backend Linux Rust/Clippy pass at the deployed checkpoint; subsequent generic
+outbound-guard storage work is not deployed or enforcement-certified. Policy
+composition, native resource handles, identity and other gaps below remain.
+
+## Previous required-recovery checkpoint
+
 The `2c687cd` checkpoint makes `OperationFailed.recovery` required in both
 generated language types, matching the existing wire schema. A real private
 registry negative test found that the backend omitted this required field on
