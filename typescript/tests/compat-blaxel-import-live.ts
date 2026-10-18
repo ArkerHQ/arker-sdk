@@ -60,6 +60,19 @@ async function program(SandboxInstance: typeof Native | typeof Shim): Promise<vo
     assert.ok(listing.files.some((entry) => entry.name === "probe.txt"));
     assert.equal(listing.files.find((entry) => entry.name === "probe.txt")?.path,
       "/blaxel/import-only/probe.txt");
+    for (const [path, display] of [
+      ["/blaxel/import-only/", "/blaxel/import-only/"],
+      ["/blaxel//import-only", "/blaxel/import-only"],
+    ]) {
+      const absolute = await sandbox.fs.ls(path!);
+      assert.equal(absolute.name, "import-only");
+      assert.equal(absolute.path, display);
+      assert.equal(absolute.files.find((entry) => entry.name === "probe.txt")?.path,
+        "/blaxel/import-only/probe.txt");
+    }
+    const root = await sandbox.fs.ls("/");
+    assert.equal(root.name, "/");
+    assert.equal(root.path, "/");
     const binaryPath = "/blaxel/import-only/binary";
     const payload = Uint8Array.from({ length: 256 }, (_, i) => i);
     assert.deepEqual(await sandbox.fs.writeBinary(binaryPath, payload), {

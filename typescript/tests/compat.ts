@@ -834,6 +834,25 @@ async function testBlaxelDirectoryPaths(): Promise<void> {
   } finally { fake.cleanup(); }
 }
 
+async function testBlaxelAbsoluteDirectoryDisplayPaths(): Promise<void> {
+  for (const [path, name, display, entryPath] of [
+    ["/", "/", "/", "/probe"],
+    ["/blaxel///nested/", "nested", "/blaxel/nested/", "/blaxel/nested/probe"],
+    ["/blaxel/nested/../", "..", "/blaxel/nested/../", "/blaxel/probe"],
+  ] as const) {
+    const box = new FakeSandbox();
+    box.filesystem.readdir = async () => [{ name: "probe", type: "file", size: 1 }];
+    const fake = installFakeCompute(box);
+    try {
+      const sandbox = await BlaxelSandbox.create();
+      const listing = await sandbox.fs.ls(path);
+      assert.equal(listing.name, name);
+      assert.equal(listing.path, display);
+      assert.equal(listing.files[0]?.path, entryPath);
+    } finally { fake.cleanup(); }
+  }
+}
+
 async function testBackgroundProcessOwnsAnArkerRun(): Promise<void> {
   const calls: any[] = [];
   const vm = {
@@ -918,6 +937,7 @@ await testBlaxelInitializationFailureDeletesCreatedVm();
 await testBlaxelBinaryFiles();
 await testBlaxelNonrecursiveRemoval();
 await testBlaxelDirectoryPaths();
+await testBlaxelAbsoluteDirectoryDisplayPaths();
 await testBackgroundProcessOwnsAnArkerRun();
 await testProcessControlHasAnIsolatedSerializedSession();
 

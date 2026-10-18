@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import posixpath
+import re
 import shlex
 import time
 from dataclasses import dataclass
@@ -55,6 +57,14 @@ class Directory:
 @dataclass(frozen=True)
 class SandboxMetadata:
     name: str
+
+
+def _filesystem_display_path(path: str) -> str:
+    return re.sub(r"/+", "/", resolve_compat_path(path, "/blaxel"))
+
+
+def _filesystem_path(path: str) -> str:
+    return posixpath.normpath(_filesystem_display_path(path))
 
 
 def _request_values(request: Any) -> dict[str, Any]:
@@ -148,27 +158,27 @@ class FileSystem:
     def read(self, path: str) -> str:
         if self._vm is None:
             return self._native.read(path)
-        return self._vm.sync(resolve_compat_path(path, "/blaxel")).decode("utf-8", "replace")
+        return self._vm.sync(_filesystem_path(path)).decode("utf-8", "replace")
 
     def write(self, path: str, content: str | bytes) -> Any:
         if self._vm is None:
             return self._native.write(path, content)
-        resolved = resolve_compat_path(path, "/blaxel")
+        resolved = _filesystem_path(path)
         self._vm.sync(resolved, content)
-        return success({"message": "File created/updated successfully", "path": resolved})
+        return success({"message": "File created/updated successfully", "path": _filesystem_display_path(path)})
 
     def write_binary(self, path: str, content: bytes | bytearray | str) -> Any:
         if self._vm is None:
             return self._native.write_binary(path, content)
         raw = Path(content).read_bytes() if isinstance(content, str) else bytes(content)
-        resolved = resolve_compat_path(path, "/blaxel")
+        resolved = _filesystem_path(path)
         self._vm.sync(resolved, raw)
-        return success({"message": "Binary file uploaded successfully", "path": resolved})
+        return success({"message": "Binary file uploaded successfully", "path": _filesystem_display_path(path)})
 
     def read_binary(self, path: str) -> bytes:
         if self._vm is None:
             return self._native.read_binary(path)
-        return self._vm.sync(resolve_compat_path(path, "/blaxel"))
+        return self._vm.sync(_filesystem_path(path))
 
     def download(self, src: str, destination_path: str, mode: int = 0o644) -> None:
         if self._vm is None:
@@ -183,16 +193,17 @@ class FileSystem:
             return self._native.mkdir(path, permissions=permissions)
         if permissions != "0755":
             raise UnsupportedCompatibilityOption("fs.mkdir custom permissions are not supported by Arker")
-        resolved = resolve_compat_path(path, "/blaxel")
+        resolved = _filesystem_path(path)
         result = run_command(self._vm, f"mkdir -p {shlex.quote(resolved)}")
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"mkdir failed with exit {result.exit_code}")
-        return success({"message": "Directory created successfully", "path": resolved})
+        return success({"message": "Directory created successfully", "path": _filesystem_display_path(path)})
 
     def ls(self, path: str) -> Any:
         if self._vm is None:
             return self._native.ls(path)
-        resolved = resolve_compat_path(path, "/blaxel")
+        display = _filesystem_display_path(path)
+        resolved = _filesystem_path(path)
         result = run_command(
             self._vm,
             # find sanitizes control characters on a terminal. The success
@@ -210,16 +221,19 @@ class FileSystem:
         records = fields[:-2]
         entries = zip(records[::2], records[1::2], strict=True)
         for kind, name in sorted(entries, key=lambda entry: entry[1]):
-            entry = DirectoryEntry(name=name, path=f"{resolved.rstrip('/')}/{name}")
+            entry = DirectoryEntry(name=name, path=posixpath.normpath(posixpath.join(display, name)))
             (subdirectories if kind == "d" else files).append(entry)
         return Directory(
-            name=resolved.rstrip("/").rsplit("/", 1)[-1], path=resolved, files=files, subdirectories=subdirectories
+            name=posixpath.basename(display.rstrip("/")) or "/",
+            path=display,
+            files=files,
+            subdirectories=subdirectories,
         )
 
     def rm(self, path: str, recursive: bool = False) -> Any:
         if self._vm is None:
             return self._native.rm(path, recursive=recursive)
-        resolved = resolve_compat_path(path, "/blaxel")
+        resolved = _filesystem_path(path)
         quoted = shlex.quote(resolved)
         directory_command = "rm -r" if recursive else "rmdir"
         result = run_command(
@@ -231,7 +245,7 @@ class FileSystem:
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"remove failed with exit {result.exit_code}")
         kind = "Directory" if result.stdout == "directory" else "File"
-        return success({"message": f"{kind} deleted successfully", "path": resolved})
+        return success({"message": f"{kind} deleted successfully", "path": _filesystem_display_path(path)})
 
     def __getattr__(self, name: str) -> Any:
         if self._native is not None:

@@ -66,6 +66,31 @@ def test_empty_allowlist_semantics_are_provider_specific():
         compat_network_policies(block_all=True, cidrs=[], empty_allowlist_blocks=True)
 
 
+@pytest.mark.parametrize(
+    "path, name, display, entry",
+    [
+        ("/", "/", "/", "/probe"),
+        ("/blaxel///nested/", "nested", "/blaxel/nested/", "/blaxel/nested/probe"),
+        ("/blaxel/nested/../", "..", "/blaxel/nested/../", "/blaxel/probe"),
+    ],
+)
+def test_blaxel_absolute_directory_display_paths(monkeypatch, path, name, display, entry):
+    from arker._compat import CommandResult
+    from arker.blaxel import FileSystem
+
+    monkeypatch.setattr(
+        "arker.blaxel.run_command",
+        lambda *_: CommandResult(
+            stdout="f\0probe\0complete\0",
+            stderr="",
+            exit_code=0,
+        ),
+    )
+    listing = FileSystem(vm=object()).ls(path)
+    assert (listing.name, listing.path) == (name, display)
+    assert listing.files[0].path == entry
+
+
 @pytest.fixture(autouse=True)
 def source_env(monkeypatch) -> None:
     monkeypatch.setenv("ARKER_SOURCE", "catalog-template")

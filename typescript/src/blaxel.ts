@@ -1,5 +1,6 @@
 import { SandboxInstance as NativeBlaxelSandbox, settings as blaxelSettings } from "@blaxel/core";
 import { chmod, readFile, writeFile } from "node:fs/promises";
+import { posix } from "node:path";
 import type { VM } from "./index.js";
 
 import { assertSupportedObjectKeys, CompatibilityNotFoundError, guardUnsupported, resolveCompatPath, shellQuote, type UniversalSandbox } from "./compat/common.js";
@@ -53,6 +54,14 @@ type BlaxelCompatFileSystem = Omit<NativeBlaxelSandbox["fs"], "write" | "mkdir" 
   mkdir(path: string, permissions?: string): Promise<any>;
   rm(path: string, recursive?: boolean): Promise<any>;
 };
+
+function filesystemDisplayPath(path: string): string {
+  return resolveCompatPath(path, "/blaxel").replace(/\/+/g, "/");
+}
+
+function filesystemPath(path: string): string {
+  return posix.resolve(filesystemDisplayPath(path));
+}
 
 function parseTtl(ttl: string | number | undefined): number | undefined {
   if (ttl === undefined || typeof ttl === "number") return ttl;
@@ -155,54 +164,54 @@ export class SandboxInstance {
       closeStdin: guest.closeStdin.bind(guest),
     }) as BlaxelCompatProcess;
     this.fs = (native?.fs ?? {
-      read: (path) => box.filesystem.readFile(this.provider === "arker" ? resolveCompatPath(path, "/blaxel") : path),
+      read: (path) => box.filesystem.readFile(this.provider === "arker" ? filesystemPath(path) : path),
       write: (path, content) => {
         if (typeof content !== "string") throw new TypeError("fs.write requires text; use fs.writeBinary for binary content");
-        const resolved = resolveCompatPath(path, "/blaxel");
-        return box.filesystem.writeFile(resolved, content).then(() => ({ message: "File created/updated successfully", path: resolved }));
+        const resolved = filesystemPath(path);
+        return box.filesystem.writeFile(resolved, content).then(() => ({ message: "File created/updated successfully", path: filesystemDisplayPath(path) }));
       },
       writeBinary: async (path, content) => {
         const bytes = typeof content === "string" ? await readFile(content)
           : content instanceof Uint8Array ? content
           : new Uint8Array(await content.arrayBuffer());
-        const resolved = resolveCompatPath(path, "/blaxel");
+        const resolved = filesystemPath(path);
         const vm = (box as unknown as { getInstance(): VM }).getInstance();
         await vm.sync(resolved, bytes);
-        return { message: "Binary file uploaded successfully", path: resolved };
+        return { message: "Binary file uploaded successfully", path: filesystemDisplayPath(path) };
       },
       readBinary: async (path) => {
         const vm = (box as unknown as { getInstance(): VM }).getInstance();
-        const bytes = await vm.sync(resolveCompatPath(path, "/blaxel"));
+        const bytes = await vm.sync(filesystemPath(path));
         return new Blob([new Uint8Array(bytes)]);
       },
       download: async (src, destinationPath, { mode = 0o644 } = {}) => {
         const vm = (box as unknown as { getInstance(): VM }).getInstance();
-        const bytes = await vm.sync(resolveCompatPath(src, "/blaxel"));
+        const bytes = await vm.sync(filesystemPath(src));
         await writeFile(destinationPath, bytes);
         await chmod(destinationPath, mode);
       },
       mkdir: async (path, permissions = "0755") => {
         if (permissions !== "0755") throw new Error("fs.mkdir custom permissions are not supported by Arker");
-        const resolved = resolveCompatPath(path, "/blaxel");
+        const resolved = filesystemPath(path);
         await box.filesystem.mkdir(resolved);
-        return { message: "Directory created successfully", path: resolved };
+        return { message: "Directory created successfully", path: filesystemDisplayPath(path) };
       },
       ls: async (path) => {
-        const resolved = resolveCompatPath(path, "/blaxel");
-        const entries = await box.filesystem.readdir(resolved);
+        const display = filesystemDisplayPath(path);
+        const entries = await box.filesystem.readdir(filesystemPath(path));
         const withPath = (entry: { name: string }) => ({
           ...entry,
-          path: `${resolved === "/" ? "" : resolved}/${entry.name}`,
+          path: posix.resolve(posix.join(display, entry.name)),
         });
         return {
-          name: resolved === "/" ? "/" : resolved.slice(resolved.lastIndexOf("/") + 1),
-          path: resolved,
+          name: posix.basename(display.replace(/\/+$/, "")) || "/",
+          path: display,
           files: entries.filter((entry) => entry.type === "file").map(withPath),
           subdirectories: entries.filter((entry) => entry.type === "directory").map(withPath),
         };
       },
       rm: async (path, recursive = false) => {
-        const resolved = resolveCompatPath(path, "/blaxel");
+        const resolved = filesystemPath(path);
         const quoted = shellQuote(resolved);
         const directoryCommand = recursive ? "rm -r" : "rmdir";
         const result = await box.runCommand(
@@ -210,7 +219,7 @@ export class SandboxInstance {
           `${directoryCommand} -- ${quoted} && printf directory; else rm -- ${quoted} && printf file; fi`,
         );
         if (result.exitCode !== 0) throw new Error(result.stderr || `remove failed with exit ${result.exitCode}`);
-        return { message: `${result.stdout === "directory" ? "Directory" : "File"} deleted successfully`, path: resolved };
+        return { message: `${result.stdout === "directory" ? "Directory" : "File"} deleted successfully`, path: filesystemDisplayPath(path) };
       },
     }) as BlaxelCompatFileSystem;
     return guardUnsupported(this, "blaxel", native);

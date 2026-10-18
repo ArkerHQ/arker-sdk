@@ -1,5 +1,26 @@
 # Recorded coverage baseline
 
+## Blaxel absolute filesystem paths
+
+Fresh native-versus-Arker observations reproduced incorrect root names,
+trailing-slash directory names/child paths and repeated-slash display paths.
+Both shims now distinguish the formatted display path from the cleaned I/O
+target, matching the observed absolute-path behavior without changing generic
+provider path helpers. Three Python regressions and the TypeScript regression
+failed before correction. Unit gates pass **492 vendor / 483 lean Python**
+tests (nine optional skips), Ruff check/format, TypeScript typecheck and the
+full test/build/isolated-consumer suite. Packed npm SHA-256:
+`6fbff950daef6efbb16f5e5d9d64e50181614640080e685f6a99c5e2e483ed44`.
+Updated import-only programs cover root, trailing and repeated absolute paths;
+their live gates are pending.
+
+The native TypeScript SDK itself exhibits operation-specific relative-path
+encoding: a nested relative text write was observed at `/relative-check/file`
+while a bare relative directory remained under `/blaxel`. The shims do not yet
+reproduce that behavior. Relative paths, complete metadata and custom Arker
+permissions remain explicit gaps; this absolute-path fix is not full parity.
+Both fingerprints changed again; previous cohorts below are historical.
+
 ## Network preflight safety and empty Modal allowlists
 
 Both languages preserve Modal's distinction between an omitted allowlist

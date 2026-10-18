@@ -62,6 +62,16 @@ try:
     assert sandbox.fs.read("/blaxel/import-only/probe.txt") == "second"
     listing = sandbox.fs.ls("/blaxel/import-only")
     assert any(entry.name == "probe.txt" for entry in listing.files)
+    for path, display in [
+        ("/blaxel/import-only/", "/blaxel/import-only/"),
+        ("/blaxel//import-only", "/blaxel/import-only"),
+    ]:
+        absolute = sandbox.fs.ls(path)
+        assert (absolute.name, absolute.path) == ("import-only", display)
+        probe = next(entry for entry in absolute.files if entry.name == "probe.txt")
+        assert probe.path == "/blaxel/import-only/probe.txt"
+    root = sandbox.fs.ls("/")
+    assert (root.name, root.path) == ("/", "/")
     odd_names = ["line" + chr(10) + "break", "tab" + chr(9) + "file", "-leading", ".hidden"]
     import shlex
     guest_code = (
