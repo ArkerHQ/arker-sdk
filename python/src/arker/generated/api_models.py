@@ -89,6 +89,8 @@ class PolicyMatch:
     query_params: dict[str, list[str]] | None = None
     body_contains: list[str] | None = None
     vm_state: Literal['idle', 'running'] | None = None
+    via: list[Literal['port', 'ssh', 'pty']] | None = None
+    connection_state: list[Literal['new', 'open']] | None = None
 
 
 @dataclass(frozen=True)

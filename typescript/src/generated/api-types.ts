@@ -864,6 +864,10 @@ export interface components {
              * @enum {string}
              */
             vm_state?: "idle" | "running";
+            /** @description `inbound` only. How the request reaches the VM: `port` to a guest port at its `.arker.app` hostname, `ssh` over SSH, `pty` by attaching a terminal (`GET /v1/vms/{id}/sessions/{sid}/pty`). Defaults to `["port"]`. A way no rule names works as it does without rules; once a rule names it, the rules decide, and a request no rule matches is refused. A rule naming `ssh` or `pty` matches only on `ips`, `vm_state` and `connection_state`, and is `allow` or `deny`. */
+            via?: ("port" | "ssh" | "pty")[];
+            /** @description `inbound` only. The requests the rule applies to: `new` ones as they arrive, and `open` ones already in progress on the VM, such as a WebSocket, a response still streaming, an SSH connection or an attached terminal, matched on the request that opened them. A request in progress meets only the rules listing `open`, by priority, when the rule is written and for as long as it is in force: an `allow` keeps it, a `deny` closes it, and one no such rule matches stays open. Only an `allow` or a `deny` may list `open`. An idle keep-alive connection holds nothing, so its next request is `new`. Defaults to `["new"]`. */
+            connection_state?: ("new" | "open")[];
         };
         /** @description allow / deny, `delete` (schedule rules), `suspend` (schedule and outbound rules: suspends the VM; on outbound, allows the request and suspends the VM until its response arrives), or an object with any combination of `rewrite`, `gate`, and `suspend` (at least one). */
         PolicyAction: ("allow" | "deny" | "delete" | "suspend") | {
@@ -2925,7 +2929,7 @@ export interface components {
             type: "schedule";
             /**
              * Format: date-time
-             * @description When the rule fires: an RFC 3339 time in the future.
+             * @description When the rule fires: an RFC 3339 time. On a `suspend` rule, a time that has already come fires it at once; on a `delete` rule, the time must be in the future.
              */
             at?: string;
             /**
@@ -2938,7 +2942,7 @@ export interface components {
              * @description Fires this many seconds, up to 2592000 (30 days), after the VM last became `running`, and again each time it starts running; a VM that never ran counts from its creation.
              */
             after_last_running_start?: number;
-            /** @description `delete` deletes the VM, as `DELETE /v1/vms/{id}` does, also while it is suspended. `suspend` suspends the VM if it is running when the rule fires, its runs `pending` until something starts it; a VM that is idle then is left alone. */
+            /** @description `delete` deletes the VM, as `DELETE /v1/vms/{id}` does, also while it is suspended. `suspend` suspends the VM once, if it is running when the rule fires, ending every use of it: its connections close, its terminals detach and its runs go `pending` until something next starts it, which the other rules still allow. A sync or resize in progress finishes first. A VM that is idle then is left alone. */
             action: components["schemas"]["PolicyAction"];
         };
         /**

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/ArkerHQ/arker-sdk/go"
@@ -39,6 +40,7 @@ func TestVMAndSessionStatesDecode(t *testing.T) {
 
 // The contract's policy shapes, exactly as the server sends and takes them.
 const policyRules = `{"rules":{` +
+	`"shell":{"type":"inbound","priority":40,"match":{"via":["ssh","pty"],"connection_state":["new","open"],"vm_state":"running"},"action":"allow"},` +
 	`"idle-gate":{"type":"inbound","priority":30,"match":{"ports":[8080],"vm_state":"idle"},"action":"deny"},` +
 	`"web":{"type":"inbound","priority":20,"match":{"ports":[8080],"vm_state":"running"},"action":"allow"},` +
 	`"llm":{"type":"outbound","priority":10,"match":{"hosts":["api.example"]},"action":{"rewrite":{"headers":{"authorization":"${secret:KEY}"}},"suspend":true}},` +
@@ -46,7 +48,8 @@ const policyRules = `{"rules":{` +
 	`"rest":{"type":"outbound","priority":0,"action":"suspend"},` +
 	`"nap":{"type":"schedule","after_last_running_start":600,"action":"suspend"},` +
 	`"ttl":{"type":"schedule","after_created":86400,"action":"delete"},` +
-	`"end":{"type":"schedule","at":"2030-01-01T00:00:00Z","action":"delete"}}}`
+	`"end":{"type":"schedule","at":"2030-01-01T00:00:00Z","action":"delete"},` +
+	`"now":{"type":"schedule","at":"2020-01-01T00:00:00Z","action":"suspend"}}}`
 
 func TestPolicyRulesRoundTripExactly(t *testing.T) {
 	var doc arker.PolicyDoc
@@ -62,6 +65,9 @@ func TestPolicyRulesRoundTripExactly(t *testing.T) {
 	}
 	if doc.Rules["idle-gate"].Match.VMState != "idle" || doc.Rules["idle-gate"].Action != "deny" {
 		t.Fatalf("vm_state rule did not decode: %+v", doc.Rules["idle-gate"])
+	}
+	if shell := doc.Rules["shell"].Match; !reflect.DeepEqual(shell.Via, []string{"ssh", "pty"}) || !reflect.DeepEqual(shell.ConnectionState, []string{"new", "open"}) {
+		t.Fatalf("via/connection_state did not decode: %+v", shell)
 	}
 	if nap := doc.Rules["nap"]; nap.AfterLastRunningStart != 600 || nap.Action != "suspend" || nap.Priority != nil {
 		t.Fatalf("schedule rule did not decode: %+v", nap)
@@ -198,4 +204,36 @@ func jsonEqual(a, b any) bool {
 	x, _ := json.Marshal(a)
 	y, _ := json.Marshal(b)
 	return string(x) == string(y)
+}
+
+func TestInboundRuleWithViaAndConnectionStateRoundTrips(t *testing.T) {
+	var body map[string]any
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, `{"vm_id":"vm_1","state":"idle","policies":`+policyRules+`}`)
+	}, reject(t, "control"))
+
+	priority := 40
+	shell := &arker.PolicyRule{
+		Type:     "inbound",
+		Priority: &priority,
+		Match:    &arker.PolicyMatch{Via: []string{"ssh", "pty"}, ConnectionState: []string{"new", "open"}, VMState: "running"},
+		Action:   "allow",
+	}
+	info, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{Policies: &arker.PolicyDoc{
+		Rules: map[string]*arker.PolicyRule{"shell": shell},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"policies": map[string]any{"rules": map[string]any{"shell": map[string]any{
+		"type": "inbound", "priority": float64(40), "action": "allow",
+		"match": map[string]any{"via": []any{"ssh", "pty"}, "connection_state": []any{"new", "open"}, "vm_state": "running"},
+	}}}}
+	if !jsonEqual(want, body) {
+		t.Fatalf("PATCH body = %v", body)
+	}
+	if got := info.Policies.Rules["shell"]; !reflect.DeepEqual(got, shell) {
+		t.Fatalf("read back %+v, want %+v", got, shell)
+	}
 }

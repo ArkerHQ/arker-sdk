@@ -8,6 +8,8 @@ import {
 } from '../src/index';
 
 const rules = {
+  shell: {type: 'inbound', priority: 40,
+    match: {via: ['ssh', 'pty'], connection_state: ['new', 'open'], vm_state: 'running'}, action: 'allow'},
   'idle-gate': {type: 'inbound', priority: 30, match: {ports: [8080], vm_state: 'idle'}, action: 'deny'},
   web: {type: 'inbound', priority: 20, match: {ports: [8080], vm_state: 'running'}, action: 'allow'},
   llm: {type: 'outbound', priority: 10, match: {hosts: ['api.example']},
@@ -17,6 +19,7 @@ const rules = {
   nap: {type: 'schedule', after_last_running_start: 600, action: 'suspend'},
   ttl: {type: 'schedule', after_created: 86400, action: 'delete'},
   end: {type: 'schedule', at: '2030-01-01T00:00:00Z', action: 'delete'},
+  now: {type: 'schedule', at: '2020-01-01T00:00:00Z', action: 'suspend'},
 } satisfies PolicyUpdate['rules'];
 
 // Compile-time: exactly the contract's states and policy shapes.
@@ -31,9 +34,13 @@ const noScale: PolicyAction = 'scale';
 const noWebhook: PolicyAction = {webhook: {url: 'https://hook.example'}};
 // @ts-expect-error there is no after_wake clock
 const noAfterWake: ScheduleRule = {type: 'schedule', after_wake: 60, action: 'suspend'};
+// @ts-expect-error a request arrives by port, ssh or pty only
+const noVia: PolicyRule = {type: 'inbound', priority: 1, match: {via: ['http']}, action: 'allow'};
+// @ts-expect-error a connection is new or open only
+const noConnectionState: PolicyRule = {type: 'inbound', priority: 1, match: {connection_state: ['closed']}, action: 'deny'};
 // @ts-expect-error there is no resources rule
 const noResourcesRule: PolicyRule = {type: 'resources', priority: 1, action: 'suspend'};
-void [vmStates, sessionStates, verbs, noPendingVm, noScale, noWebhook, noAfterWake, noResourcesRule];
+void [vmStates, sessionStates, verbs, noPendingVm, noScale, noWebhook, noAfterWake, noResourcesRule, noVia, noConnectionState];
 
 type Call = {method: string; url: string; body?: unknown};
 

@@ -18,6 +18,12 @@ type PolicyMatch struct {
 	// VMState is inbound only: "running" or "idle". Pair "idle" with "deny" to
 	// keep requests from starting the VM.
 	VMState string `json:"vm_state,omitempty"`
+	// Via is inbound only: "port" (the default), "ssh", "pty". A rule naming
+	// ssh or pty matches only on IPs, VMState and ConnectionState.
+	Via []string `json:"via,omitempty"`
+	// ConnectionState is inbound only: "new" (the default) and "open", the
+	// requests already in progress. Only allow and deny may list "open".
+	ConnectionState []string `json:"connection_state,omitempty"`
 }
 
 // PolicyActionObject is the object form of a rule's action: the request is
