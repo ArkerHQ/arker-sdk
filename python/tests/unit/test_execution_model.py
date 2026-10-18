@@ -149,6 +149,19 @@ def test_typed_inbound_ssh_and_pty_rules_round_trip() -> None:
     assert {name: vm.policies.rules[name] for name in rules} == rules
 
 
+def test_a_policy_read_back_updates_without_its_read_only_fields() -> None:
+    payload = vm_payload("idle")
+    payload["policies"] = {**payload["policies"], "secrets": {"KEY": "***"}, "mitm_domains": ["a"], "warnings": ["w"]}
+    t = FakeTransport()
+    t.add_json(lambda m, u: m == "GET", 200, payload)
+    t.add_json(lambda m, u: m == "PATCH", 200, payload)
+    with use_transport(t):
+        vm = client().vm("vm_1").refresh()
+        vm.update(policies=vm.policies)
+    sent = json.loads(t.calls[1]["body"])["policies"]
+    assert sent == {"rules": POLICY_RULES, "secrets": {"KEY": "***"}}
+
+
 def test_typed_policy_surface_has_no_withdrawn_shapes() -> None:
     verbs = next(arg for arg in get_args(models.PolicyAction) if not dataclasses.is_dataclass(arg))
     assert set(get_args(verbs)) == {"allow", "deny", "delete", "suspend"}

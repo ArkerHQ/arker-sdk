@@ -776,7 +776,7 @@ export interface components {
             error: components["schemas"]["ErrorBody"];
         };
         /**
-         * @description `running` while a run, a terminal, or an inbound request is using the VM. `idle` otherwise. A Windows VM is `running` from its start until it is suspended.
+         * @description `running` while something uses the VM: a run, an SSH connection, a terminal, an inbound request, a sync or a resize. `idle` otherwise. A Windows VM is `running` from its start until it is suspended.
          * @enum {string}
          */
         VmState: "idle" | "running";
@@ -864,11 +864,11 @@ export interface components {
              * @enum {string}
              */
             vm_state?: "idle" | "running";
-            /** @description `inbound` only. How the request reaches the VM: `port` to a guest port at its `.arker.app` hostname, `ssh` over SSH, `pty` by attaching a terminal (`GET /v1/vms/{id}/sessions/{sid}/pty`). Defaults to `["port"]`. A way no rule names works as it does without rules; once a rule names it, the rules decide, and a request no rule matches is refused. A rule naming `ssh` or `pty` matches only on `ips`, `vm_state`, `connection_state` and, for `ssh` alone, `ssh_keys`, and is `allow` or `deny`. */
+            /** @description `inbound` only. How the request reaches the VM: `port` to a guest port at its `.arker.app` hostname, `ssh` over SSH, `pty` by attaching a terminal (`GET /v1/vms/{id}/sessions/{sid}/pty`). Defaults to `["port"]`. A way no rule names works as it does without rules; once a rule names it, the rules decide, and a request no rule matches is refused. A rule naming `ssh` or `pty` matches only on `ips` (not yet for `ssh`), `vm_state`, `connection_state` and, for `ssh` alone, `ssh_keys`, and is `allow` or `deny`. */
             via?: ("port" | "ssh" | "pty")[];
             /** @description `inbound` only, on a rule whose `via` is `["ssh"]`. SSH public keys in `authorized_keys` format (`ssh-ed25519 AAAA... comment`). The rule matches an SSH login with one of these keys, compared by key, not by comment. An `allow` lets the key log in; a `deny` refuses it. Without `ssh_keys`, a `deny` naming `ssh` matches every key, and an `allow` the keys the VM knows: its own unexpired `ssh_public_keys` and the keys any `allow` lists. Once a rule names `ssh`, organization SSH keys no longer log in to the VM. A rule that stops letting a key in, by a write or its `expires_at`, also closes that key's open SSH connections. Certificates, `authorized_keys` options such as `from=` or `command=`, and `ssh-dss` keys are refused. The rule opens no port. */
             ssh_keys?: string[];
-            /** @description `inbound` only. The requests the rule applies to: `new` ones as they arrive, and `open` ones already in progress on the VM, such as a WebSocket, a response still streaming, an SSH connection or an attached terminal, matched on the request that opened them. A request in progress meets only the rules listing `open`, by priority, when the rule is written and for as long as it is in force: an `allow` keeps it, a `deny` closes it, and one no such rule matches stays open. Only an `allow` or a `deny` may list `open`. An idle keep-alive connection holds nothing, so its next request is `new`. Defaults to `["new"]`. */
+            /** @description `inbound` only. The requests the rule applies to: `new` ones as they arrive, and `open` ones already in progress on the VM, such as a WebSocket, a response still streaming, an SSH connection or an attached terminal, matched on the request that opened them. A request in progress meets only the rules listing `open`, by priority, each time the VM's policies are written: an `allow` keeps it, a `deny` closes it, and one no such rule matches stays open. Only an `allow` or a `deny` may list `open`. An idle keep-alive connection holds nothing, so its next request is `new`. Defaults to `["new"]`. */
             connection_state?: ("new" | "open")[];
         };
         /** @description allow / deny, `delete` (schedule rules), `suspend` (schedule and outbound rules: suspends the VM; on outbound, allows the request and suspends the VM until its response arrives), or an object with any combination of `rewrite`, `gate`, and `suspend` (at least one). */
@@ -896,7 +896,7 @@ export interface components {
              */
             wake?: boolean;
         };
-        /** @description Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${…}`-braced), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged. */
+        /** @description Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${…}`-braced), `${header:NAME}` (the request's header NAME, on inbound rules), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged. */
         Rewrite: {
             /** @description Replacement request host. */
             host?: string;

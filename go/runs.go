@@ -41,9 +41,9 @@ type RunRequest struct {
 	// QueueingTimeout queues instead of failing fast when capacity is short.
 	QueueingTimeout *int `json:"queueing_timeout,omitempty"`
 
-	EndSymbol string     `json:"end_symbol,omitempty"`
-	Signal    string     `json:"signal,omitempty"`
-	Policies  *PolicyDoc `json:"policies,omitempty"`
+	EndSymbol string        `json:"end_symbol,omitempty"`
+	Signal    string        `json:"signal,omitempty"`
+	Policies  *PolicyUpdate `json:"policies,omitempty"`
 
 	// IdempotencyKey asks the server to deduplicate the command. Unlike Fork it
 	// is not auto-generated: a run is usually cheap to repeat and only the

@@ -101,7 +101,7 @@ func TestUpdateSendsRulesAndRemovals(t *testing.T) {
 		fmt.Fprint(w, `{"vm_id":"vm_1","state":"idle","policies":`+policyRules+`}`)
 	}, reject(t, "control"))
 
-	info, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{Policies: &arker.PolicyDoc{
+	info, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{Policies: &arker.PolicyUpdate{
 		Rules: map[string]*arker.PolicyRule{
 			"nap": {Type: "schedule", AfterLastRunningStart: 600, Action: "suspend"},
 			"old": nil,
@@ -233,7 +233,7 @@ func TestInboundSSHAndPTYRulesRoundTrip(t *testing.T) {
 		Match:    &arker.PolicyMatch{Via: []string{"ssh"}, SSHKeys: []string{sshKey}},
 		Action:   "allow",
 	}
-	info, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{Policies: &arker.PolicyDoc{
+	info, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{Policies: &arker.PolicyUpdate{
 		Rules: map[string]*arker.PolicyRule{"shell": shell, "dev-key": devKey},
 	}})
 	if err != nil {
@@ -252,6 +252,94 @@ func TestInboundSSHAndPTYRulesRoundTrip(t *testing.T) {
 	for name, rule := range map[string]*arker.PolicyRule{"shell": shell, "dev-key": devKey} {
 		if got := info.Policies.Rules[name]; !reflect.DeepEqual(got, rule) {
 			t.Fatalf("%s read back %+v, want %+v", name, got, rule)
+		}
+	}
+}
+
+// Fields a read-modify-write must carry back unchanged: the deprecated token
+// auth, query_params, and a deprecated lifecycle rule's when.
+const preservedRules = `{"rules":{` +
+	`"api":{"type":"inbound","priority":20,"match":{"ports":[8080],"query_params":{"v":["1","2"]}},"action":"allow","auth":{"token":"${secret:TOKEN}"}},` +
+	`"open":{"type":"inbound","priority":10,"match":{"ports":[3000]},"action":"allow","auth":"open"},` +
+	`"old-ttl":{"type":"lifecycle","when":{"after":3600},"action":"delete"},` +
+	`"old-end":{"type":"lifecycle","when":{"at":"2030-01-01T00:00:00Z"},"action":"delete"}},` +
+	`"secrets":{"TOKEN":"***"},"mitm_domains":["api.example"],"warnings":["w"]}`
+
+func TestAuthQueryParamsAndWhenRoundTrip(t *testing.T) {
+	var doc arker.PolicyDoc
+	if err := json.Unmarshal([]byte(preservedRules), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if auth := doc.Rules["api"].Auth; auth == nil || auth.Token != "${secret:TOKEN}" {
+		t.Fatalf("token auth did not decode: %+v", doc.Rules["api"])
+	}
+	if auth := doc.Rules["open"].Auth; auth == nil || auth.Mode != "open" {
+		t.Fatalf("string auth did not decode: %+v", doc.Rules["open"])
+	}
+	if q := doc.Rules["api"].Match.QueryParams; !reflect.DeepEqual(q, map[string][]string{"v": {"1", "2"}}) {
+		t.Fatalf("query_params did not decode: %+v", q)
+	}
+	if w := doc.Rules["old-ttl"].When; w == nil || w.After != 3600 {
+		t.Fatalf("lifecycle when did not decode: %+v", doc.Rules["old-ttl"])
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want, got any
+	_ = json.Unmarshal([]byte(preservedRules), &want)
+	_ = json.Unmarshal(out, &got)
+	if !jsonEqual(want, got) {
+		t.Fatalf("re-encoded policy differs:\n%s", out)
+	}
+}
+
+func TestPolicyEntryDecodesTokenAuth(t *testing.T) {
+	var entry arker.PolicyEntry
+	raw := `{"type":"inbound","match":{"ports":[8080]},"action":"allow","auth":{"token":"${secret:TOKEN}"}}`
+	if err := json.Unmarshal([]byte(raw), &entry); err != nil || entry.Auth == nil || entry.Auth.Token != "${secret:TOKEN}" {
+		t.Fatalf("entry = %+v, err = %v", entry, err)
+	}
+	out, _ := json.Marshal(entry)
+	var want, got any
+	_ = json.Unmarshal([]byte(raw), &want)
+	_ = json.Unmarshal(out, &got)
+	if !jsonEqual(want, got) {
+		t.Fatalf("re-encoded entry differs: %s", out)
+	}
+}
+
+func TestReadModifyWriteKeepsRulesAndSendsNoReadOnlyFields(t *testing.T) {
+	var body map[string]any
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPatch {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		fmt.Fprint(w, `{"vm_id":"vm_1","state":"idle","policies":`+preservedRules+`}`)
+	}, reject(t, "control"))
+	ctx := context.Background()
+
+	vm := c.VM("vm_1")
+	if err := vm.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rules := vm.Info.Policies.Rules
+	priority := 30
+	rules["web"] = &arker.PolicyRule{Type: "inbound", Priority: &priority, Match: &arker.PolicyMatch{Ports: []any{8081}}, Action: "allow"}
+	if _, err := vm.Update(ctx, arker.UpdateRequest{Policies: &arker.PolicyUpdate{Rules: rules}}); err != nil {
+		t.Fatal(err)
+	}
+
+	var read map[string]any
+	_ = json.Unmarshal([]byte(preservedRules), &read)
+	sent := body["policies"].(map[string]any)
+	if len(sent) != 1 {
+		t.Fatalf("PATCH policies sent more than rules: %v", sent)
+	}
+	sentRules := sent["rules"].(map[string]any)
+	for name, rule := range read["rules"].(map[string]any) {
+		if !jsonEqual(rule, sentRules[name]) {
+			t.Fatalf("rule %s changed on the way back: %v", name, sentRules[name])
 		}
 	}
 }

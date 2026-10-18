@@ -1687,7 +1687,7 @@ export class VM {
       pool_name: r.pool_name,
       resources,
       ssh_public_keys: r.ssh_public_keys,
-      policies: r.policies,
+      policies: r.policies && withoutReadOnlyPolicyFields(r.policies),
     };
     return this._client._request("PATCH", vmPath(this.id), body, this.baseUrl);
   }
@@ -2331,6 +2331,12 @@ function canRetryAgain(
 ): boolean {
   if (queueingDeadline !== undefined) return Date.now() + delayMs < queueingDeadline;
   return attempt < retry.attempts - 1;
+}
+
+/** A policy read back (`vm.policies`) also reports fields an update refuses. */
+function withoutReadOnlyPolicyFields(policies: PolicyUpdate): PolicyUpdate {
+  const { hostname: _h, mitm_domains: _m, warnings: _w, ...update } = policies as PolicyUpdate & Partial<PolicyDoc>;
+  return update;
 }
 
 function parseJson(text: string): unknown {

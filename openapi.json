@@ -4563,7 +4563,7 @@
           "idle",
           "running"
         ],
-        "description": "`running` while a run, a terminal, or an inbound request is using the VM. `idle` otherwise. A Windows VM is `running` from its start until it is suspended."
+        "description": "`running` while something uses the VM: a run, an SSH connection, a terminal, an inbound request, a sync or a resize. `idle` otherwise. A Windows VM is `running` from its start until it is suspended."
       },
       "SessionState": {
         "type": "string",
@@ -4823,7 +4823,7 @@
                 "pty"
               ]
             },
-            "description": "`inbound` only. How the request reaches the VM: `port` to a guest port at its `.arker.app` hostname, `ssh` over SSH, `pty` by attaching a terminal (`GET /v1/vms/{id}/sessions/{sid}/pty`). Defaults to `[\"port\"]`. A way no rule names works as it does without rules; once a rule names it, the rules decide, and a request no rule matches is refused. A rule naming `ssh` or `pty` matches only on `ips`, `vm_state`, `connection_state` and, for `ssh` alone, `ssh_keys`, and is `allow` or `deny`."
+            "description": "`inbound` only. How the request reaches the VM: `port` to a guest port at its `.arker.app` hostname, `ssh` over SSH, `pty` by attaching a terminal (`GET /v1/vms/{id}/sessions/{sid}/pty`). Defaults to `[\"port\"]`. A way no rule names works as it does without rules; once a rule names it, the rules decide, and a request no rule matches is refused. A rule naming `ssh` or `pty` matches only on `ips` (not yet for `ssh`), `vm_state`, `connection_state` and, for `ssh` alone, `ssh_keys`, and is `allow` or `deny`."
           },
           "ssh_keys": {
             "type": "array",
@@ -4843,7 +4843,7 @@
                 "open"
               ]
             },
-            "description": "`inbound` only. The requests the rule applies to: `new` ones as they arrive, and `open` ones already in progress on the VM, such as a WebSocket, a response still streaming, an SSH connection or an attached terminal, matched on the request that opened them. A request in progress meets only the rules listing `open`, by priority, when the rule is written and for as long as it is in force: an `allow` keeps it, a `deny` closes it, and one no such rule matches stays open. Only an `allow` or a `deny` may list `open`. An idle keep-alive connection holds nothing, so its next request is `new`. Defaults to `[\"new\"]`."
+            "description": "`inbound` only. The requests the rule applies to: `new` ones as they arrive, and `open` ones already in progress on the VM, such as a WebSocket, a response still streaming, an SSH connection or an attached terminal, matched on the request that opened them. A request in progress meets only the rules listing `open`, by priority, each time the VM's policies are written: an `allow` keeps it, a `deny` closes it, and one no such rule matches stays open. Only an `allow` or a `deny` may list `open`. An idle keep-alive connection holds nothing, so its next request is `new`. Defaults to `[\"new\"]`."
           }
         }
       },
@@ -4903,7 +4903,7 @@
       "Rewrite": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${\u2026}`-braced), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged.",
+        "description": "Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${\u2026}`-braced), `${header:NAME}` (the request's header NAME, on inbound rules), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged.",
         "properties": {
           "host": {
             "description": "Replacement request host.",

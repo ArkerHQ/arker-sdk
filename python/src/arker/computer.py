@@ -1908,6 +1908,11 @@ def _build_pty_ws_url(base_url: str, vm_id: str, session_id: str, params: dict[s
     return urllib.parse.urlunsplit((scheme, parsed.netloc, parsed.path, query, ""))
 
 
+# What a policy read reports but an update refuses, so a policy read back can
+# be sent as an update.
+_READ_ONLY_POLICY_FIELDS = frozenset({"hostname", "mitm_domains", "warnings"})
+
+
 def _policy_update(policies: Any) -> Any:
     """A ``None`` rule or secret in a policy update removes it, so it must reach
     the wire as ``null`` rather than be pruned like an unset field."""
@@ -1920,6 +1925,7 @@ def _policy_update(policies: Any) -> Any:
         if key in ("rules", "secrets") and isinstance(value, dict)
         else value
         for key, value in policies.items()
+        if key not in _READ_ONLY_POLICY_FIELDS
     }
 
 

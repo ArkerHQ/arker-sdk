@@ -8,18 +8,20 @@ import (
 
 // PolicyMatch selects the traffic a PolicyEntry applies to.
 type PolicyMatch struct {
-	Ports        []any          `json:"ports,omitempty"`
-	IPs          []string       `json:"ips,omitempty"`
-	Hosts        []string       `json:"hosts,omitempty"`
-	Methods      []string       `json:"methods,omitempty"`
-	Paths        []string       `json:"paths,omitempty"`
-	Headers      map[string]any `json:"headers,omitempty"`
-	BodyContains []string       `json:"body_contains,omitempty"`
+	Ports        []any               `json:"ports,omitempty"`
+	IPs          []string            `json:"ips,omitempty"`
+	Hosts        []string            `json:"hosts,omitempty"`
+	Methods      []string            `json:"methods,omitempty"`
+	Paths        []string            `json:"paths,omitempty"`
+	Headers      map[string]any      `json:"headers,omitempty"`
+	QueryParams  map[string][]string `json:"query_params,omitempty"`
+	BodyContains []string            `json:"body_contains,omitempty"`
 	// VMState is inbound only: "running" or "idle". Pair "idle" with "deny" to
 	// keep requests from starting the VM.
 	VMState string `json:"vm_state,omitempty"`
 	// Via is inbound only: "port" (the default), "ssh", "pty". A rule naming
-	// ssh or pty matches only on IPs, VMState and ConnectionState.
+	// ssh or pty matches only on IPs (not yet for ssh), VMState,
+	// ConnectionState and, for ssh alone, SSHKeys.
 	Via []string `json:"via,omitempty"`
 	// ConnectionState is inbound only: "new" (the default) and "open", the
 	// requests already in progress. Only allow and deny may list "open".
@@ -77,21 +79,62 @@ type PolicyEntry struct {
 	Match        *PolicyMatch        `json:"match,omitempty"`
 	Action       string              `json:"-"`
 	ActionObject *PolicyActionObject `json:"-"`
-	Auth         string              `json:"auth,omitempty"`
+	Auth         *PolicyAuth         `json:"auth,omitempty"`
+}
+
+// PolicyAuth is a rule's deprecated auth: Mode "open" or "arker", or a Token
+// (usually "${secret:NAME}") that the request carries as arker_token. Set one.
+type PolicyAuth struct {
+	Mode  string
+	Token string
+}
+
+func (a PolicyAuth) MarshalJSON() ([]byte, error) {
+	if a.Token != "" {
+		return json.Marshal(struct {
+			Token string `json:"token"`
+		}{a.Token})
+	}
+	return json.Marshal(a.Mode)
+}
+
+func (a *PolicyAuth) UnmarshalJSON(raw []byte) error {
+	if len(raw) > 0 && raw[0] == '{' {
+		var wire struct {
+			Token string `json:"token"`
+		}
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			return err
+		}
+		*a = PolicyAuth{Token: wire.Token}
+		return nil
+	}
+	*a = PolicyAuth{}
+	return json.Unmarshal(raw, &a.Mode)
+}
+
+// LifecycleWhen is a deprecated lifecycle rule's clock: At (RFC 3339) or
+// After (seconds after creation). Set one.
+type LifecycleWhen struct {
+	At    string `json:"at,omitempty"`
+	After int    `json:"after,omitempty"`
 }
 
 // PolicyRule is one rule of a VM's keyed policy. Type "outbound" and
-// "inbound" rules take Priority (required; higher is evaluated first), Match
-// and ExpiresAt. Type "schedule" rules name exactly one clock -- At,
-// AfterCreated or AfterLastRunningStart (seconds) -- and Action "suspend" or
-// "delete".
+// "inbound" rules take Priority (required; higher is evaluated first), Match,
+// ExpiresAt and the deprecated Auth. Type "schedule" rules name exactly one
+// clock -- At, AfterCreated or AfterLastRunningStart (seconds) -- and Action
+// "suspend" or "delete". The deprecated type "lifecycle" takes When and
+// Action "delete".
 type PolicyRule struct {
 	Type                  string              `json:"type"`
 	Priority              *int                `json:"priority,omitempty"`
 	Match                 *PolicyMatch        `json:"match,omitempty"`
 	Action                string              `json:"-"`
 	ActionObject          *PolicyActionObject `json:"-"`
+	Auth                  *PolicyAuth         `json:"auth,omitempty"`
 	ExpiresAt             string              `json:"expires_at,omitempty"`
+	When                  *LifecycleWhen      `json:"when,omitempty"`
 	At                    string              `json:"at,omitempty"`
 	AfterCreated          int                 `json:"after_created,omitempty"`
 	AfterLastRunningStart int                 `json:"after_last_running_start,omitempty"`
@@ -158,12 +201,10 @@ func readAction(raw json.RawMessage, name *string, object **PolicyActionObject) 
 	return json.Unmarshal(raw, name)
 }
 
-// PolicyDoc is a VM's network policy. Rules is the keyed policy a VM reports
-// and PATCH /v1/vms/{id} (UpdateRequest.Policies) changes: a rule replaces the
-// one with its id, a nil rule removes it, and rules not named are kept.
-// Policies is the deprecated ordered list, which replaces the whole policy and
-// is all the PUT /policies document takes. Hostname and Warnings are
-// response-only.
+// PolicyDoc is a VM's network policy as read: Rules is the keyed policy a VM
+// reports, Policies the deprecated ordered list that PUT /policies takes.
+// Hostname, MITMDomains and Warnings are response-only; change a policy with a
+// PolicyUpdate, which has none of them.
 type PolicyDoc struct {
 	Rules       map[string]*PolicyRule `json:"rules,omitempty"`
 	Policies    []PolicyEntry          `json:"policies,omitempty"`
@@ -171,6 +212,16 @@ type PolicyDoc struct {
 	MITMDomains []string               `json:"mitm_domains,omitempty"`
 	Hostname    string                 `json:"hostname,omitempty"`
 	Warnings    []string               `json:"warnings,omitempty"`
+}
+
+// PolicyUpdate changes a VM's network policy on PATCH /v1/vms/{id}, fork and
+// run: a rule or secret replaces the one with its name, a nil one removes it,
+// and those not named are kept, so an empty update changes nothing. Policies is
+// the deprecated ordered list, which replaces the whole policy; not with Rules.
+type PolicyUpdate struct {
+	Rules    map[string]*PolicyRule `json:"rules,omitempty"`
+	Secrets  map[string]*string     `json:"secrets,omitempty"`
+	Policies []PolicyEntry          `json:"policies,omitempty"`
 }
 
 // GetPolicies reads this VM's network policy.
