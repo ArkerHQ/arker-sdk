@@ -1,5 +1,19 @@
 # Recorded coverage baseline
 
+## Blaxel directory paths
+
+TypeScript directory listings now include the directory name/path and every
+entry's path. A regression failed before correction. Typecheck and the full
+TypeScript test/build/isolated-consumer suite pass; the unchanged Blaxel program
+passes on native Blaxel, the shim's native route, and Arker feature backend
+`51c0ce8`. All owned sandboxes were deleted by the program's cleanup.
+Packed npm SHA-256:
+`23bade1ded0f7011b85f338712bc92cfa0e3341657654f2d3e55f51b97cc56b6`.
+
+This changes the Node fingerprint. Earlier full-cohort counts below are
+historical until refreshed; the targeted three-route run is not full parity.
+File owner/group, permissions, timestamp and symlink behavior remain gaps.
+
 ## E2B binary filesystem update
 
 At `63e9003`, buffered binary reads preserve all byte values as native

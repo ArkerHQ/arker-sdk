@@ -187,10 +187,17 @@ export class SandboxInstance {
         return { message: "Directory created successfully", path: resolved };
       },
       ls: async (path) => {
-        const entries = await box.filesystem.readdir(this.provider === "arker" ? resolveCompatPath(path, "/blaxel") : path);
+        const resolved = resolveCompatPath(path, "/blaxel");
+        const entries = await box.filesystem.readdir(resolved);
+        const withPath = (entry: { name: string }) => ({
+          ...entry,
+          path: `${resolved === "/" ? "" : resolved}/${entry.name}`,
+        });
         return {
-          files: entries.filter((entry: any) => entry.type === "file"),
-          subdirectories: entries.filter((entry: any) => entry.type === "directory"),
+          name: resolved === "/" ? "/" : resolved.slice(resolved.lastIndexOf("/") + 1),
+          path: resolved,
+          files: entries.filter((entry) => entry.type === "file").map(withPath),
+          subdirectories: entries.filter((entry) => entry.type === "directory").map(withPath),
         };
       },
       rm: async (path, recursive = false) => {

@@ -739,6 +739,27 @@ async function testBlaxelNonrecursiveRemoval(): Promise<void> {
   } finally { fake.cleanup(); }
 }
 
+async function testBlaxelDirectoryPaths(): Promise<void> {
+  const box = new FakeSandbox();
+  box.filesystem.readdir = async (path) => {
+    assert.equal(path, "/blaxel/nested");
+    return [
+      { name: "line\nbreak", type: "file", size: 7 },
+      { name: "child", type: "directory" },
+    ];
+  };
+  const fake = installFakeCompute(box);
+  try {
+    const sandbox = await BlaxelSandbox.create();
+    const listing = await sandbox.fs.ls("nested/");
+    assert.equal(listing.name, "nested");
+    assert.equal(listing.path, "/blaxel/nested");
+    assert.equal(listing.files[0]?.path, "/blaxel/nested/line\nbreak");
+    assert.equal(listing.files[0]?.size, 7);
+    assert.equal(listing.subdirectories[0]?.path, "/blaxel/nested/child");
+  } finally { fake.cleanup(); }
+}
+
 async function testBackgroundProcessOwnsAnArkerRun(): Promise<void> {
   const calls: any[] = [];
   const vm = {
@@ -819,6 +840,7 @@ await testBlaxelCreateIfNotExistsAndTtl();
 await testBlaxelInitializationFailureDeletesCreatedVm();
 await testBlaxelBinaryFiles();
 await testBlaxelNonrecursiveRemoval();
+await testBlaxelDirectoryPaths();
 await testBackgroundProcessOwnsAnArkerRun();
 await testProcessControlHasAnIsolatedSerializedSession();
 

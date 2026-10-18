@@ -55,7 +55,11 @@ async function program(SandboxInstance: typeof Native | typeof Shim): Promise<vo
     await sandbox.fs.write("/blaxel/import-only/probe.txt", "second");
     assert.equal(await sandbox.fs.read("/blaxel/import-only/probe.txt"), "second");
     const listing = await sandbox.fs.ls("/blaxel/import-only");
+    assert.equal(listing.name, "import-only");
+    assert.equal(listing.path, "/blaxel/import-only");
     assert.ok(listing.files.some((entry) => entry.name === "probe.txt"));
+    assert.equal(listing.files.find((entry) => entry.name === "probe.txt")?.path,
+      "/blaxel/import-only/probe.txt");
     const binaryPath = "/blaxel/import-only/binary";
     const payload = Uint8Array.from({ length: 256 }, (_, i) => i);
     assert.deepEqual(await sandbox.fs.writeBinary(binaryPath, payload), {
