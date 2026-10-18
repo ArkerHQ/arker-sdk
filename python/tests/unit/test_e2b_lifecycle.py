@@ -40,6 +40,33 @@ def test_async_native_filesystem_is_preserved_without_sync_translation():
     assert asyncio.run(sandbox.files.read("/binary", format="bytes", request_timeout=7)) == bytearray(b"\xff")
 
 
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_arker_binary_reads_preserve_every_byte_and_native_return_type(asynchronous):
+    payload = bytes(range(256))
+    vm = types.SimpleNamespace(id="arker", sync=lambda path: payload)
+    sandbox = shim.Sandbox(vm=vm)
+    if asynchronous:
+        from arker._compat_e2b_async import AsyncSandbox
+
+        sandbox = AsyncSandbox(sandbox)
+        result = asyncio.run(sandbox.files.read("/binary", format="bytes"))
+    else:
+        result = sandbox.files.read("/binary", format="bytes")
+    assert type(result) is bytearray
+    assert result == bytearray(payload)
+
+
+def test_arker_stream_reads_are_not_faked_with_a_buffer():
+    from arker._compat import UnsupportedCompatibilityOption
+
+    def unexpected_read(path):
+        pytest.fail("unsupported formats must not perform filesystem I/O")
+
+    sandbox = shim.Sandbox(vm=types.SimpleNamespace(id="arker", sync=unexpected_read))
+    with pytest.raises(UnsupportedCompatibilityOption, match="format"):
+        sandbox.files.read("/binary", format="stream")
+
+
 @pytest.mark.parametrize("deleted", [True, False])
 def test_kill_preserves_provider_boolean(deleted):
     assert (

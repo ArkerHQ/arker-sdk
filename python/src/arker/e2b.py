@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import shlex
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, overload
 
 from ._compat import (
     CommandResult as _CommonCommandResult,
@@ -180,12 +180,25 @@ class Files(UnsupportedMixin):
         self._vm = vm
         self._native = native
 
-    def read(self, path: str) -> str:
-        if self._vm is None:
-            return self._native.read(path)
-        return self._vm.sync(resolve_compat_path(path, "/home/user")).decode("utf-8", "replace")  # type: ignore[union-attr]
+    @overload
+    def read(self, path: str, format: Literal["text"] = "text") -> str: ...
 
-    def write(self, path: str, content: str) -> None:
+    @overload
+    def read(self, path: str, format: Literal["bytes"]) -> bytearray: ...
+
+    def read(self, path: str, format: str = "text") -> str | bytearray:
+        if self._vm is None:
+            return self._native.read(path, format=format)
+        if format not in {"text", "bytes"}:
+            raise UnsupportedCompatibilityOption(
+                "Arker files.read supports buffered text/bytes formats, not this format"
+            )
+        raw = self._vm.sync(resolve_compat_path(path, "/home/user"))
+        if raw is None:
+            raise RuntimeError("Arker file read returned no data")
+        return bytearray(raw) if format == "bytes" else raw.decode("utf-8", "replace")
+
+    def write(self, path: str, content: str | bytes) -> None:
         if self._vm is None:
             result = self._native.write(path, content)
             return None if result is None else result

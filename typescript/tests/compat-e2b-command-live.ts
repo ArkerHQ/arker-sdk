@@ -13,6 +13,12 @@ async function program(Sandbox: { create(): Promise<Native | Shim>; connect(id: 
     const connectedSandbox = await Sandbox.connect(sandbox.sandboxId);
     assert.equal(connectedSandbox.sandboxId, sandbox.sandboxId);
     assert.equal((await connectedSandbox.commands.run("printf connected")).stdout, "connected");
+    const binary = Uint8Array.from({ length: 2048 }, (_, index) => index % 256);
+    await sandbox.files.write("/tmp/compat-e2b-binary", binary.buffer);
+    const binaryResult = await connectedSandbox.files.read("/tmp/compat-e2b-binary", { format: "bytes" });
+    assert.equal(binaryResult.constructor, Uint8Array);
+    assert.deepEqual(binaryResult, binary);
+    assert.equal(await sandbox.files.read("/tmp/compat-e2b-binary"), new TextDecoder().decode(binary));
     const result = await sandbox.commands.run('printf "%s" "$COMPAT_VALUE"', {
       envs: { COMPAT_VALUE: "preserved" },
       timeoutMs: 10_000,

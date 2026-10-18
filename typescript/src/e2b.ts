@@ -162,12 +162,29 @@ export class Sandbox {
     };
     this.files = this.#native?.files ?? ({
       read: async (path: string, options?: Record<string, unknown>) => {
-        assertSupportedObjectKeys(options, [], "e2b", "files.read");
-        return this.#box.filesystem.readFile(resolveCompatPath(path, "/home/user"));
+        assertSupportedObjectKeys(options, ["format"], "e2b", "files.read");
+        const format = options?.format ?? "text";
+        if (format !== "text" && format !== "bytes") {
+          throw new ArkerError("unsupported_operation", "Arker files.read supports buffered text/bytes formats, not this format", 422);
+        }
+        const resolved = resolveCompatPath(path, "/home/user");
+        if (format === "bytes") {
+          const vm = (this.#box as unknown as { getInstance(): VM }).getInstance();
+          return Uint8Array.from(await vm.sync(resolved));
+        }
+        return this.#box.filesystem.readFile(resolved);
       },
-      write: async (path: string, content: string, options?: Record<string, unknown>) => {
+      write: async (path: string, content: string | ArrayBuffer, options?: Record<string, unknown>) => {
         assertSupportedObjectKeys(options, [], "e2b", "files.write");
-        await this.#box.filesystem.writeFile(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path, content);
+        const resolved = resolveCompatPath(path, "/home/user");
+        if (typeof content === "string") {
+          await this.#box.filesystem.writeFile(resolved, content);
+        } else if (content instanceof ArrayBuffer) {
+          const vm = (this.#box as unknown as { getInstance(): VM }).getInstance();
+          await vm.sync(resolved, new Uint8Array(content));
+        } else {
+          throw new ArkerError("unsupported_operation", "Arker files.write supports string/ArrayBuffer data, not this input", 422);
+        }
       },
       makeDir: async (path: string, options?: Record<string, unknown>) => {
         assertSupportedObjectKeys(options, [], "e2b", "files.makeDir");

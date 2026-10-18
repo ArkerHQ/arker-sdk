@@ -14,6 +14,12 @@ try:
     connected_sandbox = Sandbox.connect(sandbox.sandbox_id)
     assert connected_sandbox.sandbox_id == sandbox.sandbox_id
     assert connected_sandbox.commands.run("printf connected").stdout == "connected"
+    binary = bytes(range(256)) * 8
+    sandbox.files.write("/tmp/compat-e2b-binary", binary)
+    binary_result = connected_sandbox.files.read("/tmp/compat-e2b-binary", format="bytes")
+    assert type(binary_result) is bytearray
+    assert binary_result == bytearray(binary)
+    assert sandbox.files.read("/tmp/compat-e2b-binary") == binary.decode("utf-8", "replace")
     result = sandbox.commands.run('printf "%s" "$COMPAT_VALUE"', envs={"COMPAT_VALUE": "preserved"})
     assert isinstance(result, CommandResult)
     assert result.stdout == "preserved"
