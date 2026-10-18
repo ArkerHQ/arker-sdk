@@ -2,16 +2,31 @@ import type { CommandResult, RunCommandOptions, SandboxInterface } from "compute
 
 export type UniversalSandbox = SandboxInterface;
 
+export class CompatibilityNotFoundError extends Error {}
+
+/** A local preflight refusal before any sandbox creation request is issued. */
+export class CompatibilityCreationNotStartedError extends Error {}
+
+export function nativeInstance(box: UniversalSandbox): object | undefined {
+  if (box.provider === "arker") return undefined;
+  const getter = (box as UniversalSandbox & { getInstance?: () => unknown }).getInstance;
+  const native = typeof getter === "function" ? getter.call(box) : undefined;
+  return native && typeof native === "object" ? native : undefined;
+}
+
 export interface CreateOptions {
   timeout?: number;
   timeoutMs?: number;
+  routerConfigPath?: string;
+  envs?: Record<string, string>;
+  metadata?: Record<string, unknown>;
 }
 
 export function shouldGuardNested(value: unknown): value is object {
   return !!value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
 }
 
-export function guardUnsupported<T extends object>(instance: T, shimName: string): T {
+export function guardUnsupported<T extends object>(instance: T, shimName: string, native?: object): T {
   const passthrough = new Set<PropertyKey>([
     "then",
     "catch",
@@ -34,7 +49,16 @@ export function guardUnsupported<T extends object>(instance: T, shimName: string
         if (typeof value === "function") {
           return (value as (...args: unknown[]) => unknown).bind(target);
         }
-        return shouldGuardNested(value) ? guardUnsupported(value, shimName) : value;
+        if (shouldGuardNested(value)) {
+          const nativeValue = native && prop in native ? Reflect.get(native, prop, native) : undefined;
+          return guardUnsupported(value, shimName, nativeValue && typeof nativeValue === "object" ? nativeValue : undefined);
+        }
+        return value;
+      }
+
+      if (native && prop in native) {
+        const value = Reflect.get(native, prop, native);
+        return typeof value === "function" ? value.bind(native) : value;
       }
 
       throw new Error(
@@ -103,6 +127,25 @@ export function shellQuote(value: string): string {
   if (value === "") return "''";
   if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+export function resolveCompatPath(path: string, defaultDirectory: string): string {
+  if (path.startsWith("/")) return path;
+  const parts = `${defaultDirectory}/${path}`.split("/");
+  const resolved: string[] = [];
+  for (const part of parts) {
+    if (!part || part === ".") continue;
+    if (part === "..") resolved.pop();
+    else resolved.push(part);
+  }
+  return `/${resolved.join("/")}`;
+}
+
+export function formatEnvExports(env: Record<string, string>): string {
+  return Object.entries(env).map(([key, value]) => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new Error(`Invalid environment variable name: ${key}`);
+    return `export ${key}=${shellQuote(value)};`;
+  }).join(" ");
 }
 
 export function commandName(command: string): string {

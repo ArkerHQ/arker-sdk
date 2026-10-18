@@ -583,6 +583,7 @@ async function testConfiguredPlacementRoutesNamedSourcesToMainEndpoint(): Promis
 
   assert.equal(arker.baseUrl, "https://provider-one-region-one.arker.ai/api");
   assert.equal(vm.baseUrl, "https://provider-one-region-one.arker.ai/api");
+  assert.equal(new Arker({ apiKey: "k", baseUrl: `https://test.invalid/api${"/".repeat(10_000)}` }).baseUrl, "https://test.invalid/api");
 }
 
 function testArbitraryProviderBuildsEndpoint(): void {
@@ -2103,12 +2104,14 @@ async function testStatCacheCatchesForgedMtimeEdit(): Promise<void> {
     const cacheFile = nodePath.join(sub, fs.readdirSync(sub)[0]!);
     const parsed = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
     const entry = parsed.entries["a.txt"];
-    // Perfect (size, mtime) forge; ctime deliberately left at the old value.
+    // Forge matching fields and a stale ctime explicitly: some filesystems give
+    // both writes the same timestamp, so elapsed wall time cannot set up this case.
     entry.size = Number(now.size);
     entry.mtimeNs = String(now.mtimeNs);
     entry.ino = String(now.ino);
     entry.dev = String(now.dev);
     entry.mode = Number(now.mode);
+    entry.ctimeNs = String(now.ctimeNs - 1n);
     assert.notEqual(entry.ctimeNs, String(now.ctimeNs), "ctime must differ after a write");
     // Keep it outside the racily-clean window so THIS is what forces the re-hash.
     parsed.writtenNs = String(BigInt(entry.mtimeNs) + 10_000_000_000n);

@@ -40,6 +40,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from pydantic import TypeAdapter, ValidationError
 
+from ._port import PortStream
 from .generated.api_models import (
     BackgroundRunResponse,
     CancelRunResponse,
@@ -97,6 +98,7 @@ from .generated.api_models import (
     UpdatePoolRequest,
     Vm,
     VmNetwork,
+    VmPolicies,
     VmResources,
     WhoamiResponse,
 )
@@ -683,11 +685,16 @@ class VM:
     provider: str | None
     network: VmNetwork | None
     resources: VmResources | None
+    vcpu_count: int | None
+    memory_mib: int | None
+    disk_mib: int | None
     max_vcpus: int | None
     max_memory_mib: int | None
     min_memory_mib: int | None
     last_active_at: str | None
     sessions: list[Session] | None
+    hostname: str | None
+    policies: VmPolicies | None
 
     def __init__(
         self,
@@ -701,6 +708,10 @@ class VM:
         self.base_url = base_url or client.base_url
         for f in dataclasses.fields(Vm):
             setattr(self, f.name, getattr(data, f.name) if data is not None else None)
+        # Preserve public handle attributes while the wire contract nests resources.
+        self.vcpu_count = self.resources.vcpu if self.resources is not None else None
+        self.memory_mib = self.resources.memory_mib if self.resources is not None else None
+        self.disk_mib = self.resources.disk_mib if self.resources is not None else None
 
     def __repr__(self) -> str:
         return f"VM(id={self.id!r}, name={self.name!r}, state={self.state!r})"
@@ -875,6 +886,7 @@ class VM:
         self,
         *,
         vcpu: int | None = None,
+        vcpu_count: int | None = None,
         memory_mib: int | None = None,
         disk_mib: int | None = None,
         vgpu: float | None = None,
@@ -898,6 +910,9 @@ class VM:
         current policy unchanged.
 
         Returns the updated :class:`Vm`."""
+        if vcpu is not None and vcpu_count is not None:
+            raise TypeError("Pass vcpu, not both vcpu and vcpu_count")
+        vcpu = vcpu if vcpu is not None else vcpu_count
         resources: ResourcesInput | None = None
         if vcpu is not None or memory_mib is not None or disk_mib is not None or vgpu is not None:
             resources = ResourcesInput(
@@ -1358,6 +1373,56 @@ class VM:
             base_url=self.base_url,
         )
         return _decode_model(PatchSessionResponse, payload)
+
+    def connect_port(self, port: int, *, timeout: float = 300) -> PortStream:
+        """Connect to a VM-local TCP port without exposing public ingress."""
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            raise ValueError("port must be an integer from 1 through 65535")
+        return self._connect_private_stream(f"/ports/{port}", timeout=timeout)
+
+    def connect_unix(self, path: str, *, timeout: float = 300) -> PortStream:
+        """Open an owner-authenticated guest Unix socket without public ingress."""
+        if not isinstance(path, str) or not path.startswith("/") or "\0" in path or len(path.encode("utf-8")) > 107:
+            raise ValueError("socket path must be absolute, NUL-free, and at most 107 UTF-8 bytes")
+        return self._connect_private_stream("/sockets?" + urllib.parse.urlencode({"path": path}), timeout=timeout)
+
+    def _connect_private_stream(self, endpoint: str, *, timeout: float) -> PortStream:
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
+            raise ValueError("timeout must be finite and positive")
+        import websocket
+
+        parsed = urllib.parse.urlsplit(self.base_url + _vm_path(self.id) + endpoint)
+        if parsed.scheme not in {"https", "http"}:
+            raise ValueError("private port requires an HTTP or HTTPS API URL")
+        url = urllib.parse.urlunsplit(parsed._replace(scheme="wss" if parsed.scheme == "https" else "ws"))
+        try:
+            connection = websocket.create_connection(
+                url,
+                header=[f"Authorization: Bearer {self._client._api_key}"],
+                subprotocols=["vm-port.v1"],
+                timeout=timeout,
+                redirect_limit=0,
+                enable_multithread=True,
+            )
+        except websocket.WebSocketBadStatusException as error:
+            try:
+                payload = json.loads(error.resp_body)
+            except (TypeError, ValueError):
+                raise ArkerError(
+                    "internal", "Private port upgrade returned a malformed error", error.status_code
+                ) from error
+            parsed_error = _extract_error(payload, error.status_code)
+            if parsed_error is None:
+                raise ArkerError(
+                    "internal", "Private port upgrade returned a malformed error", error.status_code
+                ) from error
+            raise parsed_error from error
+        return PortStream(connection)
 
     # ── Interactive PTY ────────────────────────────────────────────────
     def connect_pty(

@@ -20,6 +20,12 @@ bun add @arker-ai/sdk
 
 The SDK requires Node.js 18 or later.
 
+The compatibility modules have additional vendor/runtime requirements: the
+pinned E2B SDK requires Node.js 22.19 or later. Private-port and Blaxel HTTP
+compatibility on Bun is tested with Bun 1.4.3; Bun 1.3.8 lacks the WebSocket
+upgrade-response behavior these operations require. Repository development and
+CI use Bun 1.4.3. This does not certify every vendor API or runtime combination.
+
 ## Get started
 
 Sign up and get your API key at [arker.ai/console](https://arker.ai/console).

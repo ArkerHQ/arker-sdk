@@ -668,6 +668,9 @@ def test_list_uses_configured_base_url() -> None:
     assert result.vms[0].network is not None
     assert result.vms[0].network.ssh_public_keys is None
     assert result.vms[0].resources == sdk.VmResources(vcpu=2, memory_mib=1024, disk_mib=4096)
+    assert result.vms[0].vcpu_count == 2
+    assert result.vms[0].memory_mib == 1024
+    assert result.vms[0].disk_mib == 4096
 
 
 def test_listed_vm_uses_its_placement_endpoint() -> None:
@@ -952,7 +955,15 @@ def test_run_sends_policies() -> None:
     }
 
 
-def test_resize_patches_vm_resources() -> None:
+@pytest.mark.parametrize(
+    "options, expected",
+    [
+        ({"memory_mib": 1024}, {"memory_mib": 1024}),
+        ({"vcpu": 2}, {"vcpu": 2}),
+        ({"vcpu_count": 2}, {"vcpu": 2}),
+    ],
+)
+def test_resize_patches_vm_resources(options, expected) -> None:
     t = FakeTransport()
     t.add_json(
         lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"),
@@ -971,12 +982,19 @@ def test_resize_patches_vm_resources() -> None:
     )
 
     with use_transport(t):
-        result = client().vm("vm_1").update(memory_mib=1024)
+        result = client().vm("vm_1").update(**options)
 
     # resize now PATCHes /v1/vms/{id} with a resources object (arkerd reality;
     # the old POST /v1/vms/{id}/resize route does not exist). None fields are pruned.
-    assert json.loads(t.calls[0]["body"]) == {"resources": {"memory_mib": 1024}}
+    assert json.loads(t.calls[0]["body"]) == {"resources": expected}
     assert result is not None
+
+
+def test_resize_rejects_conflicting_cpu_aliases_before_sending_a_request() -> None:
+    t = FakeTransport()
+    with use_transport(t), pytest.raises(TypeError, match="vcpu"):
+        client().vm("vm_1").update(vcpu=2, vcpu_count=3)
+    assert t.calls == []
 
 
 def test_resize_patches_vgpu_on_its_own() -> None:

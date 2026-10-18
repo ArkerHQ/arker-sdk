@@ -1003,6 +1003,7 @@ export class VM {
   readonly vm_id?: Vm["vm_id"];
   readonly pool_id?: Vm["pool_id"];
   readonly name?: Vm["name"];
+  readonly hostname?: Vm["hostname"];
   readonly state?: Vm["state"];
   readonly owner_org_id?: Vm["owner_org_id"];
   readonly created_at?: Vm["created_at"];
@@ -1019,6 +1020,7 @@ export class VM {
   readonly root_source_vm_name?: Vm["root_source_vm_name"];
   readonly worker_id?: string | null;
   readonly sessions?: Vm["sessions"];
+  readonly policies?: Vm["policies"];
 
   constructor(client: Arker, vmId: string, baseUrl = client._baseUrlFor(vmId), data?: Vm) {
     this._client = client;
@@ -1783,6 +1785,35 @@ export class VM {
     );
   }
 
+  /** Open an owner-authenticated VM-local TCP stream without public ingress. Node only. */
+  async connectPort(port: number, options: { timeoutMs?: number } = {}): Promise<import("node:stream").Duplex> {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new RangeError("port must be an integer from 1 through 65535");
+    }
+    return this._connectPrivateStream(`/ports/${port}`, options);
+  }
+
+  /** Open an owner-authenticated guest Unix socket without public ingress. Node only. */
+  async connectUnix(path: string, options: { timeoutMs?: number } = {}): Promise<import("node:stream").Duplex> {
+    if (typeof path !== "string" || !path.startsWith("/") || path.includes("\0") || new TextEncoder().encode(path).length > 107) {
+      throw new RangeError("socket path must be absolute, NUL-free, and at most 107 UTF-8 bytes");
+    }
+    return this._connectPrivateStream(`/sockets?${new URLSearchParams({ path })}`, options);
+  }
+
+  private async _connectPrivateStream(endpoint: string, options: { timeoutMs?: number }): Promise<import("node:stream").Duplex> {
+    const timeout = options.timeoutMs ?? 300000;
+    if (!Number.isFinite(timeout) || timeout <= 0) throw new RangeError("timeoutMs must be finite and positive");
+    const url = new URL(`${normalizeBaseUrl(this.baseUrl)}${vmPath(this.id)}${endpoint}`);
+    if (url.protocol === "https:") url.protocol = "wss:";
+    else if (url.protocol === "http:") url.protocol = "ws:";
+    else throw new Error("private port requires an HTTP or HTTPS API URL");
+    const { connectPortStream } = await import("./internal/port.js");
+    return connectPortStream(url.toString(), this._client._authHeaders(), timeout, (body, status) =>
+      extractError(parseJson(body), status) ?? new ArkerError("internal", "Malformed private port upgrade error", status),
+    );
+  }
+
   async connectPty(options: PtyConnectOptions = {}): Promise<PtyConnection> {
     if (this.pool_id) throw new Error("Pool VMs do not support interactive shells; use run instead.");
     const sessionId = options.sessionId ?? sessionIdFrom(await this.createSession());
@@ -2024,7 +2055,10 @@ function clampPtyDimension(value: number): number {
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  const whitespaceTrimmed = baseUrl.trim();
+  let end = whitespaceTrimmed.length;
+  while (end > 0 && whitespaceTrimmed.charCodeAt(end - 1) === 47) end -= 1;
+  const trimmed = whitespaceTrimmed.slice(0, end);
   if (!trimmed) throw new Error("baseUrl must not be empty");
   return trimmed;
 }

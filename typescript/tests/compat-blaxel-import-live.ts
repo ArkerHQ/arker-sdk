@@ -1,0 +1,137 @@
+import assert from "node:assert/strict";
+import { mkdtemp, writeFile, readFile, stat, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+
+import { SandboxInstance as Native } from "@blaxel/core";
+import { SandboxInstance as Shim } from "../src/blaxel.js";
+import { recordEvidence } from "../scripts/compat-evidence.js";
+import { traceVendor } from "./compat-trace.js";
+
+// This program uses only official Blaxel calls; the harness changes the import.
+async function program(SandboxInstance: typeof Native | typeof Shim): Promise<void> {
+  const sandboxName = `arker-import-${randomUUID().slice(0, 12)}`;
+  const sandbox = await SandboxInstance.create({ name: sandboxName });
+  try {
+    assert.equal(sandbox.metadata?.name, sandboxName);
+    assert.ok(Array.isArray((await sandbox.fs.ls("/blaxel")).files));
+    const result = await sandbox.process.exec({
+      command: "printf '%s:%s' \"$PWD\" \"$IMPORT_ONLY\"; printf diagnostic >&2",
+      workingDir: "/tmp",
+      env: { IMPORT_ONLY: "preserved" },
+      waitForCompletion: true,
+      timeout: 10_000,
+    });
+    assert.equal(result.stdout, "/tmp:preserved");
+    assert.equal(result.stderr, "diagnostic");
+    assert.equal(result.exitCode, 0);
+    const isolated = await sandbox.process.exec({
+      command: "printf '%s:%s' \"$PWD\" \"${IMPORT_ONLY-unset}\"",
+      waitForCompletion: true,
+    });
+    assert.equal(isolated.stdout, "/blaxel:unset");
+    await sandbox.process.exec({
+      command: "sleep 0.2; printf within-deadline", name: "seconds-timeout", timeout: 1,
+      waitForCompletion: false,
+    });
+    const withinDeadline = await sandbox.process.wait("seconds-timeout", { maxWait: 10_000, interval: 100 });
+    assert.deepEqual([withinDeadline.status, withinDeadline.exitCode, withinDeadline.stdout],
+      ["completed", 0, "within-deadline"]);
+    await sandbox.process.exec({
+      command: "while :; do sleep 1; done", name: "execution-deadline", timeout: 1,
+      waitForCompletion: false,
+    });
+    const expired = await sandbox.process.wait("execution-deadline", { maxWait: 10_000, interval: 100 });
+    assert.deepEqual([expired.status, expired.exitCode], ["killed", -1]);
+    const failed = await sandbox.process.exec({
+      command: "printf failure-out; printf failure-err >&2; exit 17", waitForCompletion: true,
+    });
+    assert.deepEqual([failed.stdout, failed.stderr, failed.exitCode, failed.status], ["failure-out", "failure-err", 17, "failed"]);
+    assert.deepEqual(await sandbox.fs.mkdir("/blaxel/import-only"), {
+      message: "Directory created successfully", path: "/blaxel/import-only",
+    });
+    await sandbox.fs.write("/blaxel/import-only/probe.txt", "first");
+    await sandbox.fs.write("/blaxel/import-only/probe.txt", "second");
+    assert.equal(await sandbox.fs.read("/blaxel/import-only/probe.txt"), "second");
+    const listing = await sandbox.fs.ls("/blaxel/import-only");
+    assert.ok(listing.files.some((entry) => entry.name === "probe.txt"));
+    const binaryPath = "/blaxel/import-only/binary";
+    const payload = Uint8Array.from({ length: 256 }, (_, i) => i);
+    assert.deepEqual(await sandbox.fs.writeBinary(binaryPath, payload), {
+      message: "Binary file uploaded successfully", path: binaryPath,
+    });
+    assert.deepEqual(new Uint8Array(await (await sandbox.fs.readBinary(binaryPath)).arrayBuffer()), payload);
+    await sandbox.fs.writeBinary(binaryPath, new Blob([payload]));
+    const localPath = join(directory, "binary-input");
+    await writeFile(localPath, payload);
+    await sandbox.fs.writeBinary(binaryPath, localPath);
+    const downloaded = join(directory, "binary-download");
+    await sandbox.fs.download(binaryPath, downloaded, { mode: 0o600 });
+    assert.deepEqual(new Uint8Array(await readFile(downloaded)), payload);
+    assert.equal((await stat(downloaded)).mode & 0o777, 0o600);
+    await sandbox.fs.writeBinary(binaryPath, new Uint8Array());
+    assert.equal((await sandbox.fs.readBinary(binaryPath)).size, 0);
+    await assert.rejects(() => sandbox.fs.rm("/blaxel/import-only"));
+    assert.equal(await sandbox.fs.read("/blaxel/import-only/probe.txt"), "second");
+    assert.deepEqual(await sandbox.fs.rm(binaryPath), { message: "File deleted successfully", path: binaryPath });
+    const reconnected = await SandboxInstance.get(sandbox.metadata.name!);
+    assert.equal(await reconnected.fs.read("/blaxel/import-only/probe.txt"), "second");
+    const unattendedPath = "/blaxel/import-only/unattended";
+    const unattended = await sandbox.process.exec({
+      command: `sleep 2; printf done > ${unattendedPath}`, name: "unattended", waitForCompletion: false,
+    });
+    assert.equal(unattended.status, "running");
+    await new Promise((resolve) => setTimeout(resolve, 8_000));
+    assert.equal(await sandbox.fs.read(unattendedPath), "done");
+    const started = await sandbox.process.exec({
+      command: "cat; printf stdin-error >&2", name: "stdin-probe", stdin: true, waitForCompletion: false,
+    });
+    assert.equal(started.status, "running");
+    assert.equal((await reconnected.process.get("stdin-probe")).pid, started.pid);
+    await reconnected.process.writeStdin("stdin-probe", "hello λ\n");
+    await reconnected.process.closeStdin("stdin-probe");
+    const finished = await reconnected.process.wait("stdin-probe", { maxWait: 10_000, interval: 100 });
+    assert.equal(finished.status, "completed");
+    assert.equal(finished.stdout, "hello λ\n");
+    assert.equal(finished.stderr, "stdin-error");
+    assert.equal(await reconnected.process.logs("stdin-probe", "stdout"), "hello λ\n");
+    assert.ok((await reconnected.process.list()).some((item) => item.name === "stdin-probe"));
+    await sandbox.process.exec({ command: "sleep 30", name: "kill-probe", waitForCompletion: false });
+    await assert.rejects(reconnected.process.wait("kill-probe", { maxWait: 1, interval: 1 }), /tim/i);
+    assert.equal((await reconnected.process.get("kill-probe")).status, "running");
+    await reconnected.process.kill("kill-probe");
+    assert.equal((await reconnected.process.wait("kill-probe", { maxWait: 10_000, interval: 100 })).status, "killed");
+  } finally {
+    await sandbox.delete();
+  }
+}
+
+if (!process.env.ARKER_API_KEY || !process.env.BL_API_KEY) throw new Error("Live Arker and Blaxel credentials required");
+const directory = await mkdtemp(join(tmpdir(), "blaxel-import-"));
+const previous = process.env.COMPUTESDK_ROUTER_CONFIG;
+try {
+  for (const [provider, constructor] of [["blaxel", Native], ["blaxel", Shim], ["arker", Shim]] as const) {
+    const config = join(directory, "router.json");
+    await writeFile(config, JSON.stringify({
+      version: 1,
+      existing: { strategy: "priority", order: [provider] },
+      create: { strategy: "priority", order: [provider] },
+    }));
+    process.env.COMPUTESDK_ROUTER_CONFIG = config;
+    const called = new Set<string>();
+    let outcome = "failed";
+    try {
+      await program(traceVendor(constructor, "SandboxInstance.static", called));
+      outcome = "passed";
+    } finally {
+      await recordEvidence("blaxel", constructor === Native ? "reference" : provider === "arker" ? "arker" : "native",
+        "import-only-files-and-command-isolation", [...called].sort(), outcome);
+    }
+    console.log(`PASS Blaxel unchanged program: ${constructor === Native ? "native SDK" : "shim"} on ${provider}`);
+  }
+} finally {
+  if (previous === undefined) delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  else process.env.COMPUTESDK_ROUTER_CONFIG = previous;
+  await rm(directory, { recursive: true, force: true });
+}
