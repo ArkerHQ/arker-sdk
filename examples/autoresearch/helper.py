@@ -75,7 +75,7 @@ def turn_done(agent: str, turn: int, tsv: str, stdout: str = "") -> None:
         draw_progress(_state)
     waited = f", {queued:.0f}s queued" if queued >= 1 else ""
     log(f"{agent} turn {turn}/{TURNS} done in {took:.0f}s{waited} "
-        f"— val_loss {last_loss(tsv)}")
+        f"- val_loss {last_loss(tsv)}")
 
 
 ENV = ("export PATH=/usr/local/bin:$PATH HOME=/home/user "
@@ -94,7 +94,7 @@ TASK = (HERE / "train.py").read_text()
 
 # The VM prints this the instant the exec starts. Subtracting it from when we
 # submitted the run gives the time the run spent PARKED waiting for a GPU
-# slice — the one part of contention a client otherwise cannot see.
+# slice - the one part of contention a client otherwise cannot see.
 EXEC_MARK = "ARKER_EXEC_START"
 
 

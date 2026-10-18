@@ -21,7 +21,7 @@ type Status = "PASS" | "FAIL" | "STUB";
 const rows: Array<[Status, string, string]> = [];
 function rec(s: Status, name: string, detail = "") { rows.push([s, name, detail]); }
 
-// Treat arkerd's intentional stubs (empty list / not-implemented) as STUB, not FAIL.
+// Treat intentional API stubs (empty list / not-implemented) as STUB, not FAIL.
 async function call(name: string, fn: () => Promise<unknown>, opts: { stubOk?: boolean } = {}) {
   try {
     const r = await fn();
@@ -71,7 +71,7 @@ if (!vm) {
   vm = await call("Arker.fork(sourceVmName, org=ArkerHQ)",
     () => arker.fork({ source_vm_name: sourceVmName, source_org_id: ARKER_ORG_ID, name: `${stamp}-b` })) as any;
 }
-if (!vm) { print(); throw new Error("fork failed — cannot exercise per-VM surface"); }
+if (!vm) { print(); throw new Error("fork failed - cannot exercise per-VM surface"); }
 const vmId: string = vm.id;
 rec("PASS", "fork → vmId", vmId);
 
@@ -124,7 +124,7 @@ function print() {
   console.log("\n──────── SDK SURFACE ────────");
   for (const [s, n, d] of rows) {
     const tag = s === "PASS" ? "✓ PASS" : s === "STUB" ? "~ STUB" : "✗ FAIL";
-    console.log(`${tag}  ${n}${d ? "  — " + d : ""}`);
+    console.log(`${tag}  ${n}${d ? "  - " + d : ""}`);
   }
   const fails = rows.filter((r) => r[0] === "FAIL").length;
   const pass = rows.filter((r) => r[0] === "PASS").length;

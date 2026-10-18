@@ -158,7 +158,7 @@ class ArkerComputeSandbox implements SandboxInterface {
   }
 
   async getUrl(_options: { port: number; protocol?: string }): Promise<string> {
-    // arkerd does not expose tunnel/ingress URLs; the public VM API has no
+    // The public VM API does not expose tunnel/ingress URLs; it has no
     // tunnels surface. Inbound reachability is configured via the VM network
     // settings instead.
     throw new ArkerError(
