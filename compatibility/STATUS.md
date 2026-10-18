@@ -8,10 +8,21 @@ The expanded inventory remains the default. Storage, mounts, secrets, images,
 sandbox methods and unknown APIs remain in the scoped inventory. Regressions
 failed before the change. Python gates pass **468 vendor / 459 lean tests**
 (nine optional-vendor skips); TypeScript typecheck and full test/build/packed
-consumer gates pass. Fresh differential evidence for this measurement source
-is pending; the fingerprints and coverage counts below are historical.
+consumer gates pass. Fresh matching-source cohorts against backend `45def92`
+pass **27 Python / 22 Node** cases. Both expanded strict gates and both
+core-sandbox strict gates were invoked and remain **RED, exit 1**.
+Core-sandbox scope verifies **100/1,115 Python** APIs and **51/978 TypeScript**
+APIs. The expanded counts remain **100/1,138** and **51/1,048**; exclusions
+account for 23 and 70 App/Function entries, without adding verified behavior.
+Python fingerprint:
+`8349d5e51facc05749a9314b165df804a630ddfebb540ec2a8a7e92e09b40846`.
+Node fingerprint:
+`d4c81255009b6fcbd32ce4447c36a54c0ca4ff61d335b75f0bf7c77dd4b88de9`.
+Both inventories are complete for their declared roots;
+`full_api_equivalence` remains false. The older fingerprints below are
+historical. The packed npm hash is unchanged after the full build.
 
-## Current validation
+## Previous runtime checkpoint
 
 The `e43dcaa` process checkpoint translates native Blaxel execution timeout
 seconds to internal milliseconds and translates ComputeSDK milliseconds back
