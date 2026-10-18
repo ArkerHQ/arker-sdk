@@ -14,8 +14,17 @@ with TypeScript typecheck and the full test/build/isolated consumer gates.
 Packed npm SHA-256:
 `447b274b658172a7ab0d62f437ac4e038bdda8475e4978b730b0bae28437e163`.
 The import-only differential programs now assert binary write/read, exact
-native return types and default UTF-8 text behavior. Fresh live execution and
-matching-source coverage remain pending; earlier evidence is historical.
+native return types and default UTF-8 text behavior. Fresh matching-source
+cohorts against backend `51c0ce8` pass **27 Python / 22 Node** cases. Both
+expanded and both core strict gates were invoked and remain **RED, exit 1**.
+Core scope verifies **100/1,115 Python and 53/978 Node**; expanded scope is
+**100/1,138 and 53/1,048**. Complete declared inventories still report
+`full_api_equivalence=false`. Credential-free traces are retained under
+[`evidence/`](evidence/README.md).
+Python fingerprint:
+`6181f3a9f9a0df051caff60f3eddcae81de233550dc4652097a68109d7fdf77a`.
+Node fingerprint:
+`13f75b540c5405a779577598a2dfcf82a06959b72fee943f74e41abad01aaf04`.
 
 ## Native E2B filesystem preservation
 
