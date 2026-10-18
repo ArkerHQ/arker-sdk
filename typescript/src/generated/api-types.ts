@@ -690,13 +690,13 @@ export interface paths {
         };
         /**
          * List API keys
-         * @description List the organization's unrevoked API keys, newest first.
+         * @description List the organization's unrevoked API keys, newest first. A key limited to a pool manages that pool's keys only; a key limited to VMs manages none.
          */
         get: operations["listApiKeys"];
         put?: never;
         /**
          * Create an API key
-         * @description Create an API key, optionally limited to VMs or one pool. The key has its creator's role and is returned only once.
+         * @description Create an API key, optionally limited to VMs or one pool. The key has its creator's role and is returned only once. A key limited to a pool manages that pool's keys only; a key limited to VMs manages none.
          */
         post: operations["createApiKey"];
         delete?: never;
@@ -720,7 +720,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke an API key
-         * @description Revoke an API key; requests with it are refused from then on. Viewers cannot revoke keys.
+         * @description Revoke an API key; requests with it are refused from then on. Viewers cannot revoke keys. A key limited to a pool manages that pool's keys only; a key limited to VMs manages none.
          */
         delete: operations["revokeApiKey"];
         options?: never;
@@ -864,7 +864,7 @@ export interface components {
              * @enum {string}
              */
             vm_state?: "idle" | "running";
-            /** @description `inbound` only. How the request reaches the VM: `port` to a guest port at its `.arker.app` hostname, `ssh` over SSH, `pty` by attaching a terminal (`GET /v1/vms/{id}/sessions/{sid}/pty`). Defaults to `["port"]`. A way no rule names works as it does without rules; once a rule names it, the rules decide, and a request no rule matches is refused. A rule naming `ssh` or `pty` matches only on `ips` (not yet for `ssh`), `vm_state`, `connection_state` and, for `ssh` alone, `ssh_keys`, and is `allow` or `deny`. */
+            /** @description `inbound` only. How the request reaches the VM: `port` to a guest port at its `.arker.app` hostname, `ssh` over SSH, `pty` by attaching a terminal (`GET /v1/vms/{id}/sessions/{sid}/pty`). Defaults to `["port"]`. A way no rule names works as it does without rules; once a rule names it, the rules decide, and a request no rule matches is refused. A rule naming `ssh` or `pty` matches only on `ips`, `vm_state`, `connection_state` and, for `ssh` alone, `ssh_keys`, and is `allow` or `deny`. A region that does not yet pass an SSH caller's address on refuses `ips` on a rule naming `ssh`. */
             via?: ("port" | "ssh" | "pty")[];
             /** @description `inbound` only, on a rule whose `via` is `["ssh"]`. SSH public keys in `authorized_keys` format (`ssh-ed25519 AAAA... comment`). The rule matches an SSH login with one of these keys, compared by key, not by comment. An `allow` lets the key log in; a `deny` refuses it. Without `ssh_keys`, a `deny` naming `ssh` matches every key, and an `allow` the keys the VM knows: its own unexpired `ssh_public_keys` and the keys any `allow` lists. Once a rule names `ssh`, organization SSH keys no longer log in to the VM. A `deny` of the key that also lists `open` in `connection_state` closes its open SSH connections. Certificates, `authorized_keys` options such as `from=` or `command=`, and `ssh-dss` keys are refused. The rule opens no port. */
             ssh_keys?: string[];
@@ -3396,8 +3396,30 @@ export interface components {
         ApiKey: {
             /** @description API key identifier; starts with the `name` given at creation. */
             api_key_id: string;
+            /**
+             * @deprecated
+             * @description Deprecated: the role the key acts with, its creator's.
+             * @enum {string}
+             */
+            role: "admin" | "developer" | "member" | "viewer";
             /** @description What the key is limited to: VMs, or one pool. */
             scopes: components["schemas"]["ApiKeyScope"][];
+            /**
+             * @deprecated
+             * @description Deprecated: read `scopes`. The VM when the key is limited to exactly one, else null.
+             */
+            vm_id: string | null;
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description Deprecated: read `scopes`. The pool the key is limited to, or null.
+             */
+            pool_id: string | null;
+            /**
+             * @deprecated
+             * @description Deprecated: always null.
+             */
+            action: null;
             /**
              * Format: date-time
              * @description When the key was created.
@@ -3408,8 +3430,30 @@ export interface components {
         CreatedApiKey: {
             /** @description API key identifier; starts with the `name` given at creation. */
             api_key_id: string;
+            /**
+             * @deprecated
+             * @description Deprecated: the role the key acts with, its creator's.
+             * @enum {string}
+             */
+            role: "admin" | "developer" | "member" | "viewer";
             /** @description What the key is limited to: VMs, or one pool. */
             scopes: components["schemas"]["ApiKeyScope"][];
+            /**
+             * @deprecated
+             * @description Deprecated: read `scopes`. The VM when the key is limited to exactly one, else null.
+             */
+            vm_id: string | null;
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description Deprecated: read `scopes`. The pool the key is limited to, or null.
+             */
+            pool_id: string | null;
+            /**
+             * @deprecated
+             * @description Deprecated: always null.
+             */
+            action: null;
             /**
              * Format: date-time
              * @description When the key was created.

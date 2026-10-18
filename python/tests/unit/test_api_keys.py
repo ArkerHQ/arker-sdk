@@ -13,10 +13,13 @@ import arker.computer as sdk
 
 POOL_ID = "0b6c1d2e-3f40-4a51-8b62-7c83d94ea5f6"
 CREATED_AT = "2026-10-17T00:00:00.000Z"
+# What the API still returns for SDKs released before `scopes` took objects.
+DEPRECATED = {"role": "admin", "vm_id": None, "pool_id": None, "action": None}
 
 
 def created(scopes: list[dict]) -> dict:
-    return {"api_key_id": "agents_abc", "scopes": scopes, "created_at": CREATED_AT, "key": "ark_live_secret"}
+    key = {"api_key_id": "agents_abc", "scopes": scopes, "created_at": CREATED_AT, "key": "ark_live_secret"}
+    return {**key, **DEPRECATED}
 
 
 def body(call: dict) -> dict:
@@ -64,8 +67,13 @@ def test_list_decodes_each_key() -> None:
         200,
         {
             "api_keys": [
-                {"api_key_id": "org_1", "scopes": [], "created_at": CREATED_AT},
-                {"api_key_id": "vms_1", "scopes": [{"vm_id": "vm_a"}, {"vm_id": "vm_b"}], "created_at": CREATED_AT},
+                {"api_key_id": "org_1", "scopes": [], "created_at": CREATED_AT, **DEPRECATED},
+                {
+                    "api_key_id": "vms_1",
+                    "scopes": [{"vm_id": "vm_a"}, {"vm_id": "vm_b"}],
+                    "created_at": CREATED_AT,
+                    **DEPRECATED,
+                },
             ]
         },
     )

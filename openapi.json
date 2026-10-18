@@ -2740,7 +2740,7 @@
           "API keys"
         ],
         "summary": "List API keys",
-        "description": "List the organization's unrevoked API keys, newest first.",
+        "description": "List the organization's unrevoked API keys, newest first. A key limited to a pool manages that pool's keys only; a key limited to VMs manages none.",
         "responses": {
           "200": {
             "description": "The API keys.",
@@ -2775,7 +2775,7 @@
           "API keys"
         ],
         "summary": "Create an API key",
-        "description": "Create an API key, optionally limited to VMs or one pool. The key has its creator's role and is returned only once.",
+        "description": "Create an API key, optionally limited to VMs or one pool. The key has its creator's role and is returned only once. A key limited to a pool manages that pool's keys only; a key limited to VMs manages none.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2833,7 +2833,7 @@
           "API keys"
         ],
         "summary": "Revoke an API key",
-        "description": "Revoke an API key; requests with it are refused from then on. Viewers cannot revoke keys.",
+        "description": "Revoke an API key; requests with it are refused from then on. Viewers cannot revoke keys. A key limited to a pool manages that pool's keys only; a key limited to VMs manages none.",
         "responses": {
           "204": {
             "description": "The key is revoked."
@@ -4823,7 +4823,7 @@
                 "pty"
               ]
             },
-            "description": "`inbound` only. How the request reaches the VM: `port` to a guest port at its `.arker.app` hostname, `ssh` over SSH, `pty` by attaching a terminal (`GET /v1/vms/{id}/sessions/{sid}/pty`). Defaults to `[\"port\"]`. A way no rule names works as it does without rules; once a rule names it, the rules decide, and a request no rule matches is refused. A rule naming `ssh` or `pty` matches only on `ips` (not yet for `ssh`), `vm_state`, `connection_state` and, for `ssh` alone, `ssh_keys`, and is `allow` or `deny`."
+            "description": "`inbound` only. How the request reaches the VM: `port` to a guest port at its `.arker.app` hostname, `ssh` over SSH, `pty` by attaching a terminal (`GET /v1/vms/{id}/sessions/{sid}/pty`). Defaults to `[\"port\"]`. A way no rule names works as it does without rules; once a rule names it, the rules decide, and a request no rule matches is refused. A rule naming `ssh` or `pty` matches only on `ips`, `vm_state`, `connection_state` and, for `ssh` alone, `ssh_keys`, and is `allow` or `deny`. A region that does not yet pass an SSH caller's address on refuses `ips` on a rule naming `ssh`."
           },
           "ssh_keys": {
             "type": "array",
@@ -12276,7 +12276,11 @@
         "additionalProperties": false,
         "required": [
           "api_key_id",
+          "role",
           "scopes",
+          "vm_id",
+          "pool_id",
+          "action",
           "created_at"
         ],
         "description": "An API key. It acts with the role of the user or key that created it, limited by `scopes`.",
@@ -12285,12 +12289,45 @@
             "type": "string",
             "description": "API key identifier; starts with the `name` given at creation."
           },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "developer",
+              "member",
+              "viewer"
+            ],
+            "description": "Deprecated: the role the key acts with, its creator's.",
+            "deprecated": true
+          },
           "scopes": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ApiKeyScope"
             },
             "description": "What the key is limited to: VMs, or one pool."
+          },
+          "vm_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "deprecated": true,
+            "description": "Deprecated: read `scopes`. The VM when the key is limited to exactly one, else null."
+          },
+          "pool_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "deprecated": true,
+            "description": "Deprecated: read `scopes`. The pool the key is limited to, or null."
+          },
+          "action": {
+            "type": "null",
+            "deprecated": true,
+            "description": "Deprecated: always null."
           },
           "created_at": {
             "type": "string",
@@ -12304,7 +12341,11 @@
         "additionalProperties": false,
         "required": [
           "api_key_id",
+          "role",
           "scopes",
+          "vm_id",
+          "pool_id",
+          "action",
           "created_at",
           "key"
         ],
@@ -12314,12 +12355,45 @@
             "type": "string",
             "description": "API key identifier; starts with the `name` given at creation."
           },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "developer",
+              "member",
+              "viewer"
+            ],
+            "description": "Deprecated: the role the key acts with, its creator's.",
+            "deprecated": true
+          },
           "scopes": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ApiKeyScope"
             },
             "description": "What the key is limited to: VMs, or one pool."
+          },
+          "vm_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "deprecated": true,
+            "description": "Deprecated: read `scopes`. The VM when the key is limited to exactly one, else null."
+          },
+          "pool_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "deprecated": true,
+            "description": "Deprecated: read `scopes`. The pool the key is limited to, or null."
+          },
+          "action": {
+            "type": "null",
+            "deprecated": true,
+            "description": "Deprecated: always null."
           },
           "created_at": {
             "type": "string",
