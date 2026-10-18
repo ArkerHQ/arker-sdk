@@ -16,9 +16,17 @@ languages. All **489 vendor / 480 lean Python tests** pass (nine optional
 skips), as do Ruff, TypeScript typecheck and the full test/build/isolated
 consumer suite. Packed npm SHA-256:
 `6eae1a340223fcc4df10b4044c11aa54b78c7d4e5ddf5d5bb7eaecd264f17485`.
-Both fingerprints changed again. Actual traffic denial and fresh complete
-cohorts are pending the isolated backend rollout. These unit results do not
-certify native DNS behavior, private-network exceptions or full policy parity.
+Both fingerprints changed again. Live traffic against feature backend
+`d21cfae` reproduced **two empty-allowlist failures and one positive-control
+pass** with the preceding immutable `7f42d07` wheel. The corrected source
+passes **all nine cases**: native Modal, shim-native and shim-Arker, each with
+unrestricted, empty-CIDR and empty-domain configurations. Every unrestricted
+control connects; every empty allowlist blocks. Owned parents/children were
+deleted. Native app/image setup differs from Arker's image-parent binding, so
+these checks grant no additional vendor API coverage credit. Fresh complete
+cohorts remain pending the backend's broader live gates. These observations
+do not certify native DNS behavior, private-network exceptions or full policy
+parity.
 
 ## Blaxel filesystem option safety
 
