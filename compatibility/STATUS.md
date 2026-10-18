@@ -28,6 +28,13 @@ cohorts remain pending the backend's broader live gates. These observations
 do not certify native DNS behavior, private-network exceptions or full policy
 parity.
 
+The equivalent TypeScript traffic program also passes **all nine cases** on
+the same feature release through the real published ComputeSDK factory, with
+unrestricted positive controls and both empty-list restrictions. It creates
+and deletes its own parent/children, restores the router environment and
+closes native clients. Both language suites intentionally grant no extra
+vendor API coverage for this differently configured creation setup.
+
 ## Blaxel filesystem option safety
 
 Sync Python now retains the native Blaxel filesystem handle, preserving its
