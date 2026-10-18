@@ -1,5 +1,24 @@
 # Recorded coverage baseline
 
+## Blaxel filesystem option safety
+
+Sync Python now retains the native Blaxel filesystem handle, preserving its
+method surface, operation identity and options. TypeScript no longer silently
+ignores custom `mkdir` permissions on Arker; both languages reject unsupported
+permissions before I/O. Native routes retain native permission support.
+Custom Arker permissions remain a parity gap, not a verified capability.
+
+Both regressions failed before correction. Corrected full gates pass:
+**481 vendor-enabled / 472 lean Python tests** (nine optional skips), Ruff,
+TypeScript typecheck and full test/build/isolated-consumer suite. An older
+native test double omitted the SDK's permission parameter; its initial full
+run failed one case, and the corrected signature/forwarding assertions pass.
+Packed npm SHA-256:
+`829274725062e83deb209fef1d4aedb8c0d9aa74c96a2db537a683f452da9a8e`.
+Both fingerprints changed. The completed `4951ec9` cohorts below are
+historical, not certification of this filesystem change. Fresh live gates
+are pending the isolated backend rollout.
+
 ## Modal native resource services
 
 The TypeScript Modal client preserves native secrets, volumes, cloud-bucket

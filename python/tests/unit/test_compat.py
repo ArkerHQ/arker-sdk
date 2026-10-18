@@ -19,6 +19,26 @@ from arker.e2b import Sandbox as E2BSandbox
 from arker.modal import Sandbox as ModalSandbox
 
 
+def test_blaxel_native_filesystem_retains_options_and_operation_identity():
+    calls = []
+    native_fs = types.SimpleNamespace(
+        mkdir=lambda *args, **kwargs: calls.append((args, kwargs)),
+        watch=object(),
+    )
+    sandbox = BlaxelSandbox(native=types.SimpleNamespace(id="native", fs=native_fs))
+    assert sandbox.fs is native_fs
+    sandbox.fs.mkdir("private", permissions="0700")
+    assert calls == [(("private",), {"permissions": "0700"})]
+
+
+def test_blaxel_custom_permissions_refuse_before_arker_io():
+    from arker._compat import UnsupportedCompatibilityOption
+    from arker.blaxel import FileSystem
+
+    with pytest.raises(UnsupportedCompatibilityOption, match=r"permissions.*not supported"):
+        FileSystem(vm=object()).mkdir("private", "0700")
+
+
 @pytest.fixture(autouse=True)
 def source_env(monkeypatch) -> None:
     monkeypatch.setenv("ARKER_SOURCE", "catalog-template")
@@ -630,8 +650,16 @@ def test_blaxel_mkdir_returns_native_success_on_both_routes(monkeypatch) -> None
     from arker.blaxel import FileSystem
 
     native_response = object()
-    native = types.SimpleNamespace(mkdir=lambda path: native_response)
+    calls = []
+
+    def native_mkdir(path, permissions="0755"):
+        calls.append((path, permissions))
+        return native_response
+
+    native = types.SimpleNamespace(mkdir=native_mkdir)
     assert FileSystem(native=native).mkdir("relative") is native_response
+    assert FileSystem(native=native).mkdir("private", "0700") is native_response
+    assert calls == [("relative", "0755"), ("private", "0700")]
     monkeypatch.setattr("arker.blaxel.run_command", lambda *_: CommandResult(stdout="", stderr="", exit_code=0))
     assert FileSystem(vm=object()).mkdir("relative").to_dict() == {
         "message": "Directory created successfully",

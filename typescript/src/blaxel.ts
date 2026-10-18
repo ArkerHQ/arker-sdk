@@ -50,7 +50,7 @@ type BlaxelCompatProcess = Omit<NativeBlaxelSandbox["process"], "exec"> & {
 
 type BlaxelCompatFileSystem = Omit<NativeBlaxelSandbox["fs"], "write" | "mkdir" | "rm"> & {
   write(path: string, content: string | Uint8Array): Promise<any>;
-  mkdir(path: string): Promise<any>;
+  mkdir(path: string, permissions?: string): Promise<any>;
   rm(path: string, recursive?: boolean): Promise<any>;
 };
 
@@ -181,7 +181,8 @@ export class SandboxInstance {
         await writeFile(destinationPath, bytes);
         await chmod(destinationPath, mode);
       },
-      mkdir: async (path) => {
+      mkdir: async (path, permissions = "0755") => {
+        if (permissions !== "0755") throw new Error("fs.mkdir custom permissions are not supported by Arker");
         const resolved = resolveCompatPath(path, "/blaxel");
         await box.filesystem.mkdir(resolved);
         return { message: "Directory created successfully", path: resolved };

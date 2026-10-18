@@ -178,9 +178,11 @@ class FileSystem:
         destination.chmod(mode)
         return None
 
-    def mkdir(self, path: str) -> Any:
+    def mkdir(self, path: str, permissions: str = "0755") -> Any:
         if self._vm is None:
-            return self._native.mkdir(path)
+            return self._native.mkdir(path, permissions=permissions)
+        if permissions != "0755":
+            raise UnsupportedCompatibilityOption("fs.mkdir custom permissions are not supported by Arker")
         resolved = resolve_compat_path(path, "/blaxel")
         result = run_command(self._vm, f"mkdir -p {shlex.quote(resolved)}")
         if result.exit_code != 0:
@@ -285,7 +287,8 @@ class SyncSandboxInstance(UnsupportedMixin):
         )
         self.metadata = SandboxMetadata(name=vm.name or vm.id) if vm is not None else metadata
         self.process = Process(vm, getattr(native, "process", None))
-        self.fs = FileSystem(vm, getattr(native, "fs", getattr(native, "filesystem", None)))
+        native_fs = getattr(native, "fs", getattr(native, "filesystem", None))
+        self.fs = native_fs if native_fs is not None else FileSystem(vm)
         self.network = getattr(native, "network", None) if native is not None else _Network(vm)
 
     def fetch(self, port: int, path: str = "/", method: str = "GET", **kwargs):

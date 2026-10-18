@@ -724,13 +724,17 @@ async function testBlaxelBinaryFiles(): Promise<void> {
       files.set(path, new Uint8Array(content));
     },
   };
-  const fake = installFakeCompute(new FakeSandbox("binary-vm", "arker", vm));
+  const box = new FakeSandbox("binary-vm", "arker", vm);
+  const fake = installFakeCompute(box);
   try {
     const sandbox = await BlaxelSandbox.create();
     const payload = Uint8Array.from({ length: 256 }, (_, i) => i);
     assert.deepEqual(await sandbox.fs.mkdir("relative"), {
       message: "Directory created successfully", path: "/blaxel/relative",
     });
+    const writesBefore = box.createOptions.length;
+    await assert.rejects(() => sandbox.fs.mkdir("private", "0700"), /permissions.*not supported/);
+    assert.equal(box.createOptions.length, writesBefore);
     await sandbox.fs.writeBinary("binary", payload);
     assert.deepEqual(new Uint8Array(await (await sandbox.fs.readBinary("binary")).arrayBuffer()), payload);
     await sandbox.fs.writeBinary("binary", new Blob([payload]));
