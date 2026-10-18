@@ -57,19 +57,21 @@ function decode(bytes: Uint8Array): string {
 }
 
 function splitList(value: unknown): string[] {
+  if (value === undefined) return [];
   if (typeof value === "string") return value.split(",").map((entry) => entry.trim()).filter(Boolean);
   if (Array.isArray(value) && value.every((entry) => typeof entry === "string")) return value;
-  return [];
+  throw new TypeError("network allowlist must be a string or array of strings");
 }
 
 function networkPolicies(values: Record<string, unknown>): ForkOptions["policies"] | undefined {
   const blockAll = values.allowInternetAccess === false || values.networkBlockAll === true || values.blockNetwork === true;
   const domains = splitList(values.domainAllowList ?? values.outboundDomainAllowlist);
   const cidrs = splitList(values.networkAllowList ?? values.outboundCidrAllowlist);
-  if (blockAll && (domains.length > 0 || cidrs.length > 0)) {
+  const modalAllowlistPresent = values.outboundCidrAllowlist !== undefined || values.outboundDomainAllowlist !== undefined;
+  if (blockAll && (domains.length > 0 || cidrs.length > 0 || modalAllowlistPresent)) {
     throw new ArkerError("bad_request", "block-all network policy cannot be combined with outbound allowlists", 400);
   }
-  if (!blockAll && domains.length === 0 && cidrs.length === 0) return undefined;
+  if (!blockAll && domains.length === 0 && cidrs.length === 0 && !modalAllowlistPresent) return undefined;
   const allow: Array<Record<string, unknown>> = [];
   if (domains.length > 0) {
     const modalDomainPolicy = values.outboundDomainAllowlist !== undefined;
@@ -335,7 +337,7 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
         const values = (options ?? {}) as Record<string, unknown>;
         const supported = new Set([
           "name", "image", "memory", "memoryMiB", "cpu", "vcpus", "diskMiB", "snapshotId", "templateId",
-          "networkPolicy", "networkPolicies", "internetAccess", "autoStopInterval", "allowInternetAccess",
+          "allowInternetAccess",
           "networkBlockAll", "blockNetwork", "domainAllowList", "outboundDomainAllowlist", "networkAllowList",
           "outboundCidrAllowlist", "createIfNotExist",
         ]);

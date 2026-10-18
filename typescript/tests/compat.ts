@@ -518,6 +518,59 @@ async function testInternalArkerProviderImageAndResources(): Promise<void> {
   });
 }
 
+async function testInternalArkerProviderRejectsUntranslatedPolicyControls(): Promise<void> {
+  for (const [key, value] of Object.entries({
+    networkPolicy: { allowInternetAccess: false }, networkPolicies: [],
+    internetAccess: false, autoStopInterval: 0,
+  })) {
+    const fetch = new FakeFetch();
+    fetch.addJson(() => true, 200, {
+      vm_id: "unexpected-vm", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z",
+      public: false, state: "idle", sessions: [], tunnels: [],
+    });
+    const provider = createArkerComputeProvider({
+      apiKey: "test", baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false,
+    });
+    await assert.rejects(() => provider.sandbox.create({ templateId: "source", [key]: value }),
+      new RegExp(`does not support option\\(s\\): ${key}`));
+    assert.equal(fetch.calls.length, 0);
+  }
+}
+
+async function testModalEmptyAllowlistIsNotUnrestricted(): Promise<void> {
+  for (const key of ["outboundCidrAllowlist", "outboundDomainAllowlist"]) {
+    const fetch = new FakeFetch();
+    fetch.addJson(() => true, 200, {
+      vm_id: "restricted-vm", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z",
+      public: false, state: "idle", sessions: [], tunnels: [],
+    });
+    const provider = createArkerComputeProvider({
+      apiKey: "test", baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false,
+    });
+    await provider.sandbox.create({ templateId: "source", [key]: [] });
+    const request = JSON.parse(fetch.calls[0]!.body!);
+    assert.ok(request.policies, key);
+    assert.deepEqual(Object.values(request.policies.rules), [{ type: "outbound_guard", allow: [] }]);
+  }
+}
+
+async function testInvalidNetworkAllowlistsNeverMeanUnrestricted(): Promise<void> {
+  for (const key of ["domainAllowList", "networkAllowList", "outboundDomainAllowlist", "outboundCidrAllowlist"]) {
+    for (const value of [{}, false, 7, [7]]) {
+      let requests = 0;
+      const provider = createArkerComputeProvider({
+        apiKey: "test", baseUrl: "https://arker.invalid/api", fetch: async () => {
+          requests++;
+          return new Response(JSON.stringify({ vm_id: "unexpected", owner_org_id: "owner",
+            created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] }));
+        }, retry: false,
+      });
+      await assert.rejects(() => provider.sandbox.create({ templateId: "source", [key]: value }), /allowlist/);
+      assert.equal(requests, 0);
+    }
+  }
+}
+
 async function testInternalArkerDirectoryNames(): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "arker-directory-parity-"));
   try {
@@ -850,6 +903,9 @@ await testE2BNativeErrorIdentity();
 await testModalSurface();
 await testInternalArkerProvider();
 await testInternalArkerProviderImageAndResources();
+await testInternalArkerProviderRejectsUntranslatedPolicyControls();
+await testModalEmptyAllowlistIsNotUnrestricted();
+await testInvalidNetworkAllowlistsNeverMeanUnrestricted();
 await testInternalArkerDirectoryNames();
 await testInternalArkerProviderSourceProvenance();
 await testSharedForkPolicySecretsAndRegistry();

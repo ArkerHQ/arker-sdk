@@ -39,6 +39,32 @@ def test_blaxel_custom_permissions_refuse_before_arker_io():
         FileSystem(vm=object()).mkdir("private", "0700")
 
 
+@pytest.mark.parametrize("option", ["outbound_cidr_allowlist", "outbound_domain_allowlist"])
+def test_modal_empty_allowlist_is_not_unrestricted(monkeypatch, option):
+    captured = []
+    monkeypatch.setattr("arker.modal.routed_create", lambda _vendor, _config, handlers: ("arker", handlers["arker"]()))
+    monkeypatch.setattr("arker.modal.arker_create", lambda _config, **options: (
+        captured.append(options) or types.SimpleNamespace(id="empty-allowlist")
+    ))
+    ModalSandbox.create(**{option: []})
+    assert captured[0]["policies"] is not None
+    assert list(captured[0]["policies"]["rules"].values()) == [{"type": "outbound_guard", "allow": []}]
+
+
+@pytest.mark.parametrize("value", [{}, {"example.com": True}, False, 7, [7]])
+def test_invalid_network_allowlists_never_mean_unrestricted(value):
+    with pytest.raises(TypeError, match="allowlist"):
+        compat_network_policies(domains=value)
+
+
+def test_empty_allowlist_semantics_are_provider_specific():
+    assert compat_network_policies(domains="", cidrs="") is None
+    restricted = compat_network_policies(domains=(), empty_allowlist_blocks=True)
+    assert list(restricted["rules"].values()) == [{"type": "outbound_guard", "allow": []}]
+    with pytest.raises(ValueError, match="block-all"):
+        compat_network_policies(block_all=True, cidrs=[], empty_allowlist_blocks=True)
+
+
 @pytest.fixture(autouse=True)
 def source_env(monkeypatch) -> None:
     monkeypatch.setenv("ARKER_SOURCE", "catalog-template")

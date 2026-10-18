@@ -7,7 +7,7 @@ import queue
 import shlex
 import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -131,17 +131,23 @@ def compat_network_policies(
     domains: str | list[str] | None = None,
     cidrs: str | list[str] | None = None,
     domain_ports: list[int] | None = None,
+    empty_allowlist_blocks: bool = False,
 ) -> dict[str, Any] | None:
     def values(value: str | list[str] | None) -> list[str]:
         if isinstance(value, str):
             return [part.strip() for part in value.split(",") if part.strip()]
-        return list(value or [])
+        if value is None:
+            return []
+        if not isinstance(value, Sequence) or not all(isinstance(entry, str) for entry in value):
+            raise TypeError("network allowlist must be a string or sequence of strings")
+        return list(value)
 
     domain_values = values(domains)
     cidr_values = values(cidrs)
-    if block_all and (domain_values or cidr_values):
+    allowlist_present = domains is not None or cidrs is not None
+    if block_all and (domain_values or cidr_values or (empty_allowlist_blocks and allowlist_present)):
         raise ValueError("block-all network policy cannot be combined with outbound allowlists")
-    if not block_all and not domain_values and not cidr_values:
+    if not block_all and not domain_values and not cidr_values and not (empty_allowlist_blocks and allowlist_present):
         return None
     allow: list[dict[str, Any]] = []
     if domain_values:

@@ -130,6 +130,7 @@ class Sandbox(UnsupportedMixin):
                     domains=outbound_domains,
                     cidrs=outbound_cidrs,
                     domain_ports=[443],
+                    empty_allowlist_blocks=True,
                 ),
             )
 

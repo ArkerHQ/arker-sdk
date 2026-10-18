@@ -1,5 +1,25 @@
 # Recorded coverage baseline
 
+## Network preflight safety and empty Modal allowlists
+
+Both languages preserve Modal's distinction between an omitted allowlist
+and an explicitly empty allowlist. Empty lists now attach a deny-all egress
+guard instead of silently creating an unrestricted VM. Daytona's empty-string
+semantics remain unchanged. Malformed allowlist values are rejected before
+I/O rather than treated as absent. The shared TypeScript adapter also rejects
+four untranslated policy/lifecycle controls it previously accepted and dropped.
+The Modal contract is documented at
+[Networking and security](https://modal.com/docs/guide/sandbox-networking).
+
+Regressions reproduced the fail-open behavior before correction in both
+languages. All **489 vendor / 480 lean Python tests** pass (nine optional
+skips), as do Ruff, TypeScript typecheck and the full test/build/isolated
+consumer suite. Packed npm SHA-256:
+`6eae1a340223fcc4df10b4044c11aa54b78c7d4e5ddf5d5bb7eaecd264f17485`.
+Both fingerprints changed again. Actual traffic denial and fresh complete
+cohorts are pending the isolated backend rollout. These unit results do not
+certify native DNS behavior, private-network exceptions or full policy parity.
+
 ## Blaxel filesystem option safety
 
 Sync Python now retains the native Blaxel filesystem handle, preserving its
