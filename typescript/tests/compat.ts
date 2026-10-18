@@ -10,6 +10,7 @@ import { Daytona } from "../src/daytona.js";
 import { Sandbox as E2BSandbox } from "../src/e2b.js";
 import { CommandExitError } from "e2b";
 import { Image as DaytonaImage } from "@daytona/sdk";
+import { Secret as ModalSecret, CloudBucketMount as ModalBucketMount } from "modal";
 import { ArkerError } from "../src/index.js";
 import { SandboxInstance as BlaxelSandbox } from "../src/blaxel.js";
 import { ModalClient } from "../src/modal.js";
@@ -339,6 +340,22 @@ async function testModalSurface(): Promise<void> {
     assert.equal(sandbox.sandboxId, "modal-box");
     assert.equal(typeof client.apps.fromName, "function");
     assert.equal(typeof client.images.fromRegistry, "function");
+    for (const [service, method] of [
+      ["secrets", "fromObject"], ["volumes", "fromName"],
+      ["cloudBucketMounts", "create"], ["sandboxSnapshots", "fromId"],
+      ["proxies", "fromName"], ["environments", "fromName"],
+    ]) {
+      const handle = (client as any)[service!];
+      assert.equal(typeof handle[method!], "function", `${service}.${method}`);
+      assert.equal((client as any)[service!], handle);
+    }
+    const secret = await client.secrets.fromObject({ INLINE_FIXTURE: "synthetic-only" });
+    assert.ok(secret instanceof ModalSecret);
+    assert.equal(secret.secretId, "");
+    const mount = client.cloudBucketMounts.create("synthetic-bucket", { secret, readOnly: true });
+    assert.ok(mount instanceof ModalBucketMount);
+    assert.equal(mount.secret, secret);
+    assert.equal(mount.readOnly, true);
 
     const app = { appId: "ap-native" };
     const image = { imageId: "im-native" };

@@ -1,5 +1,19 @@
 # Recorded coverage baseline
 
+## Modal native resource services
+
+The TypeScript Modal client preserves native secrets, volumes, cloud-bucket
+mounts, sandbox snapshots, proxies and environments through its existing lazy
+native client. The missing-secret-service regression failed before correction.
+Focused tests verify service identity and genuine native inline Secret and
+CloudBucketMount handles without creating remote resources. Typecheck and the
+full test/build/isolated-consumer suite pass. Packed npm SHA-256:
+`c003abdc39e6e85517eeb67591a8f1d05d19176bd73cc518e379dc2c37d047d0`.
+
+This is native-route preservation, not Arker resource translation or parity
+credit. Named secrets and volume semantics remain in the strict core inventory.
+The Node fingerprint changed again; a fresh complete cohort is required.
+
 ## Blaxel directory paths
 
 TypeScript directory listings now include the directory name/path and every

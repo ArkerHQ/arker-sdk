@@ -130,6 +130,12 @@ export class ModalClient {
 
   get apps(): NativeModalClient["apps"] { return this.#nativeClient().apps; }
   get images(): NativeModalClient["images"] { return this.#nativeClient().images; }
+  get secrets(): NativeModalClient["secrets"] { return this.#nativeClient().secrets; }
+  get volumes(): NativeModalClient["volumes"] { return this.#nativeClient().volumes; }
+  get cloudBucketMounts(): NativeModalClient["cloudBucketMounts"] { return this.#nativeClient().cloudBucketMounts; }
+  get sandboxSnapshots(): NativeModalClient["sandboxSnapshots"] { return this.#nativeClient().sandboxSnapshots; }
+  get proxies(): NativeModalClient["proxies"] { return this.#nativeClient().proxies; }
+  get environments(): NativeModalClient["environments"] { return this.#nativeClient().environments; }
 
   close(): void { this.#native?.close(); }
 
