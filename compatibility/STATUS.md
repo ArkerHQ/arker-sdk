@@ -12,7 +12,18 @@ full test/build/isolated-consumer suite pass. Packed npm SHA-256:
 
 This is native-route preservation, not Arker resource translation or parity
 credit. Named secrets and volume semantics remain in the strict core inventory.
-The Node fingerprint changed again; a fresh complete cohort is required.
+Fresh matching-source cohorts at `4951ec9` against feature backend `51c0ce8`
+pass **27 Python / 22 Node** cases. Both expanded and both core strict gates
+were invoked and remain **RED, exit 1**. Core scope still verifies
+**100/1,115 Python and 53/978 Node**; expanded scope remains 100/1,138 and
+53/1,048. Native service exposure grants no behavioral parity credit.
+Python fingerprint remains
+`6181f3a9f9a0df051caff60f3eddcae81de233550dc4652097a68109d7fdf77a`;
+current Node fingerprint is
+`f3a3134188a3eea30b1cdddd82f81f6d7e4be822280b076f7c2841255a043e90`.
+Credential-free traces are retained as `evidence/feature51-resources-*.jsonl`.
+All 11 latest SDK GitHub checks pass. This does not certify the newer backend
+release currently being built for the isolated feature environment.
 
 ## Blaxel directory paths
 
