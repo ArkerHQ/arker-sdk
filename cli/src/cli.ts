@@ -1988,7 +1988,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     summary: "Create, list and revoke API keys.",
     subs: { ls: "list unrevoked keys, newest first", create: "create a key and print it once", rm: "revoke a key" },
     notes: [
-      "A key has your role. Without --pool-id or --vm-id it acts on the whole organization.",
+      "A key has your role; --vm-id or --pool-id limits it to VMs or to one pool.",
       "--vm-id is repeatable (1 to 16 VMs); --pool-id limits the key to one pool, and only admins create one.",
     ],
   },

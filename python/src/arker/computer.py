@@ -650,9 +650,8 @@ class Arker:
         name: str | None = None,
         scopes: Sequence[ApiKeyScope | dict[str, str]] | None = None,
     ) -> CreatedApiKey:
-        """Create a key with your role. ``scopes`` is 1 to 16 ``{"vm_id"}`` or one
-        ``{"pool_id"}``; omitted or empty is the whole organization. The returned
-        ``key`` is shown only once."""
+        """Create a key with your role. ``scopes`` limits it to 1 to 16 ``{"vm_id"}``
+        or to one ``{"pool_id"}``. The returned ``key`` is shown only once."""
         request = {"name": name, "scopes": None if scopes is None else list(scopes)}
         payload = self._request("POST", "/v1/api-keys", request, base_url=self._control_base_url)
         return _decode_model(CreatedApiKey, payload)

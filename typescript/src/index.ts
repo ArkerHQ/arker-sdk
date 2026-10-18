@@ -914,9 +914,8 @@ export class Arker {
 
   // ── API keys (org-scoped, control plane) ──────────────────────────
   /**
-   * Create a key with your role. `scopes` is 1 to 16 `{ vm_id }` or one
-   * `{ pool_id }`; omitted or `[]` is the whole organization. The returned
-   * `key` is shown only once.
+   * Create a key with your role. `scopes` limits it to 1 to 16 `{ vm_id }`
+   * or to one `{ pool_id }`. The returned `key` is shown only once.
    */
   async createApiKey(request: CreateApiKeyRequest = {}): Promise<CreatedApiKey> {
     return this._request("POST", "/v1/api-keys", request, this.controlBaseUrl);

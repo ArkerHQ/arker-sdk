@@ -696,7 +696,7 @@ export interface paths {
         put?: never;
         /**
          * Create an API key
-         * @description Create an API key for the whole organization (the default), for VMs, or for one pool. The key has its creator's role and is returned only once.
+         * @description Create an API key, optionally limited to VMs or one pool. The key has its creator's role and is returned only once.
          */
         post: operations["createApiKey"];
         delete?: never;
@@ -3396,7 +3396,7 @@ export interface components {
         ApiKey: {
             /** @description API key identifier; starts with the `name` given at creation. */
             api_key_id: string;
-            /** @description What the key is limited to: VMs, or one pool. `[]` is the whole organization. */
+            /** @description What the key is limited to: VMs, or one pool. */
             scopes: components["schemas"]["ApiKeyScope"][];
             /**
              * Format: date-time
@@ -3408,7 +3408,7 @@ export interface components {
         CreatedApiKey: {
             /** @description API key identifier; starts with the `name` given at creation. */
             api_key_id: string;
-            /** @description What the key is limited to: VMs, or one pool. `[]` is the whole organization. */
+            /** @description What the key is limited to: VMs, or one pool. */
             scopes: components["schemas"]["ApiKeyScope"][];
             /**
              * Format: date-time
@@ -3422,7 +3422,7 @@ export interface components {
         CreateApiKeyRequest: {
             /** @description A label that starts `api_key_id`: lowercased, other characters than `a-z0-9_-` as `-`, cut to 13 characters. */
             name?: string;
-            /** @description What the key is limited to: 1 to 16 VMs of the organization, or one of its pools. Omitted or `[]` is the whole organization. Only admins create a key limited to a pool. */
+            /** @description What the key is limited to: 1 to 16 VMs of the organization, or one of its pools. Only admins create a key limited to a pool. */
             scopes?: components["schemas"]["ApiKeyScope"][];
         };
         ListApiKeysResponse: {

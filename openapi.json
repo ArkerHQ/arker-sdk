@@ -2775,7 +2775,7 @@
           "API keys"
         ],
         "summary": "Create an API key",
-        "description": "Create an API key for the whole organization (the default), for VMs, or for one pool. The key has its creator's role and is returned only once.",
+        "description": "Create an API key, optionally limited to VMs or one pool. The key has its creator's role and is returned only once.",
         "requestBody": {
           "required": true,
           "content": {
@@ -12290,7 +12290,7 @@
             "items": {
               "$ref": "#/components/schemas/ApiKeyScope"
             },
-            "description": "What the key is limited to: VMs, or one pool. `[]` is the whole organization."
+            "description": "What the key is limited to: VMs, or one pool."
           },
           "created_at": {
             "type": "string",
@@ -12319,7 +12319,7 @@
             "items": {
               "$ref": "#/components/schemas/ApiKeyScope"
             },
-            "description": "What the key is limited to: VMs, or one pool. `[]` is the whole organization."
+            "description": "What the key is limited to: VMs, or one pool."
           },
           "created_at": {
             "type": "string",
@@ -12349,7 +12349,7 @@
             "items": {
               "$ref": "#/components/schemas/ApiKeyScope"
             },
-            "description": "What the key is limited to: 1 to 16 VMs of the organization, or one of its pools. Omitted or `[]` is the whole organization. Only admins create a key limited to a pool."
+            "description": "What the key is limited to: 1 to 16 VMs of the organization, or one of its pools. Only admins create a key limited to a pool."
           }
         }
       },

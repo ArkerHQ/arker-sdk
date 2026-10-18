@@ -11,7 +11,7 @@ type APIKeyScope struct {
 	PoolID string `json:"pool_id,omitempty"`
 }
 
-// APIKey is a key as listed. Empty Scopes is the whole organization.
+// APIKey is a key as listed. Scopes is what the key is limited to: VMs, or one pool.
 type APIKey struct {
 	APIKeyID  string        `json:"api_key_id"`
 	Scopes    []APIKeyScope `json:"scopes"`
@@ -24,9 +24,8 @@ type CreatedAPIKey struct {
 	Key string `json:"key"`
 }
 
-// CreateAPIKeyRequest creates a key with the caller's role. Scopes is 1 to 16
-// VM scopes or one pool scope; nil or empty is the whole organization. Only
-// admins create a key limited to a pool.
+// CreateAPIKeyRequest creates a key with the caller's role. Scopes limits it to
+// 1 to 16 VMs or to one pool. Only admins create a key limited to a pool.
 type CreateAPIKeyRequest struct {
 	Name   string        `json:"name,omitempty"`
 	Scopes []APIKeyScope `json:"scopes,omitempty"`
