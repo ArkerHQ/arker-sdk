@@ -1,5 +1,19 @@
 # Recorded coverage baseline
 
+## Route-cache recovery update
+
+At `48cbf9c`, six new Python regressions first reproduced crashes on valid
+non-object JSON cache roots and acceptance of boolean `true` as version `1`.
+Explicit object/integer validation fixes both. The same six recovery cases
+pass in TypeScript. All **474 Python vendor tests**, TypeScript typecheck,
+and the full test/build/isolated packed-consumer gates pass. The npm artifact
+hash is unchanged because the runtime correction is Python-only.
+
+The Python implementation fingerprint has changed. The live cohorts and
+fingerprints below certify the preceding source, not this change; fresh
+matching-source differential evidence is pending. No additional vendor API
+coverage or full-parity credit is claimed by these cache tests.
+
 ## Core-sandbox measurement update
 
 Both reporters now accept `--scope core-sandbox`, using the same fingerprinted
