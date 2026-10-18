@@ -52,7 +52,7 @@ async function arkerE2B(): Promise<Box> {
     id: value.sandboxId,
     run: (command, options) => value.commands.run(command, options),
     read: (path) => value.files.read(path),
-    write: (path, content) => value.files.write(path, content),
+    write: async (path, content) => { await value.files.write(path, content); },
     reconnect: async () => wrap(await E2BSandbox.connect(value.sandboxId)),
     destroy: async () => { await value.kill(); },
   });

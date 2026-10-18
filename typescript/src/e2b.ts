@@ -38,6 +38,7 @@ interface NativeSandbox {
   kill: () => Promise<boolean>;
   getHost?: (port: number) => string;
   commands?: VendorCommands;
+  files?: VendorSandbox["files"];
 }
 
 const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess"] as const;
@@ -69,14 +70,7 @@ export class Sandbox {
     closeStdin: (pid: number, options?: CommandRequestOpts) => Promise<void>;
   };
 
-  readonly files: {
-    read: (path: string) => Promise<string>;
-    write: (path: string, content: string) => Promise<void>;
-    makeDir: (path: string) => Promise<void>;
-    list: (path: string) => Promise<unknown[]>;
-    exists: (path: string) => Promise<boolean>;
-    remove: (path: string) => Promise<void>;
-  };
+  readonly files: VendorSandbox["files"];
 
   private constructor(box: UniversalSandbox, native?: object, arkerHostname?: string) {
     this.#box = box;
@@ -166,20 +160,32 @@ export class Sandbox {
         await this.#processes!.closeStdin(String(pid)).catch((error) => { throw e2bProcessError(error); });
       },
     };
-    this.files = {
-      read: (path) => this.#box.filesystem.readFile(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path),
-      write: async (path, content) => {
+    this.files = this.#native?.files ?? ({
+      read: async (path: string, options?: Record<string, unknown>) => {
+        assertSupportedObjectKeys(options, [], "e2b", "files.read");
+        return this.#box.filesystem.readFile(resolveCompatPath(path, "/home/user"));
+      },
+      write: async (path: string, content: string, options?: Record<string, unknown>) => {
+        assertSupportedObjectKeys(options, [], "e2b", "files.write");
         await this.#box.filesystem.writeFile(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path, content);
       },
-      makeDir: async (path) => {
+      makeDir: async (path: string, options?: Record<string, unknown>) => {
+        assertSupportedObjectKeys(options, [], "e2b", "files.makeDir");
         await this.#box.filesystem.mkdir(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path);
       },
-      list: (path) => this.#box.filesystem.readdir(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path),
-      exists: (path) => this.#box.filesystem.exists(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path),
-      remove: async (path) => {
+      list: async (path: string, options?: Record<string, unknown>) => {
+        assertSupportedObjectKeys(options, [], "e2b", "files.list");
+        return this.#box.filesystem.readdir(resolveCompatPath(path, "/home/user"));
+      },
+      exists: async (path: string, options?: Record<string, unknown>) => {
+        assertSupportedObjectKeys(options, [], "e2b", "files.exists");
+        return this.#box.filesystem.exists(resolveCompatPath(path, "/home/user"));
+      },
+      remove: async (path: string, options?: Record<string, unknown>) => {
+        assertSupportedObjectKeys(options, [], "e2b", "files.remove");
         await this.#box.filesystem.remove(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path);
       },
-    };
+    } as unknown as VendorSandbox["files"]);
   }
 
   private static async wrap(box: UniversalSandbox): Promise<Sandbox> {

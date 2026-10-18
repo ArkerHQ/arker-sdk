@@ -249,7 +249,8 @@ class Sandbox(UnsupportedMixin):
         self.sandbox_id = vm.id if vm is not None else getattr(native, "sandbox_id", getattr(native, "id", None))
         self.sandboxId = self.sandbox_id
         self.commands = Commands(vm, getattr(native, "commands", None) if native is not None else None)
-        self.files = Files(vm, getattr(native, "files", None) if native is not None else None)
+        native_files = getattr(native, "files", None) if native is not None else None
+        self.files = native_files if native_files is not None else Files(vm)
 
     def get_host(self, port: int) -> str:
         if self._vm is None:

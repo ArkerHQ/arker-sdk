@@ -123,7 +123,8 @@ class AsyncSandbox:
         self._sandbox = sandbox
         self.sandbox_id, self.sandboxId = sandbox.sandbox_id, sandbox.sandboxId
         self.commands = _AsyncCommands(sandbox.commands)
-        self.files = _AsyncFiles(sandbox.files)
+        native_files = getattr(sandbox._native, "files", None) if sandbox._native is not None else None
+        self.files = native_files if native_files is not None else _AsyncFiles(sandbox.files)
 
     def __getattr__(self, name):
         return getattr(self._sandbox, name)

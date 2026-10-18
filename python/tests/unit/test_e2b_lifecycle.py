@@ -1,8 +1,43 @@
+import asyncio
 import types
 
 import pytest
 
 import arker.e2b as shim
+
+
+def test_native_filesystem_is_preserved_with_binary_options_and_metadata():
+    marker = object()
+
+    class NativeFiles:
+        def read(self, path, **options):
+            assert path == "/binary"
+            assert options == {"format": "bytes", "user": "user", "request_timeout": 7}
+            return bytearray(b"\x00\xff\x80")
+
+        def write(self, path, content, **options):
+            assert (path, content, options) == ("/binary", b"\xff", {"metadata": {"fixture": "owned"}})
+            return marker
+
+    files = NativeFiles()
+    sandbox = shim.Sandbox(native=types.SimpleNamespace(sandbox_id="native", files=files))
+    assert sandbox.files is files
+    assert sandbox.files.read("/binary", format="bytes", user="user", request_timeout=7) == bytearray(b"\x00\xff\x80")
+    assert sandbox.files.write("/binary", b"\xff", metadata={"fixture": "owned"}) is marker
+
+
+def test_async_native_filesystem_is_preserved_without_sync_translation():
+    from arker._compat_e2b_async import AsyncSandbox
+
+    class NativeFiles:
+        async def read(self, path, **options):
+            assert (path, options) == ("/binary", {"format": "bytes", "request_timeout": 7})
+            return bytearray(b"\xff")
+
+    files = NativeFiles()
+    sandbox = AsyncSandbox(shim.Sandbox(native=types.SimpleNamespace(sandbox_id="native", files=files)))
+    assert sandbox.files is files
+    assert asyncio.run(sandbox.files.read("/binary", format="bytes", request_timeout=7)) == bytearray(b"\xff")
 
 
 @pytest.mark.parametrize("deleted", [True, False])

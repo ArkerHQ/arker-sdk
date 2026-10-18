@@ -11,6 +11,51 @@ import {
 import { Sandbox } from "../src/e2b.js";
 import { createNativeE2BProvider } from "../src/compat/e2b-provider.js";
 
+test("native filesystem handles preserve binary options and write metadata", async () => {
+  const marker = { path: "/binary", name: "binary" };
+  class NativeFiles {
+    async read(path: string, options: unknown) {
+      assert.equal(path, "/binary");
+      assert.deepEqual(options, { format: "bytes", user: "user", requestTimeoutMs: 7000 });
+      return new Uint8Array([0, 255, 128]);
+    }
+    async write(path: string, content: unknown, options: unknown) {
+      assert.equal(path, "/binary");
+      assert.deepEqual(content, new Uint8Array([255]));
+      assert.deepEqual(options, { user: "user" });
+      return marker;
+    }
+  }
+  const files = new NativeFiles();
+  const sandbox = Reflect.construct(Sandbox, [
+    { provider: "e2b", sandboxId: "native", filesystem: { readFile: async () => "translated" } },
+    { files },
+  ]) as Sandbox;
+  assert.equal(sandbox.files, files);
+  assert.deepEqual(await sandbox.files.read("/binary", { format: "bytes", user: "user", requestTimeoutMs: 7000 }), new Uint8Array([0, 255, 128]));
+  assert.equal(await sandbox.files.write("/binary", new Uint8Array([255]), { user: "user" }), marker);
+});
+
+test("Arker filesystem options are rejected instead of silently ignored", async () => {
+  let calls = 0;
+  const sandbox = Reflect.construct(Sandbox, [{
+    provider: "arker", sandboxId: "arker",
+    filesystem: {
+      readFile: async () => { calls++; return "wrong"; },
+      writeFile: async () => { calls++; },
+      mkdir: async () => { calls++; },
+      readdir: async () => { calls++; return []; },
+      exists: async () => { calls++; return false; },
+      remove: async () => { calls++; },
+    },
+  }]) as Sandbox;
+  for (const method of ["read", "list", "exists", "remove", "makeDir"] as const) {
+    await assert.rejects(sandbox.files[method]("/owned", { user: "another" }), /received unsupported option\(s\) 'user'/);
+  }
+  await assert.rejects(sandbox.files.write("/owned", "data", { user: "another" }), /received unsupported option\(s\) 'user'/);
+  assert.equal(calls, 0);
+});
+
 test("the shim provider preserves embedding SDK identity, native filesystem metadata and errors", async () => {
   const original = { create: Native.create, connect: Native.connect };
   const modifiedTime = new Date("2026-10-17T00:00:00Z");
