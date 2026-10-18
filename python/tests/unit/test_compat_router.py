@@ -214,6 +214,23 @@ def test_json_cache_recovers_from_truncated_file(tmp_path: Path) -> None:
     assert cache.get("vm-a") == "arker"
 
 
+@pytest.mark.parametrize(
+    "payload", [None, [], True, 1, "cache", {"version": True, "entries": {"old": {"provider": "e2b", "accessedAt": 1}}}]
+)
+def test_json_cache_recovers_from_invalid_root(tmp_path: Path, payload: object) -> None:
+    path = tmp_path / "routes.json"
+    path.write_text(json.dumps(payload))
+    cache = JsonRouteCache(path, now=lambda: 100)
+
+    assert cache.get("old") is None
+    cache.set("new", "arker")
+    assert cache.get("new") == "arker"
+    assert json.loads(path.read_text()) == {
+        "version": 1,
+        "entries": {"new": {"provider": "arker", "accessedAt": 101}},
+    }
+
+
 def test_json_cache_discards_malformed_entries_individually(tmp_path: Path) -> None:
     path = tmp_path / "routes.json"
     path.write_text(

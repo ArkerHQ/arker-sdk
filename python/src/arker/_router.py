@@ -199,7 +199,12 @@ class JsonRouteCache:
     def _read(self) -> dict[str, Any]:
         try:
             payload = json.loads(self.path.read_text())
-            if payload.get("version") != 1 or not isinstance(payload.get("entries"), dict):
+            if (
+                not isinstance(payload, dict)
+                or type(payload.get("version")) is not int
+                or payload["version"] != 1
+                or not isinstance(payload.get("entries"), dict)
+            ):
                 raise ValueError
             payload["entries"] = {
                 identifier: entry

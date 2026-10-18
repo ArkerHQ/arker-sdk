@@ -196,6 +196,20 @@ async function testConfigAndCacheValidation(): Promise<void> {
   await sameClock.set("new", "arker");
   assert.equal(await sameClock.get("cold"), null);
   assert.equal(await sameClock.get("old"), "arker");
+
+  const invalidRoots = [null, [], true, 1, "cache", {
+    version: true, entries: { old: { provider: "e2b", accessedAt: 1 } },
+  }];
+  for (const payload of invalidRoots) {
+    await writeFile(path, JSON.stringify(payload));
+    const recovering = new JsonRouteCache(path, 2, 4096, () => 100);
+    assert.equal(await recovering.get("old"), null);
+    await recovering.set("new", "arker");
+    assert.equal(await recovering.get("new"), "arker");
+    assert.deepEqual(JSON.parse(await readFile(path, "utf8")), {
+      version: 1, entries: { new: { provider: "arker", accessedAt: 101 } },
+    });
+  }
 }
 
 async function testMemoryCacheIsBoundedAndPromotesReads(): Promise<void> {
