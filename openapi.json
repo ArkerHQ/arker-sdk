@@ -4831,7 +4831,7 @@
             "items": {
               "type": "string"
             },
-            "description": "`inbound` only, on a rule whose `via` is `[\"ssh\"]`. SSH public keys in `authorized_keys` format (`ssh-ed25519 AAAA... comment`). The rule matches an SSH login with one of these keys, compared by key, not by comment. An `allow` lets the key log in; a `deny` refuses it. Without `ssh_keys`, a `deny` naming `ssh` matches every key, and an `allow` the keys the VM knows: its own unexpired `ssh_public_keys` and the keys any `allow` lists. Once a rule names `ssh`, organization SSH keys no longer log in to the VM. A rule that stops letting a key in, by a write or its `expires_at`, also closes that key's open SSH connections. Certificates, `authorized_keys` options such as `from=` or `command=`, and `ssh-dss` keys are refused. The rule opens no port."
+            "description": "`inbound` only, on a rule whose `via` is `[\"ssh\"]`. SSH public keys in `authorized_keys` format (`ssh-ed25519 AAAA... comment`). The rule matches an SSH login with one of these keys, compared by key, not by comment. An `allow` lets the key log in; a `deny` refuses it. Without `ssh_keys`, a `deny` naming `ssh` matches every key, and an `allow` the keys the VM knows: its own unexpired `ssh_public_keys` and the keys any `allow` lists. Once a rule names `ssh`, organization SSH keys no longer log in to the VM. A `deny` of the key that also lists `open` in `connection_state` closes its open SSH connections. Certificates, `authorized_keys` options such as `from=` or `command=`, and `ssh-dss` keys are refused. The rule opens no port."
           },
           "connection_state": {
             "type": "array",
@@ -10923,7 +10923,7 @@
           "expires_at": {
             "type": "string",
             "format": "date-time",
-            "description": "Inbound rules only. An RFC 3339 time in the future. After it, the rule's ports refuse every request, including requests with an API key."
+            "description": "Inbound rules only. An RFC 3339 time in the future. After it, the rule no longer applies."
           }
         }
       },
