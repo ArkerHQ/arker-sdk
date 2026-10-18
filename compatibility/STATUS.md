@@ -1,5 +1,22 @@
 # Recorded coverage baseline
 
+## E2B binary filesystem update
+
+At `63e9003`, buffered binary reads preserve all byte values as native
+`bytearray` (Python sync/async) or `Uint8Array` (TypeScript). TypeScript accepts
+the native `ArrayBuffer` write input without text conversion. Unit regressions
+failed before correction. Streaming formats are rejected before I/O, not
+implemented as fake buffered streams. Arker's per-call filesystem identity,
+timeouts, streaming, Blob uploads and write metadata remain gaps.
+
+All **479 Python vendor / 470 lean tests** pass (nine optional-vendor skips),
+with TypeScript typecheck and the full test/build/isolated consumer gates.
+Packed npm SHA-256:
+`447b274b658172a7ab0d62f437ac4e038bdda8475e4978b730b0bae28437e163`.
+The import-only differential programs now assert binary write/read, exact
+native return types and default UTF-8 text behavior. Fresh live execution and
+matching-source coverage remain pending; earlier evidence is historical.
+
 ## Native E2B filesystem preservation
 
 At `637bc09`, sync/async Python and TypeScript retain the native E2B filesystem
