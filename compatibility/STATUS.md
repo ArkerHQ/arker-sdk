@@ -11,8 +11,11 @@ failed before correction. Unit gates pass **492 vendor / 483 lean Python**
 tests (nine optional skips), Ruff check/format, TypeScript typecheck and the
 full test/build/isolated-consumer suite. Packed npm SHA-256:
 `6fbff950daef6efbb16f5e5d9d64e50181614640080e685f6a99c5e2e483ed44`.
-Updated import-only programs cover root, trailing and repeated absolute paths;
-their live gates are pending.
+Updated import-only programs cover root, trailing and repeated absolute paths.
+Live checks against backend `d21cfae` pass **all six Python sync/async cases
+and all three TypeScript routes**, each running the unchanged native program
+through reference, shim-native and shim-Arker configurations. Owned fixtures
+were deleted. This targeted result does not replace fresh complete cohorts.
 
 The native TypeScript SDK itself exhibits operation-specific relative-path
 encoding: a nested relative text write was observed at `/relative-check/file`
