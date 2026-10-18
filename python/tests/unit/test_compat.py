@@ -43,9 +43,10 @@ def test_blaxel_custom_permissions_refuse_before_arker_io():
 def test_modal_empty_allowlist_is_not_unrestricted(monkeypatch, option):
     captured = []
     monkeypatch.setattr("arker.modal.routed_create", lambda _vendor, _config, handlers: ("arker", handlers["arker"]()))
-    monkeypatch.setattr("arker.modal.arker_create", lambda _config, **options: (
-        captured.append(options) or types.SimpleNamespace(id="empty-allowlist")
-    ))
+    monkeypatch.setattr(
+        "arker.modal.arker_create",
+        lambda _config, **options: captured.append(options) or types.SimpleNamespace(id="empty-allowlist"),
+    )
     ModalSandbox.create(**{option: []})
     assert captured[0]["policies"] is not None
     assert list(captured[0]["policies"]["rules"].values()) == [{"type": "outbound_guard", "allow": []}]
