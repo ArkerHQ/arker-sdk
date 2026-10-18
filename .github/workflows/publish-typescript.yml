@@ -1,18 +1,7 @@
 name: Publish TypeScript SDK
 
-# Releasing is a version bump: edit `version` in typescript/package.json, merge
-# to main, and this publishes and then tags `typescript-v<version>`. The tag is
-# the record that the version shipped, which is also what makes a re-run of an
-# already-released version a no-op.
-#
-# Pushing a `typescript-v*` tag by hand still works as an escape hatch and
-# always publishes.
-#
-# The tag is created AFTER publishing, by the same job, using GITHUB_TOKEN. A
-# tag pushed with GITHUB_TOKEN deliberately does not start another workflow run
-# — which is exactly what we want here, since publishing already happened.
-#
-# Publishes to the npm registry with npm trusted publishing.
+# Version bumps on main publish through npm trusted publishing and then create
+# `typescript-v<version>`.
 
 on:
   push:
@@ -53,10 +42,10 @@ jobs:
             echo "Tag push: publishing $version"
           elif git ls-remote --exit-code --tags origin "refs/tags/typescript-v$version" >/dev/null 2>&1; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "typescript-v$version is already tagged — nothing to release"
+            echo "typescript-v$version is already tagged - nothing to release"
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
-            echo "New version $version — releasing"
+            echo "New version $version - releasing"
           fi
 
       # The card lives in check and card, not build-and-publish: that job runs in
@@ -131,9 +120,7 @@ jobs:
       - name: Publish to npm
         run: npm publish --access public
 
-      # Last, so the tag means "this version is on npm". If this step fails
-      # after a successful publish, tag by hand — do not re-run, npm rejects a
-      # duplicate version.
+      # Tag only after a successful publish.
       - name: Tag the release
         if: github.ref_type != 'tag'
         run: |

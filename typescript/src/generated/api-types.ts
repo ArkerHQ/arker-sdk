@@ -113,7 +113,7 @@ export interface paths {
         };
         /**
          * List organization runs
-         * @description Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Reads host-local runs and ClickHouse history. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
+         * @description Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
          */
         get: operations["listOrgRuns"];
         put?: never;
@@ -295,7 +295,7 @@ export interface paths {
         head?: never;
         /**
          * Update a session (resize PTY / set timeout)
-         * @description Resize the session's PTY (cols/rows) and/or update its idle timeout. A resize applies at once to the session's open terminal, attached or detached, and is the size the next attach opens at. REST equivalent of the WebSocket {"type":"resize"} control frame — usable from any client, attached or not.
+         * @description Resize the session's PTY (cols/rows) and/or update its idle timeout. A resize applies at once to the session's open terminal, attached or detached, and is the size the next attach opens at. REST equivalent of the WebSocket {"type":"resize"} control frame - usable from any client, attached or not.
          */
         patch: operations["patchSession"];
         trace?: never;
@@ -610,7 +610,7 @@ export interface paths {
         };
         /**
          * Open the worker tunnel
-         * @description Upgrade to a WebSocket with subprotocol `worker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API; a fork names the VM id to use in header `x-vm-id`. Requires the worker to have joined. Authenticate with an API key limited to this pool.
+         * @description Opens the authenticated worker tunnel. Requires the worker to have joined. Authenticate with an API key limited to this pool.
          */
         get: operations["openWorkerTunnel"];
         put?: never;
@@ -832,7 +832,7 @@ export interface components {
             match?: components["schemas"]["PolicyMatch"];
             action: components["schemas"]["PolicyAction"];
             /**
-             * @description Authentication for an inbound rule that exposes a port — `allow`, or a `suspend` or `scaling`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. Inbound port matches must use individual ports rather than ranges.
+             * @description Authentication for an inbound rule that exposes a port - `allow`, or a `suspend` or `scaling`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges.
              * @enum {string}
              */
             auth?: "open" | "arker";
@@ -886,7 +886,7 @@ export interface components {
         /** @description Scales the VM when the rule matches or fires. On an `outbound` rule `suspend` brackets the time the VM is blocked awaiting an upstream response; on an `inbound` rule it suspends the VM once a matched request has been answered. Outbound rules may be narrowed by request fields (`methods`/`paths`/`headers`/`body_contains`), for example to suspend only on `POST /v1/messages`, and compose with `rewrite` / `gate` siblings. For outbound, prefer a `match.hosts` scope: a host-less rule matches every flow it can see, which breaks certificate-pinning clients. */
         ScaleAction: {
             /**
-             * @description Suspend the VM (snapshot and free CPU/RAM). On an `outbound` rule: while a matched upstream request is blocked, resuming when the response arrives. On an `inbound` rule (deprecated): once a matched request's response has been fully delivered and nothing else is in flight, so the next matched request starts it again. On an `outbound` rule, matched responses are delivered only once the upstream response is COMPLETE: a suspended VM has no running guest to receive bytes, so the proxy holds the whole body and hands it over at the end. Total latency is unchanged, but a response whose fragments are individually usable — an SSE token stream, for example — stops arriving incrementally, so a client rendering tokens as they arrive will see nothing until the response finishes. Enabling this is a deliberate trade of incremental delivery for the memory saving.
+             * @description Suspend the VM (snapshot and free CPU/RAM). On an `outbound` rule: while a matched upstream request is blocked, resuming when the response arrives. On an `inbound` rule (deprecated): once a matched request's response has been fully delivered and nothing else is in flight, so the next matched request starts it again. On an `outbound` rule, matched responses are delivered only once the upstream response is COMPLETE: a suspended VM has no running guest to receive bytes, so the proxy holds the whole body and hands it over at the end. Total latency is unchanged, but a response whose fragments are individually usable - an SSE token stream, for example - stops arriving incrementally, so a client rendering tokens as they arrive will see nothing until the response finishes. Enabling this is a deliberate trade of incremental delivery for the memory saving.
              * @default false
              */
             suspend?: boolean;
@@ -948,7 +948,7 @@ export interface components {
             source_vm_id?: string | null;
             /** @description VM name within the caller organization or `ArkerHQ`. Omit the organization scope to search the caller first and then `ArkerHQ`. */
             source_vm_name?: string | null;
-            /** @description OCI image reference to fork from — for example `ubuntu:24.04`, `ghcr.io/org/image:v1`, or `image@sha256:...`. An unqualified name resolves against Docker Hub. Give a bare reference, not a URI. The new VM boots a rootfs converted from that image rather than from an existing VM, so neither `source_vm_id` nor `source_vm_name` is given. */
+            /** @description OCI image reference to fork from - for example `ubuntu:24.04`, `ghcr.io/org/image:v1`, or `image@sha256:...`. An unqualified name resolves against Docker Hub. Give a bare reference, not a URI. The new VM boots a rootfs converted from that image rather than from an existing VM, so neither `source_vm_id` nor `source_vm_name` is given. */
             image?: string | null;
             /** @description Dockerfile source. Accepted by the schema and ALWAYS REFUSED with a 400: the API does not build Dockerfiles, the SDKs do. Use arker.fork(dockerfile="./Dockerfile") from the Python or TypeScript SDK, or pass `image` to fork a prebuilt image here. COPY is why it works that way: it reads files on the caller's machine, and this field carries text while the caller waits for the fork response, so the server can never be handed those files. The field is kept rather than removed so this refusal can point at the SDK instead of answering with a bare `unknown field`. */
             dockerfile?: string | null;
@@ -1097,9 +1097,9 @@ export interface components {
             region?: string | null;
             /** @description Public provider containing the VM. */
             provider?: components["schemas"]["Provider"] | null;
-            /** @description RFC 3339 timestamp of the machine's most recent activity — a run, an SSH session, an open tunnel, a resume, or being used as the source of a fork. Recorded when a stretch of activity begins and refreshed at most once a minute while it continues, so it is a recent-activity marker rather than a precise heartbeat. Null if the machine has not been active since it was created. */
+            /** @description RFC 3339 timestamp of the machine's most recent activity - a run, an SSH session, an open tunnel, a resume, or being used as the source of a fork. Recorded when a stretch of activity begins and refreshed at most once a minute while it continues, so it is a recent-activity marker rather than a precise heartbeat. Null if the machine has not been active since it was created. */
             last_active_at?: string | null;
-            /** @description The VM's network object — SSH keys only. Inbound reachability and per-port exposure are derived from `policies`, not from this object. */
+            /** @description The VM's network object - SSH keys only. Inbound reachability and per-port exposure are derived from `policies`, not from this object. */
             network: components["schemas"]["VmNetwork"];
             /** @description The VM's network policy. Returned by `GET /v1/vms/{id}`, `PATCH /v1/vms/{id}`, and `POST /v1/fork`; omitted from list responses. */
             policies?: components["schemas"]["VmPolicies"] | null;
@@ -1111,7 +1111,7 @@ export interface components {
             max_memory_mib?: number | null;
             /** @description Non-hotpluggable base memory (MiB). */
             min_memory_mib?: number | null;
-            /** @description GPU sizing bounds for each GPU platform this VM can be forked onto; absent when it has no GPU platform. A base VM is GPU-agnostic and may be offered on several GPUs at once, so this is a list — clients pick the entry matching the platform they intend to request. */
+            /** @description GPU sizing bounds for each GPU platform this VM can be forked onto; absent when it has no GPU platform. A base VM is GPU-agnostic and may be offered on several GPUs at once, so this is a list - clients pick the entry matching the platform they intend to request. */
             gpu_platforms?: components["schemas"]["GpuPlatformLimits"][] | null;
             /** @description Smallest disk size (MiB) accepted for this VM. `0` means nodisk. */
             min_disk_mib?: number | null;
@@ -1166,7 +1166,7 @@ export interface components {
             session_id: string;
         };
         RunRequest: {
-            /** @description The session to run in. Arker's run interface works like a terminal: sessions are tabs, each keeps its own state — working directory, environment, shell history — and each handles one run at a time. Create a session with `POST /v1/vms/{id}/sessions`, which also sets its starting directory and environment, then pass its id here. Run sequential commands in one session; for a long-running task, use `time_to_background: 0` in a session of its own so later work does not interrupt it. Distinct sessions run concurrently. A session that no longer exists is a 404. Omitted, the run uses the VM's default session, which every caller that omits it shares. */
+            /** @description The session to run in. Arker's run interface works like a terminal: sessions are tabs, each keeps its own state - working directory, environment, shell history - and each handles one run at a time. Create a session with `POST /v1/vms/{id}/sessions`, which also sets its starting directory and environment, then pass its id here. Run sequential commands in one session; for a long-running task, use `time_to_background: 0` in a session of its own so later work does not interrupt it. Distinct sessions run concurrently. A session that no longer exists is a 404. Omitted, the run uses the VM's default session, which every caller that omits it shares. */
             session_id?: string | null;
             /**
              * Format: uint32
@@ -1184,7 +1184,7 @@ export interface components {
             time_to_background?: number | null;
             /**
              * @deprecated
-             * @description Alias for `time_to_background`. `true` is exactly `time_to_background: 0` (return a pollable run immediately); `false` leaves the default sync window. Send only one of the two — supplying both is rejected, because they can disagree. Prefer `time_to_background`, which can also bound the wait instead of only switching it off.
+             * @description Alias for `time_to_background`. `true` is exactly `time_to_background: 0` (return a pollable run immediately); `false` leaves the default sync window. Send only one of the two - supplying both is rejected, because they can disagree. Prefer `time_to_background`, which can also bound the wait instead of only switching it off.
              */
             background?: boolean | null;
             /** @description Maximum time in seconds this request may wait to start before failing with `unavailable`. Omit this field or pass `0` to fail immediately when the run cannot start. This is independent of `timeout` and `time_to_background`. */
@@ -1211,7 +1211,7 @@ export interface components {
             session_id?: string | null;
             /** @description The run's own id. Present for executed runs; absent for operation acks (signal) with no run record. */
             run_id?: string | null;
-            /** @description Lifecycle state — "completed" when the command finished, or "cancelled" when the run was cancelled before it finished. A cancelled run reports the output recorded before the cancellation and a null `exit_code`. Read this (not the variant) for completion, uniformly with the run-status (`Run`) shape. */
+            /** @description Lifecycle state - "completed" when the command finished, or "cancelled" when the run was cancelled before it finished. A cancelled run reports the output recorded before the cancellation and a null `exit_code`. Read this (not the variant) for completion, uniformly with the run-status (`Run`) shape. */
             state?: string;
             /** @description Standard output produced by the command. */
             stdout: string;
@@ -1229,7 +1229,7 @@ export interface components {
             session_id?: string | null;
             /** @description Unique run identifier. */
             run_id: string;
-            /** @description Lifecycle state — "running" for a backgrounded run. */
+            /** @description Lifecycle state - "running" for a backgrounded run. */
             state?: string;
         };
         Run: {
@@ -1286,7 +1286,7 @@ export interface components {
             completed_at?: string | null;
             /** @description Process exit code. Null when no process completed. */
             exit_code: number | null;
-            /** @description System failure explanation when `state` is `failed` — see `Run.fail_reason`. Distinct from the program's `stderr`. */
+            /** @description System failure explanation when `state` is `failed` - see `Run.fail_reason`. Distinct from the program's `stderr`. */
             fail_reason?: string | null;
             /** @description Unique VM identifier. */
             vm_id?: string | null;
@@ -1425,11 +1425,11 @@ export interface components {
             /**
              * @description Mount state. Creating a mount returns `attaching`; poll this resource for the outcome.
              *
-             *     `attaching` — the mount is pending. A stopped VM remains in this state until it resumes.
+             *     `attaching` - the mount is pending. A stopped VM remains in this state until it resumes.
              *
-             *     `mounted` — the filesystem is available in the VM.
+             *     `mounted` - the filesystem is available in the VM.
              *
-             *     `failed` — the VM cannot mount the filesystem. `state_detail` explains the cause. Transient errors remain in `attaching` while the service retries them.
+             *     `failed` - the VM cannot mount the filesystem. `state_detail` explains the cause. Transient errors remain in `attaching` while the service retries them.
              * @enum {string|null}
              */
             state?: "attaching" | "mounted" | "failed" | null;
@@ -1703,7 +1703,7 @@ export interface components {
             gpu_count?: number | null;
         };
         /**
-         * @description How much GPU, measured in cards. Below one card: eighths of ONE card. At or above one: whole cards, and the VM holds that many devices — `gpu_sms` and `gpu_vram_mib` are per-GPU, so its total is `gpu_count` times those. 0 declines a GPU and yields a CPU-only VM. The enum is the ladder: there is no 1.5 of a card, and no 3-card worker to be given.
+         * @description How much GPU, measured in cards. Below one card: eighths of ONE card. At or above one: whole cards, and the VM holds that many devices - `gpu_sms` and `gpu_vram_mib` are per-GPU, so its total is `gpu_count` times those. 0 declines a GPU and yields a CPU-only VM. The enum is the ladder: there is no 1.5 of a card, and no 3-card worker to be given.
          * @enum {number}
          */
         Vgpu: 0 | 0.125 | 0.25 | 0.375 | 0.5 | 0.625 | 0.75 | 0.875 | 1 | 2 | 4 | 8;
@@ -1718,7 +1718,7 @@ export interface components {
             memory_mib?: number | null;
             /** @description Disk allocation in mebibytes. */
             disk_mib?: number | null;
-            /** @description Fraction of one physical GPU to allocate, in eighths of a card: 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, or 1. Resolved against the serving platform's GPU (`vgpu: 0.25` on `x86_64-l40s` is 35 SMs and 11517 MiB), so the same fraction is a different amount of silicon on a different card — see the per-platform table in the docs. Mutually exclusive with `gpu_sms` and `gpu_vram_mib`. Request-only: responses report the resolved `gpu_sms`/`gpu_vram_mib` and never this field. */
+            /** @description Fraction of one physical GPU to allocate, in eighths of a card: 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, or 1. Resolved against the serving platform's GPU (`vgpu: 0.25` on `x86_64-l40s` is 35 SMs and 11517 MiB), so the same fraction is a different amount of silicon on a different card - see the per-platform table in the docs. Mutually exclusive with `gpu_sms` and `gpu_vram_mib`. Request-only: responses report the resolved `gpu_sms`/`gpu_vram_mib` and never this field. */
             vgpu?: components["schemas"]["Vgpu"] | null;
         };
         SshPublicKeyInfo: {
@@ -1789,7 +1789,7 @@ export interface components {
         GpuResourceBand: {
             /** @description Smallest value accepted. */
             min: number;
-            /** @description Largest value accepted — the whole physical GPU. Requests above this return 400 rather than being clamped. */
+            /** @description Largest value accepted - the whole physical GPU. Requests above this return 400 rather than being clamped. */
             max: number;
             /** @description Value applied when the field is omitted on fork. */
             default: number;
@@ -1798,14 +1798,14 @@ export interface components {
         GpuPlatformLimits: {
             /** @description Platform label to request in `platforms` to land on this GPU, e.g. `x86_64-l40s`. */
             platform: string;
-            /** @description Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing — use the bands. */
+            /** @description Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing - use the bands. */
             gpu?: string | null;
             vram_mib: components["schemas"]["GpuResourceBand"];
             sms: components["schemas"]["GpuResourceBand"];
         };
         /** @description GPU sizing bands for one compatible platform, from the platform catalog. Present on a `CompatiblePlatform` entry only when that platform has a GPU; absent means the platform has none. Bands are per GPU. */
         PlatformGpuLimits: {
-            /** @description Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing — use the bands. */
+            /** @description Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing - use the bands. */
             name?: string | null;
             vram_mib: components["schemas"]["GpuResourceBand"];
             sms: components["schemas"]["GpuResourceBand"];
@@ -1813,7 +1813,7 @@ export interface components {
         /**
          * @description Credentials for pulling `image` from a private registry. Used only for this one pull and never stored. Redacted from logs and telemetry.
          *
-         *     For AWS ECR use username `AWS` with the output of `aws ecr get-login-password`; for Google Artifact Registry use `oauth2accesstoken` with an access token; for Docker Hub or GHCR use your username and a personal access token. Short-lived tokens are fine — the pull happens once, at fork time.
+         *     For AWS ECR use username `AWS` with the output of `aws ecr get-login-password`; for Google Artifact Registry use `oauth2accesstoken` with an access token; for Docker Hub or GHCR use your username and a personal access token. Short-lived tokens are fine - the pull happens once, at fork time.
          */
         RegistryAuth: {
             /** @description Registry username, e.g. `AWS` for ECR. */
@@ -3258,11 +3258,11 @@ export interface components {
             resources: components["schemas"]["WorkerResources"];
             /** @description Capacity the worker has free. */
             free: components["schemas"]["WorkerResources"];
-            /** @description For a `byoc` pool's arkerd worker: the golden and hypervisor selection it runs with, which decides the golden generations it serves. Arker upgrades a worker running with other values than the region's in place. */
+            /** @description Runtime configuration reported by a `byoc` worker. */
             golden_env?: {
                 [key: string]: string;
             };
-            /** @description For a `byoc` pool's arkerd worker: the goldens it cannot serve current. Absent while it serves each of its goldens from a generation baked for it. */
+            /** @description Images the worker cannot currently serve. Absent when all configured images are available. */
             goldens?: components["schemas"]["WorkerGoldens"];
             /** @description For a `byoc` pool's arkerd worker: its VMs forked often enough to prewarm on the pool's other workers, by VM id. Arker ignores a VM that is not in the worker's pool. */
             vm_activity?: {
@@ -3279,11 +3279,11 @@ export interface components {
              */
             forks: number;
         };
-        /** @description The goldens a worker cannot serve current, by name. */
+        /** @description Images a worker cannot currently serve, by name. */
         WorkerGoldens: {
-            /** @description Goldens it serves from a generation baked for another host fingerprint: a fork of one by name runs that older generation. */
+            /** @description Images for which the worker has an outdated version. */
             stale: string[];
-            /** @description Goldens it is to serve and serves no generation of: none is published for its platform, or none could be adopted. A fork of one by name fails. */
+            /** @description Images unavailable on this worker. A fork from one of these images fails. */
             missing: string[];
         };
         /** @description Short-lived AWS credentials for `prefix` of `bucket`; every heartbeat answer carries ones that are still fresh. */
@@ -3300,7 +3300,7 @@ export interface components {
              */
             expires_at: string;
         };
-        /** @description Where the worker keeps VM snapshots: the pool's own bucket for a `byoc` pool that isolates `vms`, else the pool's prefix of Arker's regional bucket. */
+        /** @description Storage configuration for VM snapshots. */
         WorkerStorage: {
             /** @description S3 bucket. */
             bucket: string;
@@ -3321,9 +3321,9 @@ export interface components {
             /** @description WebSocket URL the worker keeps open so Arker can reach it; a path is relative to the endpoint the heartbeat went to. */
             tunnel_url: string;
             storage: components["schemas"]["WorkerStorage"];
-            /** @description Present while Arker upgrades a `byoc` pool's arkerd worker in place: the release it is to run next. Its VMs keep running across the upgrade. */
+            /** @description Target release while a worker upgrade is pending. */
             upgrade_release_id?: string;
-            /** @description For a `byoc` pool's arkerd worker: the region's golden and hypervisor selection, which decides the golden generations it serves. A worker running with other values is upgraded onto these in place; its VMs keep running. */
+            /** @description Desired runtime configuration for a `byoc` worker. */
             golden_env?: {
                 [key: string]: string;
             };
@@ -3877,7 +3877,7 @@ export interface components {
         };
     };
     parameters: {
-        /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result — the same run, or the same VM for a fork — instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
+        /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
         IdempotencyKey: string;
         /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
         VmId: string;
@@ -3994,7 +3994,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result — the same run, or the same VM for a fork — instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
+                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -4359,7 +4359,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result — the same run, or the same VM for a fork — instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
+                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
@@ -4383,7 +4383,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunResponse"];
                 };
             };
-            /** @description Accepted — the run is still executing. The body carries `run_id` and `state: "running"`, not output; poll `GET /v1/vms/{id}/runs/{run_id}` for the result. Returned for `time_to_background: 0` and whenever the command outstays `time_to_background`. A 2xx here means the request was accepted, not that the work is done. */
+            /** @description Accepted - the run is still executing. The body carries `run_id` and `state: "running"`, not output; poll `GET /v1/vms/{id}/runs/{run_id}` for the result. Returned for `time_to_background: 0` and whenever the command outstays `time_to_background`. A 2xx here means the request was accepted, not that the work is done. */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -4686,7 +4686,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Switching Protocols — the WebSocket PTY stream is established. */
+            /** @description Switching Protocols - the WebSocket PTY stream is established. */
             101: {
                 headers: {
                     [name: string]: unknown;

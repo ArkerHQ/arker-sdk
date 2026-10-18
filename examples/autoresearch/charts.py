@@ -42,7 +42,7 @@ def draw_progress(state: dict) -> None:
     ax_t.set_yticks(range(len(names)))
     ax_t.set_yticklabels(names, fontsize=9)
     ax_t.set_xlabel("seconds since config start", fontsize=9)
-    ax_t.set_title(f"time running — {AGENTS} x {vgpu:g} vGPU",
+    ax_t.set_title(f"time running - {AGENTS} x {vgpu:g} vGPU",
                    fontsize=10)
     ax_t.grid(axis="x", alpha=.25)
     ax_t.set_axisbelow(True)
@@ -66,7 +66,7 @@ def draw_progress(state: dict) -> None:
         ax_l.legend(fontsize=8, frameon=False)
 
     done = len(turns)
-    fig.suptitle(f"{label_for(vgpu)} — {AGENTS} agents x {TURNS} turns, "
+    fig.suptitle(f"{label_for(vgpu)} - {AGENTS} agents x {TURNS} turns, "
                  f"{done}/{AGENTS * TURNS} done", fontsize=11.5)
     fig.tight_layout(rect=[0, 0, 1, .90])
     fig.savefig(RUN / f"progress-{label_for(vgpu)}.png", dpi=140)
@@ -75,7 +75,7 @@ def draw_progress(state: dict) -> None:
 
 def timeline(folder: str) -> None:
     """One figure, every config in the run folder stacked: a setup phase, then
-    one row per agent showing each turn — dark where the training run held the
+    one row per agent showing each turn - dark where the training run held the
     GPU, light where the agent was waiting on the model. Reads the saved JSON,
     so it redraws long after the run."""
     plt = _plt()
@@ -83,7 +83,7 @@ def timeline(folder: str) -> None:
     loaded = [json.loads(f.read_text()) for f in sorted(where.glob("vgpu*.json"))]
     loaded = [d for d in loaded if d.get("timeline")]
     if not loaded:
-        sys.exit(f"no timeline data in {where} — rerun to record it")
+        sys.exit(f"no timeline data in {where} - rerun to record it")
     loaded.sort(key=lambda d: d["vgpu"])
 
     fig, axes = plt.subplots(len(loaded), 1, figsize=(13, 2.4 + 1.5 * len(loaded)),
@@ -119,7 +119,7 @@ def timeline(folder: str) -> None:
         ax.set_xlim(0, span * 1.08)
         ax.grid(axis="x", alpha=.25)
         ax.set_axisbelow(True)
-        ax.set_title(f"{d['agents']} agents x {d['vgpu']:g} vGPU   —   "
+        ax.set_title(f"{d['agents']} agents x {d['vgpu']:g} vGPU   -   "
                      f"{d['wall_s']}s · {d['experiments']} experiments",
                      fontsize=10, loc="left")
 
@@ -146,7 +146,7 @@ def chart(folder: str) -> None:
               for v in VGPUS if (where / f"{label_for(v)}.json").exists()}
     if not loaded:
         sys.exit(f"no results in {where}")
-    # smallest fraction bluest, largest reddest — same order as VGPUS
+    # smallest fraction bluest, largest reddest - same order as VGPUS
     palette = ["#2b7bba", "#5b8c5a", "#c9a227", "#c1553b"]
     colors = {v: palette[min(i, len(palette) - 1)] for i, v in enumerate(sorted(loaded))}
     labels = {v: f"{AGENTS} x {v:g} vGPU" for v in loaded}

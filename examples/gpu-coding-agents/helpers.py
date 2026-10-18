@@ -1,6 +1,6 @@
 """Plumbing for launch.py: the client, retries, VM bookkeeping and the report.
 
-Nothing here is worth reading to learn the SDK — the calls that matter
+Nothing here is worth reading to learn the SDK - the calls that matter
 (`ar.fork`, `vm.run`, `vm.delete`) are in launch.py. This file is the
 scaffolding that keeps a demo honest: retrying a delete so a run cannot leak a
 GPU, and counting what happened.
@@ -60,7 +60,7 @@ def run(vm, command, session_idx=1, timeout=600, attempts=4):
     """vm.run, retried through the one failure the SDK cannot see for itself.
 
     An idle VM can suspend between runs, and a run landing mid-suspend comes back
-    `exit 128 ... in state stopped` — a successful HTTP call reporting a failed
+    `exit 128 ... in state stopped` - a successful HTTP call reporting a failed
     exec, so no HTTP-level retry applies. The next run restores the VM.
     """
     last = None
@@ -149,7 +149,7 @@ def sweep():
     """Delete every VM still alive at the end of the run.
 
     The per-cycle delete already retries, so anything here has survived several
-    attempts — and this run is the only thing that knows these VMs exist.
+    attempts - and this run is the only thing that knows these VMs exist.
     """
     with _vm_lock:
         left = [_live_vms[k] for k in sorted(_live_vms)]
@@ -210,7 +210,7 @@ def report(window_min, cfg):
     threads = sorted({r["thread"] for r in rows if "thread" in r})
 
     print("\n" + "=" * 66)
-    print(f"vLLM AGENT ITERATION — {cfg['threads']} threads, "
+    print(f"vLLM AGENT ITERATION - {cfg['threads']} threads, "
           f"{window_min:.0f} min window")
     print(f"1..{cfg['tests_per_agent']} feature-tests per agent session, "
           f"slice vgpu={cfg['vgpu']} ({cfg.get('vram_mib') or '?'} MiB resolved)")
@@ -228,7 +228,7 @@ def report(window_min, cfg):
         print(f"  swept at end         : {len(swept)}   (missed by their own cycle)")
     leaked = len(forks) - len(dels) - len(swept)
     if leaked > 0:
-        print(f"  *** {leaked} VM(s) NOT deleted — each still holds a GPU slice ***")
+        print(f"  *** {leaked} VM(s) NOT deleted - each still holds a GPU slice ***")
         for r in sweep_fail:
             print(f"        {r.get('vm_id')}  ({r.get('status')} {r.get('code')})")
     if forks:
@@ -257,9 +257,9 @@ def report(window_min, cfg):
               f"p90={pct(lat,.9):.0f}s max={max(lat):.0f}s")
 
     if not forks:
-        print("\n*** NO VM WAS EVER FORKED — this is not a throughput measurement. ***")
+        print("\n*** NO VM WAS EVER FORKED - this is not a throughput measurement. ***")
 
-    print("\nFAIRNESS — per thread (forks / ok tasks):")
+    print("\nFAIRNESS - per thread (forks / ok tasks):")
     f_by = collections.Counter(r["thread"] for r in forks)
     o_by = collections.Counter(r["thread"] for r in ok)
     for t in threads:
@@ -277,7 +277,7 @@ def report(window_min, cfg):
 
 
 def teardown_base(base, args):
-    """Delete the base last — the agent VMs were forked from it."""
+    """Delete the base last - the agent VMs were forked from it."""
     if args.base_vm:
         print(f"\nbase {base.id} left alone (you passed --base-vm)")
         return
@@ -287,7 +287,7 @@ def teardown_base(base, args):
     print(f"\n== delete base {base.id} ==")
     err = delete(base, attempts=10, floor=3.0)
     print("   deleted" if err is None
-          else f"   FAILED ({err.status} {err.code}) — it still holds a GPU slice")
+          else f"   FAILED ({err.status} {err.code}) - it still holds a GPU slice")
 
 
 def parse_args():

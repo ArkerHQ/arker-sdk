@@ -1,20 +1,13 @@
 """Parse a Dockerfile into the instruction list the SDK build driver walks.
 
-Text in, instructions out — no network, no VM, no filesystem. The driver in
+Text in, instructions out - no network, no VM, no filesystem. The driver in
 ``build.py`` is what executes them: ``FROM`` becomes a real image fork, ``RUN``
 becomes ``vm.run(...)``, ``COPY`` becomes a directory sync into the VM.
 
-## Why this lives in the SDK and not on the server
+## Why this lives in the SDK
 
-Every instruction except ``COPY`` is self-contained text that a server could
-interpret perfectly well — and one used to. ``COPY`` is different: its sources
-are files on the machine running this code. A server-side build would need the
-client to upload a build context first, which means an upload endpoint, object
-storage, context ids, and a size ceiling on however big someone's project is.
-
-Driving the build from here removes all of that. ``COPY`` becomes
-``vm.sync_dir(...)``, which already streams a tarball into the guest and, being
-manifest-diffed, ships only the files that actually changed.
+``COPY`` sources are local, so Dockerfile builds are driven by the SDK.
+``COPY`` uses ``vm.sync_dir(...)`` and sends only changed files.
 
 ## Scope
 
@@ -28,13 +21,13 @@ through an interpreter at all.
 
 Refused by name, rather than silently dropped:
 
-* **Multi-stage builds** — more than one ``FROM``, or a ``COPY --from=``.
+* **Multi-stage builds** - more than one ``FROM``, or a ``COPY --from=``.
   Resolving stage aliases and deciding what a final stage means for a single
   long-lived VM is its own feature.
-* **``ARG``-substituted ``FROM``** — ``FROM`` resolves through a real image
+* **``ARG``-substituted ``FROM``** - ``FROM`` resolves through a real image
   fork, so it has to be a literal reference.
 * **Everything else** (``VOLUME``, ``ONBUILD``, ``HEALTHCHECK``,
-  ``STOPSIGNAL``, ``MAINTAINER``, ...) — named in the error so an unsupported
+  ``STOPSIGNAL``, ``MAINTAINER``, ...) - named in the error so an unsupported
   directive never passes silently.
 
 ``${VAR}`` substitution into instruction text is not performed. A ``RUN`` sees
@@ -78,14 +71,14 @@ class DockerfileError(ValueError):
 
 @dataclass(frozen=True)
 class Run:
-    """``RUN <cmd>`` — executed against the VM via ``vm.run``."""
+    """``RUN <cmd>`` - executed against the VM via ``vm.run``."""
 
     command: str
 
 
 @dataclass(frozen=True)
 class Copy:
-    """``COPY <src>... <dest>`` — synced from the build context into the VM.
+    """``COPY <src>... <dest>`` - synced from the build context into the VM.
 
     ``sources`` are as written, relative to the context root; the driver
     resolves and globs them locally. ``chown`` is carried rather than dropped
@@ -99,7 +92,7 @@ class Copy:
 
 @dataclass(frozen=True)
 class Add:
-    """``ADD <url> <dest>`` — fetched inside the guest.
+    """``ADD <url> <dest>`` - fetched inside the guest.
 
     Only the URL form is supported. A local-source ``ADD`` differs from
     ``COPY`` mainly by auto-extracting archives, which this does not do, so it
@@ -113,21 +106,21 @@ class Add:
 
 @dataclass(frozen=True)
 class Env:
-    """``ENV k=v [k=v ...]`` — exported for later ``RUN``s and persisted."""
+    """``ENV k=v [k=v ...]`` - exported for later ``RUN``s and persisted."""
 
     pairs: list[tuple[str, str]]
 
 
 @dataclass(frozen=True)
 class Workdir:
-    """``WORKDIR <dir>`` — created if missing, then ``cd``'d into."""
+    """``WORKDIR <dir>`` - created if missing, then ``cd``'d into."""
 
     path: str
 
 
 @dataclass(frozen=True)
 class User:
-    """``USER <name>`` — subsequent ``RUN``s execute as this user."""
+    """``USER <name>`` - subsequent ``RUN``s execute as this user."""
 
     name: str
 
@@ -147,28 +140,28 @@ class Arg:
 
 @dataclass(frozen=True)
 class Label:
-    """``LABEL k=v`` — recorded, no runtime effect on a VM."""
+    """``LABEL k=v`` - recorded, no runtime effect on a VM."""
 
     pairs: list[tuple[str, str]]
 
 
 @dataclass(frozen=True)
 class Expose:
-    """``EXPOSE <port>`` — recorded; VMs are reached via run/SSH, not -p."""
+    """``EXPOSE <port>`` - recorded; VMs are reached via run/SSH, not -p."""
 
     port: str
 
 
 @dataclass(frozen=True)
 class Entrypoint:
-    """``ENTRYPOINT`` — composed with ``CMD`` by the driver."""
+    """``ENTRYPOINT`` - composed with ``CMD`` by the driver."""
 
     command: str
 
 
 @dataclass(frozen=True)
 class Cmd:
-    """``CMD`` — arguments to ``ENTRYPOINT``, or the whole command alone."""
+    """``CMD`` - arguments to ``ENTRYPOINT``, or the whole command alone."""
 
     command: str
 
@@ -208,8 +201,8 @@ def _instructions(text: str) -> Iterator[tuple[str, str]]:
     """Yield ``(DIRECTIVE, argument)`` pairs from Dockerfile text.
 
     Lexing is delegated to ``dockerfile-parse`` rather than hand-rolled. That
-    layer — line continuations, comments (including a ``#`` line *inside* a
-    continued instruction), the ``# escape=`` parser directive, CRLF — is
+    layer - line continuations, comments (including a ``#`` line *inside* a
+    continued instruction), the ``# escape=`` parser directive, CRLF - is
     exactly where a hand-written splitter goes quietly wrong, and it is the
     part this library does well. It hands back the instruction NAME and its
     raw argument string; parsing the arguments (flags, exec-form JSON,
@@ -246,7 +239,7 @@ def _command_line(argument: str, shell: list[str] | None) -> str:
 
     Exec form does not go through a shell in Docker, but the only execution
     primitive we have is "a command line in a shell", so each element is quoted
-    and joined — which invokes the same argv a direct exec would.
+    and joined - which invokes the same argv a direct exec would.
 
     ``shell`` is the interpreter set by a preceding ``SHELL``. Docker applies it
     to the SHELL FORM of all three instructions, and to exec form of none of
@@ -287,7 +280,7 @@ def _key_value_pairs(argument: str, directive: str) -> list[tuple[str, str]]:
     if not tokens:
         raise DockerfileError(f"{directive} requires at least one key")
     if "=" not in tokens[0]:
-        # Legacy `ENV key value with spaces` — everything after the key is the
+        # Legacy `ENV key value with spaces` - everything after the key is the
         # value, so it cannot be split into further pairs.
         if len(tokens) < 2:
             raise DockerfileError(f"{directive} {tokens[0]} has no value")
@@ -373,7 +366,7 @@ def parse_dockerfile(text: str) -> ParsedDockerfile:
             if not source.startswith(("http://", "https://")):
                 raise DockerfileError(
                     f"ADD {source} is not supported: only a URL source is. Use COPY for "
-                    "local files — note ADD's archive auto-extraction is not implemented, "
+                    "local files - note ADD's archive auto-extraction is not implemented, "
                     "which is why a local ADD is refused rather than treated as COPY"
                 )
             steps.append(Add(source, dest, checksum=flags.get("checksum")))

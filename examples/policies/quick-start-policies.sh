@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Policies as code — quick start (host-enforced egress policy)
+# Policies as code - quick start (host-enforced egress policy)
 #
 # Forks a caller-selected source and attaches an ordered list of outbound
 # rules (allow / deny / rewrite / gate), enforced in the host network path so a

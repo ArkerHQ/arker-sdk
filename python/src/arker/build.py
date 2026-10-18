@@ -1,36 +1,8 @@
-"""Drive a parsed Dockerfile against a VM.
+"""Apply parsed Dockerfile instructions to a VM.
 
-``FROM`` is not executed here — the caller forks from it, through the ordinary
-server-side ``fork(image=…)`` path, which owns the registry pull, the OCI→ext4
-conversion and the template cache. Everything after it is walked by
-:func:`apply_steps` against the resulting VM.
-
-## Shell state
-
-``ENV``, ``WORKDIR`` and ``ARG``-with-a-default are applied by running real
-``export``/``cd`` commands rather than by prefixing every later command. A VM
-session keeps its exported environment and working directory between runs, so
-one ``export`` sticks for every subsequent ``RUN`` — and, importantly, for the
-customer's own ``run()`` calls on the VM they get back. Prefixing would have
-made the state vanish the moment the build ended.
-
-``USER`` is different: there is no per-session "become this user", so each
-subsequent ``RUN`` is wrapped in ``su -p``. That means USER affects the build
-but does NOT carry onto the delivered VM's later runs — documented here rather
-than silently differing from Docker.
-
-## COPY
-
-Sources resolve against the build context root and are transferred with the
-VM's own file APIs: a directory through ``sync_dir`` (manifest-diffed, so a
-rebuild ships only what changed), a single file through ``sync``. No shell is
-involved in the transfer, so there is nothing to quote or escape — the paths
-never reach a command line.
-
-``COPY`` deliberately runs unwrapped, outside any ``USER`` shell: Docker writes
-copied files as root unless ``--chown`` says otherwise, and the transfer APIs
-write as the guest agent rather than as a session user. ``--chown`` is applied
-afterwards as an explicit ``chown -R``.
+``ENV`` and ``WORKDIR`` persist in the build session. ``USER`` applies to
+subsequent ``RUN`` instructions. ``COPY`` resolves sources from the local build
+context and applies ``--chown`` after transfer.
 """
 
 from __future__ import annotations
@@ -75,20 +47,7 @@ class _VM(Protocol):
 
 
 def _env_value(value: str) -> str:
-    """Quote an `ENV`/`ARG` value for `export`.
-
-    A value containing `$` is DOUBLE-quoted so the guest shell expands it.
-    `ENV PATH=/opt/bin:$PATH` is one of the most common lines in any
-    Dockerfile, and single-quoting it sets the literal string `$PATH` — which
-    then breaks every later `RUN` and every `run()` the customer makes, with a
-    "command not found" three steps away from the cause.
-
-    The trade-off is deliberate: double quotes make the value an expansion
-    context, so `$(...)` would also run. That is guest-side, where `RUN`
-    already grants arbitrary execution, so it costs nothing that was not
-    already spent. Backslash, backtick and `"` are escaped so the value cannot
-    break out of the quoting itself.
-    """
+    """Quote an ENV or ARG value while preserving shell expansion."""
     if "$" not in value:
         return shlex.quote(value)
     escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`")
@@ -96,13 +55,7 @@ def _env_value(value: str) -> str:
 
 
 def _resolve_sources(source: str, context_root: str) -> list[str]:
-    """Resolve one COPY source against the context, expanding globs.
-
-    Globs are expanded HERE, by Python, against the local filesystem — never by
-    a shell. That removes the whole class of quoting and metacharacter problems
-    a shell-side expansion would carry, and it means an unmatched glob is a
-    clear error rather than a literal path that fails later.
-    """
+    """Resolve and expand a COPY source without invoking a shell."""
     root = os.path.realpath(context_root)
     pattern = os.path.join(root, source)
     matches = sorted(_glob.glob(pattern)) if _glob.has_magic(pattern) else [pattern]
@@ -115,7 +68,7 @@ def _resolve_sources(source: str, context_root: str) -> list[str]:
         real = os.path.realpath(match)
         # The context root is the boundary, exactly as `docker build` treats
         # it. `..` in the source, or a symlink pointing out of the tree, both
-        # land here — realpath is what makes the symlink case caught too.
+        # land here - realpath is what makes the symlink case caught too.
         if real != root and not real.startswith(root + os.sep):
             raise BuildError(
                 f"COPY {source} names a path outside the build context; everything "
@@ -199,7 +152,7 @@ def _apply_copy(
     for path in resolved:
         if os.path.isdir(path):
             # A directory source copies its CONTENTS into the destination,
-            # which is what sync_dir does — `COPY src /app/src` puts src's
+            # which is what sync_dir does - `COPY src /app/src` puts src's
             # files at /app/src, not at /app/src/src.
             target = _join_workdir(workdir, step.dest)
             # Patterns are context-relative but sync_dir reports paths
@@ -229,18 +182,7 @@ def _apply_copy(
 
 
 def _run_checked(vm: _VM, command: str, what: str, *, queueing_timeout: int | None = None) -> None:
-    """Run `command` and abort the build unless it succeeded.
-
-    Docker fails a build on a non-zero `RUN`, and the reason is not tidiness: a
-    build that continues past a failure applies every later instruction on top
-    of it and hands back a VM that looks built and is not. `RUN npm install`
-    failing must not produce a "successful" image with no node_modules.
-
-    `exit_code is None` is also a failure. It means a prompt ended the command
-    rather than its completion marker — an interpreter left running by an
-    earlier step swallowed it — so the command never ran at all. Folding that
-    to success would be the same lie in a quieter form.
-    """
+    """Run a build command and require a successful exit code."""
     result = vm.run(command, queueing_timeout=queueing_timeout)
     code = getattr(result, "exit_code", 0)
     if code == 0:
@@ -268,11 +210,7 @@ def apply_steps(
 ) -> None:
     """Execute every step after ``FROM`` against ``vm``, in file order."""
     current_user: str | None = None
-    # Docker resolves a RELATIVE copy destination against the current WORKDIR,
-    # whose implicit value is `/`. Without tracking it, `COPY x ./` sends "."
-    # as the destination and the API refuses it — "path must name a file",
-    # because "." normalises to no path components at all. MEASURED on
-    # aider-polyglot, whose Dockerfiles all use `WORKDIR /app` + `COPY … ./`.
+    # Resolve relative COPY destinations against the current WORKDIR.
     current_workdir = "/"
 
     for step in steps:
@@ -283,7 +221,7 @@ def apply_steps(
         elif isinstance(step, Arg):
             if step.default is None:
                 # No --build-arg channel exists, so an ARG with no default can
-                # only ever be unset — same as Docker leaves it.
+                # only ever be unset - same as Docker leaves it.
                 continue
             command = f"export {step.name}={_env_value(step.default)}"
         elif isinstance(step, Workdir):
@@ -296,8 +234,7 @@ def apply_steps(
             current_user = step.name
             continue
         elif isinstance(step, Add):
-            # Fetched here, then written like a COPY: the guest needs no
-            # network tooling and no shell for this at all.
+            # Fetch ADD URLs locally, then write the result to the destination.
             try:
                 with urllib.request.urlopen(step.url, timeout=30) as response:
                     payload = response.read()
@@ -307,7 +244,7 @@ def apply_steps(
             vm.sync(_join_workdir(current_workdir, step.dest), payload)
             continue
         elif isinstance(step, Copy):
-            # Unwrapped by design — see the module docstring.
+            # Unwrapped by design - see the module docstring.
             _apply_copy(
                 vm,
                 step,
@@ -317,18 +254,12 @@ def apply_steps(
             )
             continue
         elif isinstance(step, (Label, Expose, Entrypoint, Cmd)):
-            # Recorded by the parser, no effect on a VM: nothing invokes a VM
-            # the way `docker run` invokes an entrypoint, and there is no
-            # `docker inspect` surface for LABEL/EXPOSE to configure.
+            # Parsed metadata instructions have no runtime effect.
             continue
         else:  # pragma: no cover - every step type is handled above
             raise BuildError(f"unhandled instruction: {step!r}")
 
-        # Only a RUN (or an ADD's fetch) needs to become the USER. Wrapping
-        # `export`/`cd` would run them in a `su -c` subshell that exits
-        # immediately, throwing the state away — so `ENV` after `USER` silently
-        # did nothing at all. Docker treats ENV/WORKDIR as metadata that USER
-        # does not affect, and this matches that.
+        # USER applies to RUN; ENV and WORKDIR must persist in the session.
         if current_user is not None and isinstance(step, (Run, Add)):
             command = f"su -p {shlex.quote(current_user)} -c {shlex.quote(command)}"
         _run_checked(
