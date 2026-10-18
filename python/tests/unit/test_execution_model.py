@@ -13,7 +13,10 @@ from test_computer import FakeTransport, client, use_transport
 import arker.computer as sdk
 from arker.generated import api_models as models
 
+SSH_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl dev@laptop"
+
 POLICY_RULES = {
+    "dev-key": {"type": "inbound", "priority": 50, "match": {"via": ["ssh"], "ssh_keys": [SSH_KEY]}, "action": "allow"},
     "shell": {
         "type": "inbound",
         "priority": 40,
@@ -100,6 +103,7 @@ def test_policy_rules_decode_to_typed_models() -> None:
     assert rules["idle-gate"].match.vm_state == "idle"
     assert rules["shell"].match.via == ["ssh", "pty"]
     assert rules["shell"].match.connection_state == ["new", "open"]
+    assert (rules["dev-key"].match.via, rules["dev-key"].match.ssh_keys) == (["ssh"], [SSH_KEY])
     assert (rules["now"].at, rules["now"].action) == ("2020-01-01T00:00:00Z", "suspend")
     assert rules["web"].match.vm_state == "running"
     assert rules["rest"].action == "suspend"
@@ -122,19 +126,27 @@ def test_update_sends_rules_verbatim() -> None:
     assert json.loads(t.calls[0]["body"]) == {"policies": update}
 
 
-def test_typed_inbound_rule_with_via_and_connection_state_round_trips() -> None:
+def test_typed_inbound_ssh_and_pty_rules_round_trip() -> None:
     shell = models.PolicyRule(
         type="inbound",
         priority=40,
         match=models.PolicyMatch(via=["ssh", "pty"], connection_state=["new", "open"], vm_state="running"),
         action="allow",
     )
+    dev_key = models.PolicyRule(
+        type="inbound",
+        priority=50,
+        match=models.PolicyMatch(via=["ssh"], ssh_keys=[SSH_KEY]),
+        action="allow",
+    )
+    rules = {"shell": shell, "dev-key": dev_key}
     t = FakeTransport()
     t.add_json(lambda m, u: m == "PATCH", 200, vm_payload("idle"))
     with use_transport(t):
-        vm = client().vm("vm_1").update(policies=models.PolicyUpdate(rules={"shell": shell}))
-    assert json.loads(t.calls[0]["body"]) == {"policies": {"rules": {"shell": POLICY_RULES["shell"]}}}
-    assert vm.policies.rules["shell"] == shell
+        vm = client().vm("vm_1").update(policies=models.PolicyUpdate(rules=rules))
+    sent = {name: POLICY_RULES[name] for name in rules}
+    assert json.loads(t.calls[0]["body"]) == {"policies": {"rules": sent}}
+    assert {name: vm.policies.rules[name] for name in rules} == rules
 
 
 def test_typed_policy_surface_has_no_withdrawn_shapes() -> None:

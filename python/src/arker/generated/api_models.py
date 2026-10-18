@@ -90,6 +90,7 @@ class PolicyMatch:
     body_contains: list[str] | None = None
     vm_state: Literal['idle', 'running'] | None = None
     via: list[Literal['port', 'ssh', 'pty']] | None = None
+    ssh_keys: list[str] | None = None
     connection_state: list[Literal['new', 'open']] | None = None
 
 

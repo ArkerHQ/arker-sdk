@@ -701,6 +701,23 @@ async function testPoolManagementCommands(): Promise<void> {
   });
 }
 
+async function testUpdateSshPublicKeysFileWritesVmKeys(): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), "arker-cli-ssh-"));
+  const keysFile = join(dir, "authorized_keys");
+  writeFileSync(keysFile, "ssh-ed25519 AAAAfile file@example\n");
+  try {
+    await withCapturedServer((_req, res) => jsonResponse(res, { vm_id: "vm_1", state: "idle" }), async (baseUrl, requests) => {
+      const result = await runCli(baseUrl, ["update", "vm_1", "--ssh-public-keys-file", keysFile]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.deepEqual(requestsWithoutKeys(requests), [
+        { method: "PATCH", url: "/api/v1/vms/vm_1", body: { ssh_public_keys: ["ssh-ed25519 AAAAfile file@example"] } },
+      ]);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 const CLI_API_KEY = { api_key_id: "agents_abc", scopes: [], created_at: "2026-10-17T00:00:00.000Z" };
 async function testApiKeysCommands(): Promise<void> {
   for (const [flags, scopes] of [
@@ -1540,6 +1557,7 @@ await testPoolsCreateShowsSetup();
 await testPoolsCreateJson();
 await testPoolManagementCommands();
 await testApiKeysCommands();
+await testUpdateSshPublicKeysFileWritesVmKeys();
 await testRemovedSecretAndUrlFlagsFailLocally();
 await testHelpMatchesSupportedSurface();
 await testPerCommandHelpIsCommandSpecific();

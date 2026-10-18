@@ -7,7 +7,10 @@ import {
   type PolicyAction, type PolicyRule, type PolicyUpdate, type ScheduleRule, type SessionState, type VmState,
 } from '../src/index';
 
+const sshKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl dev@laptop';
+
 const rules = {
+  'dev-key': {type: 'inbound', priority: 50, match: {via: ['ssh'], ssh_keys: [sshKey]}, action: 'allow'},
   shell: {type: 'inbound', priority: 40,
     match: {via: ['ssh', 'pty'], connection_state: ['new', 'open'], vm_state: 'running'}, action: 'allow'},
   'idle-gate': {type: 'inbound', priority: 30, match: {ports: [8080], vm_state: 'idle'}, action: 'deny'},

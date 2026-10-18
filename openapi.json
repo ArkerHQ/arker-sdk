@@ -4563,7 +4563,7 @@
           "idle",
           "running"
         ],
-        "description": "`running` while a run, a terminal, or an inbound request is using the VM. `idle` otherwise."
+        "description": "`running` while a run, a terminal, or an inbound request is using the VM. `idle` otherwise. A Windows VM is `running` from its start until it is suspended."
       },
       "SessionState": {
         "type": "string",
@@ -4823,7 +4823,15 @@
                 "pty"
               ]
             },
-            "description": "`inbound` only. How the request reaches the VM: `port` to a guest port at its `.arker.app` hostname, `ssh` over SSH, `pty` by attaching a terminal (`GET /v1/vms/{id}/sessions/{sid}/pty`). Defaults to `[\"port\"]`. A way no rule names works as it does without rules; once a rule names it, the rules decide, and a request no rule matches is refused. A rule naming `ssh` or `pty` matches only on `ips`, `vm_state` and `connection_state`, and is `allow` or `deny`."
+            "description": "`inbound` only. How the request reaches the VM: `port` to a guest port at its `.arker.app` hostname, `ssh` over SSH, `pty` by attaching a terminal (`GET /v1/vms/{id}/sessions/{sid}/pty`). Defaults to `[\"port\"]`. A way no rule names works as it does without rules; once a rule names it, the rules decide, and a request no rule matches is refused. A rule naming `ssh` or `pty` matches only on `ips`, `vm_state`, `connection_state` and, for `ssh` alone, `ssh_keys`, and is `allow` or `deny`."
+          },
+          "ssh_keys": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "`inbound` only, on a rule whose `via` is `[\"ssh\"]`. SSH public keys in `authorized_keys` format (`ssh-ed25519 AAAA... comment`). The rule matches an SSH login with one of these keys, compared by key, not by comment. An `allow` lets the key log in; a `deny` refuses it. Without `ssh_keys`, a `deny` naming `ssh` matches every key, and an `allow` the keys the VM knows: its own unexpired `ssh_public_keys` and the keys any `allow` lists. Once a rule names `ssh`, organization SSH keys no longer log in to the VM. A rule that stops letting a key in, by a write or its `expires_at`, also closes that key's open SSH connections. Certificates, `authorized_keys` options such as `from=` or `command=`, and `ssh-dss` keys are refused. The rule opens no port."
           },
           "connection_state": {
             "type": "array",

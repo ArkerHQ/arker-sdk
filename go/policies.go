@@ -24,6 +24,9 @@ type PolicyMatch struct {
 	// ConnectionState is inbound only: "new" (the default) and "open", the
 	// requests already in progress. Only allow and deny may list "open".
 	ConnectionState []string `json:"connection_state,omitempty"`
+	// SSHKeys is inbound only, on a rule whose Via is exactly ["ssh"]: the
+	// authorized_keys-format public keys the rule matches.
+	SSHKeys []string `json:"ssh_keys,omitempty"`
 }
 
 // PolicyActionObject is the object form of a rule's action: the request is

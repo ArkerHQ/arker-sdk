@@ -39,7 +39,10 @@ func TestVMAndSessionStatesDecode(t *testing.T) {
 }
 
 // The contract's policy shapes, exactly as the server sends and takes them.
+const sshKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl dev@laptop"
+
 const policyRules = `{"rules":{` +
+	`"dev-key":{"type":"inbound","priority":50,"match":{"via":["ssh"],"ssh_keys":["` + sshKey + `"]},"action":"allow"},` +
 	`"shell":{"type":"inbound","priority":40,"match":{"via":["ssh","pty"],"connection_state":["new","open"],"vm_state":"running"},"action":"allow"},` +
 	`"idle-gate":{"type":"inbound","priority":30,"match":{"ports":[8080],"vm_state":"idle"},"action":"deny"},` +
 	`"web":{"type":"inbound","priority":20,"match":{"ports":[8080],"vm_state":"running"},"action":"allow"},` +
@@ -68,6 +71,9 @@ func TestPolicyRulesRoundTripExactly(t *testing.T) {
 	}
 	if shell := doc.Rules["shell"].Match; !reflect.DeepEqual(shell.Via, []string{"ssh", "pty"}) || !reflect.DeepEqual(shell.ConnectionState, []string{"new", "open"}) {
 		t.Fatalf("via/connection_state did not decode: %+v", shell)
+	}
+	if dev := doc.Rules["dev-key"].Match; !reflect.DeepEqual(dev.Via, []string{"ssh"}) || !reflect.DeepEqual(dev.SSHKeys, []string{sshKey}) {
+		t.Fatalf("ssh_keys did not decode: %+v", dev)
 	}
 	if nap := doc.Rules["nap"]; nap.AfterLastRunningStart != 600 || nap.Action != "suspend" || nap.Priority != nil {
 		t.Fatalf("schedule rule did not decode: %+v", nap)
@@ -206,7 +212,7 @@ func jsonEqual(a, b any) bool {
 	return string(x) == string(y)
 }
 
-func TestInboundRuleWithViaAndConnectionStateRoundTrips(t *testing.T) {
+func TestInboundSSHAndPTYRulesRoundTrip(t *testing.T) {
 	var body map[string]any
 	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -220,8 +226,15 @@ func TestInboundRuleWithViaAndConnectionStateRoundTrips(t *testing.T) {
 		Match:    &arker.PolicyMatch{Via: []string{"ssh", "pty"}, ConnectionState: []string{"new", "open"}, VMState: "running"},
 		Action:   "allow",
 	}
+	devPriority := 50
+	devKey := &arker.PolicyRule{
+		Type:     "inbound",
+		Priority: &devPriority,
+		Match:    &arker.PolicyMatch{Via: []string{"ssh"}, SSHKeys: []string{sshKey}},
+		Action:   "allow",
+	}
 	info, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{Policies: &arker.PolicyDoc{
-		Rules: map[string]*arker.PolicyRule{"shell": shell},
+		Rules: map[string]*arker.PolicyRule{"shell": shell, "dev-key": devKey},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -229,11 +242,16 @@ func TestInboundRuleWithViaAndConnectionStateRoundTrips(t *testing.T) {
 	want := map[string]any{"policies": map[string]any{"rules": map[string]any{"shell": map[string]any{
 		"type": "inbound", "priority": float64(40), "action": "allow",
 		"match": map[string]any{"via": []any{"ssh", "pty"}, "connection_state": []any{"new", "open"}, "vm_state": "running"},
+	}, "dev-key": map[string]any{
+		"type": "inbound", "priority": float64(50), "action": "allow",
+		"match": map[string]any{"via": []any{"ssh"}, "ssh_keys": []any{sshKey}},
 	}}}}
 	if !jsonEqual(want, body) {
 		t.Fatalf("PATCH body = %v", body)
 	}
-	if got := info.Policies.Rules["shell"]; !reflect.DeepEqual(got, shell) {
-		t.Fatalf("read back %+v, want %+v", got, shell)
+	for name, rule := range map[string]*arker.PolicyRule{"shell": shell, "dev-key": devKey} {
+		if got := info.Policies.Rules[name]; !reflect.DeepEqual(got, rule) {
+			t.Fatalf("%s read back %+v, want %+v", name, got, rule)
+		}
 	}
 }
