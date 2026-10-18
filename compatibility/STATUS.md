@@ -1,5 +1,21 @@
 # Recorded coverage baseline
 
+## Native E2B filesystem preservation
+
+At `637bc09`, sync/async Python and TypeScript retain the native E2B filesystem
+handle rather than translating it through a smaller wrapper. Regressions first
+failed in both languages; binary options, operation identity and write metadata
+are preserved on native routes. Arker's TypeScript filesystem rejects extra
+options before I/O instead of silently dropping them. This is not proof of
+Arker binary-format, stream, identity or metadata parity.
+
+All **476 Python vendor / 467 lean tests** pass (nine optional-vendor skips),
+as do TypeScript typecheck and the full test/build/isolated packed-consumer
+gates. Packed npm SHA-256:
+`c4dfade935999ee9791e6c068316cf745fe8e531a1cba538c79a85c846589a96`.
+Both runtime fingerprints changed; fresh differential evidence is pending.
+The preceding cohorts below are historical, not current certification.
+
 ## Route-cache recovery update
 
 At `48cbf9c`, six new Python regressions first reproduced crashes on valid
