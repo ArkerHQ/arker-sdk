@@ -79,6 +79,33 @@ def client() -> sdk.Arker:
     return sdk.Arker(api_key="ark_live_test", base_url="https://test.invalid/api", retry=False)
 
 
+@pytest.mark.parametrize(
+    ("state", "detail"),
+    [("attaching", None), ("mounted", None), ("failed", "internal server error")],
+)
+def test_mount_state_survives_create_and_list(state: str, detail: str | None) -> None:
+    mount = {
+        "mount_id": "mount-1",
+        "vm_id": "vm-1",
+        "filesystem_id": "fs-1",
+        "path": "/mnt/shared",
+        "state": state,
+        "state_detail": detail,
+    }
+    transport = FakeTransport()
+    transport.add_json(lambda method, url: method == "POST" and url.endswith("/mounts"), 200, mount)
+    transport.add_json(lambda method, url: method == "GET" and url.endswith("/mounts"), 200, {"mounts": [mount]})
+
+    with use_transport(transport):
+        vm = client().vm("vm-1")
+        created = vm.create_mount(filesystem_id="fs-1", path="/mnt/shared")
+        listed = vm.list_mounts().mounts
+
+    assert created.state == state
+    assert created.state_detail == detail
+    assert listed == [created]
+
+
 def region_client() -> sdk.Arker:
     return sdk.Arker(
         api_key="ark_live_test",

@@ -76,6 +76,6 @@ func main() {
 		log.Fatalf("list mounts: %v", err)
 	}
 	for _, s := range mounts.Mounts {
-		fmt.Printf("mount %s -> %s (status %s)\n", s.MountID, s.Path, s.Status)
+		fmt.Printf("mount %s -> %s (state %s)\n", s.MountID, s.Path, s.State)
 	}
 }
