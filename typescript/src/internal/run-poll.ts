@@ -2,7 +2,7 @@
 export const RUN_POLL_MARGIN_MS = 30_000;
 
 /**
- * How long run()'s poll may wait for a backgrounded run, in ms — `null` for no
+ * How long run()'s poll may wait for a backgrounded run, in ms - `null` for no
  * limit.
  *
  * An unset or `0` timeout is unbounded server-side, so the poll is unbounded

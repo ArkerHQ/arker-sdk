@@ -7,13 +7,8 @@
  *
  * ## Why this is in the SDK
  *
- * Every instruction except `COPY` is self-contained text a server could
- * interpret, and one used to. `COPY` is different: its sources are files on the
- * machine running this code. A server-side build would need the client to
- * upload a build context first, which means an upload endpoint, object storage,
- * and a ceiling on how large a project may be. Building from here turns `COPY`
- * into `vm.syncDir`, which streams into the guest and re-sends only what
- * changed.
+ * `COPY` sources are local, so Dockerfile builds are driven by the SDK.
+ * `COPY` uses `vm.syncDir` and sends only changed files.
  *
  * ## Scope
  *
@@ -45,20 +40,20 @@ export class DockerfileError extends Error {
   }
 }
 
-/** `RUN <cmd>` — executed against the VM via `vm.run`. */
+/** `RUN <cmd>` - executed against the VM via `vm.run`. */
 export type RunStep = { kind: "run"; command: string };
 /**
- * `COPY <src>... <dest>` — synced from the build context into the VM.
+ * `COPY <src>... <dest>` - synced from the build context into the VM.
  * `sources` are as written; the driver resolves and globs them locally.
  */
 export type CopyStep = { kind: "copy"; sources: string[]; dest: string; chown?: string };
-/** `ADD <url> <dest>` — fetched inside the guest. */
+/** `ADD <url> <dest>` - fetched inside the guest. */
 export type AddStep = { kind: "add"; url: string; dest: string; checksum?: string };
-/** `ENV k=v` — exported for later RUNs, and persists onto the delivered VM. */
+/** `ENV k=v` - exported for later RUNs, and persists onto the delivered VM. */
 export type EnvStep = { kind: "env"; pairs: [string, string][] };
-/** `WORKDIR <dir>` — created if missing, then entered. */
+/** `WORKDIR <dir>` - created if missing, then entered. */
 export type WorkdirStep = { kind: "workdir"; path: string };
-/** `USER <name>` — subsequent RUNs execute as this user. */
+/** `USER <name>` - subsequent RUNs execute as this user. */
 export type UserStep = { kind: "user"; name: string };
 /** `ARG name[=default]`; without a default it is inert, as in Docker. */
 export type ArgStep = { kind: "arg"; name: string; default?: string };

@@ -1,24 +1,7 @@
 name: Publish Python SDK
 
-# Releasing is a version bump: edit `version` in python/pyproject.toml, merge to
-# main, and this publishes and then tags `python-v<version>`. The tag is the
-# record that the version shipped, which is also what makes a re-run of an
-# already-released version a no-op.
-#
-# Pushing a `python-v*` tag by hand still works as an escape hatch (a re-publish
-# after a half-failed run, say) and always publishes.
-#
-# The tag is created AFTER publishing, by the same job, using GITHUB_TOKEN. A
-# tag pushed with GITHUB_TOKEN deliberately does not start another workflow run
-# — which is exactly what we want here, since publishing already happened.
-#
-# Uses PyPI Trusted Publishing (OIDC). One-time setup on PyPI:
-#   1. Create a "pending publisher" or claim the project once.
-#   2. Add a Trusted Publisher with:
-#        Owner:           ArkerHQ
-#        Repository:      arker-sdk
-#        Workflow name:   publish-python.yml
-#        Environment:     pypi   (matches the `environment:` below)
+# Version bumps on main publish through PyPI Trusted Publishing and then create
+# `python-v<version>`.
 
 on:
   push:
@@ -66,10 +49,10 @@ jobs:
             echo "Tag push: publishing $version"
           elif git ls-remote --exit-code --tags origin "refs/tags/python-v$version" >/dev/null 2>&1; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "python-v$version is already tagged — nothing to release"
+            echo "python-v$version is already tagged - nothing to release"
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
-            echo "New version $version — releasing"
+            echo "New version $version - releasing"
           fi
 
       # The card lives in check and card, not build-and-publish: that job runs in
@@ -128,9 +111,7 @@ jobs:
         with:
           packages-dir: python/dist
 
-      # Last, so the tag means "this version is on PyPI". If this step fails
-      # after a successful upload, tag by hand — do not re-run, PyPI rejects a
-      # duplicate upload.
+      # Tag only after a successful upload.
       - name: Tag the release
         if: github.ref_type != 'tag'
         run: |
