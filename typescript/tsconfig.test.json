@@ -5,6 +5,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src/**/*", "tests/**/*", "examples/ios-qa.ts", "examples/aws-pool.ts"],
+  "include": ["src/**/*", "tests/**/*", "examples/ios-qa.ts"],
   "exclude": ["node_modules", "dist"]
 }
