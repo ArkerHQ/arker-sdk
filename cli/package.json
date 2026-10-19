@@ -1,6 +1,6 @@
 {
   "name": "@arker-ai/cli",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Command-line client for the Arker virtual computer platform.",
   "type": "module",
   "bin": {
@@ -37,7 +37,7 @@
   },
   "bugs": "https://github.com/ArkerHQ/arker-sdk/issues",
   "dependencies": {
-    "@arker-ai/sdk": "^1.2.8"
+    "@arker-ai/sdk": "^1.3.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
