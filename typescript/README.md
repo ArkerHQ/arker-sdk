@@ -36,7 +36,7 @@ const vm = await arker.fork({ source_vm_name: "ubuntu-coding" });
 
 const result = await vm.run("python3 -c 'print(2 + 2)'");
 if (result.type === "completed") {
-  console.log(new TextDecoder().decode(result.stdout));
+  console.log(result.stdout);
 }
 
 await vm.sync("/tmp/hello.txt", "hello from Arker");
