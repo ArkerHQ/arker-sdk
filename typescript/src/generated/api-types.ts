@@ -979,7 +979,7 @@ export interface components {
             layers?: ("disk" | "memory")[] | null;
             /** @description Maximum time in seconds this request may wait for capacity before failing with `capacity_unavailable`. Omit this field or pass `0` to fail immediately when capacity is unavailable. */
             queueing_timeout?: number | null;
-            /** @description Network policy for the new VM, stored and enforced before it first runs. The new VM inherits the source VM's policy with this change applied: rules and secrets named here are written or removed, the rest are inherited. Omit it to inherit the policy unchanged. A policy with rules denies unmatched outbound traffic, so include outbound rules needed during setup. Network topology is inherited from the source. Set SSH keys through `ssh_public_keys`. */
+            /** @description Network policy for the new VM, stored and enforced before it first runs. The new VM inherits the source VM's policy with this change applied: rules and secrets named here are written or removed, the rest are inherited. Omit it to inherit the policy unchanged. Once it has an outbound `allow`, unmatched outbound traffic is denied, so allow what setup needs. Network topology is inherited from the source. Set SSH keys through `ssh_public_keys`. */
             policies?: components["schemas"]["PolicyUpdate"] | null;
             /** @description Resource shape for the new VM. */
             resources?: components["schemas"]["ResourcesInput"] | null;
