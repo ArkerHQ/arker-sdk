@@ -31,9 +31,14 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write   # the card's AWS role
     outputs:
       version: ${{ steps.decide.outputs.version }}
       publish: ${{ steps.decide.outputs.publish }}
+      card_ts: ${{ steps.card.outputs.ts }}
+      card_channel: ${{ steps.card.outputs.channel }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,6 +58,19 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
             echo "New version $version — releasing"
           fi
+
+      # The card lives in check and card, not build-and-publish: that job runs in
+      # the npm environment, so its OIDC sub is environment:npm, and the AWS
+      # role trusts only refs/heads/main.
+      - id: card
+        if: steps.decide.outputs.publish == 'true'
+        continue-on-error: true
+        uses: ./.github/actions/release-card
+        with:
+          state: publishing
+          package: typescript
+          version: ${{ steps.decide.outputs.version }}
+          registry-url: https://www.npmjs.com/package/@arker-ai/sdk/v/${{ steps.decide.outputs.version }}
 
   build-and-publish:
     needs: check
@@ -124,3 +142,24 @@ jobs:
           git tag "$tag"
           git push origin "$tag"
           echo "Tagged $tag"
+
+  card:
+    needs: [check, build-and-publish]
+    if: always() && needs.check.outputs.publish == 'true' && needs.check.outputs.card_ts != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write   # the card's AWS role
+    steps:
+      - uses: actions/checkout@v4
+
+      - continue-on-error: true
+        uses: ./.github/actions/release-card
+        with:
+          state: ${{ needs.build-and-publish.result == 'success' && 'published' || needs.build-and-publish.result == 'cancelled' && 'cancelled' || 'failed' }}
+          package: typescript
+          version: ${{ needs.check.outputs.version }}
+          registry-url: https://www.npmjs.com/package/@arker-ai/sdk/v/${{ needs.check.outputs.version }}
+          ts: ${{ needs.check.outputs.card_ts }}
+          channel: ${{ needs.check.outputs.card_channel }}
