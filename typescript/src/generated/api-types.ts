@@ -720,7 +720,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke an API key
-         * @description Revoke an API key; requests with it are refused from then on. Viewers cannot revoke keys. A key limited to a pool manages that pool's keys only; a key limited to VMs manages none.
+         * @description Revoke an API key; requests with it are refused from then on. A key limited to a pool manages that pool's keys only; a key limited to VMs manages none.
          */
         delete: operations["revokeApiKey"];
         options?: never;
@@ -832,7 +832,7 @@ export interface components {
             match?: components["schemas"]["PolicyMatch"];
             action: components["schemas"]["PolicyAction"];
             /**
-             * @description Authentication for an inbound rule that exposes a port - `allow`, or a `suspend` or `scaling`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges.
+             * @description Authentication for an inbound rule that exposes a port - `allow`, or a `suspend` or `scaling`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. Inbound port matches must use individual ports rather than ranges.
              * @enum {string}
              */
             auth?: "open" | "arker";
@@ -3398,10 +3398,10 @@ export interface components {
             api_key_id: string;
             /**
              * @deprecated
-             * @description Deprecated: the role the key acts with, its creator's.
+             * @description Deprecated: the role the key acts with, its creator's: `admin` or `member`.
              * @enum {string}
              */
-            role: "admin" | "developer" | "member" | "viewer";
+            role: "admin" | "member";
             /** @description What the key is limited to: VMs, or one pool. */
             scopes: components["schemas"]["ApiKeyScope"][];
             /**
@@ -3432,10 +3432,10 @@ export interface components {
             api_key_id: string;
             /**
              * @deprecated
-             * @description Deprecated: the role the key acts with, its creator's.
+             * @description Deprecated: the role the key acts with, its creator's: `admin` or `member`.
              * @enum {string}
              */
-            role: "admin" | "developer" | "member" | "viewer";
+            role: "admin" | "member";
             /** @description What the key is limited to: VMs, or one pool. */
             scopes: components["schemas"]["ApiKeyScope"][];
             /**

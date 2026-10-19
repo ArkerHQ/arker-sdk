@@ -2833,7 +2833,7 @@
           "API keys"
         ],
         "summary": "Revoke an API key",
-        "description": "Revoke an API key; requests with it are refused from then on. Viewers cannot revoke keys. A key limited to a pool manages that pool's keys only; a key limited to VMs manages none.",
+        "description": "Revoke an API key; requests with it are refused from then on. A key limited to a pool manages that pool's keys only; a key limited to VMs manages none.",
         "responses": {
           "204": {
             "description": "The key is revoked."
@@ -4708,7 +4708,7 @@
               "open",
               "arker"
             ],
-            "description": "Authentication for an inbound rule that exposes a port - `allow`, or a `suspend` or `scaling`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges."
+            "description": "Authentication for an inbound rule that exposes a port - `allow`, or a `suspend` or `scaling`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. Inbound port matches must use individual ports rather than ranges."
           }
         }
       },
@@ -12293,11 +12293,9 @@
             "type": "string",
             "enum": [
               "admin",
-              "developer",
-              "member",
-              "viewer"
+              "member"
             ],
-            "description": "Deprecated: the role the key acts with, its creator's.",
+            "description": "Deprecated: the role the key acts with, its creator's: `admin` or `member`.",
             "deprecated": true
           },
           "scopes": {
@@ -12359,11 +12357,9 @@
             "type": "string",
             "enum": [
               "admin",
-              "developer",
-              "member",
-              "viewer"
+              "member"
             ],
-            "description": "Deprecated: the role the key acts with, its creator's.",
+            "description": "Deprecated: the role the key acts with, its creator's: `admin` or `member`.",
             "deprecated": true
           },
           "scopes": {

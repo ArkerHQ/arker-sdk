@@ -2050,7 +2050,7 @@ ApiKeyScope: TypeAlias = ApiKeyVmScope | ApiKeyPoolScope
 @dataclass(frozen=True)
 class ApiKey:
     api_key_id: str
-    role: Literal['admin', 'developer', 'member', 'viewer']
+    role: Literal['admin', 'member']
     scopes: list[ApiKeyScope]
     vm_id: str | None
     pool_id: str | None
@@ -2061,7 +2061,7 @@ class ApiKey:
 @dataclass(frozen=True)
 class CreatedApiKey:
     api_key_id: str
-    role: Literal['admin', 'developer', 'member', 'viewer']
+    role: Literal['admin', 'member']
     scopes: list[ApiKeyScope]
     vm_id: str | None
     pool_id: str | None
