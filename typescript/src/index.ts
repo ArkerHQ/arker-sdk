@@ -1656,7 +1656,8 @@ export class VM {
 
   /**
    * Update this VM's description, resources, pool, SSH keys, or network
-   * policy via `PATCH /v1/vms/{id}`. Returns the updated `Vm`.
+   * policy, or make it immutable, via `PATCH /v1/vms/{id}`. Returns the
+   * updated `Vm`.
    *
    * Accepts either a `PatchVmRequest` or flat resource fields
    * (`{ vcpu, memory_mib, disk_mib, vgpu }`), which are folded into
@@ -1666,12 +1667,17 @@ export class VM {
    * works the same way. An ordered `policies` list instead replaces the
    * whole policy, and `{ policies: [] }` clears it to allow-all. Omit it to
    * leave the current policy unchanged.
+   *
+   * `{ immutable: true }` freezes the VM for good: it can still be viewed,
+   * listed, forked, and deleted, but anything that changes or starts it is
+   * refused, and its forks are mutable. Send it alone. A running VM fails with
+   * `resource_busy`; retry once it is idle.
    */
   async update(
     request:
       | PatchVmRequest
       | (ResourcesInput &
-          Pick<PatchVmRequest, "description" | "ssh_public_keys" | "policies" | "pool_id" | "pool_name">),
+          Pick<PatchVmRequest, "description" | "ssh_public_keys" | "policies" | "pool_id" | "pool_name" | "immutable">),
   ): Promise<Vm> {
     const r = request as PatchVmRequest &
       ResourcesInput & { resources?: ResourcesInput | null };
@@ -1687,6 +1693,7 @@ export class VM {
       resources,
       ssh_public_keys: r.ssh_public_keys,
       policies: r.policies && withoutReadOnlyPolicyFields(r.policies),
+      immutable: r.immutable,
     };
     return this._client._request("PATCH", vmPath(this.id), body, this.baseUrl);
   }

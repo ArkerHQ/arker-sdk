@@ -149,6 +149,7 @@ type VMInfo struct {
 	CreatedAt           string               `json:"created_at,omitempty"`
 	LastActiveAt        string               `json:"last_active_at,omitempty"`
 	Public              bool                 `json:"public,omitempty"`
+	Immutable           bool                 `json:"immutable,omitempty"`
 	Region              string               `json:"region,omitempty"`
 	Provider            string               `json:"provider,omitempty"`
 	Platform            string               `json:"platform,omitempty"`
@@ -345,10 +346,16 @@ type UpdateRequest struct {
 	Resources     *Resources    `json:"resources,omitempty"`
 	SSHPublicKeys *[]string     `json:"ssh_public_keys,omitempty"`
 	Policies      *PolicyUpdate `json:"policies,omitempty"`
+
+	// Immutable freezes the VM for good: it can still be viewed, listed,
+	// forked and deleted, but anything that changes or starts it is refused,
+	// and its forks are mutable. Only true is accepted, so false is simply
+	// left out. Send it alone; a running VM fails with resource_busy.
+	Immutable bool `json:"immutable,omitempty"`
 }
 
 // Update changes this VM's description, resources, authorized SSH keys and/or
-// network policy, and returns the updated record.
+// network policy, or makes it immutable, and returns the updated record.
 func (v *VM) Update(ctx context.Context, req UpdateRequest) (*VMInfo, error) {
 	var info VMInfo
 	if _, err := v.do(ctx, http.MethodPatch, v.path(""), req, &info); err != nil {

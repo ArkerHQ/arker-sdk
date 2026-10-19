@@ -209,6 +209,40 @@ func TestUpdateClearsDescriptionWithAnEmptyString(t *testing.T) {
 	}
 }
 
+func TestUpdateMakesAVMImmutableWithNothingElse(t *testing.T) {
+	var body map[string]any
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, `{"vm_id":"vm_1","immutable":true}`)
+	}, reject(t, "control"))
+
+	info, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{Immutable: true})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if want := map[string]any{"immutable": true}; !reflect.DeepEqual(body, want) {
+		t.Fatalf("body = %v, want %v", body, want)
+	}
+	if !info.Immutable {
+		t.Fatal("the updated VM is not reported immutable")
+	}
+}
+
+func TestUpdateLeavesImmutableOffTheWireByDefault(t *testing.T) {
+	var body map[string]any
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, forkVM)
+	}, reject(t, "control"))
+
+	if _, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{Description: arker.Ptr("CI runner")}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if _, present := body["immutable"]; present {
+		t.Fatal("a description-only update sent immutable")
+	}
+}
+
 func TestUpdateLeavesDescriptionAloneByDefault(t *testing.T) {
 	var body map[string]any
 	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {

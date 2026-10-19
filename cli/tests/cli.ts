@@ -1412,6 +1412,14 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
       },
     },
     {
+      name: "vms update --immutable",
+      args: ["vms", "update", "--immutable", "vm_1"],
+      response: { vm_id: "vm_1", state: "idle", immutable: true },
+      method: "PATCH",
+      url: "/api/v1/vms/vm_1",
+      body: { immutable: true },
+    },
+    {
       name: "runs ls",
       args: [
         "runs", "ls", "vm_1",

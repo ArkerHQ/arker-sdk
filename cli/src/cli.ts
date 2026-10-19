@@ -227,6 +227,7 @@ const UPDATE_OPTIONS: OptionSpecs = {
   ...GLOBAL_OPTIONS,
   ...FORK_RESOURCE_OPTIONS,
   description: { type: "string", allowEmpty: true },
+  immutable: { type: "boolean" },
   "policies-file": { type: "string" },
   "ssh-public-key": { type: "string", repeatable: true },
   "ssh-public-keys-file": { type: "string" },
@@ -314,6 +315,7 @@ const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
     ...RUN_OPTIONS,
     ...VM_LIST_OPTIONS,
     ...PAGINATION_OPTIONS,
+    immutable: { type: "boolean" },
   },
 };
 
@@ -1487,7 +1489,7 @@ async function cmdSync(args: ParsedArgs, client: Arker): Promise<void> {
 
 async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
   const vm = args.positional[0];
-  if (!vm) die("usage: arker update <vm_id> [--description TEXT] [resource, SSH key, or policy flags]");
+  if (!vm) die("usage: arker update <vm_id> [--description TEXT] [--immutable] [resource, SSH key, or policy flags]");
   const memoryMib = numFlag(args, "memory-mib");
   const vcpu = numFlag(args, "vcpu");
   const diskMib = numFlag(args, "disk-mib");
@@ -1499,11 +1501,13 @@ async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
   const policies = policiesFile === undefined
     ? undefined
     : readJsonObject(policiesFile, "policy document") as PolicyDoc;
+  const immutable = boolFlag(args, "immutable");
   if (
     memoryMib === undefined && vcpu === undefined && diskMib === undefined && vgpu === undefined &&
-    description === undefined && !sshPublicKeys.provided && policies === undefined && pool === undefined
+    description === undefined && !sshPublicKeys.provided && policies === undefined && pool === undefined &&
+    immutable === undefined
   ) {
-    die("update: pass at least one description, resource, pool, SSH key, or policy flag");
+    die("update: pass at least one description, resource, pool, SSH key, policy, or --immutable flag");
   }
   const updated = await withSecretRedaction(
     policySecretValues(policies),
@@ -1517,6 +1521,7 @@ async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
         : {}),
       ...(sshPublicKeys.provided ? { ssh_public_keys: sshPublicKeys.values } : {}),
       ...(policies !== undefined ? { policies } : {}),
+      ...(immutable ? { immutable } : {}),
     }),
   );
   if (args.flags.json) return out(updated);
@@ -1911,6 +1916,7 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   type: { placeholder: "<managed|byoc|self_hosted>", desc: "pool type" },
   clear: { desc: "remove the pool's name" },
   yes: { desc: "buy without asking for confirmation" },
+  immutable: { desc: "make the VM immutable for good: forkable but never changed or started again; send it alone" },
   json: { desc: "emit JSON instead of tabular output" },
   limit: { placeholder: "<n>", desc: "maximum rows to return; the command-specific service cap applies" },
   layers: { placeholder: "<disk[,memory]>", desc: "state layers to inherit from a source VM" },
@@ -2117,7 +2123,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   update: {
     synopsis: ["arker update <vm> [flags]"],
-    summary: "Update a VM's description, resources, SSH keys, or network policy.",
+    summary: "Update a VM's description, resources, SSH keys, or network policy, or make it immutable.",
   },
   vms: {
     synopsis: ["arker vms <ls|get|rm|fork|run|update> [args] [flags]"],

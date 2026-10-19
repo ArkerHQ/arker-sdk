@@ -1061,6 +1061,56 @@ def test_update_patches_vm_description() -> None:
     assert result.description == "CI runner"
 
 
+def test_update_makes_a_vm_immutable_with_nothing_else_in_the_request() -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"),
+        200,
+        {
+            "vm_id": "vm_1",
+            "owner_org_id": "owner",
+            "created_at": "now",
+            "description": None,
+            "public": False,
+            "immutable": True,
+            "state": "idle",
+            "sessions": [],
+            "resources": {},
+            "network": {},
+        },
+    )
+
+    with use_transport(t):
+        result = client().vm("vm_1").update(immutable=True)
+
+    assert json.loads(t.calls[0]["body"]) == {"immutable": True}
+    assert result.immutable is True
+
+
+def test_update_leaves_immutable_off_the_wire_by_default() -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"),
+        200,
+        {
+            "vm_id": "vm_1",
+            "owner_org_id": "owner",
+            "created_at": "now",
+            "description": "CI runner",
+            "public": False,
+            "state": "idle",
+            "sessions": [],
+            "resources": {},
+            "network": {},
+        },
+    )
+
+    with use_transport(t):
+        client().vm("vm_1").update(description="CI runner")
+
+    assert "immutable" not in json.loads(t.calls[0]["body"])
+
+
 def test_update_can_clear_vm_description_with_null() -> None:
     t = FakeTransport()
     t.add_json(
