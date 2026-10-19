@@ -439,6 +439,13 @@ async function testUpdateSendsPolicies(): Promise<void> {
   assert.deepEqual(JSON.parse(fetch.calls[5]!.body!), {
     resources: { memory_mib: 2048 },
   });
+
+  // `immutable` goes out alone, and only when the caller sets it.
+  fetch.addJson(isPatch, 200, { ...vm, immutable: true });
+  const frozen = await client(fetch).vm("vm_1").update({ immutable: true });
+  assert.deepEqual(JSON.parse(fetch.calls[6]!.body!), { immutable: true });
+  assert.equal(frozen.immutable, true);
+  assert.equal("immutable" in JSON.parse(fetch.calls[5]!.body!), false);
 }
 
 async function testNestedErrorWithoutOkStillParses(): Promise<void> {

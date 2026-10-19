@@ -908,9 +908,10 @@ class VM:
         pool_name: str | None = None,
         ssh_public_keys: list[str] | None = None,
         policies: PolicyUpdate | PolicyDoc | dict[str, Any] | None = None,
+        immutable: bool | None = None,
     ) -> Vm:
         """Update this VM's description, resources, pool, SSH keys, or network
-        policy via ``PATCH /v1/vms/{id}``.
+        policy, or make it immutable, via ``PATCH /v1/vms/{id}``.
 
         Pass an empty ``ssh_public_keys`` list to remove all authorized keys.
 
@@ -929,6 +930,12 @@ class VM:
                 "old": None,
             }})
 
+        ``immutable=True`` freezes the VM for good: it can still be viewed,
+        listed, forked, and deleted, but anything that changes or starts it is
+        refused, and its forks are mutable. Send it alone, as the only
+        argument. A running VM raises ``resource_busy``; retry once it is
+        idle.
+
         Returns the updated :class:`Vm`."""
         resources: ResourcesInput | None = None
         if vcpu is not None or memory_mib is not None or disk_mib is not None or vgpu is not None:
@@ -946,6 +953,7 @@ class VM:
                 pool_name=pool_name,
                 ssh_public_keys=ssh_public_keys,
                 policies=_policy_update(policies),
+                immutable=immutable,
             )
         else:
             body = {
@@ -955,6 +963,7 @@ class VM:
                 "pool_name": pool_name,
                 "ssh_public_keys": ssh_public_keys,
                 "policies": _policy_update(policies),
+                "immutable": immutable,
             }
         payload = self._client._request("PATCH", _vm_path(self.id), body, base_url=self.base_url)
         return _vm_info(payload)
