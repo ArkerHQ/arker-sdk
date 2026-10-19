@@ -853,7 +853,7 @@ export interface components {
             headers?: {
                 [key: string]: string[];
             };
-            /** @description Query parameter name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, parameters named `arker_*` are removed from a `GET` request's URL by a redirect that keeps them in a cookie, so the rest of a browsing session carries them without the URL showing them. */
+            /** @description Query parameter name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, one matched against a secret is a credential: it never reaches the VM, and a browser opening a link that carries it trades it for a cookie on that host. */
             query_params?: {
                 [key: string]: string[];
             };
