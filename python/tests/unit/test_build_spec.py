@@ -1,12 +1,12 @@
 """Dockerfile parsing for the SDK-driven build.
 
 The SDK builds a Dockerfile by forking from `FROM` and then driving each
-instruction itself — `RUN` becomes `vm.run(...)`, `COPY` becomes a directory
+instruction itself - `RUN` becomes `vm.run(...)`, `COPY` becomes a directory
 sync into the VM. This module is the parse half: text in, an ordered list of
 instructions out, with no network and no VM.
 
 Parsing lives client-side because `COPY` is what makes a Dockerfile build
-impossible to serve purely server-side — its sources are files on THIS machine,
+impossible to serve purely server-side - its sources are files on THIS machine,
 and only the client can read them.
 """
 
@@ -92,7 +92,7 @@ def test_env_line_with_several_pairs_becomes_one_step():
 
 
 def test_env_legacy_space_form():
-    """`ENV key value` — Docker's older single-pair spelling, still common."""
+    """`ENV key value` - Docker's older single-pair spelling, still common."""
     parsed = parse_dockerfile("FROM ubuntu:24.04\nENV FOO bar baz\n")
     assert parsed.steps == [Env([("FOO", "bar baz")])]
 
@@ -104,7 +104,7 @@ def test_env_quoted_value_keeps_inner_spaces():
 
 def test_run_exec_form_becomes_a_quoted_command_line():
     """Exec form has no shell in Docker; our only primitive is a command line,
-    so each element is quoted and joined — same argv, via the shell's own
+    so each element is quoted and joined - same argv, via the shell's own
     fork+exec. `shlex.quote` quotes only what needs it, so `echo` stays bare."""
     parsed = parse_dockerfile('FROM ubuntu:24.04\nRUN ["echo", "a b"]\n')
     assert parsed.steps == [Run("echo 'a b'")]

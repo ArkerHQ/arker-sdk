@@ -1,5 +1,5 @@
 /**
- * PTY round-trip e2e — the interactive-terminal path that `arker shell`
+ * PTY round-trip e2e - the interactive-terminal path that `arker shell`
  * drives under the hood (SDK `vm.connectPty`). Complements the
  * unit tests (which fake the socket) by exercising a REAL PTY-over-WebSocket
  * against a live backend: open → receive output → send keystrokes → resize →
@@ -33,13 +33,7 @@ function check(label: string, ok: boolean, detail = ""): void {
   if (ok) { pass++; console.log(`  PASS  ${label}`); }
   else { fail++; console.log(`  FAIL  ${label}  ${detail.slice(0, 160).replace(/\n/g, "⏎")}`); }
 }
-/** Reconnect was previously a KNOWN ISSUE (SDK connectPty RECONNECT dropped with
- *  WS 1006 ~140ms). ROOT CAUSE + FIX (arkerd commit 7151609b7): on a warm
- *  reconnect, pty_bridge ran probe_guest_ready against control vsock port 52 and
- *  hit its full 20s timeout (port 52 storms on reattach), so open_pty was delayed
- *  past the client's patience. Fix gates the probe on runtime state (skip when the
- *  FC is already warm). Now a real gated assertion. Requires that server fix
- *  deployed; will fail against an arkerd without it. See project_pty_sdk_reconnect_ws_rst. */
+/** Reconnecting to a persisted session must return the same shell promptly. */
 
 /** Attach a buffer to a PTY; returns helpers to drive it like a terminal. */
 function driver(pty: PtyConnection) {
@@ -108,7 +102,7 @@ async function main(): Promise<void> {
     if (a) {
       a.d.clear();
       check("keystroke → command output", await a.d.expect("RT=hello", "echo RT=hello\n"));
-      // 2) resize → guest tty reflects new size (the #53 in-band resize fix)
+      // 2) resize → the VM's terminal reflects the new size
       a.pty.resize(120, 40);
       a.d.clear();
       check("resize → stty size = 40 120", await a.d.expect("40 120", "stty size\n"));
@@ -120,8 +114,6 @@ async function main(): Promise<void> {
     await sleep(4000);
 
     // 3) reconnect to the SAME session → same shell ($MARK survives)
-    //    (Previously a known SDK ws-reconnect 1006; fixed by the arkerd probe-gate
-    //    — see project_pty_sdk_reconnect_ws_rst. Now a real gated assertion.)
     const b = await live(vmId, sid);
     check("reconnect same session", b !== null);
     if (b) {

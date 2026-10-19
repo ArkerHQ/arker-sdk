@@ -2,21 +2,14 @@
 
 Go client for the Arker VM API. The surface mirrors the [Python](../python) and
 [TypeScript](../typescript) SDKs: a `Client` for org-wide calls, and a `VM`
-handle for everything scoped to one machine.
+handle for everything scoped to one VM.
 
 ```bash
 go get github.com/ArkerHQ/arker-sdk/go
 ```
 
-There is no registry upload: `proxy.golang.org` fetches straight from the repo,
-and a git tag is what makes a version exist. Releasing is deliberately MANUAL: bump `go/VERSION`, then run the
-`Publish Go` workflow from the Actions tab and type that version to confirm.
-It is not a side effect of merging, because a Go tag is immutable the moment
-the proxy fetches it — there is no yanking a Go release, only superseding it. That prefix is required — Go resolves a module in a subdirectory only from
-`<subdir>/vX.Y.Z`, so the hyphenated form the other SDKs use would be invisible.
-
 ```go
-client, err := arker.New(arker.Options{})       // ARKER_API_KEY + ARKER_BASE_URL
+client, err := arker.New(arker.Options{})       // ARKER_API_KEY, ARKER_PROVIDER, ARKER_REGION
 vm, err := client.Fork(ctx, arker.ForkRequest{SourceVMName: "ubuntu-base"})
 defer vm.Delete(ctx)
 
@@ -29,11 +22,8 @@ fmt.Print(out.Stdout)
 `New` reads `ARKER_API_KEY`, `ARKER_BASE_URL`, `ARKER_CONTROL_BASE_URL`,
 `ARKER_PROVIDER` and `ARKER_REGION`, and explicit `Options` win over all of them.
 
-Placement works exactly as in the other SDKs. `BaseURL` fully determines
-routing, so `Provider` and `Region` are ignored when it is set; supply either
-`BaseURL` or *both* `Provider` and `Region`. Org-wide calls — `ListVMs`,
-`ListRuns`, `ListRegions`, `Whoami` and `ListPools` — reach the control plane
-and work with no placement at all; everything else needs a regional endpoint.
+`BaseURL` overrides `Provider` and `Region`; otherwise provide both. Org-wide
+calls do not require a placement. VM operations require a regional endpoint.
 
 ## Surface
 
@@ -45,12 +35,12 @@ and work with no placement at all; everything else needs a regional endpoint.
 | `GetFilesystem` `DeleteFilesystem` | `UpdateSession` `DeleteSession` |
 | `ListPools` `GetPool` `ListPoolWorkers` | |
 | `CreatePool` `UpdatePool` `RenamePool` `DeletePool` `AddPoolCommitment` | |
+| `CreateAPIKey` `ListAPIKeys` `RevokeAPIKey` | |
 | `BaseURL` `ControlBaseURL` `Provider` `Region` | `GetPolicies` `SetPolicies` |
 | package-level `DiscoverRegions` | `ReadFile` `WriteFile` `SyncDir` |
 | | `ListMounts` `CreateMount` `DeleteMount` `ConnectPTY` |
 
-Two deliberate differences from Python and TypeScript, both because Go has no
-optional arguments and no union return:
+Two differences from Python and TypeScript follow Go's type system:
 
 - **`ReadFile` / `WriteFile`** rather than one `sync(path, data?)`. Splitting
   them also removes the nil-versus-empty ambiguity when writing a zero-length
@@ -58,29 +48,26 @@ optional arguments and no union return:
 - **`Run` returns one `*RunResult`** with a `Type` of `"completed"` or
   `"background"` (`out.Completed()`), rather than a union of two result types.
 
-Not implemented: **Dockerfile forks**. The API refuses `dockerfile` by design —
-Python and TypeScript parse it client-side and replay the steps. Go returns a
-typed error rather than sending a request that always 400s.
+Dockerfile forks are not supported by the Go SDK.
+
+`VM.Update` changes a policy with a `PolicyUpdate`; `Info.Policies.Update()`
+turns a policy read back into one, leaving out masked (`***`) secret values,
+which the server keeps.
 
 ## Idempotency
 
-Every `Fork` carries an `Idempotency-Key`, generated per call when you do not
-supply one, and **the same key is presented on every retry** — a fresh key per
-attempt is what turns one fork into two VMs.
-
-An auto-generated key only protects the SDK's *own* retries. If you catch an
-`UnknownOutcomeError` and retry yourself, set `ForkRequest.IdempotencyKey` to a
-value stable across processes, or the second call mints a new key and builds a
-second machine.
+A `Fork` sends an `Idempotency-Key` only when you set `ForkRequest.Idempotency`
+(a key per call, reused on SDK retries) or `ForkRequest.IdempotencyKey`. To retry
+an `UnknownOutcomeError` yourself, use a stable `IdempotencyKey`, or you fork a
+second VM.
 
 ```go
 key := "provision-" + installationID + "-" + machineID   // deterministic
 vm, err := client.Fork(ctx, arker.ForkRequest{SourceVMName: "ubuntu-base", IdempotencyKey: key})
 ```
 
-A key is **one-shot**: it stays bound to the VM it created, so replaying a key
-whose VM was deleted returns 404 rather than forking again. Reusing a key for a
-*different* request is a 409 (`arker.IsConflict`).
+A key remains bound to its request. Reusing it for a different request returns
+409 (`arker.IsConflict`).
 
 ## Errors
 
@@ -88,20 +75,20 @@ whose VM was deleted returns 404 rather than forking again. Reusing a key for a
 var apiErr *arker.Error
 if errors.As(err, &apiErr) { /* branch on apiErr.Code, never on Message */ }
 
-arker.IsNotFound(err)   // 404 — ORG-SCOPED: another org's VM is indistinguishable from one that never existed
+arker.IsNotFound(err)   // 404
 arker.IsConflict(err)   // 409
 ```
 
 `UnknownOutcomeError` means a **mutation** failed at the transport layer, so
-whether the server acted is unknown. The SDK does not retry those: the work may
-be done, and retrying blind is how one fork becomes two VMs. Reads are retried
-normally, as are responses the server marks retryable (and 429/502/503/504).
+whether the server acted is unknown. The SDK does not retry those. Reads are
+retried on retryable errors (and 429/502/503/504); a mutation is retried only
+when it carries an idempotency key or the error says no work started.
 
 ## Sessions
 
 Sessions are tabs: each keeps its own working directory, environment and
 history, and each handles one run at a time. `SessionIdx` is find-or-create, and
-**omitting it means index 0** — where a plain `Run` also lands. A run entering a
+**omitting it means index 0** - where a plain `Run` also lands. A run entering a
 session that holds a live foreground process interrupts it, so give anything
 long-lived its own session and probe from another.
 
@@ -116,31 +103,10 @@ API returns a background ack and `Run` polls it to a terminal state for you.
 Pass `TimeToBackground: arker.Ptr(0)` to get the ack immediately and poll
 `GetRun` yourself.
 
-## Layout
-
-```
-go/
-  *.go              the arker package
-  examples/         fork-run, pty, sync-dir, filesystems
-  tests/unit/       hermetic, httptest-backed — go test ./tests/unit/
-  tests/e2e/        against a live deployment — see below
-```
-
-```bash
-go test ./tests/unit/                                    # no network
-ARKER_API_KEY=ark_... ARKER_BASE_URL=https://<env>/api \
-  go test -v -timeout 30m ./tests/e2e/                   # creates real VMs
-```
-
-The e2e suite has **no default base URL** on purpose: it creates and deletes
-real machines, and defaulting to production would mean anyone with
-`ARKER_API_KEY` exported for another reason silently runs it against prod. Set
-`ARKER_TEST_GOLDEN` to fork from something other than `ubuntu-base`.
-
 ## Interactive PTY
 
 `ConnectPTY` opens a terminal over a WebSocket. The connection outlives the
-context passed in — that context bounds the dial only — so use `Close` to
+context passed in - that context bounds the dial only - so use `Close` to
 detach and `Kill` to destroy the shell.
 
 ```go
@@ -162,15 +128,12 @@ Pools require the per-organization pools flag; a disabled organization receives
 `404 not_found`. The three pool types are `managed` (Arker's multi-cloud
 compute), `byoc` (workers Arker launches in your cloud account), and
 `self_hosted` (BLAST workers you run).
-This replaces pools v1 and the earlier BYOC API: quotes, fixed purchase terms, prices, and the
-purchase idempotency key are removed with no compatibility layer.
-
 Configure a regional endpoint (or provider and region) for pool operations.
 Listing pools uses the control plane across regions; use each returned pool's
 region for subsequent operations. Fork with exactly one of `pool_id` or
-`pool_name`; names are case-insensitive within a region. A fleet VM cannot be
-forked into a pool: use a supported image source instead. Pool VMs do not support
-interactive shells; use `run` for commands.
+`pool_name`; names are case-insensitive within a region. A VM from outside a
+`byoc` or `self_hosted` pool cannot be forked into it. Pool VMs do not support
+interactive shells; use `Run` for commands.
 
 `managed` and `byoc` pools request `resources` with all three quantities
 (`vcpu`, `memory_mib`, `disk_mib`), including zeros; a `self_hosted` pool's
@@ -181,8 +144,9 @@ is `creating` until its first worker is running (a `managed` pool starts
 needs setup: open `byoc.setup_url` in the specified AWS account and create the
 CloudFormation stack. A `self_hosted` pool's platform is set by its first
 worker; workers join with an API key limited to the pool,
-`c.CreateAPIKey(ctx, arker.CreateAPIKeyRequest{Scopes: []arker.APIKeyScope{{PoolID: poolID}}})`.
-Only `managed` pools take commitments.
+`client.CreateAPIKey(ctx, arker.CreateAPIKeyRequest{Name: name, Scopes: []arker.APIKeyScope{{PoolID: poolID}}})`.
+Only `managed` pools take commitments. Commitments and `self_hosted` pools are
+not enabled in every deployment yet; there they return `unsupported_operation`.
 
 Commitments last at least 24 hours, cannot overlap, and new commitments cannot
 start in the past. Started commitments must remain unchanged, including expired

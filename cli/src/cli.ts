@@ -1,27 +1,5 @@
 #!/usr/bin/env node
-/**
- * Arker CLI — a small wrapper over `@arker-ai/sdk`.
- *
- * Conventions
- * -----------
- * Every resource follows the same shape:
- *     arker <resource> <ls|rm|get|create|...> [args]
- *
- * Top-level shortcuts collapse the most-common operations:
- *     arker ls                 → arker vms ls
- *     arker rm <vm>            → arker vms rm <vm>
- *     arker fork <source>      → arker vms fork --image|--vm-id <source>
- *     arker run  <vm> <cmd>    → arker vms run <vm> <cmd>
- *     arker sync <vm> ...      → read or write files on <vm>
- *     arker shell [vm]         → native PTY shell over WebSocket
- *
- * Resources: vms, runs, sessions, mounts, filesystems (alias `fs`), pools,
- * api-keys.
- * Each supports `ls`, `get`, `rm`, and the resource-specific verbs.
- *
- * Auth: reads `ARKER_API_KEY` from the environment (or `~/.arker/config`).
- * Placement: `ARKER_PROVIDER` + `ARKER_REGION`, or the matching flags.
- */
+/** Command-line interface for `@arker-ai/sdk`. */
 
 import { randomUUID } from "node:crypto";
 import { readFileSync, existsSync, fstatSync, statSync, mkdirSync, writeFileSync, renameSync, rmSync, realpathSync } from "node:fs";
@@ -51,16 +29,13 @@ import type {
   ListVmsParameters,
 } from "@arker-ai/sdk";
 
-/** A command that finishes within this window costs one request, as before;
- *  a longer one is backgrounded and its output is polled while it runs. */
+/** Commands exceeding this window continue in the background and are polled. */
 const RUN_STREAM_AFTER_SECS = 1;
 
 /** Signals the service accepts, per RunRequest.signal in the OpenAPI contract. */
 const RUN_SIGNALS = ["SIGINT", "SIGTERM", "SIGKILL", "SIGHUP"] as const;
 
-// Version string for `--version` and the help header. Read from the
-// published package.json (dist/cli.js → ../package.json) so it never
-// drifts from the release. Falls back to "unknown" if unreadable.
+// Read the published package version; fall back to "unknown".
 const VERSION: string = (() => {
   try {
     return (createRequire(import.meta.url)("../package.json") as { version: string })
@@ -700,12 +675,13 @@ function clientFromArgs(
   if (!apiKey) {
     die("Missing API key. Set ARKER_API_KEY or add apiKey to ~/.arker/config.json.");
   }
-  const resolvedBaseUrl = baseUrl ?? (requiresComputePlacement ? undefined : controlBaseUrl ?? "https://arker.ai/api");
+  // A partial placement only matters to compute commands, which died above.
+  const placed = Boolean(provider && configuredRegion);
   return new Arker({
     apiKey,
-    baseUrl: resolvedBaseUrl,
-    region: requiresComputePlacement ? configuredRegion : undefined,
-    provider: requiresComputePlacement ? provider : undefined,
+    baseUrl,
+    region: placed ? configuredRegion : undefined,
+    provider: placed ? provider : undefined,
     controlBaseUrl,
   });
 }
@@ -769,7 +745,7 @@ function printMutationResult(
 function fmtVm(vm: VM | Vm): string {
   const provider = vm.provider ?? "?";
   const region = vm.region ?? "?";
-  const name = vm.name ?? "—";
+  const name = vm.name ?? "-";
   const state = vm.state ?? "?";
   const id = vm.vm_id ?? (vm as VM).id;
   return `${id}\t${provider}-${region}\t${state}\t${name}`;
@@ -877,18 +853,14 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
   if (dockerfile) requirePathKind(dockerfile, "Dockerfile", "file");
   if (context) requirePathKind(context, "build context", "directory");
 
-  // Hard platform pin: `--platform icelake` (or graviton2/x86_64/...) forces
-  // the fork onto a worker of that compute platform and fails closed if none
-  // is available — it never silently falls back to another arch. Comma-
-  // separate to allow any of several platforms (e.g. `graviton2,icelake`).
-  // Omit to inherit the source VM's platform set.
+  // Platform filters are strict; omit the flag to inherit the source platforms.
   const platformFlag = args.flags.platform as string | undefined;
   const platforms = platformFlag
     ?.split(",")
     .map((token) => token.trim())
     .filter((token) => token.length > 0);
 
-  // Resource overrides — same flag names as `arker update` for consistency.
+  // Resource overrides - same flag names as `arker update` for consistency.
   // Folded into the contract's single `resources` object.
   const vcpu = numFlag(args, "vcpu");
   const memoryMib = numFlag(args, "memory-mib");
@@ -1124,7 +1096,7 @@ function printStoredRun(run: RunRecord, json: boolean): void {
     type: "completed",
     runId: run.run_id,
     state: run.state,
-    // Exact bytes — the CLI pipes them through unchanged.
+    // Exact bytes - the CLI pipes them through unchanged.
     stdout: run.stdoutBytes,
     stderr: run.stderrBytes,
     exitCode: run.exit_code ?? (run.state === "completed" ? 0 : 1),
@@ -1614,7 +1586,7 @@ async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
     case "list": {
       const res = await client.listPools({ cursor: args.flags.cursor as string | undefined, limit: numFlag(args, "limit") });
       if (args.flags.json) return out(res);
-      for (const p of res.pools) out(`${p.pool_id}\t${p.name ?? "—"}\t${p.type}\t${p.region}\t${p.platform}\t${p.state}`);
+      for (const p of res.pools) out(`${p.pool_id}\t${p.name ?? "-"}\t${p.type}\t${p.region}\t${p.platform}\t${p.state}`);
       if (res.next_cursor) out(`# next_cursor=${res.next_cursor}`);
       return;
     }
@@ -1638,7 +1610,7 @@ async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
       const pool = await client.createPool(poolRequestFromArgs(args));
       out(pool);
       if (pool.type === "byoc" && !args.flags.json) {
-        out(`Open ${pool.byoc.setup_url} signed in to AWS account ${pool.byoc.account_id} and create the stack. Then run arker pools get ${pool.pool_id} until state is active.`);
+        out(`Open ${pool.byoc.setup_url} signed in to AWS account ${pool.byoc.account_id} and create the stack. Then run arker pools get ${pool.pool_id} until state is running.`);
       }
       return;
     }
@@ -1739,7 +1711,7 @@ async function cmdShell(args: ParsedArgs, client: Arker): Promise<void> {
   const cols = colsFlag ?? output.columns ?? 80;
   const rows = rowsFlag ?? output.rows ?? 24;
   // Optional auto-cancel: the server destroys the shell after this many seconds
-  // with no terminal I/O — `arker shell <vm> --cancel-ttl 600`.
+  // with no terminal I/O - `arker shell <vm> --cancel-ttl 600`.
   const cancelTtlSecs = numFlag(args, "cancel-ttl");
   const pty = await computer.connectPty({
     sessionId,
@@ -1822,13 +1794,7 @@ async function readAllStdin(): Promise<Uint8Array> {
   return new Uint8Array(Buffer.concat(chunks));
 }
 
-/** How stdin is attached. This is the only thing that can disambiguate a bare
- *  `arker sync <vm> <path>`: read the file back, or write what is piped in.
- *
- *  The distinction that matters is whether draining is guaranteed to finish.
- *  A `< file` redirect ends at EOF. A pipe or socket does not: a script that
- *  inherits stdin from a parent nobody ever closes hands us a descriptor that
- *  stays open forever, and draining it blocks with no output and no error. */
+/** Classify stdin so sync can distinguish reads from piped writes. */
 function stdinKind(): "tty" | "file" | "stream" | "none" {
   if (input.isTTY) return "tty";
   try {
@@ -1846,11 +1812,7 @@ function stdinHasDataSource(): boolean {
   return kind === "file" || kind === "stream";
 }
 
-/** Drain stdin, giving up if the FIRST byte never arrives. Returns null when
- *  nothing had been read by the deadline — the descriptor is idle and the
- *  caller cannot tell read from write. Once any data arrives the remainder is
- *  read unbounded: a slow producer is legitimate, a silent one is not
- *  actionable. */
+/** Stop waiting for a silent stream; after the first byte, read through EOF. */
 async function readAllStdinWithFirstByteDeadline(ms: number): Promise<Uint8Array | null> {
   const chunks: Buffer[] = [];
   const drained = (async () => {

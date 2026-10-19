@@ -1,9 +1,4 @@
-"""`.dockerignore` matching.
-
-The reason this exists at all: `COPY . /app` without it copies `.git` and
-`.env` into the VM. Verified against a live env before the fix — a `.env`
-holding an AWS key and a `.git/config` holding a token URL both landed.
-"""
+"""Tests for `.dockerignore` matching."""
 
 from __future__ import annotations
 
@@ -71,28 +66,20 @@ def test_negation_and_last_match_wins(tmp_path):
 
 
 def test_negation_order_matters(tmp_path):
-    """Reversed, the exclusion wins — same rules, opposite outcome."""
+    """Reversed, the exclusion wins - same rules, opposite outcome."""
     ig = write(tmp_path, "!keep.txt\n*\n")
     assert ig.ignores("keep.txt")
 
 
 def test_the_dockerfile_itself_can_be_ignored_without_breaking_anything(tmp_path):
-    """E2B hit a bug where a `.dockerignore` excluding the Dockerfile broke the
-    build (e2b-dev/E2B#255). We read the Dockerfile before any ignore logic
-    runs, so this only affects what gets COPIED — which is what Docker does."""
+    """Ignoring the Dockerfile affects COPY but not Dockerfile parsing."""
     ig = write(tmp_path, "Dockerfile\n.dockerignore\n")
     assert ig.ignores("Dockerfile")
     assert ig.ignores(".dockerignore")
 
 
 def test_a_bare_name_does_not_match_at_depth(tmp_path):
-    """The headline difference from .gitignore.
-
-    gitignore implicitly prepends `**/`, so a bare `abc` matches at any depth.
-    .dockerignore uses Go's filepath.Match and anchors to the context root, so
-    it matches only `./abc`. A gitignore matcher (pathspec) would be subtly
-    wrong in exactly this case, which is why this is hand-rolled.
-    """
+    """A bare name is anchored to the build-context root."""
     ig = write(tmp_path, "abc\n")
     assert ig.ignores("abc")
     assert ig.ignores("abc/inner.txt")

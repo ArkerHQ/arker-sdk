@@ -3,7 +3,7 @@ import { validateHttpError, validateFileError } from "./generated/error-validato
  * Arker TypeScript SDK.
  *
  * A small wrapper around the VM API. Configure a region for the standard
- * Arker endpoints, or pass baseUrl directly for internal/dev targets.
+ * Arker endpoints, or pass baseUrl directly for a custom endpoint.
  */
 
 import { runPollBudgetMs } from "./internal/run-poll.js";
@@ -19,10 +19,8 @@ export const CHUNK_SIZE = 4 * 1024 * 1024;
 export const STREAM_MAX_BYTES = 64 * 1024 * 1024;
 
 /**
- * Below this, don't bother sampling for compressibility — the gzip decision
- * costs more than it can save. Above it, `syncDir` samples before choosing
- * `tar` vs `tar.gz` (the guest pays ~3.4x for gunzip over a plain untar, so
- * gzipping an incompressible tree is a pure loss).
+ * Below this size, sampling costs more than it saves. Larger inputs are sampled
+ * before choosing `tar` or `tar.gz`.
  */
 const COMPRESSION_SAMPLE_MIN_BYTES = 256 * 1024;
 
@@ -51,7 +49,7 @@ const STAT_CACHE_VERSION = 1;
 const STAT_CACHE_RACE_MARGIN_NS = 2_000_000_000n;
 
 /**
- * Stat signature used to decide "did this file change?" WITHOUT reading it.
+ * Stat signature used to detect changes without reading file contents.
  *
  * Deliberately wider than (size, mtime), which is forgeable: `cp -p`, `tar -x`,
  * `rsync --times` and `touch -r` all restore mtime, so a same-size edit could
@@ -165,7 +163,7 @@ const DEFAULT_RETRY_JITTER_MS = 50;
 // the API hands back a background ack carrying a run_id. For a synchronous
 // caller (one that did not ask to background) run() then polls getRun()
 // under the hood until the run reaches a terminal state and resolves to the
-// completed run — so the caller transparently gets the final result.
+// completed run - so the caller transparently gets the final result.
 const RUN_POLL_INITIAL_MS = 500;
 const RUN_POLL_MAX_MS = 3_000;
 const RUN_POLL_BACKOFF = 1.5;
@@ -175,7 +173,7 @@ const RUN_POLL_BACKOFF = 1.5;
 // successful check), so a long-running command and a transient network blip
 // both survive; only a service that has stopped responding throws.
 const RUN_POLL_MAX_CONSECUTIVE_FAILURES = 10;
-// Terminal run states — RunState ("pending" | "running" | "completed" |
+// Terminal run states - RunState ("pending" | "running" | "completed" |
 // "failed" | "cancelled") minus the two NON-terminal states, "pending" and
 // "running". A run is "pending" while it waits behind an earlier run on the
 // same session; a poller must keep polling through it. Anything not in this
@@ -216,11 +214,11 @@ export interface ArkerOptions {
   region?: string;
   /** Provider for compute calls. */
   provider?: ComputeProvider;
-  /** Override the compute base URL (e.g. for internal / dev targets).
+  /** Override the compute base URL.
    * If set, `provider` + `region` are ignored for compute. */
   baseUrl?: string;
-  /** Override the control-plane URL — the CF Worker that owns
-   * administrative endpoints like `GET /v1/vms` (cross-provider list)
+  /** Override the control API URL for administrative endpoints like
+   * `GET /v1/vms` (cross-provider list)
    * and `/v1/filesystems`. Default `https://arker.ai/api`. */
   controlBaseUrl?: string;
   fetch?: FetchLike;
@@ -290,7 +288,7 @@ export type ForkRequest = ApiSchema<"ForkRequest">;
  * where you can reconstruct the same key.
  *
  * One-shot and bound to the VM it created: reusing it for a different request
- * is a 409, and reusing it once that VM is deleted is a 404 — never a second
+ * is a 409, and reusing it once that VM is deleted is a 404 - never a second
  * machine. Maximum 64 characters.
  */
 export type ForkIdempotency = {
@@ -402,10 +400,10 @@ export type CompletedRunResponse = ApiSchema<"CompletedRunResponse">;
 export type BackgroundRunResponse = ApiSchema<"BackgroundRunResponse">;
 /** The run record exactly as it arrives on the wire: `stdout`/`stderr` are
  * strings tagged by `stdout_encoding`/`stderr_encoding` (`utf-8` or `base64`).
- * Mirrors openapi.json exactly — see tests/contract-compat.ts. */
+ * Mirrors openapi.json exactly - see tests/contract-compat.ts. */
 export type Run = ApiSchema<"Run">;
 
-/** A run record with `stdout`/`stderr` decoded to bytes — what `getRun()`
+/** A run record with `stdout`/`stderr` decoded to bytes - what `getRun()`
  * returns.
  *
  * The wire model carries them as encoded strings; every output-bearing surface
@@ -415,7 +413,7 @@ export type Run = ApiSchema<"Run">;
 /** A fetched run. Output is available as text and as exact bytes.
  *
  * `stdout`/`stderr` are decoded text, ready to print or match on.
- * `stdoutBytes`/`stderrBytes` are exactly what the command wrote — use those
+ * `stdoutBytes`/`stderrBytes` are exactly what the command wrote - use those
  * when the output is not text (an image, an archive, anything binary), because
  * decoding to text replaces undecodable bytes and cannot be undone. */
 export type RunRecord = Run & {
@@ -455,12 +453,12 @@ export interface CompletedRunResult {
   type: "completed";
   /** The run's own id. Present for executed runs; absent for operation acks. */
   runId?: string;
-  /** Lifecycle state — "completed" or "failed". Mirrors the run-status (`Run`) shape. */
+  /** Lifecycle state - "completed" or "failed". Mirrors the run-status (`Run`) shape. */
   state: string;
   /** Decoded text, ready to print or match on. */
   stdout: string;
   stderr: string;
-  /** Exactly what the command wrote — use these when the output is not text. */
+  /** Exactly what the command wrote - use these when the output is not text. */
   stdoutBytes: Uint8Array;
   stderrBytes: Uint8Array;
   exitCode: number;
@@ -476,16 +474,16 @@ export interface CompletedRunResult {
 export interface BackgroundRunResult {
   type: "background";
   runId: string;
-  /** The session this run is executing in — how to find a backgrounded
+  /** The session this run is executing in - how to find a backgrounded
    * process again without guessing the index it landed on. */
   sessionId?: string | null;
-  /** Lifecycle state — "running". */
+  /** Lifecycle state - "running". */
   state: string;
 }
 
 /**
  * Result of {@link VM.run}. A synchronous call (`time_to_background` not zero)
- * always resolves to a {@link CompletedRunResult} — if the run outlives its
+ * always resolves to a {@link CompletedRunResult} - if the run outlives its
  * sync window run() polls it to completion under the hood. Only an explicit
  * `time_to_background: 0` yields a {@link BackgroundRunResult} (the running ack,
  * returned immediately for the caller to poll via {@link VM.getRun}).
@@ -537,7 +535,7 @@ export interface PtyConnectOptions {
   /**
    * Auto-cancel the PTY run after this many seconds with no terminal I/O. When
    * the window elapses the server completes the underlying run and DESTROYS the
-   * shell (not just a detach) — a reconnect to the same `sessionId` starts
+   * shell (not just a detach) - a reconnect to the same `sessionId` starts
    * fresh. Unset (default) means no auto-cancel.
    */
   cancelTtlSecs?: number;
@@ -636,12 +634,12 @@ async function deleteAfterFailedBuild(vm: VM, attempts = 3, baseDelayMs = 1000):
 }
 
 export class Arker {
-  /** Compute base URL for `provider` + `region` — used for fork/run/
-   * per-VM ops. SDK calls go straight to this host, skipping the CF
-   * Worker control plane. */
+  /** Regional API base URL for per-VM operations. */
   private readonly computeBaseUrl?: string;
-  /** CF Worker control-plane URL — used for cross-cutting admin calls
-   * like list-VMs and filesystems. */
+  /** False when `baseUrl` was given: every VM is then served there, never at a
+   * production regional URL. */
+  private readonly routesByPlacement: boolean;
+  /** Control API base URL for cross-region administrative calls. */
   readonly controlBaseUrl: string;
   readonly region?: string;
   readonly provider?: ComputeProvider;
@@ -667,6 +665,7 @@ export class Arker {
     if (!apiKey) throw new Error("apiKey is required; pass apiKey or set ARKER_API_KEY");
     this.apiKey = apiKey;
     this.computeBaseUrl = baseUrl ? normalizeBaseUrl(baseUrl) : undefined;
+    this.routesByPlacement = !explicitBaseUrl;
     this.controlBaseUrl = normalizeBaseUrl(controlBaseUrl);
     this.region = region;
     this.provider = provider;
@@ -818,7 +817,7 @@ export class Arker {
 
   /**
    * List run activity visible to the authenticated caller across VMs in the
-   * serving region. Admin call — routed through the control plane.
+   * serving region. Admin call - routed through the control plane.
    */
   async listRuns(opts: ListOrgRunsOptions = {}): Promise<ListOrgRunsResponse> {
     const query: ListOrgRunsParameters = {
@@ -842,8 +841,7 @@ export class Arker {
     return this._request("GET", buildQuery("/v1/runs", query), undefined, this.controlBaseUrl);
   }
 
-  /** Compute call — goes direct to the backend hosting this VM (no
-   * control-plane hop). Returns a fully-populated VM handle. */
+  /** Fetch a VM from its regional endpoint. */
   async getVm(vmId: string, placement?: VmPlacement): Promise<VM> {
     const baseUrl = this._baseUrlFor(vmId, placement);
     const data = await this._request<Vm>("GET", vmPath(vmId), undefined, baseUrl);
@@ -851,9 +849,7 @@ export class Arker {
   }
 
   // ── Filesystems (region-scoped) ────────────────────────────────────
-  // Route to the regional endpoint (baseUrl), not the control plane: the
-  // control-plane path (arker.ai → api_proxy_bash) does not route
-  // /v1/filesystems, while the regional endpoint serves the full CRUD.
+  // Filesystem operations are region-scoped.
   async listFilesystems(opts: ListFilesystemsOptions = {}): Promise<ListFilesystemsResponse> {
     const query: ListFilesystemsParameters = {
       cursor: opts.cursor, limit: opts.limit, name_prefix: opts.namePrefix,
@@ -1001,7 +997,7 @@ export class Arker {
   ): string {
     const provider = optionalComputeProvider(placement?.provider);
     const region = placement?.region?.trim();
-    if (provider && region) return computeBaseUrl(provider, region);
+    if (this.routesByPlacement && provider && region) return computeBaseUrl(provider, region);
     return this.baseUrl;
   }
 }
@@ -1083,11 +1079,11 @@ export class VM {
    * Synchronous by default. If the run outlives the server sync window
    * (`time_to_background`, default 120s) the API returns a background ack
    * with a `run_id`; run() then transparently polls {@link getRun} until the
-   * run reaches a terminal state and resolves to the completed run — so a
+   * run reaches a terminal state and resolves to the completed run - so a
    * synchronous caller always receives the final result. Polling is bounded
    * by the run's `timeout` (its kill bound) plus a margin; if that budget is
    * exceeded run() throws an ArkerError with code `"timeout"` (the run keeps
-   * executing server-side — poll {@link getRun} to retrieve it). With no
+   * executing server-side - poll {@link getRun} to retrieve it). With no
    * `timeout` the run is unbounded server-side and the poll is unbounded with
    * it.
    *
@@ -1121,7 +1117,7 @@ export class VM {
     // The server backgrounds a run that outlived its sync window. When the
     // caller did NOT ask to skip the wait, poll getRun() to a terminal state
     // and hand back the completed run so the synchronous call is transparent.
-    // Explicit zero is a pure pass-through — return the ack immediately.
+    // Explicit zero is a pure pass-through - return the ack immediately.
     if (result.type === "background" && options.time_to_background !== 0) {
       return this._awaitRun(result.runId, options.timeout, onOutput);
     }
@@ -1137,7 +1133,7 @@ export class VM {
    * Sent as `POST /v1/vms/{id}/runs` with `signal` and no `command`; the
    * service acknowledges immediately and returns no run id.
    *
-   * This is the recovery path when a session is stuck — e.g. an interactive
+   * This is the recovery path when a session is stuck - e.g. an interactive
    * program (`python3`, `psql`, `cat`) holds the terminal and never returns to
    * a prompt the run matcher recognises. Nothing else clears that state:
    * {@link cancelRun} cancels the run record but not the process, a run's
@@ -1147,7 +1143,7 @@ export class VM {
    * stuck run.
    *
    * `SIGKILL` is the reliable choice. `SIGINT` behaves exactly as Ctrl-C would
-   * — a Python REPL catches it, prints `KeyboardInterrupt` and keeps running —
+   * - a Python REPL catches it, prints `KeyboardInterrupt` and keeps running -
    * so it will not free a session held by one.
    *
    * A signal is not queued: a VM that is not running throws `invalid_state`
@@ -1196,7 +1192,7 @@ export class VM {
    *
    * Bounded by `timeoutSecs` (the run's kill bound) plus a margin, so the poll
    * outlives the server-side kill and reports its outcome. An unset or `0`
-   * timeout is unbounded server-side, so the poll is unbounded too — giving up
+   * timeout is unbounded server-side, so the poll is unbounded too - giving up
    * at a client-side deadline the caller never asked for would abandon a run
    * that is still going.
    */
@@ -1224,7 +1220,7 @@ export class VM {
           throw new ArkerError(
             "unavailable",
             `run ${runId}: ${consecutiveFailures} consecutive poll failures ` +
-              `(last: ${code}); the run may still be going server-side — poll ` +
+              `(last: ${code}); the run may still be going server-side - poll ` +
               `getRun(${JSON.stringify(runId)}) to retrieve it`,
             0,
           );
@@ -1250,7 +1246,7 @@ export class VM {
         throw new ArkerError(
           "timeout",
           `run ${runId} did not reach a terminal state within ${Math.round(budgetMs / 1000)}s; ` +
-            `it continues server-side — poll getRun(${JSON.stringify(runId)}) to retrieve it`,
+            `it continues server-side - poll getRun(${JSON.stringify(runId)}) to retrieve it`,
           0,
         );
       }
@@ -1277,16 +1273,13 @@ export class VM {
 
   /**
    * Recursively sync a local directory INTO this VM at `remoteDir`, rsync-style:
-   * fetch the VM's file manifest (content hashes and modes) in ONE request, diff it
-   * against the local tree, and upload files whose content or permissions differ —
-   * packed into a single tarball the guest extracts with `tar -x` (so the guest
-   * does the writes, always consistent with its own filesystem). Node-only: it
-   * reads the local filesystem.
+   * compare the local tree with the VM's current contents and upload files whose
+   * content or permissions differ. Node-only: it reads the local filesystem.
    *
    * The remote manifest is authoritative. `options.cache` (a caller-owned Map you
    * reuse across calls) is a pure accelerator: it skips re-hashing local files
    * whose (size, mtime) are unchanged. It never decides remote state, so it can
-   * never cause a stale or missing upload — worst case it re-hashes a file it
+   * never cause a stale or missing upload - worst case it re-hashes a file it
    * didn't need to.
    *
    *     const cache = new Map();
@@ -1309,10 +1302,7 @@ export class VM {
     // 1. Authoritative remote manifest: relative path -> content hash and mode. A directory that
     //    doesn't exist yet (or an empty VM) yields {} -> everything is sent.
     const clock = () => Number(process.hrtime.bigint() / 1000n) / 1000;
-    //    `assumeEmpty` skips the round-trip on a destination the caller knows
-    //    is fresh. `manifestMs` then rounds to 0 on its own (the skip costs
-    //    microseconds against 0.1ms reporting precision), so a caller can still
-    //    tell "skipped" from "merely fast" — a real fetch is ~184ms.
+    // `assumeEmpty` skips the request for a destination known to be fresh.
     const tManifest0 = clock();
     const manifest = options.assumeEmpty
       ? { entries: new Map<string, { hash: string; mode?: number }>(), truncated: false }
@@ -1321,7 +1311,7 @@ export class VM {
     const manifestMs = clock() - tManifest0;
     const tWalk0 = clock();
 
-    // 2. Enumerate local regular files (skip symlinks — the manifest lists
+    // 2. Enumerate local regular files (skip symlinks - the manifest lists
     //    regular files only, so a symlink would always look "missing").
     const localFiles: Array<{ rel: string; abs: string; sig: StatSignature }> = [];
     const walk = async (dir: string): Promise<void> => {
@@ -1334,7 +1324,7 @@ export class VM {
         const st = await fsp.stat(abs, { bigint: true });
         const rel = nodePath.relative(localRoot, abs).split(nodePath.sep).join("/");
         // Filtered BEFORE hashing, so an ignored file cannot perturb the
-        // incremental diff — not merely skipped at upload time.
+        // incremental diff - not merely skipped at upload time.
         if (options.ignore?.(rel)) continue;
         localFiles.push({
           rel, abs,
@@ -1364,7 +1354,7 @@ export class VM {
     // whole. Two distinct wins, and it is worth being precise about which:
     //
     //   - Streaming replaces `readFile`, which buffered an ENTIRE file in memory
-    //     just to digest it — a 2 GB file meant a 2 GB allocation.
+    //     just to digest it - a 2 GB file meant a 2 GB allocation.
     //   - Concurrency overlaps the file I/O.
     //
     // It does NOT spread SHA-256 across cores: Node runs JS on one thread and
@@ -1385,7 +1375,7 @@ export class VM {
           if (!file) return;
           // Cheap change detection: if every stat field matches what we
           // recorded, the contents cannot have changed under us, so skip the
-          // read entirely. This is the whole point of the cache — an untouched
+          // read entirely. This is the whole point of the cache - an untouched
           // tree is answered from stat alone.
           const persisted = statCache.get(file.rel);
           if (persisted && statSignaturesMatch(persisted, file.sig)) {
@@ -1435,11 +1425,10 @@ export class VM {
     const hashMs = clock() - tHash0;
     const tUpload0 = clock();
 
-    // 4. Ship the changed files as ONE tarball and extract it in the guest. The
-    //    extract's exit is checked, so a failure surfaces (never a silent partial);
-    //    the manifest also fails safe — any omitted file is re-sent next call.
+    // 4. Upload the changed files in one batch. A failed operation is surfaced,
+    //    and any omitted file is sent again on the next call.
     if (changed.length > 0) await this.uploadAndExtractTarball(changed, localRoot, remoteRoot, fsp);
-    // Only after the upload succeeded — persisting earlier would record files
+    // Only after the upload succeeded - persisting earlier would record files
     // as synced that never made it.
     if (!options.cache) await saveStatCache(cacheFile, fresh);
     const round = (v: number) => Math.round(v * 10) / 10;
@@ -1452,8 +1441,7 @@ export class VM {
     return result;
   }
 
-  /** Fetch the VM's content hashes and permission bits under `path`, via the
-   * host-first `op: "manifest"` op (no FC boot; works on a never-run VM). */
+  /** Fetch content hashes and permission bits under `path`. */
   private async remoteManifest(
     path: string,
   ): Promise<{ entries: Map<string, { hash: string; mode?: number }>; truncated: boolean }> {
@@ -1493,14 +1481,8 @@ export class VM {
   /**
    * Decide whether gzip earns its keep for this file set.
    *
-   * The guest pays for decompression: gunzip measures ~3.4x a plain
-   * untar (294ms vs 86ms for 2000 files), so gzipping an already-compressed
-   * tree (images, video, archives, binaries) is a pure loss at both ends. Source
-   * trees, by contrast, compress ~4:1 and are well worth it.
-   *
-   * Samples the head of a handful of files rather than compressing everything
-   * twice. Falls back to compressing when the sample is too small to be
-   * meaningful, preserving the previous always-gzip behaviour for tiny syncs.
+   * Samples a few file prefixes rather than compressing the full input twice.
+   * Small samples default to compression.
    */
   private async shouldCompress(
     changed: Array<{ rel: string; abs: string }>,
@@ -1526,7 +1508,7 @@ export class VM {
           await handle.close();
         }
       } catch {
-        // Unreadable sample file — the tar step will surface it if it matters.
+        // Unreadable sample file - the tar step will surface it if it matters.
       }
     }
     if (raw < COMPRESSION_SAMPLE_MIN_BYTES) return true;
@@ -1544,12 +1526,7 @@ export class VM {
     const os = await import("node:os");
     const nodePath = await import("node:path");
 
-    // gzip when it pays: source trees compress ~4:1 (a Linux checkout goes
-    // 319 MB -> 70 MB) and this tarball is ONE request, so compressing is a
-    // large win there. On an already-compressed tree it is a double loss —
-    // wasted CPU here plus ~3.4x the extraction cost in the guest — so sample
-    // first rather than always gzipping. `tar -xf` detects the compression
-    // format, so either choice extracts correctly.
+    // Sample first to avoid recompressing data that is already compact.
     const compress = await this.shouldCompress(changed, fsp);
     const mode = compress ? "tar.gz" : "tar";
     const localTar = nodePath.join(os.tmpdir(), `arker-sync-${ulid()}.${mode}`);
@@ -1793,7 +1770,7 @@ export class VM {
   /**
    * Update a session via `PATCH /v1/vms/{id}/sessions/{sid}`: resize its PTY
    * (`cols`/`rows`) and/or set the idle `timeoutSecs`. Works whether or not a
-   * PTY is currently attached — the REST equivalent of {@link PtyConnection.resize}
+   * PTY is currently attached - the REST equivalent of {@link PtyConnection.resize}
    * (which sends an in-band control frame on the live WebSocket).
    */
   async updateSession(
@@ -2130,8 +2107,8 @@ function withoutUndefined(value: unknown): unknown {
 
 /** Terminal state for a finished run.
  *
- * A negative `exitCode` means no process status was obtained — the run was
- * killed or the compute was lost — which is `"failed"`. Keeps the synchronous
+ * A negative `exitCode` means no process status was obtained - the run was
+ * killed or the compute was lost - which is `"failed"`. Keeps the synchronous
  * run result and `getRun()` reporting the same state for the same run. */
 function terminalRunState(state: unknown, exitCode: number): string {
   if (exitCode < 0) return "failed";
@@ -2175,7 +2152,7 @@ function parseRunResponse(payload: unknown): RunResult {
  * run-status wire shape becomes a caller-facing one. */
 /** Decode command output for the caller-facing `stdout`/`stderr`.
  *
- * Never throws — `TextDecoder` is non-fatal, so bytes that are not valid UTF-8
+ * Never throws - `TextDecoder` is non-fatal, so bytes that are not valid UTF-8
  * become U+FFFD. Defined once so the conversion cannot drift between result
  * types. */
 function asText(data: Uint8Array): string {
@@ -2221,7 +2198,7 @@ function runOutputDelta(
  * that a synchronous run() resolves to. The stored run carries no memory
  * override fields, so those stay undefined.
  *
- * `run.stdout`/`run.stderr` are already bytes — decoded at the wire boundary —
+ * `run.stdout`/`run.stderr` are already bytes - decoded at the wire boundary -
  * so they pass through untouched. */
 function runToCompletedResult(run: RunRecord): CompletedRunResult {
   return {
@@ -2335,6 +2312,11 @@ function canRetryAgain(
 /** A policy read back (`vm.policies`) also reports fields an update refuses. */
 function withoutReadOnlyPolicyFields(policies: PolicyUpdate): PolicyUpdate {
   const { hostname: _h, mitm_domains: _m, warnings: _w, ...update } = policies as PolicyUpdate & Partial<PolicyDoc>;
+  // A policy read back masks its secret values as `***`, which a write
+  // refuses; a secret an update leaves out is kept as it is.
+  if (update.secrets) {
+    update.secrets = Object.fromEntries(Object.entries(update.secrets).filter(([, value]) => value !== "***"));
+  }
   return update;
 }
 
@@ -2366,7 +2348,9 @@ function wireRetryAfter(value: unknown): number | undefined {
 
 function isRetryable(status: number, error?: ArkerError, replaySafe = false): boolean {
   if (error?.code === "quota_exceeded") return false;
-  const work = error?.body?.recovery?.work;
+  // A valid error names `recovery` whenever the server may have acted, so
+  // one without it says the request did nothing and may be sent again.
+  const work = error?.body ? (error.body.recovery?.work ?? "not_started") : undefined;
   if (work !== undefined) {
     if (work !== "not_started") return false;
     replaySafe = true;
@@ -2376,7 +2360,7 @@ function isRetryable(status: number, error?: ArkerError, replaySafe = false): bo
 
 function retryDelay(retry: RetryConfig, attempt: number, error?: ArkerError): number {
   // The server's hint beats backoff, bounded by an explicitly configured
-  // maxDelayMs — the caller's latency budget outranks the server. The DEFAULT
+  // maxDelayMs - the caller's latency budget outranks the server. The DEFAULT
   // max only shapes backoff; applying it here would neuter real capacity waits.
   const hint = error?.body && "retry_after_seconds" in error.body
     ? wireRetryAfter(error.body.retry_after_seconds) : undefined;
@@ -2474,7 +2458,7 @@ export interface SyncDirResult {
   /**
    * True when the VM's manifest hit the server's entry cap (50,000 files) and
    * was truncated. Everything beyond the cap is invisible to the diff, so it is
-   * treated as changed and re-uploaded — the sync stays CORRECT but stops being
+   * treated as changed and re-uploaded - the sync stays CORRECT but stops being
    * a delta. If you see this, split the sync into subdirectories.
    */
   manifestTruncated?: boolean;
@@ -2488,19 +2472,17 @@ export interface SyncDirResult {
 export interface SyncDirOptions {
   /** Caller-owned accelerator cache: absolute local path -> {size, mtimeMs, hash}.
    * Reused across calls it skips re-hashing files whose (size, mtime) are
-   * unchanged. Pure optimization — it never affects which files are sent. */
+   * unchanged. Pure optimization - it never affects which files are sent. */
   cache?: Map<string, { size: number; mtimeMs: number; hash: string }>;
 
   /** Skip the remote manifest round-trip and send everything.
    *
-   * The manifest exists to avoid re-sending unchanged files. On a FIRST sync
-   * into a fresh directory it is guaranteed empty, so the round-trip costs
-   * ~184ms to learn nothing. Set this when you know the destination is new
-   * (e.g. straight after a fork).
+   * Set this when the destination is known to be empty, such as immediately
+   * after a fork.
    *
    * Safe by construction: an empty manifest means "send everything", which is
    * what a first sync does anyway. Setting it wrongly re-sends files that were
-   * already there — wasteful, never incorrect. */
+   * already there - wasteful, never incorrect. */
   assumeEmpty?: boolean;
 }
 

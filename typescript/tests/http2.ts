@@ -29,7 +29,7 @@ function listen(server: http2.Http2Server): Promise<number> {
   });
 }
 
-// An Arker pointed at a local server with HTTP/2 ENABLED — i.e. no custom fetch, so
+// An Arker pointed at a local server with HTTP/2 ENABLED - i.e. no custom fetch, so
 // `this.http2` is true and requests go through the node:http2 path under test.
 function h2client(port: number): Arker {
   return new Arker({

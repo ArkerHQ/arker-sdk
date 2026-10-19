@@ -25,7 +25,7 @@ def build_base(ar, args, real_key, workspace_id):
     """
     base = ar.fork(
         source_vm_name=spec.GOLDEN,
-        source_org_id=spec.GOLDEN_ORG or None,
+        source_org_name=spec.GOLDEN_ORG or None,
         name=f"{spec.PREFIX}-base",
         platforms=spec.PLATFORMS or None,
         policies=spec.policy_doc(real_key, workspace_id),
@@ -40,7 +40,7 @@ def build_base(ar, args, real_key, workspace_id):
         return _prepare_base(base, args, real_key)
     except BaseException:
         # A half-built base is no use to anyone and still holds a slice.
-        print(f"\nbase build failed — deleting {base.id}")
+        print(f"\nbase build failed - deleting {base.id}")
         h.delete(base, attempts=10, floor=3.0)
         raise
 
@@ -50,7 +50,7 @@ def _prepare_base(base, args, real_key):
 
     stored = base.get_policies()
     if real_key in str(stored.secrets):
-        raise SystemExit("FAIL: the real key came back UNMASKED — stop.")
+        raise SystemExit("FAIL: the real key came back UNMASKED - stop.")
 
     h.run(base, spec.ENV_SH.format(key=spec.DUMMY_KEY), session_idx=3, timeout=90)
 
@@ -65,7 +65,7 @@ def _prepare_base(base, args, real_key):
     check = h.stdout_of(h.run(base, spec.TOOLCHAIN_CHECK, session_idx=2, timeout=180))
     for missing in ("NO_CLAUDE", "NO_VLLM", "NO_MODEL"):
         if missing in check:
-            raise SystemExit(f"FAIL: {missing} — base is not usable.")
+            raise SystemExit(f"FAIL: {missing} - base is not usable.")
 
     # The agent must write AND run a file: a chat-only prompt would pass even
     # with tools broken, and a 401 here means the rewrite never applied.
@@ -107,7 +107,7 @@ def run_agent(ar, base, policy, thread_idx, cycle, args, base_vram_mib, stop, de
         )
     except ArkerError as e:
         # 429 = your API concurrency limit; the fork never reached a GPU.
-        # 503 = no GPU slice free — often the previous VM's slice is still held.
+        # 503 = no GPU slice free - often the previous VM's slice is still held.
         h.ev("fork_rejected", thread=thread_idx, cycle=cycle, status=e.status,
              code=e.code, waited=round(time.time() - t_fork, 1))
         stop.wait(5.0 + random.random() * 5.0)
@@ -128,7 +128,7 @@ def run_agent(ar, base, policy, thread_idx, cycle, args, base_vram_mib, stop, de
                     for i in range(n)]
         agent_session(vm, thread_idx, cycle, features, args, stop, deadline, vram_mib)
     finally:
-        # Always delete, even on interrupt — a leaked VM holds its GPU slice.
+        # Always delete, even on interrupt - a leaked VM holds its GPU slice.
         t_del = time.time()
         err = h.delete(vm)
         if err is None:
@@ -230,7 +230,7 @@ def main():
         while time.time() < deadline and any(t.is_alive() for t in threads):
             time.sleep(5)
     except KeyboardInterrupt:
-        print("\ninterrupted — draining and deleting VMs")
+        print("\ninterrupted - draining and deleting VMs")
     finally:
         stop.set()
         # Generous: threads are mid-cycle and must still delete their VM.

@@ -221,7 +221,7 @@ def test_placement_requires_separate_provider_and_region() -> None:
 def test_list_regions_uses_public_control_plane_catalog() -> None:
     t = FakeTransport()
     # `endpoint` is required, so a placement missing it is not a shape the
-    # service can return. `provider` is deliberately NOT a closed set — see
+    # service can return. `provider` is deliberately NOT a closed set - see
     # tests/test_openapi_enforcement.py; a pinned SDK must not reject the first
     # placement on a provider added after its release.
     placement = {
@@ -521,7 +521,7 @@ def test_fork_from_a_private_image_sends_registry_auth() -> None:
     """Credentials ride with the pull they authorize, and nothing else.
 
     The service performs the pull as the authorization check, so the body must
-    carry the image AND the credentials together — a pull attempted without
+    carry the image AND the credentials together - a pull attempted without
     them fails as `not found`, which reads to the caller as a typo rather than
     a permission problem.
     """
@@ -646,7 +646,7 @@ def test_configured_placement_routes_named_sources_to_main_endpoint() -> None:
 
 def test_list_uses_configured_base_url() -> None:
     t = FakeTransport()
-    # `Arker.list()` is an admin call — routed through the control
+    # `Arker.list()` is an admin call - routed through the control
     # plane, not the compute URL.
     t.add_json(
         lambda method, url: (
@@ -738,13 +738,47 @@ def test_listed_vm_uses_its_placement_endpoint() -> None:
 
     arker = sdk.Arker(
         api_key="ark_live_test",
-        base_url="https://fallback.invalid/api",
+        provider="provider-one",
+        region="region-one",
         retry=False,
     )
     with use_transport(t):
         result = arker.list_vms()
         assert result.vms[0].base_url == "https://provider-two-region-two.arker.ai/api"
         result.vms[0].run("printf ok")
+
+
+def test_listed_vm_keeps_custom_base_url() -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "GET" and url == "https://control.invalid/api/v1/vms",
+        200,
+        {
+            "vms": [
+                {
+                    "vm_id": "vm_placed",
+                    "owner_org_id": "org_1",
+                    "created_at": "now",
+                    "description": None,
+                    "public": False,
+                    "state": "idle",
+                    "region": "region-two",
+                    "provider": "provider-two",
+                    "network": {},
+                    "sessions": [],
+                    "resources": {},
+                }
+            ]
+        },
+    )
+    arker = sdk.Arker(
+        api_key="ark_live_test",
+        base_url="https://feature.invalid/api",
+        control_base_url="https://control.invalid/api",
+        retry=False,
+    )
+    with use_transport(t):
+        assert arker.list_vms().vms[0].base_url == "https://feature.invalid/api"
 
 
 def test_list_runs_uses_control_plane_and_filters() -> None:
@@ -859,7 +893,7 @@ def test_run_sends_command_without_default_session_id() -> None:
 def test_sync_run_polls_backgrounded_run_to_completion(monkeypatch) -> None:
     # A synchronous run() that outlives the server sync window gets a background
     # ack; run() must poll get_run() under the hood and return the terminal run
-    # — the caller never sees the intermediate background shape.
+    # - the caller never sees the intermediate background shape.
     monkeypatch.setattr(sdk.time, "sleep", lambda _s: None)
     t = FakeTransport()
     t.add_json(
@@ -911,7 +945,7 @@ def test_sync_run_polls_backgrounded_run_to_completion(monkeypatch) -> None:
 
 
 def test_explicit_zero_returns_ack_without_polling(monkeypatch) -> None:
-    # time_to_background=0 is a pure pass-through — run() returns the running ack
+    # time_to_background=0 is a pure pass-through - run() returns the running ack
     # immediately and never polls get_run().
     slept: list[float] = []
     monkeypatch.setattr(sdk.time, "sleep", lambda s: slept.append(s))
@@ -927,7 +961,7 @@ def test_explicit_zero_returns_ack_without_polling(monkeypatch) -> None:
 
     assert isinstance(result, sdk.BackgroundRunResult)
     assert result.run_id == "run_bg"
-    # Only the POST — no polling, no sleeping.
+    # Only the POST - no polling, no sleeping.
     assert [c["method"] for c in t.calls] == ["POST"]
     assert slept == []
     assert json.loads(t.calls[0]["body"]) == {
@@ -960,7 +994,7 @@ def test_run_sends_policies() -> None:
                 "type": "outbound",
                 "action": "deny",
                 # `PolicyMatch` has no `protocol` field (real fields: ports, ips,
-                # hosts, methods, paths, headers, body_contains) — a leftover
+                # hosts, methods, paths, headers, body_contains) - a leftover
                 # "protocol": "tcp" here only ever passed because the
                 # `_decode_value` bug (see test_get_and_set_policies) skipped
                 # nested validation entirely, so an unreal field was silently
@@ -1000,8 +1034,7 @@ def test_resize_patches_vm_resources() -> None:
     with use_transport(t):
         result = client().vm("vm_1").update(memory_mib=1024)
 
-    # resize now PATCHes /v1/vms/{id} with a resources object (arkerd reality;
-    # the old POST /v1/vms/{id}/resize route does not exist). None fields are pruned.
+    # Resize uses PATCH with a resources object. None fields are pruned.
     assert json.loads(t.calls[0]["body"]) == {"resources": {"memory_mib": 1024}}
     assert result is not None
 
@@ -1010,7 +1043,7 @@ def test_resize_patches_vgpu_on_its_own() -> None:
     """A GPU resize is a PATCH like any other resize.
 
     `vgpu` is the one non-int resource arg, so it has to be in the "any of
-    these were passed" guard as well as the `ResourcesInput` construction —
+    these were passed" guard as well as the `ResourcesInput` construction -
     miss the guard and `resources` is dropped and the VM keeps its old share.
     """
     t = FakeTransport()
@@ -1401,6 +1434,30 @@ def test_mutation_does_not_retry_a_server_unknown_outcome() -> None:
     assert len(t.calls) == 1
 
 
+def test_mutation_retries_an_error_that_names_no_recovery() -> None:
+    # The contract names `recovery` whenever the server may have acted.
+    t = FakeTransport()
+    predicate = lambda method, url: method == "POST" and url.endswith("/v1/vms/vm_1/runs")
+    body = _unavailable_body(0)
+    del body["error"]["recovery"]
+    t.add_json(predicate, 503, body)
+    t.add_json(predicate, 200, _completed_run_body())
+
+    with use_transport(t):
+        sdk.Arker(
+            api_key="k",
+            base_url="https://test.invalid/api",
+            retry={"attempts": 2, "base_delay_s": 0, "jitter_s": 0},
+        ).vm("vm_1").run("true")
+
+    assert len(t.calls) == 2
+
+
+def test_a_read_back_policy_update_leaves_masked_secrets_out() -> None:
+    update = sdk._policy_update({"rules": {}, "secrets": {"KEPT": "***", "NEW": "v", "GONE": None}})
+    assert update["secrets"] == {"NEW": "v", "GONE": sdk._EXPLICIT_NULL}
+
+
 def test_sync_write_does_not_retry_an_ambiguous_network_failure() -> None:
     t = FakeTransport()
     predicate = lambda method, url: method == "POST" and url.endswith("/sync")
@@ -1592,7 +1649,7 @@ def test_fork_sends_disk_only_layers() -> None:
 
 
 def test_fork_omits_layers_by_default() -> None:
-    """A plain fork sends no `layers` key — the server applies the default full
+    """A plain fork sends no `layers` key - the server applies the default full
     fork (disk + memory), so the child resumes warm."""
     t = FakeTransport()
     t.add_json(
@@ -1773,14 +1830,7 @@ def test_get_and_set_policies() -> None:
                 }
             )
         )
-    # Regression coverage for a bug found writing this test: `PolicyDoc.policies`
-    # is typed `list[PolicyEntry] | None`. `_decode_value`'s Union branch used to
-    # only recurse when a member was itself a bare dataclass type — `list[PolicyEntry]`
-    # is a generic alias, not a dataclass, so it was never matched and the raw
-    # list-of-dicts passed through unconverted (entries stayed plain dicts;
-    # `.type` attribute access raised AttributeError). Fixed in `_decode_value`
-    # to also recurse into a single non-null Optional[list[...]]/Optional[dict[...]]
-    # member. Assert the real dataclass here so this can't silently regress.
+    # Decode optional typed lists through the Union branch.
     assert updated.policies[0].type == "outbound"
     assert updated.mitm_domains == ["example.com"]
     put_call = next(c for c in t.calls if c["method"] == "PUT")
@@ -1974,7 +2024,7 @@ def test_run_and_get_run_agree_on_state_for_a_killed_run() -> None:
 # lossy for those by definition, so `*_bytes` must round-trip them exactly.
 
 # 1x1 PNG. Starts with 0x89, which is not a valid UTF-8 start byte, so decoding
-# to text mangles it — that is the whole point of keeping the bytes.
+# to text mangles it - that is the whole point of keeping the bytes.
 PNG_1X1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 )
@@ -2001,7 +2051,7 @@ def test_run_returns_image_bytes_intact_and_text_is_lossy() -> None:
     with use_transport(t):
         result = client().vm("vm_1").run("cat photo.png")
 
-    # The bytes survive exactly — you can write them straight to a file.
+    # The bytes survive exactly - you can write them straight to a file.
     assert result.stdout_bytes == PNG_1X1
     assert result.stdout_bytes[:8] == b"\x89PNG\r\n\x1a\n"
     assert len(result.stdout_bytes) == len(PNG_1X1)
@@ -2024,7 +2074,7 @@ def test_get_run_returns_image_bytes_intact() -> None:
 
 
 def test_run_and_get_run_agree_on_binary_output() -> None:
-    """The two paths decode the same wire payload identically — the asymmetry
+    """The two paths decode the same wire payload identically - the asymmetry
     that made `get_run` return encoded strings is what broke callers."""
     t = FakeTransport()
     t.add_json(
@@ -2093,7 +2143,7 @@ def test_utf8_wire_still_yields_both_forms() -> None:
 
 
 def test_connect_pty_defaults_to_plain_text_env() -> None:
-    """A PTY should emit plain text by default — its consumer is a program.
+    """A PTY should emit plain text by default - its consumer is a program.
 
     The env rides on the SESSION (a PTY inherits it), so this asserts the
     create-session body rather than any PTY query param.
@@ -2137,7 +2187,7 @@ def test_fork_sends_vgpu_as_the_only_resource() -> None:
     """`vgpu` alone must reach the wire, and reach it as a float.
 
     It is the one resource arg that is not an int, so it has to be in the
-    "any of these were passed" guard as well as the VmResources construction —
+    "any of these were passed" guard as well as the VmResources construction -
     miss the guard and `resources` is dropped entirely and the caller silently
     gets a whole card.
     """
@@ -2455,7 +2505,7 @@ def test_run_poll_budget_is_unbounded_without_a_caller_timeout() -> None:
     # The poll budget exists to outlive the server-side kill and report its
     # outcome. There is no server-side kill without a caller ``timeout``
     # (absent and ``0`` are both unbounded), so there is nothing to outlive and
-    # the poll must not invent a deadline — abandoning a run that is still
+    # the poll must not invent a deadline - abandoning a run that is still
     # going is worse than waiting.
     assert sdk.run_poll_budget_s(None) is None
     assert sdk.run_poll_budget_s(0) is None
@@ -2467,20 +2517,11 @@ def test_run_poll_budget_is_unbounded_without_a_caller_timeout() -> None:
     assert sdk.run_poll_budget_s(-1) is None
 
 
-# ── run(): what bounds the wait, and what does not ──────────────────────────
-# `timeout` is the SERVER-side kill bound (run_command.rs: "timeout: N kills the
-# command after N seconds; zero is unbounded"). The SDK used to substitute a
-# 3600s client deadline when it was unset, which raised `timeout` on runs the
-# service was still executing — an hour-long stall on a deliberately unbounded
-# server run. These pin the corrected contract in both directions.
+# ── Run timeout behavior ───────────────────────────────────────────
 
 
 def test_unset_timeout_never_gives_up_on_a_still_running_run(monkeypatch) -> None:
-    """No `timeout` = no client deadline. The poll loop must keep waiting.
-
-    Fails on the old code, which raised after its 3600s budget: here the clock
-    is advanced past that budget while every poll answers 200 `running`.
-    """
+    """An unset timeout has no client deadline."""
     monkeypatch.setattr(sdk.time, "sleep", lambda _s: None)
     clock = {"t": 0.0}
 
@@ -2531,7 +2572,7 @@ def test_unset_timeout_never_gives_up_on_a_still_running_run(monkeypatch) -> Non
 def test_explicit_timeout_still_bounds_the_wait(monkeypatch) -> None:
     """Setting `timeout` must still produce a bounded wait and a `timeout` error.
 
-    Removing the default must not remove the knob — without this, "no timeouts"
+    Removing the default must not remove the knob - without this, "no timeouts"
     could be implemented by never timing out at all and nothing would notice.
     """
     monkeypatch.setattr(sdk.time, "sleep", lambda _s: None)
@@ -2574,7 +2615,7 @@ def test_explicit_timeout_still_bounds_the_wait(monkeypatch) -> None:
 
 
 def test_polling_gives_up_when_the_service_stops_answering(monkeypatch) -> None:
-    """An unbounded wait still ends if the SERVICE goes away — but only then."""
+    """An unbounded wait still ends if the SERVICE goes away - but only then."""
     monkeypatch.setattr(sdk.time, "sleep", lambda _s: None)
     t = FakeTransport()
     t.add_json(
@@ -2624,7 +2665,7 @@ def test_a_poll_blip_does_not_end_an_unbounded_wait(monkeypatch) -> None:
         "stderr": "",
         "stderr_encoding": "utf-8",
     }
-    # Blip, recover, blip again — never MAX consecutive — then finish.
+    # Blip, recover, blip again - never MAX consecutive - then finish.
     for _ in range(sdk.RUN_POLL_MAX_CONSECUTIVE_FAILURES - 1):
         t.add_json(is_get, 503, {"error": {"code": "unavailable", "message": "blip"}})
     t.add_json(is_get, 200, running)
@@ -2640,14 +2681,7 @@ def test_a_poll_blip_does_not_end_an_unbounded_wait(monkeypatch) -> None:
 
 
 def test_time_to_background_zero_matches_background_true(monkeypatch) -> None:
-    """The two spellings of "don't wait" must behave identically.
-
-    openapi.json: `background` is a "DEPRECATED alias for `time_to_background`;
-    `true` is exactly `time_to_background: 0`". The SDK used to poll for the
-    canonical field and pass through for the alias, so the alias behaved UNLIKE
-    the thing it aliases. A caller starting a server with `time_to_background=0`
-    got its run id from the server and then blocked in the client forever.
-    """
+    """Both background options return the running acknowledgement."""
     slept: list[float] = []
     monkeypatch.setattr(sdk.time, "sleep", lambda s: slept.append(s))
 
@@ -2659,7 +2693,7 @@ def test_time_to_background_zero_matches_background_true(monkeypatch) -> None:
             {"run_id": "run_srv", "state": "running"},
         )
         # Deliberately script NO get_run: any poll would 404 and fail loudly,
-        # which is what we want — it proves no polling happened.
+        # which is what we want - it proves no polling happened.
         return t
 
     t1 = ack_only()
@@ -2819,11 +2853,8 @@ def test_the_shared_client_does_not_multiplex_requests_over_one_socket() -> None
 
 # ── fork Idempotency-Key ────────────────────────────────────────────────
 #
-# The prod failure: the gateway answered a fork with 502/504 AFTER the worker
-# had already built the VM, `_request` re-POSTed, and the caller got a SECOND
-# machine while the first ran on, unnamed and billable. Transport failures on a
-# mutation are not retried, but a 502/504 is a *response* and still is --
-# so this is the window that remains, and the key is what closes it.
+# A retryable gateway response may arrive after a fork succeeds. The
+# idempotency key prevents a retry from creating a second VM.
 
 _FORK_VM = {
     "vm_id": "vm_child",

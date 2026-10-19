@@ -35,9 +35,7 @@ const arker = new Arker();
 const vm = await arker.fork({ source_vm_name: "ubuntu-coding" });
 
 const result = await vm.run("python3 -c 'print(2 + 2)'");
-if (result.type === "completed") {
-  console.log(new TextDecoder().decode(result.stdout));
-}
+console.log(result.stdout);
 
 await vm.sync("/tmp/hello.txt", "hello from Arker");
 const data = await vm.sync("/tmp/hello.txt");
@@ -66,8 +64,8 @@ purchase idempotency key are removed with no compatibility layer.
 Configure a regional endpoint (or provider and region) for pool operations.
 Listing pools uses the control plane across regions; use each returned pool's
 region for subsequent operations. Fork with exactly one of `pool_id` or
-`pool_name`; names are case-insensitive within a region. A fleet VM cannot be
-forked into a pool: use a supported image source instead. Pool VMs do not support
+`pool_name`; names are case-insensitive within a region. A VM from outside a
+`byoc` or `self_hosted` pool cannot be forked into it. Pool VMs do not support
 interactive shells; use `run` for commands.
 
 `managed` and `byoc` pools request `resources` with all three quantities
@@ -79,8 +77,9 @@ is `creating` until its first worker is running (a `managed` pool starts
 needs setup: open `byoc.setup_url` in the specified AWS account and create the
 CloudFormation stack. A `self_hosted` pool's platform is set by its first
 worker; workers join with an API key limited to the pool,
-`ar.createApiKey({ name, scopes: [{ pool_id: poolId }] })`.
-Only `managed` pools take commitments.
+`arker.createApiKey({ name, scopes: [{ pool_id: poolId }] })`.
+Only `managed` pools take commitments. Commitments and `self_hosted` pools are
+not enabled in every deployment yet; there they return `unsupported_operation`.
 
 Commitments last at least 24 hours, cannot overlap, and new commitments cannot
 start in the past. Started commitments must remain unchanged, including expired

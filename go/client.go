@@ -42,13 +42,16 @@ type Options struct {
 
 // Client talks to one Arker deployment.
 type Client struct {
-	apiKey     string
-	baseURL    string
-	controlURL string
-	provider   string
-	region     string
-	http       *http.Client
-	retry      Retry
+	apiKey  string
+	baseURL string
+	// False when BaseURL was given: a custom deployment serves every VM
+	// there, so no handle may route to a production regional URL.
+	routesByPlacement bool
+	controlURL        string
+	provider          string
+	region            string
+	http              *http.Client
+	retry             Retry
 }
 
 // New builds a Client.
@@ -59,6 +62,7 @@ func New(opts Options) (*Client, error) {
 	}
 	base := firstNonEmpty(opts.BaseURL, os.Getenv("ARKER_BASE_URL"))
 	provider, region := opts.Provider, opts.Region
+	routesByPlacement := base == ""
 	if base != "" {
 		provider, region = "", ""
 	} else {
@@ -81,13 +85,14 @@ func New(opts Options) (*Client, error) {
 		retry.Attempts = max(retry.Attempts, 1)
 	}
 	return &Client{
-		apiKey:     key,
-		baseURL:    trimURL(base),
-		controlURL: trimURL(firstNonEmpty(opts.ControlBaseURL, os.Getenv("ARKER_CONTROL_BASE_URL"), DefaultControlBaseURL)),
-		provider:   provider,
-		region:     region,
-		http:       httpClient,
-		retry:      retry,
+		apiKey:            key,
+		baseURL:           trimURL(base),
+		routesByPlacement: routesByPlacement,
+		controlURL:        trimURL(firstNonEmpty(opts.ControlBaseURL, os.Getenv("ARKER_CONTROL_BASE_URL"), DefaultControlBaseURL)),
+		provider:          provider,
+		region:            region,
+		http:              httpClient,
+		retry:             retry,
 	}, nil
 }
 
@@ -188,7 +193,10 @@ func (c *Client) do(ctx context.Context, cl call) (int, error) {
 		}
 
 		apiErr := decodeError(status, raw)
-		if !retryable(apiErr) || attempt == c.retry.Attempts-1 || !c.backoff(ctx, attempt, apiErr) {
+		// A mutation is sent again only when it cannot act twice: it carries
+		// an idempotency key, or the server says it did nothing.
+		replaySafe := isRead || cl.key != "" || apiErr.nothingStarted()
+		if !replaySafe || !retryable(apiErr) || attempt == c.retry.Attempts-1 || !c.backoff(ctx, attempt, apiErr) {
 			return status, apiErr
 		}
 		lastErr = apiErr
@@ -237,7 +245,7 @@ func drain(resp *http.Response) (int, []byte, error) {
 // retryable resolves the server's intent; the status is only the fallback,
 // because `retryable` is frequently absent.
 func retryable(err *Error) bool {
-	if err.Code == "quota_exceeded" {
+	if err.Code == "quota_exceeded" || (err.work != "" && err.work != "not_started") {
 		return false
 	}
 	switch {
@@ -287,6 +295,9 @@ func decodeError(status int, raw []byte) *Error {
 			Message    string          `json:"message"`
 			Retryable  *bool           `json:"retryable"`
 			RetryAfter *float64        `json:"retry_after_seconds"`
+			Recovery   *struct {
+				Work string `json:"work"`
+			} `json:"recovery"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(raw, &envelope) == nil && envelope.Error.Code != "" {
@@ -295,6 +306,10 @@ func decodeError(status int, raw []byte) *Error {
 		out.Message = envelope.Error.Message
 		out.Retryable = envelope.Error.Retryable
 		out.RetryAfter = envelope.Error.RetryAfter
+		out.enveloped = true
+		if envelope.Error.Recovery != nil {
+			out.work = envelope.Error.Recovery.Work
+		}
 	}
 	if out.Message == "" {
 		out.Message = strings.TrimSpace(string(raw))

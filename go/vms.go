@@ -124,7 +124,7 @@ type ForkRequest struct {
 
 	// IdempotencyKey is used verbatim. The only form that survives across
 	// processes, so it is what makes YOUR retry after an UnknownOutcomeError
-	// converge instead of building a second machine. Wins over Idempotency.
+	// converge instead of forking a second VM. Wins over Idempotency.
 	//
 	// Idempotency generates a key for this call instead. Bound once, before the
 	// retry loop, so every attempt of a single fork presents the same one --
@@ -297,10 +297,10 @@ func (c *Client) ListVMs(ctx context.Context, opts ListVMsOptions) (*VMList, err
 	}
 	list := &VMList{VMs: make([]*VM, 0, len(out.VMs)), NextCursor: out.NextCursor}
 	for i := range out.VMs {
-		// This listing spans regions, so a placed VM is addressed at its own
-		// regional endpoint rather than the client's.
+		// This listing spans regions, so on production a placed VM is
+		// addressed at its own regional endpoint rather than the client's.
 		base := c.baseURL
-		if info := &out.VMs[i]; info.Provider != "" && info.Region != "" {
+		if info := &out.VMs[i]; c.routesByPlacement && info.Provider != "" && info.Region != "" {
 			base = computeBaseURL(info.Provider, info.Region)
 		}
 		list.VMs = append(list.VMs, c.newVM(&out.VMs[i], base))

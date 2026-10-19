@@ -57,10 +57,10 @@ function vmMetadata(vm: VM): string {
 
 // Synchronous run() auto-polls a backgrounded run (one that outlived its sync
 // window) to completion under the hood, so the result is always the terminal
-// run — no manual background polling needed here. `label` is retained for
+// run - no manual background polling needed here. `label` is retained for
 // call-site readability.
 async function runAndWait(vm: VM, command: string, timeout: number, _label: string): Promise<CompletedRunResult> {
-  return vm.run(command, { timeout: timeout * 1000 });
+  return vm.run(command, { timeout });
 }
 
 function writeRunOutput(result: CompletedRunResult): void {
@@ -131,6 +131,7 @@ async function collectXcresult(vm: VM, artifactDir: string): Promise<void> {
 }
 
 const ar = new Arker({
+  provider: env("ARKER_PROVIDER", "aws"),
   region: env("ARKER_REGION", "us-west-2"),
   apiKey: process.env.ARKER_API_KEY,
   baseUrl: env("ARKER_BASE_URL") || undefined,

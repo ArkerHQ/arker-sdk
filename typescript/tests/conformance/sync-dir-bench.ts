@@ -1,27 +1,18 @@
 /**
- * Throughput bench for VM.syncDir FULL-sync (ARK-268).
+ * Throughput benchmark for VM.syncDir full sync.
  *
  * Measures the SDK's rsync-style directory sync on a first/full push: a tree of
- * ~3000 small files + a few large ones, forked onto a live VM, timed end-to-end
- * through the working-tree `VM.syncDir`. Reports files/s, MB/s, and the
- * tarball-vs-naive win — syncDir packs all changed files into ONE tarball the
- * guest extracts with `tar -x`, versus the naive path of one `vm.sync()` write
- * per file (N round-trips). The tarball collapses N round-trips to ~2, which is
- * the whole point of the method (the ~6.6s→~2.4s story at this scale).
+ * small files and a few large ones, forked onto a live VM and timed end-to-end.
+ * Reports files/s, MB/s, and the difference from one `vm.sync()` per file.
  *
- * FULL-sync ONLY. The delta/repeat throughput bench is intentionally NOT here:
- * op=manifest reads the host rootfs.xfs directly, while syncDir's guest tar-x
- * writes only reach rootfs.xfs after an async host-side flush (~2-3s lag,
- * measured). So a back-to-back second syncDir re-sends everything (sent=N,
- * skipped=0) — the delta path is blocked on the manifest-flush fix
- * (quiesce/FIFREEZE-then-read, or a guest-agent manifest). Re-enable a delta
- * bench once the host manifest is flush-consistent for a running VM.
+ * This benchmark measures full sync only. Delta behavior has its own benchmark
+ * and consistency checks.
  *
  *   ARKER_API_KEY=ark_... ARKER_BASE_URL=http://host:8080/api \
  *   ARKER_SOURCE_VM=<source-name> bun tests/conformance/sync-dir-bench.ts
  *
  * Knobs (env): BENCH_N_FILES (3000), BENCH_SMALL_BYTES (256),
- * BENCH_LARGE_COUNT (3), BENCH_LARGE_MB (2), BENCH_NAIVE_FILES (400 — cap on
+ * BENCH_LARGE_COUNT (3), BENCH_LARGE_MB (2), BENCH_NAIVE_FILES (400 - cap on
  * the naive per-file comparison so the bench stays quick over a real RTT;
  * the full-tree naive time is projected from the measured per-file rate).
  */

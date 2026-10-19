@@ -294,6 +294,29 @@ func TestAuthQueryParamsAndWhenRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPolicyDocUpdateDropsReadOnlyFieldsAndMaskedSecrets(t *testing.T) {
+	var doc arker.PolicyDoc
+	if err := json.Unmarshal([]byte(preservedRules), &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc.Secrets["NEW"] = "v"
+	out, err := json.Marshal(doc.Update())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(out, &got)
+	if _, ok := got["mitm_domains"]; ok {
+		t.Fatalf("read-only field sent: %s", out)
+	}
+	if !reflect.DeepEqual(got["secrets"], map[string]any{"NEW": "v"}) {
+		t.Fatalf("secrets = %v, want only the unmasked one", got["secrets"])
+	}
+	if rules, _ := got["rules"].(map[string]any); len(rules) != len(doc.Rules) {
+		t.Fatalf("rules not carried over: %s", out)
+	}
+}
+
 func TestPolicyEntryDecodesTokenAuth(t *testing.T) {
 	var entry arker.PolicyEntry
 	raw := `{"type":"inbound","match":{"ports":[8080]},"action":"allow","auth":{"token":"${secret:TOKEN}"}}`

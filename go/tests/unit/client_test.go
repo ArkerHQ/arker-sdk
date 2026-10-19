@@ -229,7 +229,7 @@ func TestReadIsRetriedOnTransportFailure(t *testing.T) {
 }
 
 func TestServerRetryableFalseBeatsTheStatus(t *testing.T) {
-	// arkerd's `retryable` is the authority; the status is only a fallback,
+	// The API's `retryable` value is authoritative; the status is only a fallback,
 	// because the field is frequently absent.
 	var n int32
 	c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -244,6 +244,35 @@ func TestServerRetryableFalseBeatsTheStatus(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&n); got != 1 {
 		t.Fatalf("retryable:false was retried %d times", got)
+	}
+}
+
+func TestMutationIsRetriedOnlyWhenTheServerDidNothing(t *testing.T) {
+	// A run carries no idempotency key, so a 503 is sent again only when the
+	// error says no work started, or is the envelope and names no recovery.
+	for _, tc := range []struct {
+		body string
+		want int32
+	}{
+		{`{"error":{"code":"unavailable","message":"x","recovery":{"work":"unknown"}}}`, 1},
+		{`{"error":{"code":"unavailable","message":"x","recovery":{"work":"not_started"}}}`, 4},
+		{`{"error":{"code":"capacity_unavailable","message":"x"}}`, 4},
+		{`upstream timed out`, 1},
+	} {
+		var n int32
+		c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&n, 1)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprint(w, tc.body)
+		})
+		_, err := c.VM("vm_1").Run(context.Background(), arker.RunRequest{Command: "true"})
+		done()
+		if err == nil {
+			t.Fatalf("%s: expected an error", tc.body)
+		}
+		if got := atomic.LoadInt32(&n); got != tc.want {
+			t.Fatalf("%s: sent %d times, want %d", tc.body, got, tc.want)
+		}
 	}
 }
 

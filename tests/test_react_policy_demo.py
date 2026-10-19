@@ -17,27 +17,30 @@ PYTHON_DEMO = DEMO_DIR / "quick_start.py"
 REACT_APP = DEMO_DIR / "app" / "src" / "App.jsx"
 
 BUILD_POLICY = {
-    "policies": [
-        {
+    "rules": {
+        "npm": {
             "type": "outbound",
+            "priority": 100,
             "match": {
                 "hosts": ["registry.npmjs.org"],
                 "ports": [443],
             },
             "action": "allow",
         }
-    ]
+    }
 }
 
 PUBLIC_POLICY = {
-    "policies": [
-        {
+    "rules": {
+        "npm": None,
+        "no-egress": {"type": "outbound", "priority": 100, "action": "deny"},
+        "app": {
             "type": "inbound",
+            "priority": 100,
             "match": {"ports": [8080]},
             "action": "allow",
-            "auth": "open",
-        }
-    ]
+        },
+    }
 }
 
 
@@ -68,6 +71,7 @@ class FakeVM:
         self.runs: list[tuple[str, dict[str, Any]]] = []
         self.session_cwds: list[str] = []
         self.syncs: list[tuple[str, str]] = []
+        self.updates: list[dict[str, Any]] = []
 
     def sync_dir(self, local_dir: str, remote_dir: str) -> SimpleNamespace:
         self.syncs.append((local_dir, remote_dir))
@@ -86,6 +90,10 @@ class FakeVM:
         if "registry.npmjs.org" in command:
             return SimpleNamespace(exit_code=1, stdout="", stderr="")
         return SimpleNamespace(exit_code=0, stdout="ok\n", stderr="")
+
+    def update(self, **kwargs: Any) -> SimpleNamespace:
+        self.updates.append(kwargs)
+        return SimpleNamespace()
 
     def create_session(self, *, cwd: str) -> SimpleNamespace:
         self.session_cwds.append(cwd)
@@ -150,6 +158,7 @@ def test_python_demo_runs_the_documented_sdk_flow(
     assert "npm ci" in build_command
     assert "npm run build" in build_command
 
+    assert vm.updates == [{"policies": PUBLIC_POLICY}]
     assert vm.session_cwds == ["/workspace/react-policy"]
     server_command, server_options = vm.runs[1]
     assert server_command == "exec node server.mjs"
@@ -157,7 +166,6 @@ def test_python_demo_runs_the_documented_sdk_flow(
         "session_id": "session_test",
         "time_to_background": 0,
         "timeout": 0,
-        "policies": PUBLIC_POLICY,
     }
     health_command, _ = vm.runs[2]
     assert "node -e" in health_command

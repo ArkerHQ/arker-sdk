@@ -98,7 +98,7 @@ test('a policy read back updates without its read-only fields', async () => {
   const a = client(200, read, calls);
   const handle = await a.vm('vm_1').refresh();
   await handle.update({policies: handle.policies!});
-  assert.deepEqual(calls[1]!.body, {policies: {rules, secrets: {KEY: '***'}}});
+  assert.deepEqual(calls[1]!.body, {policies: {rules, secrets: {}}});
 });
 
 const notRunningCases: Array<[string, string, (a: Arker) => Promise<unknown>]> = [

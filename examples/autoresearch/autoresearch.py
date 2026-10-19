@@ -18,13 +18,13 @@ def prepare_vm(ark: Arker) -> VM:
                                "memory_mib": 16384, "disk_mib": 102400},
                     policies={
                         "secrets": {"OPENROUTER_API_KEY": os.environ["OPENROUTER_API_KEY"]},
-                        "policies": [
-                            {"type": "outbound",
-                             "match": {"hosts": ["openrouter.ai"]},
-                             "action": {"rewrite": {"headers": {
-                                 "authorization": "Bearer ${secret:OPENROUTER_API_KEY}"}}}},
-                            {"type": "outbound", "action": "allow"},
-                        ],
+                        "rules": {
+                            "openrouter": {
+                                "type": "outbound", "priority": 100,
+                                "match": {"hosts": ["openrouter.ai"]},
+                                "action": {"rewrite": {"headers": {
+                                    "authorization": "Bearer ${secret:OPENROUTER_API_KEY}"}}}},
+                        },
                     })
 
     # uv, plus the ~ venv that everything below installs into: ~6s
@@ -44,11 +44,13 @@ def prepare_vm(ark: Arker) -> VM:
              '{"providers":{"openrouter":{"modelOverrides":'
              '{"openai/gpt-5.6-luna":{"maxTokens": 16000}}}}}\nEOF')
     # fail here, on prep, rather than once four agents are running: ~12s
-    prep.run(ENV + ".venv/bin/python -c 'import torch; print(\"torch\", torch.__version__)'")
+    check = prep.run(ENV + ".venv/bin/python -c 'import torch; print(\"torch\", torch.__version__)'")
+    if check.exit_code != 0:
+        raise SystemExit(f"prep failed: {check.stderr}")
 
     prep.run(ENV + f"cat > train.py <<'EOF'\n{TASK}\nEOF")
     prep_ready()
-    log(f"prep ready — forking {AGENTS} agents")
+    log(f"prep ready - forking {AGENTS} agents")
     return prep
 
 
@@ -76,7 +78,7 @@ def run_agent(ark: Arker, prep: VM, n: int, vgpu: float) -> list[dict]:
             turn_done(f"agent{n}", turn, tsv, out)
 
         experiments = parse_runs(tsv)
-        log(f"agent{n} finished — {len(experiments)} experiments")
+        log(f"agent{n} finished - {len(experiments)} experiments")
         return experiments
     finally:
         vm.delete()

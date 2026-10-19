@@ -1,4 +1,4 @@
-"""Interactive PTY example — open a real terminal in a VM and run `claude`.
+"""Interactive PTY example - open a real terminal in a VM and run `claude`.
 
     pip install 'arker[pty]'
     ARKER_API_KEY=...  ARKER_BASE_URL=https://<host>/api \
@@ -20,7 +20,7 @@ from arker import Arker
 
 
 def main() -> None:
-    ar = Arker()  # reads ARKER_API_KEY + ARKER_REGION/ARKER_BASE_URL
+    ar = Arker()  # reads ARKER_API_KEY and ARKER_PROVIDER + ARKER_REGION or ARKER_BASE_URL
 
     arg = sys.argv[1] if len(sys.argv) > 1 else None
     vm = ar.vm(arg).refresh() if arg else ar.fork(source_vm_name=os.environ["ARKER_SOURCE_VM"])
@@ -33,7 +33,7 @@ def main() -> None:
         sys.stdout.buffer.write(b)
         sys.stdout.buffer.flush()
 
-    pty = vm.connect_pty(cols=cols, rows=rows, on_data=on_data)
+    pty = vm.connect_pty(cols=cols, rows=rows, on_data=on_data, plain=False)
 
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd) if sys.stdin.isatty() else None
