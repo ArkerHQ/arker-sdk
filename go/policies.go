@@ -3,7 +3,9 @@ package arker
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
+	"slices"
 )
 
 // PolicyMatch selects the traffic a PolicyEntry applies to.
@@ -222,6 +224,23 @@ type PolicyUpdate struct {
 	Rules    map[string]*PolicyRule `json:"rules,omitempty"`
 	Secrets  map[string]*string     `json:"secrets,omitempty"`
 	Policies []PolicyEntry          `json:"policies,omitempty"`
+}
+
+// Update turns a policy read back into an update that writes the same rules
+// and secrets, so a caller can edit one and send it. Secret values read back
+// masked as "***" are left out: a write refuses them, and the server keeps a
+// secret an update does not name.
+func (d *PolicyDoc) Update() PolicyUpdate {
+	update := PolicyUpdate{Rules: maps.Clone(d.Rules), Policies: slices.Clone(d.Policies)}
+	for name, value := range d.Secrets {
+		if s, ok := value.(string); ok && s != "***" {
+			if update.Secrets == nil {
+				update.Secrets = map[string]*string{}
+			}
+			update.Secrets[name] = &s
+		}
+	}
+	return update
 }
 
 // GetPolicies reads this VM's network policy.

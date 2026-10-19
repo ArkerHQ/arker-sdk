@@ -2,7 +2,7 @@
 #
 # Browser checkpoints — quick start
 #
-# fork snapshots a machine's live memory, so forking a running browser
+# fork snapshots a VM's live memory, so forking a running browser
 # checkpoints it mid-session. Here we open two Wikipedia pages and fork at each,
 # leaving two live checkpoints you can reopen over VNC.
 #
@@ -18,7 +18,7 @@ REGION="${ARKER_REGION:-us-west-2}"
 VM=$(arker fork "$ARKER_SOURCE_VM" | jq -r .vm_id)
 echo "forked $VM"
 trap 'arker rm "$VM" >/dev/null 2>&1 || true' EXIT
-arker run --timeout 480000 "$VM" "export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq software-properties-common && add-apt-repository -y ppa:xtradeb/apps && apt-get update -qq && apt-get install -y -qq chromium" >/dev/null 2>&1 || true
+arker run --timeout 480 "$VM" "export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq software-properties-common && add-apt-repository -y ppa:xtradeb/apps && apt-get update -qq && apt-get install -y -qq chromium" >/dev/null 2>&1 || true
 until arker run "$VM" "command -v chromium" >/dev/null 2>&1; do sleep 5; done
 
 # open <url> fullscreen on the VNC desktop (display :99)
@@ -38,12 +38,8 @@ checkpoint() {
   sleep 4
   local ck
   ck=$(arker fork --source-vm-id "$VM" | jq -r .vm_id)
-  arker policies set "$ck" >/dev/null <<'JSON'
-{
-  "policies": [
-    {"type":"inbound","match":{"ports":[6080]},"action":"allow","auth":"open"}
-  ]
-}
+  arker update "$ck" --policies-file /dev/stdin >/dev/null <<'JSON'
+{"rules": {"vnc": {"type":"inbound","priority":100,"match":{"ports":[6080]},"action":"allow"}}}
 JSON
   echo "$2: https://$ck-6080.aws-$REGION.arker.app/vnc.html"
 }

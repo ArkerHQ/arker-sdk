@@ -42,13 +42,16 @@ type Options struct {
 
 // Client talks to one Arker deployment.
 type Client struct {
-	apiKey     string
-	baseURL    string
-	controlURL string
-	provider   string
-	region     string
-	http       *http.Client
-	retry      Retry
+	apiKey  string
+	baseURL string
+	// False when BaseURL was given: a custom deployment serves every VM
+	// there, so no handle may route to a production regional URL.
+	routesByPlacement bool
+	controlURL        string
+	provider          string
+	region            string
+	http              *http.Client
+	retry             Retry
 }
 
 // New builds a Client.
@@ -59,6 +62,7 @@ func New(opts Options) (*Client, error) {
 	}
 	base := firstNonEmpty(opts.BaseURL, os.Getenv("ARKER_BASE_URL"))
 	provider, region := opts.Provider, opts.Region
+	routesByPlacement := base == ""
 	if base != "" {
 		provider, region = "", ""
 	} else {
@@ -81,13 +85,14 @@ func New(opts Options) (*Client, error) {
 		retry.Attempts = max(retry.Attempts, 1)
 	}
 	return &Client{
-		apiKey:     key,
-		baseURL:    trimURL(base),
-		controlURL: trimURL(firstNonEmpty(opts.ControlBaseURL, os.Getenv("ARKER_CONTROL_BASE_URL"), DefaultControlBaseURL)),
-		provider:   provider,
-		region:     region,
-		http:       httpClient,
-		retry:      retry,
+		apiKey:            key,
+		baseURL:           trimURL(base),
+		routesByPlacement: routesByPlacement,
+		controlURL:        trimURL(firstNonEmpty(opts.ControlBaseURL, os.Getenv("ARKER_CONTROL_BASE_URL"), DefaultControlBaseURL)),
+		provider:          provider,
+		region:            region,
+		http:              httpClient,
+		retry:             retry,
 	}, nil
 }
 

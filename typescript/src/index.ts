@@ -640,6 +640,9 @@ export class Arker {
    * per-VM ops. SDK calls go straight to this host, skipping the CF
    * Worker control plane. */
   private readonly computeBaseUrl?: string;
+  /** False when `baseUrl` was given: a custom deployment serves every VM
+   * there, so no handle may route to a production regional URL. */
+  private readonly routesByPlacement: boolean;
   /** CF Worker control-plane URL — used for cross-cutting admin calls
    * like list-VMs and filesystems. */
   readonly controlBaseUrl: string;
@@ -667,6 +670,7 @@ export class Arker {
     if (!apiKey) throw new Error("apiKey is required; pass apiKey or set ARKER_API_KEY");
     this.apiKey = apiKey;
     this.computeBaseUrl = baseUrl ? normalizeBaseUrl(baseUrl) : undefined;
+    this.routesByPlacement = !explicitBaseUrl;
     this.controlBaseUrl = normalizeBaseUrl(controlBaseUrl);
     this.region = region;
     this.provider = provider;
@@ -1001,7 +1005,7 @@ export class Arker {
   ): string {
     const provider = optionalComputeProvider(placement?.provider);
     const region = placement?.region?.trim();
-    if (provider && region) return computeBaseUrl(provider, region);
+    if (this.routesByPlacement && provider && region) return computeBaseUrl(provider, region);
     return this.baseUrl;
   }
 }

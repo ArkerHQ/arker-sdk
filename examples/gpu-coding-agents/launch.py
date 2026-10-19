@@ -25,7 +25,7 @@ def build_base(ar, args, real_key, workspace_id):
     """
     base = ar.fork(
         source_vm_name=spec.GOLDEN,
-        source_org_id=spec.GOLDEN_ORG or None,
+        source_org_name=spec.GOLDEN_ORG or None,
         name=f"{spec.PREFIX}-base",
         platforms=spec.PLATFORMS or None,
         policies=spec.policy_doc(real_key, workspace_id),

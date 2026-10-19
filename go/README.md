@@ -2,21 +2,20 @@
 
 Go client for the Arker VM API. The surface mirrors the [Python](../python) and
 [TypeScript](../typescript) SDKs: a `Client` for org-wide calls, and a `VM`
-handle for everything scoped to one machine.
+handle for everything scoped to one VM.
 
 ```bash
 go get github.com/ArkerHQ/arker-sdk/go
 ```
 
 There is no registry upload: `proxy.golang.org` fetches straight from the repo,
-and a git tag is what makes a version exist. Releasing is deliberately MANUAL: bump `go/VERSION`, then run the
-`Publish Go` workflow from the Actions tab and type that version to confirm.
-It is not a side effect of merging, because a Go tag is immutable the moment
-the proxy fetches it — there is no yanking a Go release, only superseding it. That prefix is required — Go resolves a module in a subdirectory only from
-`<subdir>/vX.Y.Z`, so the hyphenated form the other SDKs use would be invisible.
+and a `go/vX.Y.Z` git tag is what makes a version exist. That prefix is required:
+Go resolves a module in a subdirectory only from `<subdir>/vX.Y.Z`. Releasing is
+deliberately manual: bump `go/VERSION`, then run the `Publish Go` workflow and
+type that version to confirm. A Go tag is immutable once the proxy fetches it.
 
 ```go
-client, err := arker.New(arker.Options{})       // ARKER_API_KEY + ARKER_BASE_URL
+client, err := arker.New(arker.Options{})       // ARKER_API_KEY, ARKER_PROVIDER, ARKER_REGION
 vm, err := client.Fork(ctx, arker.ForkRequest{SourceVMName: "ubuntu-base"})
 defer vm.Delete(ctx)
 
@@ -45,6 +44,7 @@ and work with no placement at all; everything else needs a regional endpoint.
 | `GetFilesystem` `DeleteFilesystem` | `UpdateSession` `DeleteSession` |
 | `ListPools` `GetPool` `ListPoolWorkers` | |
 | `CreatePool` `UpdatePool` `RenamePool` `DeletePool` `AddPoolCommitment` | |
+| `CreateAPIKey` `ListAPIKeys` `RevokeAPIKey` | |
 | `BaseURL` `ControlBaseURL` `Provider` `Region` | `GetPolicies` `SetPolicies` |
 | package-level `DiscoverRegions` | `ReadFile` `WriteFile` `SyncDir` |
 | | `ListMounts` `CreateMount` `DeleteMount` `ConnectPTY` |
@@ -62,16 +62,17 @@ Not implemented: **Dockerfile forks**. The API refuses `dockerfile` by design �
 Python and TypeScript parse it client-side and replay the steps. Go returns a
 typed error rather than sending a request that always 400s.
 
+`VM.Update` changes a policy with a `PolicyUpdate`; `Info.Policies.Update()`
+turns a policy read back into one, leaving out masked (`***`) secret values,
+which the server keeps.
+
 ## Idempotency
 
-Every `Fork` carries an `Idempotency-Key`, generated per call when you do not
-supply one, and **the same key is presented on every retry** — a fresh key per
-attempt is what turns one fork into two VMs.
-
-An auto-generated key only protects the SDK's *own* retries. If you catch an
-`UnknownOutcomeError` and retry yourself, set `ForkRequest.IdempotencyKey` to a
-value stable across processes, or the second call mints a new key and builds a
-second machine.
+A `Fork` sends an `Idempotency-Key` only when you ask: set
+`ForkRequest.Idempotency` for a key generated per call, presented on every SDK
+retry, or `ForkRequest.IdempotencyKey` for one you choose. If you catch an
+`UnknownOutcomeError` and retry yourself, use an `IdempotencyKey` stable across
+processes, or the second call forks a second VM.
 
 ```go
 key := "provision-" + installationID + "-" + machineID   // deterministic
@@ -93,9 +94,9 @@ arker.IsConflict(err)   // 409
 ```
 
 `UnknownOutcomeError` means a **mutation** failed at the transport layer, so
-whether the server acted is unknown. The SDK does not retry those: the work may
-be done, and retrying blind is how one fork becomes two VMs. Reads are retried
-normally, as are responses the server marks retryable (and 429/502/503/504).
+whether the server acted is unknown. The SDK does not retry those. Reads are
+retried on retryable errors (and 429/502/503/504); a mutation is retried only
+when it carries an idempotency key or the error says no work started.
 
 ## Sessions
 
@@ -133,7 +134,7 @@ ARKER_API_KEY=ark_... ARKER_BASE_URL=https://<env>/api \
 ```
 
 The e2e suite has **no default base URL** on purpose: it creates and deletes
-real machines, and defaulting to production would mean anyone with
+real VMs, and defaulting to production would mean anyone with
 `ARKER_API_KEY` exported for another reason silently runs it against prod. Set
 `ARKER_TEST_GOLDEN` to fork from something other than `ubuntu-base`.
 
@@ -168,9 +169,9 @@ purchase idempotency key are removed with no compatibility layer.
 Configure a regional endpoint (or provider and region) for pool operations.
 Listing pools uses the control plane across regions; use each returned pool's
 region for subsequent operations. Fork with exactly one of `pool_id` or
-`pool_name`; names are case-insensitive within a region. A fleet VM cannot be
-forked into a pool: use a supported image source instead. Pool VMs do not support
-interactive shells; use `run` for commands.
+`pool_name`; names are case-insensitive within a region. A VM from outside a
+`byoc` or `self_hosted` pool cannot be forked into it. Pool VMs do not support
+interactive shells; use `Run` for commands.
 
 `managed` and `byoc` pools request `resources` with all three quantities
 (`vcpu`, `memory_mib`, `disk_mib`), including zeros; a `self_hosted` pool's
@@ -181,8 +182,9 @@ is `creating` until its first worker is running (a `managed` pool starts
 needs setup: open `byoc.setup_url` in the specified AWS account and create the
 CloudFormation stack. A `self_hosted` pool's platform is set by its first
 worker; workers join with an API key limited to the pool,
-`c.CreateAPIKey(ctx, arker.CreateAPIKeyRequest{Scopes: []arker.APIKeyScope{{PoolID: poolID}}})`.
-Only `managed` pools take commitments.
+`client.CreateAPIKey(ctx, arker.CreateAPIKeyRequest{Name: name, Scopes: []arker.APIKeyScope{{PoolID: poolID}}})`.
+Only `managed` pools take commitments. Commitments and `self_hosted` pools are
+not enabled in every deployment yet; there they return `unsupported_operation`.
 
 Commitments last at least 24 hours, cannot overlap, and new commitments cannot
 start in the past. Started commitments must remain unchanged, including expired

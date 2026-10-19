@@ -13,7 +13,7 @@ import base64
 import os
 
 GOLDEN = os.environ.get("FLEET_GOLDEN", "ubuntu-gpu")
-# ubuntu-gpu is a public template, so its owning org must be named.
+# ubuntu-gpu is a public template owned by ArkerHQ.
 GOLDEN_ORG = os.environ.get("FLEET_GOLDEN_ORG", "ArkerHQ")
 # Only the base fork picks a platform; children inherit what it landed on, so one
 # card type serves a whole run. Comma-separated to allow more than one.
@@ -45,19 +45,17 @@ WORK = "/home/user/work"
 AGENT = "/root/agent"
 
 def policy_doc(real_key, workspace_id=""):
-    """Rewrite the Anthropic auth header; allow everything else.
-
-    First match wins. The catch-all `allow` is load-bearing: without it a
-    non-empty document denies pip and HuggingFace, and the install fails.
-    """
+    """Rewrite the Anthropic auth header. With no outbound `allow`, all other
+    egress (pip, HuggingFace) stays open."""
     headers = {"x-api-key": "${secret:%s}" % SECRET_NAME}
     if workspace_id:
         headers["anthropic-workspace-id"] = workspace_id
 
     return {
-        "policies": [
-            {
+        "rules": {
+            "anthropic": {
                 "type": "outbound",
+                "priority": 100,
                 "match": {"hosts": ["api.anthropic.com"]},
                 "action": {
                     "rewrite": {
@@ -65,8 +63,7 @@ def policy_doc(real_key, workspace_id=""):
                     }
                 },
             },
-            {"type": "outbound", "action": "allow"},
-        ],
+        },
         "secrets": {SECRET_NAME: real_key},
     }
 

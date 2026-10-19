@@ -122,8 +122,8 @@ purchase idempotency key are removed with no compatibility layer.
 Configure a regional endpoint (or provider and region) for pool operations.
 Listing pools uses the control plane across regions; use each returned pool's
 region for subsequent operations. Fork with exactly one of `pool_id` or
-`pool_name`; names are case-insensitive within a region. A fleet VM cannot be
-forked into a pool: use a supported image source instead. Pool VMs do not support
+`pool_name`; names are case-insensitive within a region. A VM from outside a
+`byoc` or `self_hosted` pool cannot be forked into it. Pool VMs do not support
 interactive shells; use `run` for commands.
 
 `managed` and `byoc` pools request `resources` with all three quantities
@@ -136,7 +136,8 @@ needs setup: open `byoc.setup_url` in the specified AWS account and create the
 CloudFormation stack. A `self_hosted` pool's platform is set by its first
 worker; workers join with an API key limited to the pool,
 `arker api-keys create --name <name> --pool-id <pool_id>`.
-Only `managed` pools take commitments.
+Only `managed` pools take commitments. Commitments and `self_hosted` pools are
+not enabled in every deployment yet; there they return `unsupported_operation`.
 
 Commitments last at least 24 hours, cannot overlap, and new commitments cannot
 start in the past. Started commitments must remain unchanged, including expired
@@ -164,7 +165,7 @@ arker pools create --type byoc --platform icelake --name ci \
 arker pools get <pool_id>
 arker pools workers <pool_id>
 arker pools update <pool_id> --file update.json
-arker pools add-commitment <pool_id> \
+arker pools add-commitment <managed_pool_id> \
   --starts-at 2027-01-01T00:00:00Z --ends-at 2027-01-02T00:00:00Z
 arker pools create --type self_hosted --name edge
 arker fork ubuntu --pool-id <pool_id>

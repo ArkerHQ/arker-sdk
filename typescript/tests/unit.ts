@@ -767,7 +767,8 @@ async function testListedVmUsesItsPlacementEndpoint(): Promise<void> {
 
   const arker = new Arker({
     apiKey: "ark_live_test",
-    baseUrl: "https://fallback.invalid/api",
+    provider: "provider-one",
+    region: "region-one",
     fetch: fetch.fetch,
     retry: false,
   });
@@ -776,10 +777,31 @@ async function testListedVmUsesItsPlacementEndpoint(): Promise<void> {
   await vms[0]!.run("printf ok");
 }
 
+async function testListedVmKeepsCustomBaseUrl(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson(
+    (method, url) => method === "GET" && url === "https://control.invalid/api/v1/vms",
+    200,
+    { vms: [{ vm_id: "vm_placed", owner_org_id: "org_1", created_at: "now", region: "region-two", provider: "provider-two" }] },
+  );
+  const arker = new Arker({
+    apiKey: "ark_live_test",
+    baseUrl: "https://feature.invalid/api",
+    controlBaseUrl: "https://control.invalid/api",
+    fetch: fetch.fetch,
+    retry: false,
+  });
+  const { vms } = await arker.listVms();
+  assert.equal(vms[0]?.baseUrl, "https://feature.invalid/api");
+  const vm = arker.vm("vm_placed", { provider: "provider-two", region: "region-two" });
+  assert.equal(vm.baseUrl, "https://feature.invalid/api");
+}
+
 function testExplicitVmHandleUsesPlacementEndpoint(): void {
   const arker = new Arker({
     apiKey: "ark_live_test",
-    baseUrl: "https://fallback.invalid/api",
+    provider: "provider-one",
+    region: "region-one",
     retry: false,
   });
   const vm = arker.vm("vm_placed", { provider: "provider-two", region: "region-two" });
@@ -1304,6 +1326,7 @@ await testPoolRefusals();
 await testPoolQuotaIsNotRetried();
 await testDiscoverRegionsRequiresNoConfiguredClient();
 await testListedVmUsesItsPlacementEndpoint();
+await testListedVmKeepsCustomBaseUrl();
 testExplicitVmHandleUsesPlacementEndpoint();
 await testListRunsUsesControlPlaneAndFilters();
 await testListVmsPreservesForkLimitFields();

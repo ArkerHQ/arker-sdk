@@ -53,8 +53,12 @@ func main() {
 			log.Fatalf("fork %s: %v", role, err)
 		}
 		vms = append(vms, vm)
-		if _, err := vm.CreateMount(ctx, fs.FilesystemID, "/mnt/shared"); err != nil {
+		mount, err := vm.CreateMount(ctx, fs.FilesystemID, "/mnt/shared")
+		if err != nil {
 			log.Fatalf("bind filesystem into %s: %v", role, err)
+		}
+		if err := waitMounted(ctx, vm, mount.MountID); err != nil {
+			log.Fatalf("mount into %s: %v", role, err)
 		}
 		fmt.Printf("%s = %s, filesystem mounted at /mnt/shared\n", role, vm.ID)
 	}
@@ -77,5 +81,31 @@ func main() {
 	}
 	for _, s := range mounts.Mounts {
 		fmt.Printf("mount %s -> %s (state %s)\n", s.MountID, s.Path, s.State)
+	}
+}
+
+// waitMounted polls a mount out of "attaching": a new mount is not yet usable.
+func waitMounted(ctx context.Context, vm *arker.VM, mountID string) error {
+	for {
+		mounts, err := vm.ListMounts(ctx, arker.ListMountsOptions{})
+		if err != nil {
+			return err
+		}
+		for _, m := range mounts.Mounts {
+			if m.MountID != mountID {
+				continue
+			}
+			switch m.State {
+			case "mounted":
+				return nil
+			case "failed":
+				return fmt.Errorf("mount failed: %s", m.StateDetail)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
 	}
 }

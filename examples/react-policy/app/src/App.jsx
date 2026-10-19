@@ -1,24 +1,26 @@
 const cliCommands = String.raw`# 1. Configure Arker
 export ARKER_API_KEY=ark_live_...
+export ARKER_PROVIDER=aws
 export ARKER_REGION=us-west-2
 test -n "$ARKER_SOURCE_VM" || { echo "set ARKER_SOURCE_VM to a source name" >&2; exit 1; }
 
 # 2. Fork the selected source VM
 VM=$(arker fork "$ARKER_SOURCE_VM" | jq -r .vm_id)
 
-# 3. Allow npm during the build
-arker policies set "$VM" >/dev/null <<'JSON'
+# 3. Allow only npm during the build
+arker update "$VM" --policies-file /dev/stdin >/dev/null <<'JSON'
 {
-  "policies": [
-    {
+  "rules": {
+    "npm": {
       "type": "outbound",
+      "priority": 100,
       "match": {
         "hosts": ["registry.npmjs.org"],
         "ports": [443]
       },
       "action": "allow"
     }
-  ]
+  }
 }
 JSON
 
@@ -31,19 +33,21 @@ arker run "$VM" "mkdir -p /workspace/react-policy && tar -xzf /tmp/react-policy.
 arker run "$VM" "cd /workspace/react-policy && npm ci --include=dev --no-audit --no-fund"
 arker run "$VM" "cd /workspace/react-policy && npm run build"
 
-# 6. Expose port 8080 and start the server
-arker policies set "$VM" >/dev/null <<'JSON'
+# 6. Expose port 8080, deny outbound, and start the server
+arker update "$VM" --policies-file /dev/stdin >/dev/null <<'JSON'
 {
-  "policies": [
-    {
+  "rules": {
+    "npm": null,
+    "no-egress": { "type": "outbound", "priority": 100, "action": "deny" },
+    "app": {
       "type": "inbound",
+      "priority": 100,
       "match": {
         "ports": [8080]
       },
-      "action": "allow",
-      "auth": "open"
+      "action": "allow"
     }
-  ]
+  }
 }
 JSON
 

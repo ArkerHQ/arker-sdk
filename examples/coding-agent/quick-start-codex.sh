@@ -19,8 +19,7 @@ trap 'arker rm "$VM" >/dev/null 2>&1 || true' EXIT
 # The selected source contains Codex, so no install is necessary.
 arker run "$VM" "printf '%s' '$OPENAI_API_KEY' | codex login --with-api-key"
 # --dangerously-bypass... skips approvals + Codex's own sandbox (safe: the VM is isolated).
-# The agent runs for minutes; a synchronous `arker run` is capped at 300s by the HTTP layer,
-# so start it in the background and poll for completion (up to arkerd's 1h exec limit).
+# The agent runs for minutes, so start it in the background and poll until the run ends.
 RID=$(arker run --time-to-background 0 "$VM" "codex exec --dangerously-bypass-approvals-and-sandbox 'create hello.py that prints hello world, then run it'" | jq -r .run_id)
-until [ "$(arker runs get --json "$VM" "$RID" 2>/dev/null | jq -r .state)" != running ]; do sleep 5; done
+until [[ "$(arker runs get --json "$VM" "$RID" 2>/dev/null | jq -r .state)" =~ ^(completed|failed|cancelled)$ ]]; do sleep 5; done
 arker runs get "$VM" "$RID" 2>/dev/null

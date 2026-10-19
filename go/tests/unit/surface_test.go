@@ -165,12 +165,16 @@ func TestPlacementDerivesTheRegionalURL(t *testing.T) {
 }
 
 func TestListedVMsCarryTheirOwnEndpoint(t *testing.T) {
-	// ListVMs aggregates across regions, so a returned handle must address the
-	// VM's OWN region. Reusing the client's endpoint would send every call for
-	// a remote VM to the wrong worker.
-	c := twoPlane(t, reject(t, "regional"), func(w http.ResponseWriter, r *http.Request) {
+	// On production, ListVMs aggregates across regions, so a returned handle
+	// must address the VM's OWN region.
+	cs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"vms":[{"vm_id":"vm_far","provider":"gcp","region":"us-central1"}]}`)
-	})
+	}))
+	t.Cleanup(cs.Close)
+	c, err := arker.New(arker.Options{APIKey: "k", Provider: "aws", Region: "us-east-1", ControlBaseURL: cs.URL})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
 	list, err := c.ListVMs(context.Background(), arker.ListVMsOptions{})
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -180,6 +184,22 @@ func TestListedVMsCarryTheirOwnEndpoint(t *testing.T) {
 	}
 	if got := list.VMs[0].BaseURL(); got != "https://gcp-us-central1.arker.ai/api" {
 		t.Fatalf("remote VM bound to %q", got)
+	}
+}
+
+func TestListedVMsKeepACustomBaseURL(t *testing.T) {
+	// A custom BaseURL (feature env, private deployment) serves every VM, so a
+	// listed handle must not route to production.
+	c := twoPlane(t, reject(t, "regional"), func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"vms":[{"vm_id":"vm_far","provider":"gcp","region":"us-central1"}]}`)
+	})
+	list, err := c.ListVMs(context.Background(), arker.ListVMsOptions{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	base, _ := c.BaseURL()
+	if got := list.VMs[0].BaseURL(); got != base {
+		t.Fatalf("listed VM bound to %q, want %q", got, base)
 	}
 }
 

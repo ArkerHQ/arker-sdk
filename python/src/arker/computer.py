@@ -332,6 +332,9 @@ class Arker:
 
         # base_url fully determines routing, so provider/region are ignored when it is set.
         base_url = base_url or _env("ARKER_BASE_URL")
+        # A custom base_url serves every VM there, so no handle may route to a
+        # production regional URL.
+        self._routes_by_placement = not base_url
         if base_url:
             provider = region = None
         else:
@@ -494,7 +497,7 @@ class Arker:
         vms = []
         for item in payload.get("vms", []):
             info = _vm_info(item)
-            placed = info.provider and info.region
+            placed = self._routes_by_placement and info.provider and info.region
             base_url = _compute_base_url(info.provider, info.region) if placed else self.base_url
             vms.append(VM(self, info.vm_id, base_url, info))
         return VmList(vms=vms, next_cursor=_optional_str(payload.get("next_cursor")))

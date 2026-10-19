@@ -7,7 +7,7 @@
 # and has it add another — building on the first.
 #
 # Prereqs: the Arker CLI (`bun add --global @arker-ai/cli`) and `jq`.
-#   ARKER_API_KEY=...  CURSOR_API_KEY=...  ./quick-start-firmware.sh
+#   ARKER_API_KEY=...  CURSOR_API_KEY=...  ARKER_SOURCE_VM=...  ./quick-start-firmware.sh
 
 set -uo pipefail
 : "${ARKER_API_KEY:?set ARKER_API_KEY (https://arker.ai/console)}"
@@ -43,12 +43,11 @@ SECTIONS {
 }'
 
 b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
-# run a command in the background and wait for it to finish. Background + poll (not a
-# synchronous `arker run`) because agent runs routinely exceed the 300s HTTP request cap.
+# run a command in the background and wait for it to finish: agent runs take minutes.
 run() {
   local rid
   rid=$(arker run --time-to-background 0 "$1" "{ set +x; } 2>/dev/null; $2" 2>/dev/null | jq -r '.run_id // empty' 2>/dev/null || true)
-  [ -n "${rid:-}" ] && until [ "$(arker runs get --json "$1" "$rid" 2>/dev/null | jq -r .state 2>/dev/null)" != running ]; do sleep 3; done
+  [ -n "${rid:-}" ] && until [[ "$(arker runs get --json "$1" "$rid" 2>/dev/null | jq -r .state 2>/dev/null)" =~ ^(completed|failed|cancelled)$ ]]; do sleep 3; done
   return 0
 }
 show() { arker run "$1" "{ set +x; } 2>/dev/null; cat $2" 2>&1 | grep -vaE '^\+\+? ' || true; }

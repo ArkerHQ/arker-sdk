@@ -1,6 +1,6 @@
 // Package arker is the Go client for the Arker VM API. Its surface mirrors the
 // Python and TypeScript SDKs: a Client for org-wide calls, and a VM handle for
-// everything scoped to one machine.
+// everything scoped to one VM.
 //
 //	client, _ := arker.New(arker.Options{APIKey: os.Getenv("ARKER_API_KEY")})
 //	vm, _ := client.Fork(ctx, arker.ForkRequest{SourceVMName: "ubuntu-base"})
@@ -49,8 +49,8 @@ var retryableCodes = map[string]bool{
 }
 
 // 429 and 503 are refusals -- the origin did no work. 502 and 504 are gateway
-// errors where it may already have acted, and are only safe to retry because
-// Fork carries an Idempotency-Key.
+// errors where it may already have acted, so a mutation is resent on them only
+// with an Idempotency-Key or when the error says no work started.
 var retryableStatus = map[int]bool{429: true, 502: true, 503: true, 504: true}
 
 // PlainPTYEnv makes a PTY emit plain text. The usual consumer of a PTY here is

@@ -13,7 +13,7 @@
 import { Arker } from "../src/index.js";
 
 async function main() {
-  const ar = new Arker(); // reads ARKER_API_KEY + ARKER_REGION/ARKER_BASE_URL
+  const ar = new Arker(); // reads ARKER_API_KEY and ARKER_PROVIDER + ARKER_REGION or ARKER_BASE_URL
 
   const arg = process.argv[2];
   const source = process.env.ARKER_SOURCE_VM;
@@ -25,22 +25,20 @@ async function main() {
   const stdout = process.stdout;
   let closed = false;
 
-  const pty = await vm.createPty({
-    cols: stdout.columns ?? 80,
-    rows: stdout.rows ?? 24,
-    onData: (bytes) => stdout.write(bytes),
-    onExit: () => {
-      closed = true;
-      if (stdin.isTTY) try { stdin.setRawMode(false); } catch {}
-      process.exit(0);
-    },
+  const pty = await vm.connectPty({ cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 });
+  pty.onData((bytes) => stdout.write(bytes));
+  pty.onClose(() => {
+    closed = true;
+    if (stdin.isTTY) try { stdin.setRawMode(false); } catch {}
+    process.exit(0);
   });
+  await pty.ready;
 
   if (stdin.isTTY) stdin.setRawMode(true);
   stdin.resume();
-  stdin.on("data", (c: Buffer) => { if (!closed) void pty.sendInput(new Uint8Array(c)); });
+  stdin.on("data", (c: Buffer) => { if (!closed) pty.send(new Uint8Array(c)); });
   stdout.on("resize", () => {
-    if (!closed) void pty.resize({ cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 });
+    if (!closed) pty.resize(stdout.columns ?? 80, stdout.rows ?? 24);
   });
 
   console.error("[connected] you're in the VM. Try: claude  (install first if needed)");

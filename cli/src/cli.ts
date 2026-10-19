@@ -700,12 +700,13 @@ function clientFromArgs(
   if (!apiKey) {
     die("Missing API key. Set ARKER_API_KEY or add apiKey to ~/.arker/config.json.");
   }
-  const resolvedBaseUrl = baseUrl ?? (requiresComputePlacement ? undefined : controlBaseUrl ?? "https://arker.ai/api");
+  // A partial placement only matters to compute commands, which died above.
+  const placed = Boolean(provider && configuredRegion);
   return new Arker({
     apiKey,
-    baseUrl: resolvedBaseUrl,
-    region: requiresComputePlacement ? configuredRegion : undefined,
-    provider: requiresComputePlacement ? provider : undefined,
+    baseUrl,
+    region: placed ? configuredRegion : undefined,
+    provider: placed ? provider : undefined,
     controlBaseUrl,
   });
 }

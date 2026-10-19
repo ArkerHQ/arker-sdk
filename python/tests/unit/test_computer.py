@@ -738,13 +738,47 @@ def test_listed_vm_uses_its_placement_endpoint() -> None:
 
     arker = sdk.Arker(
         api_key="ark_live_test",
-        base_url="https://fallback.invalid/api",
+        provider="provider-one",
+        region="region-one",
         retry=False,
     )
     with use_transport(t):
         result = arker.list_vms()
         assert result.vms[0].base_url == "https://provider-two-region-two.arker.ai/api"
         result.vms[0].run("printf ok")
+
+
+def test_listed_vm_keeps_custom_base_url() -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "GET" and url == "https://control.invalid/api/v1/vms",
+        200,
+        {
+            "vms": [
+                {
+                    "vm_id": "vm_placed",
+                    "owner_org_id": "org_1",
+                    "created_at": "now",
+                    "description": None,
+                    "public": False,
+                    "state": "idle",
+                    "region": "region-two",
+                    "provider": "provider-two",
+                    "network": {},
+                    "sessions": [],
+                    "resources": {},
+                }
+            ]
+        },
+    )
+    arker = sdk.Arker(
+        api_key="ark_live_test",
+        base_url="https://feature.invalid/api",
+        control_base_url="https://control.invalid/api",
+        retry=False,
+    )
+    with use_transport(t):
+        assert arker.list_vms().vms[0].base_url == "https://feature.invalid/api"
 
 
 def test_list_runs_uses_control_plane_and_filters() -> None:

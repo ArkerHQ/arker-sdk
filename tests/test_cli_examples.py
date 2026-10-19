@@ -49,7 +49,7 @@ def test_run_status_piped_to_jq_uses_json_output() -> None:
 def test_policies_example_uses_cli_policy_commands() -> None:
     source = (EXAMPLES_DIR / "policies" / "quick-start-policies.sh").read_text()
 
-    assert "arker policies set" in source
+    assert "arker update \"$VM\" --policies-file" in source
     assert "arker policies get" in source
     assert "curl -fsS -X PUT" not in source
     assert "ARKER_REGION" not in source
@@ -61,7 +61,7 @@ def test_browser_example_does_not_wait_for_window_manager_activation() -> None:
     assert "windowactivate --sync" not in source
     assert 'arker run --time-to-background 0 "$VM" "open-url' in source
     assert "curl -fsS -X PATCH" not in source
-    assert 'arker policies set "$ck"' in source
+    assert 'arker update "$ck" --policies-file' in source
 
 
 def test_gpu_coding_agents_quickstart_installs_python_sdk() -> None:

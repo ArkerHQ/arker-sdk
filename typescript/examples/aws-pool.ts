@@ -1,4 +1,4 @@
-import { Arker } from "@arker-ai/sdk";
+import { Arker } from "../src/index.js";
 
 const client = new Arker({ provider: "aws", region: "us-west-2" });
 const accountId = process.env.AWS_POOL_ACCOUNT_ID;

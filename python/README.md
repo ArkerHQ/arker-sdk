@@ -35,7 +35,7 @@ arker = Arker()
 vm = arker.fork(source_vm_name="ubuntu-coding")
 
 result = vm.run("python3 -c 'print(2 + 2)'")
-print(result.stdout.decode())
+print(result.stdout)
 
 vm.sync("/tmp/hello.txt", "hello from Arker")
 print(vm.sync("/tmp/hello.txt").decode())
@@ -63,8 +63,8 @@ purchase idempotency key are removed with no compatibility layer.
 Configure a regional endpoint (or provider and region) for pool operations.
 Listing pools uses the control plane across regions; use each returned pool's
 region for subsequent operations. Fork with exactly one of `pool_id` or
-`pool_name`; names are case-insensitive within a region. A fleet VM cannot be
-forked into a pool: use a supported image source instead. Pool VMs do not support
+`pool_name`; names are case-insensitive within a region. A VM from outside a
+`byoc` or `self_hosted` pool cannot be forked into it. Pool VMs do not support
 interactive shells; use `run` for commands.
 
 `managed` and `byoc` pools request `resources` with all three quantities
@@ -76,8 +76,9 @@ is `creating` until its first worker is running (a `managed` pool starts
 needs setup: open `byoc.setup_url` in the specified AWS account and create the
 CloudFormation stack. A `self_hosted` pool's platform is set by its first
 worker; workers join with an API key limited to the pool,
-`ar.create_api_key(name=..., scopes=[{"pool_id": pool_id}])`.
-Only `managed` pools take commitments.
+`arker.create_api_key(name=..., scopes=[{"pool_id": pool_id}])`.
+Only `managed` pools take commitments. Commitments and `self_hosted` pools are
+not enabled in every deployment yet; there they return `unsupported_operation`.
 
 Commitments last at least 24 hours, cannot overlap, and new commitments cannot
 start in the past. Started commitments must remain unchanged, including expired
@@ -99,22 +100,22 @@ failure, inspect the pool list before creating again.
 ```python
 from arker import CreateManagedPoolRequest, PoolResources, PoolCommitment
 
-pool = client.create_pool(
+pool = arker.create_pool(
     CreateManagedPoolRequest(
         type="managed",
         platform="icelake",
         resources=PoolResources(vcpu=8, memory_mib=32768, disk_mib=102400),
     )
 )
-client.add_pool_commitment(
+arker.add_pool_commitment(
     pool.pool_id,
     PoolCommitment(
         starts_at="2027-01-01T00:00:00Z",
         ends_at="2027-01-02T00:00:00Z",
     ),
 )
-client.fork(image="ubuntu", pool_id=pool.pool_id)
-client.rename_pool(pool.pool_id, None)  # Clear the name.
+arker.fork(image="ubuntu", pool_id=pool.pool_id)
+arker.rename_pool(pool.pool_id, None)  # Clear the name.
 ```
 
 `update_pool` accepts `UpdatePoolRequest` or a dictionary. Dataclass fields set

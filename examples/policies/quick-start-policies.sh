@@ -2,9 +2,9 @@
 #
 # Policies as code — quick start (host-enforced egress policy)
 #
-# Forks a caller-selected source and attaches an ordered list of outbound
-# rules (allow / deny / rewrite / gate), enforced in the host network path so a
-# process in the VM can't escape it.
+# Forks a caller-selected source and attaches outbound rules (rewrite / deny /
+# allow), enforced in the host network path so a process in the VM can't
+# escape it.
 #
 # Prereqs: the Arker CLI (`bun add --global @arker-ai/cli`) and `jq`.
 
@@ -18,16 +18,17 @@ echo "forked $VM"
 trap 'arker rm "$VM" >/dev/null 2>&1 || true' EXIT
 
 # rewrite httpbin.org (inject a secret, strip the guest's authorization) · deny
-# openai.com · allow the rest. The injected credential is stored on the host
-# (encrypted, redacted on read); the guest never sees it.
-arker policies set "$VM" >/dev/null <<'JSON'
+# openai.com · allow the rest. The secret is stored on the host (encrypted,
+# read back as ***); the guest never holds it.
+arker update "$VM" --policies-file /dev/stdin >/dev/null <<'JSON'
 {
-    "policies": [
-      {"type":"outbound","match":{"hosts":["httpbin.org"]},
-       "action":{"rewrite":{"headers":{"x-api-key":"sk-demo-the-guest-never-sees-this"},"remove_headers":["authorization"]}}},
-      {"type":"outbound","match":{"hosts":["openai.com"]},"action":"deny"},
-      {"type":"outbound","action":"allow"}
-    ]
+  "secrets": {"DEMO_KEY": "sk-demo-the-guest-never-sees-this"},
+  "rules": {
+    "httpbin": {"type":"outbound","priority":300,"match":{"hosts":["httpbin.org"]},
+                "action":{"rewrite":{"headers":{"x-api-key":"${secret:DEMO_KEY}"},"remove_headers":["authorization"]}}},
+    "no-openai": {"type":"outbound","priority":200,"match":{"hosts":["openai.com"]},"action":"deny"},
+    "rest": {"type":"outbound","priority":100,"action":"allow"}
+  }
 }
 JSON
 arker policies get "$VM" >/dev/null

@@ -7,7 +7,7 @@
 
 Run from the repository root:
 
-    ARKER_API_KEY=ark_live_... ./examples/react-policy/quick_start.py
+    ARKER_API_KEY=ark_live_... ARKER_SOURCE_VM=<name> ./examples/react-policy/quick_start.py
 """
 
 import os
@@ -23,27 +23,32 @@ LOCAL_APP = Path(__file__).parent / "app"
 REMOTE_APP = "/workspace/react-policy"
 
 BUILD_POLICY = {
-    "policies": [
-        {
+    "rules": {
+        "npm": {
             "type": "outbound",
+            "priority": 100,
             "match": {
                 "hosts": ["registry.npmjs.org"],
                 "ports": [443],
             },
             "action": "allow",
         }
-    ]
+    }
 }
 
+# Outbound is blocked only while an outbound allow exists, so removing the npm
+# rule alone would reopen egress; deny it instead.
 PUBLIC_POLICY = {
-    "policies": [
-        {
+    "rules": {
+        "npm": None,
+        "no-egress": {"type": "outbound", "priority": 100, "action": "deny"},
+        "app": {
             "type": "inbound",
+            "priority": 100,
             "match": {"ports": [APP_PORT]},
             "action": "allow",
-            "auth": "open",
-        }
-    ]
+        },
+    }
 }
 
 
@@ -56,7 +61,7 @@ def main() -> None:
         print(f"1. Forking {source_vm}")
         print("   Build policy: allow registry.npmjs.org:443")
         print('   $ arker fork "$ARKER_SOURCE_VM"')
-        print("   $ arker policies set $VM  # allow registry.npmjs.org:443")
+        print("   $ arker update $VM --policies-file build-policy.json")
         vm = arker.fork(
             source_vm_name=source_vm,
             name="react-policy-demo",
@@ -93,20 +98,20 @@ def main() -> None:
             raise RuntimeError(build.stderr.strip())
 
         print(f"\n4. Exposing the app on port {APP_PORT}")
-        print(f"   Runtime policy: allow public inbound traffic on :{APP_PORT}")
-        print(f"   $ arker policies set $VM  # allow public inbound on :{APP_PORT}")
+        print(f"   Runtime policy: allow public inbound traffic on :{APP_PORT}, deny outbound")
+        print("   $ arker update $VM --policies-file public-policy.json")
         print(f"   $ arker sessions create $VM --cwd {REMOTE_APP}")
         print(
             "   $ arker run --session-id $SESSION --time-to-background 0 --timeout 0"
             ' $VM "exec node server.mjs"'
         )
+        vm.update(policies=PUBLIC_POLICY)
         session = vm.create_session(cwd=REMOTE_APP)
         server = vm.run(
             "exec node server.mjs",
             session_id=session.session_id,
             time_to_background=0,
             timeout=0,
-            policies=PUBLIC_POLICY,
         )
 
         # Wait until the server accepts connections before checking it publicly.
@@ -145,7 +150,7 @@ def main() -> None:
         )
         if lockdown.exit_code == 0:
             raise RuntimeError("Outbound traffic is unexpectedly still allowed")
-        print("   Blocked, as intended: the runtime policy has no outbound rule.")
+        print("   Blocked, as intended: the runtime policy denies outbound traffic.")
 
     except BaseException:
         if vm is not None:
