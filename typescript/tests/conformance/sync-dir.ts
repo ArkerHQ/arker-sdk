@@ -1,5 +1,5 @@
 /**
- * Behavioral conformance test for VM.syncDir (ARK-268).
+ * Behavioral conformance test for VM.syncDir.
  *
  * Exercises the SDK's rsync-style directory sync end-to-end against a live VM:
  *   fork -> full sync -> repeat (delta=0) -> edit one file (delta=1) ->
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
     writeFileSync(join(local, "c.txt"), new TextEncoder().encode("charlie\n"));
     eq(await vm.syncDir(local, remote), 1, 3, "add-file sync");
 
-    // 6) The accelerator cache is a pure optimization — same delta result.
+    // 6) The accelerator cache is a pure optimization - same delta result.
     const cache = new Map();
     eq(await vm.syncDir(local, remote, { cache }), 0, 4, "cached repeat sync");
 

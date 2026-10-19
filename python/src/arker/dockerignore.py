@@ -1,26 +1,10 @@
 """`.dockerignore` matching for the build context.
 
-`COPY . /app` without this ships `.git` and `.env` into the VM. That is not
-only wasteful — a repo's `.git/config` carries push credentials and a `.env`
-carries whatever the project keeps there — so the file is a correctness AND a
-disclosure concern, not a performance tweak.
-
-## Semantics
-
-Docker's, with the parts real files actually use:
-
 * One pattern per line; blank lines and `#` comments ignored.
 * Paths are matched relative to the context root, with `/` separators.
 * `*` and `?` match within one path segment; `**` matches across segments.
-* A leading `/` is stripped — every pattern is already context-relative.
-* A pattern that matches a DIRECTORY excludes everything under it, which is
-  what makes a bare `node_modules` do what everyone expects.
-* `!` negates, and the LAST matching pattern wins. That ordering is the whole
-  reason `*` followed by `!keep.txt` works.
-
-Deliberately not implemented: `\\` escaping of a leading `!` or `#`. Nothing
-writes those, and guessing at them silently would be worse than leaving them
-as literal characters.
+* Leading `/` is stripped; directory matches include descendants.
+* `!` negates, and the last matching pattern wins.
 """
 
 from __future__ import annotations

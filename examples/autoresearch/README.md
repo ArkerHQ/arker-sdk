@@ -27,9 +27,9 @@ Result:
 ```
 results -> results/20260819-194048-4agents-2turns
 [19:40:49] === vgpu0.25: 4 agents x 0.25 vGPU, 2 turns each ===
-[19:44:31] prep ready — forking 4 agents
+[19:44:31] prep ready - forking 4 agents
 [19:44:33] agent1 turn 1/2 started
-[19:45:01] agent1 turn 1/2 done in 28s — val_loss 3.6545
+[19:45:01] agent1 turn 1/2 done in 28s - val_loss 3.6545
 ```
 
 To take a closer look at how Arker works, read `autoresearch.py` and read the [docs](https://arker.ai/docs) for `fork`, `run`, `sync` for the general primitives that make GPU virtualization work.

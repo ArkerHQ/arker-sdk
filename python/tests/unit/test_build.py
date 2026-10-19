@@ -1,8 +1,8 @@
 """The build driver: walking parsed instructions against a VM.
 
 These tests use a fake VM that records calls, so they cover the part that is
-actually ours — ordering, shell state, and how COPY resolves against the build
-context — without needing a real VM.
+actually ours - ordering, shell state, and how COPY resolves against the build
+context - without needing a real VM.
 """
 
 from __future__ import annotations
@@ -269,7 +269,7 @@ def test_env_with_a_variable_reference_expands(context):
     """`ENV PATH=/opt/bin:$PATH` is one of the most common Dockerfile lines.
 
     Single-quoting the value set the literal string `$PATH`, breaking every
-    later RUN and every run() the customer makes — with a "command not found"
+    later RUN and every run() the customer makes - with a "command not found"
     three steps away from the cause.
     """
     vm = build("FROM x\nENV PATH=/opt/bin:$PATH\n", context)
@@ -363,12 +363,7 @@ def test_add_checksum_match_is_accepted(context, monkeypatch):
 
 
 def test_copy_dir_to_a_relative_dest_resolves_against_workdir(context):
-    """MEASURED on aider-polyglot: `WORKDIR /app` + `COPY workspace/ ./`.
-
-    `dest.rstrip("/")` turns "./" into ".", which normalises to no path
-    components at all, and the API rejects it with `path must name a file`.
-    Docker resolves a relative destination against the current WORKDIR.
-    """
+    """Relative COPY destinations resolve against WORKDIR."""
     vm = build("FROM x\nWORKDIR /app\nCOPY src/ ./\n", context)
     dests = [c[2] for c in vm.calls if c[0] == "sync_dir"]
     assert dests == ["/app"], dests

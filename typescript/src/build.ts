@@ -1,36 +1,6 @@
-/**
- * Drive a parsed Dockerfile against a VM.
- *
- * `FROM` is not executed here: the caller forks from it through the ordinary
- * server-side image path, which owns the registry pull, the OCI to ext4
- * conversion and the template cache. Everything after it is walked by
- * {@link applySteps} against the resulting VM.
- *
- * ## Shell state
- *
- * `ENV`, `WORKDIR` and `ARG`-with-a-default run real `export`/`cd` commands
- * rather than prefixing every later command. A VM session keeps its exported
- * environment and working directory between runs, so one `export` sticks for
- * each subsequent `RUN` and for the caller's own `run()` calls on the VM they
- * get back. Prefixing would have lost that state the moment the build ended.
- *
- * `USER` is the exception: there is no per-session "become this user", so each
- * later `RUN` is wrapped in `su -p`. `USER` therefore affects the build but
- * does not carry onto the delivered VM, which is a real divergence from Docker
- * and is documented rather than hidden.
- *
- * ## COPY
- *
- * Sources resolve against the build context root and transfer through the VM's
- * own file APIs: a directory via `syncDir` (manifest-diffed, so a rebuild sends
- * only what changed), a single file via `sync`. No shell is involved, so there
- * is nothing to quote and the paths never reach a command line.
- *
- * `COPY` runs unwrapped, outside any `USER` shell: Docker writes copied files
- * as root unless `--chown` says otherwise, and the transfer APIs write as the
- * guest agent rather than a session user. `--chown` is applied afterwards as an
- * explicit `chown -R`.
- */
+/** Apply parsed Dockerfile instructions to a VM.
+ * ENV and WORKDIR persist in the build session. USER applies to subsequent RUN
+ * instructions. COPY resolves sources from the local build context. */
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -58,20 +28,7 @@ export type BuildTarget = {
   syncDir(localDir: string, remoteDir: string, options?: Record<string, unknown>): Promise<unknown>;
 };
 
-/**
- * Quote an `ENV`/`ARG` value for `export`.
- *
- * A value containing `$` is DOUBLE-quoted so the guest shell expands it.
- * `ENV PATH=/opt/bin:$PATH` is one of the most common lines in any Dockerfile,
- * and single-quoting it sets the literal string `$PATH` — breaking every later
- * `RUN` and every `run()` the customer makes, with a "command not found" three
- * steps away from the cause.
- *
- * The trade-off is deliberate: double quotes make the value an expansion
- * context, so `$(...)` would also run. That is guest-side, where `RUN` already
- * grants arbitrary execution, so it costs nothing already spent. Backslash,
- * backtick and `"` are escaped so the value cannot break out of the quoting.
- */
+/** Quote an ENV or ARG value while preserving shell expansion. */
 function envValue(value: string): string {
   if (!value.includes("$")) return shellQuote(value);
   const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/`/g, "\\`");
@@ -83,14 +40,7 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-/**
- * Resolve one COPY source against the context, expanding globs.
- *
- * Globs expand HERE, against the local filesystem, never by a shell. That
- * removes the whole class of quoting and metacharacter problems a shell-side
- * expansion carries, and an unmatched glob becomes a clear error rather than a
- * literal path that fails later.
- */
+/** Resolve and expand a COPY source without invoking a shell. */
 function resolveSources(source: string, contextRoot: string): string[] {
   const root = fs.realpathSync(contextRoot);
   const full = nodePath.resolve(root, source);
@@ -161,18 +111,7 @@ function destinationFor(dest: string, sourcePath: string, multiple: boolean): st
   return dest;
 }
 
-/**
- * Run `command` and abort the build unless it succeeded.
- *
- * Docker fails a build on a non-zero `RUN`, and the reason is not tidiness: a
- * build that continues past a failure applies every later instruction on top of
- * it and hands back a VM that looks built and is not. `RUN npm install` failing
- * must not produce a "successful" image with no node_modules.
- *
- * A missing exit code is also a failure. It means a prompt ended the command
- * rather than its completion marker — an interpreter left running by an earlier
- * instruction swallowed it — so the command never ran at all.
- */
+/** Run a build command and require a successful exit code. */
 async function runChecked(
   vm: BuildTarget,
   command: string,
@@ -242,8 +181,7 @@ export async function applySteps(
         currentUser = step.name;
         continue;
       case "add": {
-        // Fetched here, then written like a COPY: the guest needs no network
-        // tooling and no shell for this at all.
+        // Fetch ADD URLs locally, then write the result to the destination.
         let payload: Uint8Array;
         try {
           const response = await fetch(step.url, { signal: AbortSignal.timeout(30_000) });
@@ -264,17 +202,12 @@ export async function applySteps(
       case "expose":
       case "entrypoint":
       case "cmd":
-        // Recorded by the parser, no effect on a VM: nothing invokes a VM the
-        // way `docker run` invokes an entrypoint, and there is no
-        // `docker inspect` surface for LABEL/EXPOSE to configure.
+        // Parsed metadata instructions have no runtime effect.
         continue;
     }
 
     if (command === undefined) continue;
-    // Only a RUN needs to become the USER. Wrapping `export`/`cd` would run
-    // them in a `su -c` subshell that exits immediately, throwing the state
-    // away — so `ENV` after `USER` silently did nothing at all. Docker treats
-    // ENV/WORKDIR as metadata that USER does not affect.
+    // USER applies to RUN; ENV and WORKDIR must persist in the session.
     if (currentUser !== undefined && step.kind === "run") {
       command = `su -p ${shellQuote(currentUser)} -c ${shellQuote(command)}`;
     }

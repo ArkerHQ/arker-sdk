@@ -8,12 +8,6 @@ handle for everything scoped to one VM.
 go get github.com/ArkerHQ/arker-sdk/go
 ```
 
-There is no registry upload: `proxy.golang.org` fetches straight from the repo,
-and a `go/vX.Y.Z` git tag is what makes a version exist. That prefix is required:
-Go resolves a module in a subdirectory only from `<subdir>/vX.Y.Z`. Releasing is
-deliberately manual: bump `go/VERSION`, then run the `Publish Go` workflow and
-type that version to confirm. A Go tag is immutable once the proxy fetches it.
-
 ```go
 client, err := arker.New(arker.Options{})       // ARKER_API_KEY, ARKER_PROVIDER, ARKER_REGION
 vm, err := client.Fork(ctx, arker.ForkRequest{SourceVMName: "ubuntu-base"})
@@ -28,11 +22,8 @@ fmt.Print(out.Stdout)
 `New` reads `ARKER_API_KEY`, `ARKER_BASE_URL`, `ARKER_CONTROL_BASE_URL`,
 `ARKER_PROVIDER` and `ARKER_REGION`, and explicit `Options` win over all of them.
 
-Placement works exactly as in the other SDKs. `BaseURL` fully determines
-routing, so `Provider` and `Region` are ignored when it is set; supply either
-`BaseURL` or *both* `Provider` and `Region`. Org-wide calls — `ListVMs`,
-`ListRuns`, `ListRegions`, `Whoami` and `ListPools` — reach the control plane
-and work with no placement at all; everything else needs a regional endpoint.
+`BaseURL` overrides `Provider` and `Region`; otherwise provide both. Org-wide
+calls do not require a placement. VM operations require a regional endpoint.
 
 ## Surface
 
@@ -49,8 +40,7 @@ and work with no placement at all; everything else needs a regional endpoint.
 | package-level `DiscoverRegions` | `ReadFile` `WriteFile` `SyncDir` |
 | | `ListMounts` `CreateMount` `DeleteMount` `ConnectPTY` |
 
-Two deliberate differences from Python and TypeScript, both because Go has no
-optional arguments and no union return:
+Two differences from Python and TypeScript follow Go's type system:
 
 - **`ReadFile` / `WriteFile`** rather than one `sync(path, data?)`. Splitting
   them also removes the nil-versus-empty ambiguity when writing a zero-length
@@ -58,9 +48,7 @@ optional arguments and no union return:
 - **`Run` returns one `*RunResult`** with a `Type` of `"completed"` or
   `"background"` (`out.Completed()`), rather than a union of two result types.
 
-Not implemented: **Dockerfile forks**. The API refuses `dockerfile` by design —
-Python and TypeScript parse it client-side and replay the steps. Go returns a
-typed error rather than sending a request that always 400s.
+Dockerfile forks are not supported by the Go SDK.
 
 `VM.Update` changes a policy with a `PolicyUpdate`; `Info.Policies.Update()`
 turns a policy read back into one, leaving out masked (`***`) secret values,
@@ -68,20 +56,18 @@ which the server keeps.
 
 ## Idempotency
 
-A `Fork` sends an `Idempotency-Key` only when you ask: set
-`ForkRequest.Idempotency` for a key generated per call, presented on every SDK
-retry, or `ForkRequest.IdempotencyKey` for one you choose. If you catch an
-`UnknownOutcomeError` and retry yourself, use an `IdempotencyKey` stable across
-processes, or the second call forks a second VM.
+A `Fork` sends an `Idempotency-Key` only when you set `ForkRequest.Idempotency`
+(a key per call, reused on SDK retries) or `ForkRequest.IdempotencyKey`. To retry
+an `UnknownOutcomeError` yourself, use a stable `IdempotencyKey`, or you fork a
+second VM.
 
 ```go
 key := "provision-" + installationID + "-" + machineID   // deterministic
 vm, err := client.Fork(ctx, arker.ForkRequest{SourceVMName: "ubuntu-base", IdempotencyKey: key})
 ```
 
-A key is **one-shot**: it stays bound to the VM it created, so replaying a key
-whose VM was deleted returns 404 rather than forking again. Reusing a key for a
-*different* request is a 409 (`arker.IsConflict`).
+A key remains bound to its request. Reusing it for a different request returns
+409 (`arker.IsConflict`).
 
 ## Errors
 
@@ -89,7 +75,7 @@ whose VM was deleted returns 404 rather than forking again. Reusing a key for a
 var apiErr *arker.Error
 if errors.As(err, &apiErr) { /* branch on apiErr.Code, never on Message */ }
 
-arker.IsNotFound(err)   // 404 — ORG-SCOPED: another org's VM is indistinguishable from one that never existed
+arker.IsNotFound(err)   // 404
 arker.IsConflict(err)   // 409
 ```
 
@@ -102,7 +88,7 @@ when it carries an idempotency key or the error says no work started.
 
 Sessions are tabs: each keeps its own working directory, environment and
 history, and each handles one run at a time. `SessionIdx` is find-or-create, and
-**omitting it means index 0** — where a plain `Run` also lands. A run entering a
+**omitting it means index 0** - where a plain `Run` also lands. A run entering a
 session that holds a live foreground process interrupts it, so give anything
 long-lived its own session and probe from another.
 
@@ -117,31 +103,10 @@ API returns a background ack and `Run` polls it to a terminal state for you.
 Pass `TimeToBackground: arker.Ptr(0)` to get the ack immediately and poll
 `GetRun` yourself.
 
-## Layout
-
-```
-go/
-  *.go              the arker package
-  examples/         fork-run, pty, sync-dir, filesystems
-  tests/unit/       hermetic, httptest-backed — go test ./tests/unit/
-  tests/e2e/        against a live deployment — see below
-```
-
-```bash
-go test ./tests/unit/                                    # no network
-ARKER_API_KEY=ark_... ARKER_BASE_URL=https://<env>/api \
-  go test -v -timeout 30m ./tests/e2e/                   # creates real VMs
-```
-
-The e2e suite has **no default base URL** on purpose: it creates and deletes
-real VMs, and defaulting to production would mean anyone with
-`ARKER_API_KEY` exported for another reason silently runs it against prod. Set
-`ARKER_TEST_GOLDEN` to fork from something other than `ubuntu-base`.
-
 ## Interactive PTY
 
 `ConnectPTY` opens a terminal over a WebSocket. The connection outlives the
-context passed in — that context bounds the dial only — so use `Close` to
+context passed in - that context bounds the dial only - so use `Close` to
 detach and `Kill` to destroy the shell.
 
 ```go
@@ -163,9 +128,6 @@ Pools require the per-organization pools flag; a disabled organization receives
 `404 not_found`. The three pool types are `managed` (Arker's multi-cloud
 compute), `byoc` (workers Arker launches in your cloud account), and
 `self_hosted` (BLAST workers you run).
-This replaces pools v1 and the earlier BYOC API: quotes, fixed purchase terms, prices, and the
-purchase idempotency key are removed with no compatibility layer.
-
 Configure a regional endpoint (or provider and region) for pool operations.
 Listing pools uses the control plane across regions; use each returned pool's
 region for subsequent operations. Fork with exactly one of `pool_id` or

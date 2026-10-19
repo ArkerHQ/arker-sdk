@@ -1,8 +1,8 @@
 /**
- * Throughput bench for VM.syncDir DELTA path (ARK-268).
+ * Throughput benchmark for VM.syncDir delta sync.
  *
  * The companion of sync-dir-bench.ts (which measures the FULL first-push). This
- * one measures the incremental/rsync-style path — the reason syncDir exists:
+ * one measures the incremental/rsync-style path - the reason syncDir exists:
  *
  *   1. FULL   sync of an N-file tree            -> assert sent=N   (baseline)
  *   2. REPEAT with no local change              -> assert sent=0   (delta)
@@ -11,16 +11,10 @@
  * The delta round-trip is one op="manifest" fetch + a local (size,mtime)-cached
  * diff; with nothing changed the guest is never touched and ZERO bytes upload.
  * We report delta files/s (files diffed per second on the no-change repeat) and
- * the delta-vs-full speedup (full_s / repeat_s) — the win a warm re-sync buys.
+ * the delta-vs-full speedup (full_s / repeat_s) - the win a warm re-sync buys.
  *
- * ── REQUIRES THE SERVER MANIFEST-FRESHNESS FIX ──────────────────────────────
- * The `sent=0` repeat only holds once the server-side manifest is flush-consistent
- * for a running VM (quiesce/FIFREEZE-then-read, so op="manifest" reflects the
- * guest's own tar-x writes rather than a stale host rootfs.xfs). Without that fix
- * a back-to-back second syncDir re-sends everything (sent=N) and this bench fails
- * the `sent=0` assertion by design — that failure IS the signal the fix is not
- * deployed on the target host. See sync-dir-bench.ts's header for the full
- * host-flush-lag story.
+ * The `sent=0` repeat verifies that a completed sync is immediately visible to
+ * the next sync. The benchmark fails rather than reporting misleading results.
  *
  * SKIP-tolerant: with ARKER_API_KEY / ARKER_BASE_URL unset it prints SKIP and
  * exits 0. Self-cleaning: it tracks the VM ids it forks and deletes only those.
@@ -95,7 +89,7 @@ async function main(): Promise<void> {
     // Warm the guest so cold-boot doesn't pollute the first sync timing.
     await vm.sync(`/home/user/.bench-warm`, "warm");
 
-    // A caller-owned accelerator cache reused across all three calls — the
+    // A caller-owned accelerator cache reused across all three calls - the
     // realistic warm-resync pattern: full populates it, delta reuses it (no
     // re-hash of unchanged files), so the repeat measures the pure manifest RTT.
     const cache = new Map<string, { size: number; mtimeMs: number; hash: string }>();
@@ -113,7 +107,7 @@ async function main(): Promise<void> {
     const repeatS = now() - r0;
     assert(
       repeat.sent === 0,
-      `repeat (delta) sync: expected sent=0, got sent=${repeat.sent} skipped=${repeat.skipped} — ` +
+      `repeat (delta) sync: expected sent=0, got sent=${repeat.sent} skipped=${repeat.skipped} - ` +
         `the server manifest-freshness fix is likely NOT deployed on this host ` +
         `(op="manifest" returned a stale/empty manifest, so unchanged files re-sent). See header.`,
     );

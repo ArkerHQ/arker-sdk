@@ -25,8 +25,7 @@ def run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         cwd=REPO_ROOT,
         check=check,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
 
 
@@ -140,7 +139,7 @@ def test_sdk_runtime_uses_only_current_public_error_codes() -> None:
 
 
 def test_retired_vm_pin_is_not_in_the_public_sdk_contract() -> None:
-    field = "_".join(("keep", "alive"))
+    field = "keep_alive"
     contract = json.loads((REPO_ROOT / "openapi.json").read_text())
     schemas = contract["components"]["schemas"]
 
@@ -209,7 +208,7 @@ def test_public_surface_uses_only_current_names_and_copy() -> None:
     }
     for name in removed_exports:
         assert f"export type {name}" not in typescript
-    for name in {"RunStatusResponse", "SessionInfo", "VmInfo", "VmSummary"}:
+    for name in ("RunStatusResponse", "SessionInfo", "VmInfo", "VmSummary"):
         assert f'"{name}"' not in python_init
 
     transition_terms = re.compile(

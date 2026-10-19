@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Policies as code — quick start (host-enforced egress policy)
+# Policies as code - quick start (host-enforced egress policy)
 #
 # Forks a caller-selected source and attaches outbound rules (rewrite / deny /
 # allow), enforced in the host network path so a process in the VM can't

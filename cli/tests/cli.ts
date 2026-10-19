@@ -318,7 +318,7 @@ async function testForkAndUpdateSelectPools(): Promise<void> {
 }
 
 /// `--vgpu` is the only fractional resource flag, so it exercises the number
-/// option type as well as the fork wiring — an integer-only parser would have
+/// option type as well as the fork wiring - an integer-only parser would have
 /// refused `0.25` outright.
 async function testForkForwardsVgpu(): Promise<void> {
   await withCapturedServer(
@@ -352,7 +352,7 @@ async function testForkForwardsVgpu(): Promise<void> {
   }
 
   // Off the ladder, out of range, and non-numeric must all fail before any
-  // request is made — the server enforces the ladder, so spending a round trip
+  // request is made - the server enforces the ladder, so spending a round trip
   // to be told so is pure latency. 3, 5 and 16 sit between or past the
   // whole-card rungs.
   for (const value of ["0", "1.5", "-0.5", "half", "0.3", "0.2", "0.0625", "3", "5", "16"]) {
@@ -367,10 +367,7 @@ async function testForkForwardsVgpu(): Promise<void> {
   }
 }
 
-/// `ResourcesInput` is `deny_unknown_fields`, so an UNKNOWN key fails the fork
-/// even when its value is null. The retired per-card fields were sent as nulls
-/// on every fork, which is why `--vcpu` alone was rejected too; a null on a
-/// known field is fine and still means "inherit from the source".
+/// Fork requests omit unspecified resource fields instead of sending nulls.
 async function testForkOmitsRetiredGpuResourceKeys(): Promise<void> {
   await withCapturedServer(
     (_request, res) => jsonResponse(res, { vm_id: "vm_gpu" }),
@@ -823,7 +820,7 @@ async function testHelpMatchesSupportedSurface(): Promise<void> {
 }
 
 async function testExtraOperandsFailBeforeRequest(): Promise<void> {
-  // Each of these used to act on the first operands and silently drop the rest.
+  // Commands reject extra positional operands.
   const cases = [
     ["rm", "vm_1", "vm_2"],
     ["vms", "delete", "vm_1", "vm_2"],

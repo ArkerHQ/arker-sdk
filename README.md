@@ -10,7 +10,7 @@
 
 Arker provides hyper-elastic, durable virtual machines for agent workloads. Its core primitives are fork, run, and sync.
 
-This repository contains the Arker CLI and the Python, TypeScript, and Go SDKs, providing convenient access to Arker.
+This repository contains the Arker CLI and the Python, TypeScript, and Go SDKs.
 
 [![PyPI](https://img.shields.io/pypi/v/arker.svg?style=flat-square&label=pypi)](https://pypi.org/project/arker/)
 [![CLI](https://img.shields.io/npm/v/@arker-ai/cli.svg?style=flat-square&label=cli)](https://www.npmjs.com/package/@arker-ai/cli)
@@ -30,8 +30,6 @@ Read the [Arker documentation](https://arker.ai/docs), or see the package-specif
 ## Examples
 
 - [Browser](./examples/browser): Open two Wikipedia pages and fork a live checkpoint at each.
-- [Coding agents](./examples/coding-agent): Run Claude Code, Codex, or Cursor in the background.
-- [Firmware](./examples/firmware): Use a coding agent to edit firmware and run it with QEMU.
 - [GPU coding agents](./examples/gpu-coding-agents): Run coding agents on parallel GPU workloads.
 - [Policies](./examples/policies): Configure host-enforced egress policies.
 - [React policy](./examples/react-policy): Control a VM's network policy from a React application.

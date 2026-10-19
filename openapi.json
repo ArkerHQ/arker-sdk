@@ -569,7 +569,7 @@
             "$ref": "#/components/responses/UnavailableError"
           }
         },
-        "description": "Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Reads host-local runs and ClickHouse history. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.",
+        "description": "Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.",
         "servers": [
           {
             "url": "https://{regionalHost}/api",
@@ -909,7 +909,7 @@
             }
           },
           "202": {
-            "description": "Accepted \u2014 the run is still executing. The body carries `run_id` and `state: \"running\"`, not output; poll `GET /v1/vms/{id}/runs/{run_id}` for the result. Returned for `time_to_background: 0` and whenever the command outstays `time_to_background`. A 2xx here means the request was accepted, not that the work is done.",
+            "description": "Accepted - the run is still executing. The body carries `run_id` and `state: \"running\"`, not output; poll `GET /v1/vms/{id}/runs/{run_id}` for the result. Returned for `time_to_background: 0` and whenever the command outstays `time_to_background`. A 2xx here means the request was accepted, not that the work is done.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1355,7 +1355,7 @@
           "Sessions"
         ],
         "summary": "Update a session (resize PTY / set timeout)",
-        "description": "Resize the session's PTY (cols/rows) and/or update its idle timeout. A resize applies at once to the session's open terminal, attached or detached, and is the size the next attach opens at. REST equivalent of the WebSocket {\"type\":\"resize\"} control frame \u2014 usable from any client, attached or not.",
+        "description": "Resize the session's PTY (cols/rows) and/or update its idle timeout. A resize applies at once to the session's open terminal, attached or detached, and is the size the next attach opens at. REST equivalent of the WebSocket {\"type\":\"resize\"} control frame - usable from any client, attached or not.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1541,7 +1541,7 @@
         ],
         "responses": {
           "101": {
-            "description": "Switching Protocols \u2014 the WebSocket PTY stream is established."
+            "description": "Switching Protocols - the WebSocket PTY stream is established."
           },
           "400": {
             "$ref": "#/components/responses/BadRequestError"
@@ -2528,7 +2528,7 @@
           "Pools"
         ],
         "summary": "Open the worker tunnel",
-        "description": "Upgrade to a WebSocket with subprotocol `worker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API; a fork names the VM id to use in header `x-vm-id`. Requires the worker to have joined. Authenticate with an API key limited to this pool.",
+        "description": "Opens the authenticated worker tunnel. Requires the worker to have joined. Authenticate with an API key limited to this pool.",
         "responses": {
           "101": {
             "description": "Switching to the tunnel."
@@ -2879,7 +2879,7 @@
         "name": "Idempotency-Key",
         "in": "header",
         "required": false,
-        "description": "Makes the request safely retryable. Reusing a key with the same request returns the original result \u2014 the same run, or the same VM for a fork \u2014 instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet.",
+        "description": "Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet.",
         "schema": {
           "type": "string",
           "minLength": 1,
@@ -4708,7 +4708,7 @@
               "open",
               "arker"
             ],
-            "description": "Authentication for an inbound rule that exposes a port \u2014 `allow`, or a `suspend` or `scaling`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. Inbound port matches must use individual ports rather than ranges."
+            "description": "Authentication for an inbound rule that exposes a port - `allow`, or a `suspend` or `scaling`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges."
           }
         }
       },
@@ -4891,7 +4891,7 @@
           "suspend": {
             "type": "boolean",
             "default": false,
-            "description": "Suspend the VM (snapshot and free CPU/RAM). On an `outbound` rule: while a matched upstream request is blocked, resuming when the response arrives. On an `inbound` rule (deprecated): once a matched request's response has been fully delivered and nothing else is in flight, so the next matched request starts it again. On an `outbound` rule, matched responses are delivered only once the upstream response is COMPLETE: a suspended VM has no running guest to receive bytes, so the proxy holds the whole body and hands it over at the end. Total latency is unchanged, but a response whose fragments are individually usable \u2014 an SSE token stream, for example \u2014 stops arriving incrementally, so a client rendering tokens as they arrive will see nothing until the response finishes. Enabling this is a deliberate trade of incremental delivery for the memory saving."
+            "description": "Suspend the VM (snapshot and free CPU/RAM). On an `outbound` rule: while a matched upstream request is blocked, resuming when the response arrives. On an `inbound` rule (deprecated): once a matched request's response has been fully delivered and nothing else is in flight, so the next matched request starts it again. On an `outbound` rule, matched responses are delivered only once the upstream response is COMPLETE: a suspended VM has no running guest to receive bytes, so the proxy holds the whole body and hands it over at the end. Total latency is unchanged, but a response whose fragments are individually usable - an SSE token stream, for example - stops arriving incrementally, so a client rendering tokens as they arrive will see nothing until the response finishes. Enabling this is a deliberate trade of incremental delivery for the memory saving."
           },
           "wake": {
             "type": "boolean",
@@ -5172,7 +5172,7 @@
               "string",
               "null"
             ],
-            "description": "OCI image reference to fork from \u2014 for example `ubuntu:24.04`, `ghcr.io/org/image:v1`, or `image@sha256:...`. An unqualified name resolves against Docker Hub. Give a bare reference, not a URI. The new VM boots a rootfs converted from that image rather than from an existing VM, so neither `source_vm_id` nor `source_vm_name` is given."
+            "description": "OCI image reference to fork from - for example `ubuntu:24.04`, `ghcr.io/org/image:v1`, or `image@sha256:...`. An unqualified name resolves against Docker Hub. Give a bare reference, not a URI. The new VM boots a rootfs converted from that image rather than from an existing VM, so neither `source_vm_id` nor `source_vm_name` is given."
           },
           "dockerfile": {
             "type": [
@@ -5546,7 +5546,7 @@
             ]
           },
           "last_active_at": {
-            "description": "RFC 3339 timestamp of the machine's most recent activity \u2014 a run, an SSH session, an open tunnel, a resume, or being used as the source of a fork. Recorded when a stretch of activity begins and refreshed at most once a minute while it continues, so it is a recent-activity marker rather than a precise heartbeat. Null if the machine has not been active since it was created.",
+            "description": "RFC 3339 timestamp of the machine's most recent activity - a run, an SSH session, an open tunnel, a resume, or being used as the source of a fork. Recorded when a stretch of activity begins and refreshed at most once a minute while it continues, so it is a recent-activity marker rather than a precise heartbeat. Null if the machine has not been active since it was created.",
             "type": [
               "string",
               "null"
@@ -5554,7 +5554,7 @@
           },
           "network": {
             "$ref": "#/components/schemas/VmNetwork",
-            "description": "The VM's network object \u2014 SSH keys only. Inbound reachability and per-port exposure are derived from `policies`, not from this object."
+            "description": "The VM's network object - SSH keys only. Inbound reachability and per-port exposure are derived from `policies`, not from this object."
           },
           "policies": {
             "description": "The VM's network policy. Returned by `GET /v1/vms/{id}`, `PATCH /v1/vms/{id}`, and `POST /v1/fork`; omitted from list responses.",
@@ -5609,7 +5609,7 @@
             "items": {
               "$ref": "#/components/schemas/GpuPlatformLimits"
             },
-            "description": "GPU sizing bounds for each GPU platform this VM can be forked onto; absent when it has no GPU platform. A base VM is GPU-agnostic and may be offered on several GPUs at once, so this is a list \u2014 clients pick the entry matching the platform they intend to request."
+            "description": "GPU sizing bounds for each GPU platform this VM can be forked onto; absent when it has no GPU platform. A base VM is GPU-agnostic and may be offered on several GPUs at once, so this is a list - clients pick the entry matching the platform they intend to request."
           },
           "min_disk_mib": {
             "type": [
@@ -5759,7 +5759,7 @@
         "additionalProperties": false,
         "properties": {
           "session_id": {
-            "description": "The session to run in. Arker's run interface works like a terminal: sessions are tabs, each keeps its own state \u2014 working directory, environment, shell history \u2014 and each handles one run at a time. Create a session with `POST /v1/vms/{id}/sessions`, which also sets its starting directory and environment, then pass its id here. Run sequential commands in one session; for a long-running task, use `time_to_background: 0` in a session of its own so later work does not interrupt it. Distinct sessions run concurrently. A session that no longer exists is a 404. Omitted, the run uses the VM's default session, which every caller that omits it shares.",
+            "description": "The session to run in. Arker's run interface works like a terminal: sessions are tabs, each keeps its own state - working directory, environment, shell history - and each handles one run at a time. Create a session with `POST /v1/vms/{id}/sessions`, which also sets its starting directory and environment, then pass its id here. Run sequential commands in one session; for a long-running task, use `time_to_background: 0` in a session of its own so later work does not interrupt it. Distinct sessions run concurrently. A session that no longer exists is a 404. Omitted, the run uses the VM's default session, which every caller that omits it shares.",
             "type": [
               "string",
               "null"
@@ -5797,7 +5797,7 @@
             "format": "uint16"
           },
           "background": {
-            "description": "Alias for `time_to_background`. `true` is exactly `time_to_background: 0` (return a pollable run immediately); `false` leaves the default sync window. Send only one of the two \u2014 supplying both is rejected, because they can disagree. Prefer `time_to_background`, which can also bound the wait instead of only switching it off.",
+            "description": "Alias for `time_to_background`. `true` is exactly `time_to_background: 0` (return a pollable run immediately); `false` leaves the default sync window. Send only one of the two - supplying both is rejected, because they can disagree. Prefer `time_to_background`, which can also bound the wait instead of only switching it off.",
             "type": [
               "boolean",
               "null"
@@ -5884,7 +5884,7 @@
             ]
           },
           "state": {
-            "description": "Lifecycle state \u2014 \"completed\" when the command finished, or \"cancelled\" when the run was cancelled before it finished. A cancelled run reports the output recorded before the cancellation and a null `exit_code`. Read this (not the variant) for completion, uniformly with the run-status (`Run`) shape.",
+            "description": "Lifecycle state - \"completed\" when the command finished, or \"cancelled\" when the run was cancelled before it finished. A cancelled run reports the output recorded before the cancellation and a null `exit_code`. Read this (not the variant) for completion, uniformly with the run-status (`Run`) shape.",
             "type": "string"
           },
           "stdout": {
@@ -5931,7 +5931,7 @@
             "type": "string"
           },
           "state": {
-            "description": "Lifecycle state \u2014 \"running\" for a backgrounded run.",
+            "description": "Lifecycle state - \"running\" for a backgrounded run.",
             "type": "string"
           }
         }
@@ -6113,7 +6113,7 @@
               "string",
               "null"
             ],
-            "description": "System failure explanation when `state` is `failed` \u2014 see `Run.fail_reason`. Distinct from the program's `stderr`."
+            "description": "System failure explanation when `state` is `failed` - see `Run.fail_reason`. Distinct from the program's `stderr`."
           },
           "vm_id": {
             "description": "Unique VM identifier.",
@@ -6501,7 +6501,7 @@
             ]
           },
           "state": {
-            "description": "Mount state. Creating a mount returns `attaching`; poll this resource for the outcome.\n\n`attaching` \u2014 the mount is pending. A stopped VM remains in this state until it resumes.\n\n`mounted` \u2014 the filesystem is available in the VM.\n\n`failed` \u2014 the VM cannot mount the filesystem. `state_detail` explains the cause. Transient errors remain in `attaching` while the service retries them.",
+            "description": "Mount state. Creating a mount returns `attaching`; poll this resource for the outcome.\n\n`attaching` - the mount is pending. A stopped VM remains in this state until it resumes.\n\n`mounted` - the filesystem is available in the VM.\n\n`failed` - the VM cannot mount the filesystem. `state_detail` explains the cause. Transient errors remain in `attaching` while the service retries them.",
             "type": [
               "string",
               "null"
@@ -7388,7 +7388,7 @@
           4,
           8
         ],
-        "description": "How much GPU, measured in cards. Below one card: eighths of ONE card. At or above one: whole cards, and the VM holds that many devices \u2014 `gpu_sms` and `gpu_vram_mib` are per-GPU, so its total is `gpu_count` times those. 0 declines a GPU and yields a CPU-only VM. The enum is the ladder: there is no 1.5 of a card, and no 3-card worker to be given."
+        "description": "How much GPU, measured in cards. Below one card: eighths of ONE card. At or above one: whole cards, and the VM holds that many devices - `gpu_sms` and `gpu_vram_mib` are per-GPU, so its total is `gpu_count` times those. 0 declines a GPU and yields a CPU-only VM. The enum is the ladder: there is no 1.5 of a card, and no 3-card worker to be given."
       },
       "ResourcesInput": {
         "type": "object",
@@ -7429,7 +7429,7 @@
                 "type": "null"
               }
             ],
-            "description": "Fraction of one physical GPU to allocate, in eighths of a card: 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, or 1. Resolved against the serving platform's GPU (`vgpu: 0.25` on `x86_64-l40s` is 35 SMs and 11517 MiB), so the same fraction is a different amount of silicon on a different card \u2014 see the per-platform table in the docs. Mutually exclusive with `gpu_sms` and `gpu_vram_mib`. Request-only: responses report the resolved `gpu_sms`/`gpu_vram_mib` and never this field."
+            "description": "Fraction of one physical GPU to allocate, in eighths of a card: 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, or 1. Resolved against the serving platform's GPU (`vgpu: 0.25` on `x86_64-l40s` is 35 SMs and 11517 MiB), so the same fraction is a different amount of silicon on a different card - see the per-platform table in the docs. Mutually exclusive with `gpu_sms` and `gpu_vram_mib`. Request-only: responses report the resolved `gpu_sms`/`gpu_vram_mib` and never this field."
           }
         },
         "description": "Resource shape a caller asks for. GPU size is set with `vgpu`, in eighths of one card; the resolved per-GPU `gpu_sms`/`gpu_vram_mib` are reported back on the machine."
@@ -7643,7 +7643,7 @@
           "max": {
             "type": "integer",
             "minimum": 0,
-            "description": "Largest value accepted \u2014 the whole physical GPU. Requests above this return 400 rather than being clamped."
+            "description": "Largest value accepted - the whole physical GPU. Requests above this return 400 rather than being clamped."
           },
           "default": {
             "type": "integer",
@@ -7670,7 +7670,7 @@
               "string",
               "null"
             ],
-            "description": "Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing \u2014 use the bands."
+            "description": "Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing - use the bands."
           },
           "vram_mib": {
             "$ref": "#/components/schemas/GpuResourceBand"
@@ -7694,7 +7694,7 @@
               "string",
               "null"
             ],
-            "description": "Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing \u2014 use the bands."
+            "description": "Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing - use the bands."
           },
           "vram_mib": {
             "$ref": "#/components/schemas/GpuResourceBand"
@@ -7711,7 +7711,7 @@
           "username",
           "password"
         ],
-        "description": "Credentials for pulling `image` from a private registry. Used only for this one pull and never stored. Redacted from logs and telemetry.\n\nFor AWS ECR use username `AWS` with the output of `aws ecr get-login-password`; for Google Artifact Registry use `oauth2accesstoken` with an access token; for Docker Hub or GHCR use your username and a personal access token. Short-lived tokens are fine \u2014 the pull happens once, at fork time.",
+        "description": "Credentials for pulling `image` from a private registry. Used only for this one pull and never stored. Redacted from logs and telemetry.\n\nFor AWS ECR use username `AWS` with the output of `aws ecr get-login-password`; for Google Artifact Registry use `oauth2accesstoken` with an access token; for Docker Hub or GHCR use your username and a personal access token. Short-lived tokens are fine - the pull happens once, at fork time.",
         "properties": {
           "username": {
             "type": "string",
@@ -11941,11 +11941,11 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "For a `byoc` pool's arkerd worker: the golden and hypervisor selection it runs with, which decides the golden generations it serves. Arker upgrades a worker running with other values than the region's in place."
+            "description": "Runtime configuration reported by a `byoc` worker."
           },
           "goldens": {
             "$ref": "#/components/schemas/WorkerGoldens",
-            "description": "For a `byoc` pool's arkerd worker: the goldens it cannot serve current. Absent while it serves each of its goldens from a generation baked for it."
+            "description": "Images the worker cannot currently serve. Absent when all configured images are available."
           },
           "vm_activity": {
             "type": "object",
@@ -11984,7 +11984,7 @@
           "stale",
           "missing"
         ],
-        "description": "The goldens a worker cannot serve current, by name.",
+        "description": "Images a worker cannot currently serve, by name.",
         "properties": {
           "stale": {
             "type": "array",
@@ -11992,7 +11992,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Goldens it serves from a generation baked for another host fingerprint: a fork of one by name runs that older generation."
+            "description": "Images for which the worker has an outdated version."
           },
           "missing": {
             "type": "array",
@@ -12000,7 +12000,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Goldens it is to serve and serves no generation of: none is published for its platform, or none could be adopted. A fork of one by name fails."
+            "description": "Images unavailable on this worker. A fork from one of these images fails."
           }
         }
       },
@@ -12043,7 +12043,7 @@
           "prefix",
           "credentials"
         ],
-        "description": "Where the worker keeps VM snapshots: the pool's own bucket for a `byoc` pool that isolates `vms`, else the pool's prefix of Arker's regional bucket.",
+        "description": "Storage configuration for VM snapshots.",
         "properties": {
           "bucket": {
             "type": "string",
@@ -12095,14 +12095,14 @@
           },
           "upgrade_release_id": {
             "type": "string",
-            "description": "Present while Arker upgrades a `byoc` pool's arkerd worker in place: the release it is to run next. Its VMs keep running across the upgrade."
+            "description": "Target release while a worker upgrade is pending."
           },
           "golden_env": {
             "type": "object",
             "additionalProperties": {
               "type": "string"
             },
-            "description": "For a `byoc` pool's arkerd worker: the region's golden and hypervisor selection, which decides the golden generations it serves. A worker running with other values is upgraded onto these in place; its VMs keep running."
+            "description": "Desired runtime configuration for a `byoc` worker."
           }
         }
       },

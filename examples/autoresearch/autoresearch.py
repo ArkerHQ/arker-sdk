@@ -50,7 +50,7 @@ def prepare_vm(ark: Arker) -> VM:
 
     prep.run(ENV + f"cat > train.py <<'EOF'\n{TASK}\nEOF")
     prep_ready()
-    log(f"prep ready — forking {AGENTS} agents")
+    log(f"prep ready - forking {AGENTS} agents")
     return prep
 
 
@@ -78,7 +78,7 @@ def run_agent(ark: Arker, prep: VM, n: int, vgpu: float) -> list[dict]:
             turn_done(f"agent{n}", turn, tsv, out)
 
         experiments = parse_runs(tsv)
-        log(f"agent{n} finished — {len(experiments)} experiments")
+        log(f"agent{n} finished - {len(experiments)} experiments")
         return experiments
     finally:
         vm.delete()

@@ -229,7 +229,7 @@ func TestReadIsRetriedOnTransportFailure(t *testing.T) {
 }
 
 func TestServerRetryableFalseBeatsTheStatus(t *testing.T) {
-	// arkerd's `retryable` is the authority; the status is only a fallback,
+	// The API's `retryable` value is authoritative; the status is only a fallback,
 	// because the field is frequently absent.
 	var n int32
 	c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {

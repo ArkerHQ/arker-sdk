@@ -224,7 +224,7 @@ async function testForkPreservesTheCanonicalWireShape(): Promise<void> {
 }
 
 // `image` is a third fork source. The service models the three as a `oneOf`,
-// so a body carrying `image` alongside a VM selector fails to decode there —
+// so a body carrying `image` alongside a VM selector fails to decode there -
 // and a body that sent a REAL selector next to an image would turn a registry
 // pull into a fork of someone's VM.
 async function testForkFromImageSendsOnlyTheImage(): Promise<void> {
@@ -491,7 +491,7 @@ async function testCompletedRunDecodesOutput(): Promise<void> {
 async function testSyncRunPollsBackgroundedRunToCompletion(): Promise<void> {
   // A synchronous run() that outlives the server sync window gets a background
   // ack; run() must poll getRun() under the hood and resolve to the terminal
-  // run — the caller never sees the intermediate background shape.
+  // run - the caller never sees the intermediate background shape.
   const fetch = new FakeFetch();
   fetch.addJson(
     (method, url) => method === "POST" && url === "https://test.invalid/api/v1/vms/vm_1/runs",
@@ -530,7 +530,7 @@ async function testRunPollBudgetIsUnboundedWithoutACallerTimeout(): Promise<void
   // The poll budget exists to outlive the server-side kill and report its
   // outcome. There is no server-side kill without a caller `timeout` (absent
   // and `0` are both unbounded), so there is nothing to outlive and the poll
-  // must not invent a deadline — abandoning a run that is still going is worse
+  // must not invent a deadline - abandoning a run that is still going is worse
   // than waiting.
   assert.equal(runPollBudgetMs(undefined), null);
   assert.equal(runPollBudgetMs(null), null);
@@ -544,7 +544,7 @@ async function testRunPollBudgetIsUnboundedWithoutACallerTimeout(): Promise<void
 }
 
 async function testExplicitZeroReturnsAckWithoutPolling(): Promise<void> {
-  // time_to_background:0 is a pure pass-through — run() returns the running ack
+  // time_to_background:0 is a pure pass-through - run() returns the running ack
   // immediately and never polls getRun().
   const fetch = new FakeFetch();
   fetch.addJson(
@@ -557,7 +557,7 @@ async function testExplicitZeroReturnsAckWithoutPolling(): Promise<void> {
 
   assert.equal(result.type, "background");
   assert.equal((result as { runId: string }).runId, "run_bg");
-  // Only the POST — no polling.
+  // Only the POST - no polling.
   assert.equal(fetch.calls.length, 1);
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { command: "sleep 999", time_to_background: 0 });
 }
@@ -1012,7 +1012,7 @@ async function testRetryOnRetryableStatusThenSucceeds(): Promise<void> {
 async function testRetryGivesUpAfterExhaustingAttempts(): Promise<void> {
   const fetch = new FakeFetch();
   const matchListVms = (method: string, url: string) => method === "GET" && url === "https://arker.ai/api/v1/vms";
-  // Every attempt sees a 503 — script exactly `attempts` of them so the
+  // Every attempt sees a 503 - script exactly `attempts` of them so the
   // FakeFetch throws "no scripted response" if the client ever calls one
   // extra time (an off-by-one in the retry loop).
   fetch.addJson(matchListVms, 503, RETRYABLE_ERROR_BODY);
@@ -1021,7 +1021,7 @@ async function testRetryGivesUpAfterExhaustingAttempts(): Promise<void> {
   await assert.rejects(
     () => clientWithRetry(fetch, 2).listVms(),
     // The final attempt's parsed error code/message must surface, not a
-    // generic "internal" — the caller can still branch on `unavailable`.
+    // generic "internal" - the caller can still branch on `unavailable`.
     (error) => error instanceof ArkerError && error.code === "unavailable" && error.status === 503,
   );
   assert.equal(fetch.calls.length, 2, "should stop retrying once attempts are exhausted, not call again");
@@ -1029,7 +1029,7 @@ async function testRetryGivesUpAfterExhaustingAttempts(): Promise<void> {
 
 async function testNonRetryableStatusFailsImmediately(): Promise<void> {
   const fetch = new FakeFetch();
-  // A 400 is not in RETRYABLE_HTTP — even with attempts=3 configured, the
+  // A 400 is not in RETRYABLE_HTTP - even with attempts=3 configured, the
   // client must not burn through retries on a client error.
   fetch.addJson(
     (method, url) => method === "GET" && url === "https://arker.ai/api/v1/vms",
@@ -1334,7 +1334,7 @@ await testForkSendsDurableFlag();
 await testRunSendsIdempotencyKeyHeader();
 await testRunStatusReturnsRetryCount();
 async function testConnectPtyPassesCancelTtlSecs(): Promise<void> {
-  // ARK-120: cancelTtlSecs must surface as the `cancel_ttl_secs` query param so
+  // cancelTtlSecs must surface as the `cancel_ttl_secs` query param so
   // the server auto-cancels (destroys) the PTY run after that idle window.
   const fetch = new FakeFetch();
   fetch.addJson(
@@ -1500,7 +1500,7 @@ async function testRunAndGetRunAgreeOnStateForKilledRun(): Promise<void> {
 // lossy for those by definition, so `*Bytes` must round-trip them exactly.
 
 // 1x1 PNG. Starts with 0x89, not a valid UTF-8 start byte, so decoding to text
-// mangles it — which is the whole point of keeping the bytes.
+// mangles it - which is the whole point of keeping the bytes.
 const PNG_1X1 = Uint8Array.from(
   atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="),
   (c) => c.charCodeAt(0),
@@ -1524,7 +1524,7 @@ async function testRunReturnsImageBytesIntactAndTextIsLossy(): Promise<void> {
 
   const result = (await client(fetch).vm("vm_1").run("cat photo.png")) as CompletedRunResult;
 
-  // The bytes survive exactly — you can write them straight to a file.
+  // The bytes survive exactly - you can write them straight to a file.
   assert.deepEqual(result.stdoutBytes, PNG_1X1);
   assert.deepEqual(result.stdoutBytes.slice(0, 8), Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
   // The text view is lossy for binary, and must not throw.
@@ -1890,9 +1890,7 @@ await testSyncDirUploadsThenExtracts();
 await testSyncDirUploadErrorsStopExtraction();
 
 // ── syncDir assumeEmpty ──────────────────────────────────────────────
-// The manifest exists to avoid re-sending unchanged files. Into a fresh
-// directory it is guaranteed empty, so the round-trip costs ~184ms to learn
-// nothing — on exactly the first-sync path we lose to E2B on.
+// A known-empty destination does not need a remote manifest request.
 
 async function testAssumeEmptySkipsTheManifestRoundTrip(): Promise<void> {
   const fs = await import("node:fs");
@@ -1922,11 +1920,8 @@ await testAssumeEmptySkipsTheManifestRoundTrip();
 
 // ── fork Idempotency-Key ────────────────────────────────────────────────
 //
-// The prod failure: the gateway answered a fork with 502/504 AFTER the worker
-// had already built the VM, the retry re-POSTed, and the caller got a SECOND
-// machine while the first ran on, unnamed and billable. Transport failures on
-// a mutation are not retried, but a 502/504 is a *response* and still
-// is -- so this is the window that remains.
+// A retryable gateway response may arrive after a fork succeeds. The
+// idempotency key prevents a retry from creating a second VM.
 
 const FORK_VM = {
   vm_id: "vm_child",
@@ -2128,16 +2123,8 @@ async function testStatCacheSkipsRereadOnSecondSync(): Promise<void> {
 }
 
 async function testStatCacheCatchesForgedMtimeEdit(): Promise<void> {
-  // THE regression this cache design exists for. A (size, mtime) key can be
-  // defeated by anything that restores timestamps — cp -p, GNU tar -x, touch -r
-  // — and the changed file would be silently NOT uploaded.
-  //
-  // Node's utimesSync truncates sub-millisecond precision, so it cannot forge
-  // an mtime exactly (real tools can). Rather than depend on that, this forges
-  // the recorded signature directly: rewrite the cached entry so size AND mtime
-  // match the edited file exactly, leaving only ctime stale. That is precisely
-  // the state a timestamp-restoring tool produces, and precisely what the
-  // narrow key cannot see.
+  // A restored mtime must not hide changed content. Rewrite the cache directly
+  // because utimesSync cannot preserve the required precision.
   await withCacheDir(async (cacheDir) => {
     const dir = tmpTree({ "a.txt": "AAAAA" });
     const abs = nodePath.join(dir, "a.txt");
@@ -2152,19 +2139,18 @@ async function testStatCacheCatchesForgedMtimeEdit(): Promise<void> {
     const cacheFile = nodePath.join(sub, fs.readdirSync(sub)[0]!);
     const parsed = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
     const entry = parsed.entries["a.txt"];
-    // Perfect (size, mtime) forge; ctime deliberately left at the old value.
+    // Match size and mtime while leaving ctime stale.
     entry.size = Number(now.size);
     entry.mtimeNs = String(now.mtimeNs);
     entry.ino = String(now.ino);
     entry.dev = String(now.dev);
     entry.mode = Number(now.mode);
-    assert.notEqual(entry.ctimeNs, String(now.ctimeNs), "ctime must differ after a write");
-    // Keep it outside the racily-clean window so THIS is what forces the re-hash.
+    entry.ctimeNs = String(BigInt(now.ctimeNs) - 1n);
+    // Keep it outside the racily-clean window so ctime forces the rehash.
     parsed.writtenNs = String(BigInt(entry.mtimeNs) + 10_000_000_000n);
     fs.writeFileSync(cacheFile, JSON.stringify(parsed));
 
-    // Remote still holds the ORIGINAL content's hash. A cache trusting
-    // (size, mtime) would match it and skip — losing the edit.
+    // The remote hash still describes the original content.
     const staleHash = createHash("sha256").update("AAAAA").digest("hex");
     const second = await client(syncDirServer([{ path: "a.txt", hash: staleHash }]))
       .vm("vm_1").syncDir(dir, "/p");
@@ -2193,7 +2179,7 @@ async function testStatCacheDistrustsRacilyCleanEntries(): Promise<void> {
 
     const hash = createHash("sha256").update("alpha").digest("hex");
     const again = await client(syncDirServer([{ path: "a.txt", hash }])).vm("vm_1").syncDir(dir, "/p");
-    // Re-hashed (not trusted from stat) — and since the content really is
+    // Re-hashed (not trusted from stat) - and since the content really is
     // unchanged, the recomputed hash matches the remote and it is still skipped.
     assert.equal(again.sent, 0, "racily-clean entry re-hashes to the same value");
     fs.rmSync(dir, { recursive: true, force: true });
@@ -2237,7 +2223,7 @@ async function testStatCacheIsBestEffortWhenUnwritable(): Promise<void> {
 
 async function testStatCacheNotWrittenWhenUploadFails(): Promise<void> {
   // Persisting before the upload lands would record files as synced that never
-  // arrived — every later run would then skip them.
+  // arrived - every later run would then skip them.
   await withCacheDir(async (cacheDir) => {
     const dir = tmpTree({ "a.txt": "alpha" });
     const fetch = new FakeFetch();
@@ -2308,7 +2294,7 @@ const UNAVAILABLE_ENVELOPE = { error: { code: "unavailable", message: "slot busy
 const RUNNING_RUN = { run_id: "run_bg", state: "running", started_at: "now", exit_code: null, stdout: "", stdout_encoding: "utf-8", stderr: "", stderr_encoding: "utf-8" };
 const COMPLETED_RUN = { run_id: "run_bg", state: "completed", started_at: "now", exit_code: 0, stdout: "done\n", stdout_encoding: "utf-8", stderr: "", stderr_encoding: "utf-8" };
 
-/** A fetch whose Nth poll response is decided by `plan` — no per-call scripting. */
+/** A fetch whose Nth poll response is decided by `plan` - no per-call scripting. */
 function pollingFetch(plan: (pollIndex: number) => { status: number; body: unknown }) {
   let polls = 0;
   const state = {
@@ -2391,15 +2377,13 @@ async function testWaitForRunPreservesFailureWithTruncatedTerminalOutput(): Prom
 }
 
 async function testUnsetTimeoutNeverGivesUpOnAStillRunningRun(): Promise<void> {
-  // THE regression assertion. The old client capped an unset timeout at a
-  // 3600s CLIENT-side budget and threw "timeout" on a run that was perfectly
-  // healthy. 1500 polls at the 3s cap is >4500s of virtual time — comfortably
-  // past that old budget — and it must still resolve.
+  // Advance virtual time past one hour to verify that an unset timeout remains
+  // unbounded.
   const stub = pollingFetch((n) => ({ status: 200, body: n < 1500 ? RUNNING_RUN : COMPLETED_RUN }));
   const result = await withFakeClock(() => pollingClient(stub.fetch).vm("vm_1").run("sleep forever"));
   assert.equal(result.type, "completed");
   assert.equal((result as CompletedRunResult).exitCode, 0);
-  assert.ok(stub.polls > 1500, `expected to poll past the old 3600s budget, polled ${stub.polls}`);
+  assert.ok(stub.polls > 1500, `expected more than 1500 polls, got ${stub.polls}`);
 }
 
 async function testExplicitTimeoutStillBoundsTheWait(): Promise<void> {
@@ -2419,7 +2403,7 @@ async function testExplicitTimeoutStillBoundsTheWait(): Promise<void> {
 
 async function testPollingGivesUpWhenTheServiceStopsAnswering(): Promise<void> {
   // An unbounded wait is not an infinite one. If the status checks themselves
-  // stop answering, waiting forever helps nobody — bail after 10 consecutive.
+  // stop answering, waiting forever helps nobody - bail after 10 consecutive.
   const stub = pollingFetch(() => ({ status: 503, body: UNAVAILABLE_ENVELOPE }));
   await assert.rejects(
     withFakeClock(() => pollingClient(stub.fetch).vm("vm_1").run("sleep 999")),
@@ -2435,8 +2419,7 @@ async function testPollingGivesUpWhenTheServiceStopsAnswering(): Promise<void> {
 }
 
 async function testAPollBlipDoesNotEndAnUnboundedWait(): Promise<void> {
-  // CONSECUTIVE is the whole point: a transient blip must not kill a healthy
-  // long-running run, and any answered check resets the counter.
+  // A successful poll resets the consecutive-failure counter.
   const stub = pollingFetch((n) => {
     if (n < 3 || (n > 3 && n < 7)) return { status: 503, body: UNAVAILABLE_ENVELOPE };
     return { status: 200, body: n < 20 ? RUNNING_RUN : COMPLETED_RUN };
@@ -2447,12 +2430,7 @@ async function testAPollBlipDoesNotEndAnUnboundedWait(): Promise<void> {
 }
 
 async function testTimeToBackgroundZeroReturnsTheAckWithoutPolling(): Promise<void> {
-  // `time_to_background: 0` is the ONLY spelling of "don't wait" the SDK
-  // exposes — #89 removed `background`, and arkerd resolves the two to the same
-  // zero-length sync window anyway, so nothing is lost. Measured against the
-  // live service, ttb=0 answers 202 with a run id in ~0.2s; the client must
-  // hand that ack straight back rather than polling a command that is not meant
-  // to finish.
+  // A zero sync window returns the background acknowledgement without polling.
   const stub = pollingFetch(() => ({ status: 200, body: RUNNING_RUN }));
   const result = await withFakeClock(() =>
     pollingClient(stub.fetch).vm("vm_1").run("node server.js", { time_to_background: 0 }));
@@ -2715,7 +2693,7 @@ async function testCopyIsNotWrappedInTheUserShell(): Promise<void> {
 async function testAddUrlIsFetchedByTheClient(): Promise<void> {
   // Docker downloads an ADD url on the BUILDER and copies the bytes in, so the
   // image needs no curl or wget. Fetching inside the guest instead made ADD
-  // fail on any minimal base (ubuntu:24.04 ships neither) — a divergence from
+  // fail on any minimal base (ubuntu:24.04 ships neither) - a divergence from
   // Docker, not a limitation of it.
   const dir = makeBuildContext();
   const realFetch = globalThis.fetch;
@@ -2758,7 +2736,7 @@ async function testAFailingRunAbortsTheBuild(): Promise<void> {
 
 async function testGlobDoesNotMatchDotfiles(): Promise<void> {
   // `COPY * /app` must not ship `.env`. The hand-rolled matcher turned `*`
-  // into `.*`, which matches a leading dot — so TypeScript copied dotfiles
+  // into `.*`, which matches a leading dot - so TypeScript copied dotfiles
   // where Python (glob) and Docker do not. Same Dockerfile, two images.
   const dir = makeBuildContext();
   fs.writeFileSync(nodePath.join(dir, ".env"), "AWS_SECRET=hunter2\n");

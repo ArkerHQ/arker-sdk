@@ -1,4 +1,4 @@
-"""Interactive PTY example — open a real terminal in a VM and run `claude`.
+"""Interactive PTY example - open a real terminal in a VM and run `claude`.
 
     pip install 'arker[pty]'
     ARKER_API_KEY=...  ARKER_BASE_URL=https://<host>/api \

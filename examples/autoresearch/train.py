@@ -16,8 +16,8 @@ SEQ, VOCAB = 96, 48
 
 # Multi-rule copy: the CURRENT token decides which lag to copy from, so the model
 # must learn four different offsets and switch between them. Partial mastery earns
-# partial credit — getting 1 of the 4 rules right lands near 3.1, two near 2.3,
-# three near 1.5, all four near the 0.70 floor — so the search descends in steps
+# partial credit - getting 1 of the 4 rules right lands near 3.1, two near 2.3,
+# three near 1.5, all four near the 0.70 floor - so the search descends in steps
 # over many turns instead of hitting the floor on turn 2. Chance is ln(48) = 3.87.
 LAGS, SIGNAL = (4, 11, 23, 37), 0.9
 MAXLAG = max(LAGS)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Browser checkpoints — quick start
+# Browser checkpoints - quick start
 #
 # fork snapshots a VM's live memory, so forking a running browser
 # checkpoints it mid-session. Here we open two Wikipedia pages and fork at each,

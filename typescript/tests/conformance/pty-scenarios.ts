@@ -1,5 +1,5 @@
 /**
- * PTY scenarios e2e — comprehensive coverage of the interactive-terminal paths
+ * PTY scenarios e2e - comprehensive coverage of the interactive-terminal paths
  * beyond the core pty-roundtrip (which covers connect/keystroke/resize/reconnect/kill).
  * This file adds the rest of the matrix so every observable PTY scenario is gated:
  *
@@ -128,7 +128,7 @@ async function main(): Promise<void> {
 
     // ---- 3) custom command (connectPty command override) ----
     {
-      // Run python3 as the PTY program (not the login shell) — the real
+      // Run python3 as the PTY program (not the login shell) - the real
       // custom-command use case (an interactive REPL over the terminal).
       let pty: PtyConnection | null = null;
       try { pty = await arker.vm(vmId).connectPty({ cols: 80, rows: 24, persist: true, command: "/usr/bin/python3" }); } catch { /**/ }
@@ -221,9 +221,9 @@ async function main(): Promise<void> {
     }
 
     // ---- 8) cancel_ttl: an idle ATTACHED PTY auto-cancels + destroys the shell ----
-    //   Semantics (ARK-120 Phase D): while attached, if there's no PTY I/O for
+    //   While attached, if there's no PTY I/O for
     //   cancel_ttl_secs the bridge cancels the run and DESTROYS the shell (the WS
-    //   closes server-side). This is NOT a detach timer — it fires on the live conn.
+    //   closes server-side). This is NOT a detach timer - it fires on the live conn.
     {
       const s = await arker.vm(vmId).createSession();
       const sid = s.session_id ?? (s as { id?: string }).id!;

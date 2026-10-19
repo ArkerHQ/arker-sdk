@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-// Error is an arkerd API failure. The envelope is flat, and `retryable` is
+// Error is an Arker API failure. The envelope is flat, and `retryable` is
 // often absent -- absent means unspecified, not false. Branch on Code, never
 // on Message.
 type Error struct {

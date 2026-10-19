@@ -1,4 +1,4 @@
-// Interactive PTY — drop your local terminal into a live shell inside a VM.
+// Interactive PTY - drop your local terminal into a live shell inside a VM.
 //
 //	ARKER_API_KEY=... ARKER_BASE_URL=https://<host>/api \
 //	  go run ./examples/pty [vm_id]
