@@ -1411,7 +1411,7 @@ class PoolCommitment:
     ends_at: str
 
 
-PoolState: TypeAlias = Literal['creating', 'active', 'deleting']
+PoolState: TypeAlias = Literal['creating', 'running', 'deleting']
 
 
 PoolIsolation: TypeAlias = Literal['vms']
@@ -1550,7 +1550,7 @@ WorkerHeartbeatState: TypeAlias = Literal['bootstrapping', 'active', 'draining',
 
 
 WorkerState: TypeAlias = Literal[
-    'bootstrapping', 'running', 'draining', 'unreachable', 'left'
+    'creating', 'running', 'draining', 'unreachable', 'left'
 ]
 
 

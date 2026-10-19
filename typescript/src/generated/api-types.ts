@@ -508,7 +508,7 @@ export interface paths {
         put?: never;
         /**
          * Create a pool
-         * @description Create a pool in the region of the endpoint you call. A `managed` pool starts `active`; a `byoc` or `self_hosted` pool starts `creating`. Requires an API key not limited to a VM or pool; viewers cannot create pools. Returns 404 when pools are not enabled for the organization. `self_hosted` pools may be unavailable, and creating one then returns 422 `unsupported_operation`. Returns 429 `quota_exceeded` when the organization already has as many pools in the region as its `pools` quota allows, or when a `managed` pool would take the organization's `managed` pools in the region past its `vcpus`, `ram_mib` or `disk_mib` quota.
+         * @description Create a pool accessible through the regional endpoint used to invoke this operation. A `managed` pool starts `running`; a `byoc` or `self_hosted` pool starts `creating`. Requires an admin API key not limited to a VM or pool. Returns 404 when pools are not enabled for the organization. `self_hosted` pools may be unavailable, and creating one then returns 422 `unsupported_operation`. Returns 429 `quota_exceeded` when the organization already has as many pools in the region as its `pools` quota allows, or when a `managed` pool would take the organization's `managed` pools in the region past its `vcpus`, `ram_mib` or `disk_mib` quota.
          */
         post: operations["createPool"];
         delete?: never;
@@ -536,14 +536,14 @@ export interface paths {
         post?: never;
         /**
          * Delete a pool
-         * @description Do NOT invoke this unless you're sure you want to completely delete the pool. Resize to zero in most cases, e.g. to end Arker billing (once no commitment is active). The pool turns `deleting`, its workers are told to leave, every VM in it is deleted, and its API keys are revoked once it is gone. Refused while a commitment is active. Deleting a pool that is already deleting answers the same way. Requires an API key with access to the pool; viewers cannot change pools. Returns 404 when pools are not enabled for the organization.
+         * @description Do NOT invoke this unless you're sure you want to completely delete the pool. Resize to zero in most cases, e.g. to end Arker billing. The pool turns `deleting`, its workers are told to leave, every VM in it is deleted, and its API keys are revoked once it is gone. Refused during a commitment. Deleting a pool that is already deleting answers the same way. Requires an admin API key with access to the pool. Returns 404 when pools are not enabled for the organization.
          */
         delete: operations["deletePool"];
         options?: never;
         head?: never;
         /**
          * Update a pool
-         * @description Rename a pool, resize it, or change its commitments. Requires an API key with access to the pool; viewers cannot change pools. Returns 404 when pools are not enabled for the organization. Growing a `managed` pool returns 429 `quota_exceeded` when the organization's `managed` pools in the region would reserve more than its `vcpus`, `ram_mib` or `disk_mib` quota.
+         * @description Rename or resize a pool; commitments may be unavailable. Requires an admin API key with access to the pool. Returns 404 when pools are not enabled for the organization. Growing a `managed` pool returns 429 `quota_exceeded` when the organization's `managed` pools in the region would reserve more than its `vcpus`, `ram_mib` or `disk_mib` quota.
          */
         patch: operations["updatePool"];
         trace?: never;
@@ -794,9 +794,9 @@ export interface components {
         Provider: string;
         /** @description A complete replacement for a VM's network policy. Rules are evaluated in order, and the first matching rule determines the result. An empty rule list allows all outbound traffic and permits authenticated inbound access to any guest port. */
         PolicyWriteRequest: {
-            /** @description Ordered network policy rules. An empty list allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. In a non-empty document, unmatched outbound traffic is denied. If no inbound rules are present, inbound access keeps the authenticated default; explicit inbound allow rules restrict exposure to their listed ports. */
+            /** @description Ordered network policy rules. An empty list allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With an outbound `allow` rule, unmatched outbound traffic is denied. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable. */
             policies?: components["schemas"]["PolicyEntry"][];
-            /** @description Named secret values referenced by `${secret:NAME}` in rewrite actions. Values are encrypted at rest and masked in subsequent policy responses. */
+            /** @description Named secret values referenced by `${secret:NAME}` in rewrite actions, match values and `auth.token`. Values are encrypted at rest and masked in subsequent policy responses. */
             secrets?: {
                 [key: string]: string;
             };
@@ -809,9 +809,9 @@ export interface components {
         };
         /** @description A VM's current network policy and its derived inbound exposure metadata. */
         PolicyDoc: {
-            /** @description Ordered network policy rules. An empty list allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. In a non-empty document, unmatched outbound traffic is denied. If no inbound rules are present, inbound access keeps the authenticated default; explicit inbound allow rules restrict exposure to their listed ports. */
+            /** @description Ordered network policy rules. An empty list allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With an outbound `allow` rule, unmatched outbound traffic is denied. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable. */
             policies?: components["schemas"]["PolicyEntry"][];
-            /** @description Named secrets referenced by `${secret:NAME}` in rewrite actions. Stored values are represented as `***`; supply the original value when replacing a policy that uses it. */
+            /** @description Named secrets referenced by `${secret:NAME}` in rewrite actions, match values and `auth.token`. Stored values are represented as `***`; supply the original value when replacing a policy that uses it. */
             secrets?: {
                 [key: string]: string;
             };
@@ -832,14 +832,14 @@ export interface components {
             match?: components["schemas"]["PolicyMatch"];
             action: components["schemas"]["PolicyAction"];
             /**
-             * @description Authentication for an inbound rule that exposes a port — `allow`, or a `suspend` or `scaling`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges.
+             * @description Authentication for an inbound rule that exposes a port — `allow`, or a `suspend` or `scaling`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. Inbound port matches must use individual ports rather than ranges.
              * @enum {string}
              */
             auth?: "open" | "arker";
         };
         /** @description Match criteria: present fields are combined with AND; list items are combined with OR. `ips` and `hosts` are mutually exclusive, and inbound rules cannot use `hosts`. Port, IP, and host rules operate at the connection layer. Method, path, header, query parameter, and body rules operate at the request layer. */
         PolicyMatch: {
-            /** @description Single ports and/or inclusive [start, end] ranges, e.g. [80, 443, [1000, 2000]]. Absent = any port; an empty list is refused. Inbound allow rules require one or more individual ports and reject ranges. */
+            /** @description Single ports and/or inclusive [start, end] ranges, e.g. [80, 443, [1000, 2000]]. Absent = any port; an empty list is refused. Inbound rules other than `deny` require one or more individual ports, and inbound rules reject ranges. */
             ports?: (number | number[])[];
             /** @description IPs or CIDRs. Outbound rules match destination IPs; inbound rules match the caller source IP. */
             ips?: string[];
@@ -2878,11 +2878,11 @@ export interface components {
         };
         /** @description A change to a VM's network policy: only the rules and secrets named are written or removed, and everything else is kept, so `{}` changes nothing. The deprecated `policies` list instead replaces the whole policy. */
         PolicyUpdate: {
-            /** @description Rules to write, keyed by rule id. A rule replaces any rule with the same id; `null` removes the rule with that id. Rules not named here are kept. The resulting policy must not give two rules the same priority. */
+            /** @description Rules to write, keyed by rule id. A rule replaces any rule with the same id; `null` removes the rule with that id. Rules not named here are kept. The resulting policy must not give two rules of one `type` the same priority. */
             rules?: {
                 [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["ScheduleRule"] | components["schemas"]["LifecycleRule"] | null;
             };
-            /** @description Secrets to write, referenced by `${secret:NAME}` in rewrite actions. A value replaces the secret with that name; `null` removes it. Secrets not named here are kept. Values are encrypted at rest and masked as `***` in responses; `***` is not accepted as a value. */
+            /** @description Secrets to write, referenced by `${secret:NAME}` in rewrite actions, match values and `auth.token`. A value replaces the secret with that name; `null` removes it. Secrets not named here are kept. Values are encrypted at rest and masked as `***` in responses; `***` is not accepted as a value. */
             secrets?: {
                 [key: string]: string | null;
             };
@@ -2894,9 +2894,9 @@ export interface components {
         };
         /** @description The VM's network policy. Change it with `policies` on `PATCH /v1/vms/{id}`. */
         VmPolicies: {
-            /** @description The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With rules, unmatched outbound traffic is denied. If no inbound rules are present, inbound access keeps the authenticated default; explicit inbound allow rules restrict exposure to their listed ports. */
+            /** @description The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With an outbound `allow` rule, unmatched outbound traffic is denied. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable. */
             rules?: components["schemas"]["PolicyRules"];
-            /** @description Names of the secrets referenced by `${secret:NAME}` in rewrite actions. Values are masked as `***`. */
+            /** @description Names of the secrets referenced by `${secret:NAME}` in rewrite actions, match values and `auth.token`. Values are masked as `***`. */
             secrets?: {
                 [key: string]: string;
             };
@@ -2905,7 +2905,7 @@ export interface components {
             /** @description Non-fatal policy application notices. */
             readonly warnings?: string[];
         };
-        /** @description The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With rules, unmatched outbound traffic is denied. If no inbound rules are present, inbound access keeps the authenticated default; explicit inbound allow rules restrict exposure to their listed ports. */
+        /** @description The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With an outbound `allow` rule, unmatched outbound traffic is denied. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable. */
         PolicyRules: {
             [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["ScheduleRule"] | components["schemas"]["LifecycleRule"];
         };
@@ -2982,7 +2982,7 @@ export interface components {
             /** @description Disk in MiB. */
             disk_mib: number;
         };
-        /** @description A period the pool is committed to, from `starts_at` up to but not including `ends_at`, lasting at least 24 hours. Commitments do not overlap, a new one may not start in the past, and one that has started cannot change. While a commitment is active the pool cannot shrink or be deleted. */
+        /** @description A period the pool is committed to, from `starts_at` up to but not including `ends_at`, lasting at least 24 hours. Commitments do not overlap, a new one may not start in the past, and one that has started cannot change. During a commitment the pool cannot shrink or be deleted. */
         PoolCommitment: {
             /**
              * Format: date-time
@@ -2996,10 +2996,10 @@ export interface components {
             ends_at: string;
         };
         /**
-         * @description `creating` until `resources_reserved` first reaches `resources` (a `managed` pool starts `active`; a `self_hosted` pool without `resources` turns `active` once its first worker is live); `active` from then on, also when `resources_reserved` later drops below `resources`; `deleting` from the delete request until the pool is gone. `reason` says what needs attention.
+         * @description `creating` until the pool's first worker is running (a `managed` pool starts `running`); `running` from then on, also while workers come and go; `deleting` from the delete request until the pool is gone. `reason` says what needs attention.
          * @enum {string}
          */
-        PoolState: "creating" | "active" | "deleting";
+        PoolState: "creating" | "running" | "deleting";
         /**
          * @description What a `byoc` pool keeps in your cloud account instead of Arker's regional store. `vms`: VM snapshots, in a bucket of your account.
          * @enum {string}
@@ -3072,9 +3072,9 @@ export interface components {
             resources: components["schemas"]["PoolResources"];
             /** @description Resources set aside for the pool: `resources`. */
             resources_reserved: components["schemas"]["PoolResources"];
-            /** @description Resources of the pool's active VMs. */
+            /** @description What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers. */
             resources_provisioned: components["schemas"]["PoolResources"];
-            /** @description Commitments, each {starts_at, ends_at}. Managed only. A commitment reserves a pool for at least 24 hours, during which it can't be deleted or shrunk. Commitment duration nonlinearly scales a percentage discount. Otherwise pools are billed at on-demand rates on the total size reserved. Oldest first. */
+            /** @description Commitments, each {starts_at, ends_at}, oldest first. Commitments may be unavailable in a region; a pool's commitments, where it has any, discount its reserved size, otherwise billed at on-demand rates. */
             commitments: components["schemas"]["PoolCommitment"][];
         };
         /** @description A pool whose workers Arker launches in your cloud account (BYOC). */
@@ -3104,9 +3104,9 @@ export interface components {
             created_at: string;
             /** @description Resources requested. Arker launches workers until they cover it. */
             resources: components["schemas"]["PoolResources"];
-            /** @description What the pool's live workers contribute, at most `resources`. */
+            /** @description What the pool's `running` and `draining` workers contribute, at most `resources`. */
             resources_reserved: components["schemas"]["PoolResources"];
-            /** @description Resources of the pool's active VMs. */
+            /** @description What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers. */
             resources_provisioned: components["schemas"]["PoolResources"];
             /** @description What the pool keeps in your cloud account instead of Arker's regional store. */
             isolation: components["schemas"]["PoolIsolation"][];
@@ -3139,9 +3139,9 @@ export interface components {
             created_at: string;
             /** @description Resources requested: a cap on `resources_reserved`. Absent means no cap. */
             resources?: components["schemas"]["PoolResources"];
-            /** @description What the pool's live workers contribute, at most `resources` when present. */
+            /** @description What the pool's `running` and `draining` workers contribute, at most `resources` when present. */
             resources_reserved: components["schemas"]["PoolResources"];
-            /** @description Resources of the pool's active VMs. */
+            /** @description What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers. */
             resources_provisioned: components["schemas"]["PoolResources"];
         };
         /** @description A regional pool. Run on multi-cloud managed compute, BYOC in an arbitrary cloud account, or self-hosted using BLAST. If BYOC or self-hosted, a significant discount is applied against on-demand rates and organization limits are not applied. */
@@ -3163,7 +3163,7 @@ export interface components {
             platform: components["schemas"]["PoolPlatform"];
             /** @description Resources requested. */
             resources: components["schemas"]["PoolResources"];
-            /** @description Commitments, each {starts_at, ends_at}. Managed only. A commitment reserves a pool for at least 24 hours, during which it can't be deleted or shrunk. Commitment duration nonlinearly scales a percentage discount. Otherwise pools are billed at on-demand rates on the total size reserved. */
+            /** @description Commitments may be unavailable, and a request that then sets one is refused with 422 unsupported_operation; `[]` is always accepted. Each is {starts_at, ends_at}. */
             commitments?: components["schemas"]["PoolCommitment"][];
         };
         CreateByocPoolRequest: {
@@ -3200,7 +3200,7 @@ export interface components {
             name?: string | null;
             /** @description New requested resources. Growing is always allowed; shrinking, including to zero, only while no commitment is active. */
             resources?: components["schemas"]["PoolResources"];
-            /** @description The full list of commitments. A commitment that has started must be kept unchanged. Managed pools only. */
+            /** @description Commitments may be unavailable, and a request that then sets one is refused with 422 unsupported_operation; `[]` is always accepted. The full list of commitments; one that has started must be kept unchanged. Managed pools only. */
             commitments?: components["schemas"]["PoolCommitment"][];
         };
         /**
@@ -3214,10 +3214,10 @@ export interface components {
          */
         WorkerHeartbeatState: "bootstrapping" | "active" | "draining" | "left";
         /**
-         * @description `bootstrapping` is starting and takes no VMs yet; `running` takes new VMs; `draining` keeps its VMs but takes no new ones; `unreachable` has missed its heartbeats or lost its tunnel, and its VMs answer `unavailable` until it returns; `left` has left the pool for good.
+         * @description `creating` is starting and takes no VMs yet; `running` takes new VMs; `draining` keeps its VMs but takes no new ones; `unreachable` has missed its heartbeats or lost its tunnel, and its VMs answer `unavailable` until it returns; `left` has left the pool for good.
          * @enum {string}
          */
-        WorkerState: "bootstrapping" | "running" | "draining" | "unreachable" | "left";
+        WorkerState: "creating" | "running" | "draining" | "unreachable" | "left";
         WorkerResources: {
             /** @description vCPUs. */
             vcpu: number;
@@ -3232,9 +3232,9 @@ export interface components {
             /** @description Worker identifier. */
             worker_id: string;
             state: components["schemas"]["WorkerState"];
-            /** @description Resources of the worker's active VMs. */
+            /** @description What the worker's VMs use right now; nothing unless the worker is `running` or `draining`. */
             resources_provisioned: components["schemas"]["PoolResources"];
-            /** @description Resources the worker contributes to the pool. */
+            /** @description What the worker adds to the pool's `resources_reserved`; nothing unless it is `running` or `draining`. */
             resources_reserved: components["schemas"]["PoolResources"];
             /**
              * Format: date-time
