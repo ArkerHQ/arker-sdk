@@ -701,6 +701,78 @@ async function testPoolManagementCommands(): Promise<void> {
   });
 }
 
+async function testUpdateSshPublicKeysFileWritesVmKeys(): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), "arker-cli-ssh-"));
+  const keysFile = join(dir, "authorized_keys");
+  writeFileSync(keysFile, "ssh-ed25519 AAAAfile file@example\n");
+  try {
+    await withCapturedServer((_req, res) => jsonResponse(res, { vm_id: "vm_1", state: "idle" }), async (baseUrl, requests) => {
+      const result = await runCli(baseUrl, ["update", "vm_1", "--ssh-public-keys-file", keysFile]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.deepEqual(requestsWithoutKeys(requests), [
+        { method: "PATCH", url: "/api/v1/vms/vm_1", body: { ssh_public_keys: ["ssh-ed25519 AAAAfile file@example"] } },
+      ]);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const CLI_API_KEY = { api_key_id: "agents_abc", scopes: [], created_at: "2026-10-17T00:00:00.000Z" };
+async function testApiKeysCommands(): Promise<void> {
+  for (const [flags, scopes] of [
+    [["--pool-id", "pool-1"], [{ pool_id: "pool-1" }]],
+    [["--vm-id", "vm_a", "--vm-id", "vm_b"], [{ vm_id: "vm_a" }, { vm_id: "vm_b" }]],
+    [[], undefined],
+  ] as const) {
+    const created = { ...CLI_API_KEY, scopes: scopes ?? [], key: "ark_live_secret" };
+    await withCapturedServer((_req, res) => jsonResponse(res, created, 201), async (baseUrl, requests) => {
+      const result = await runCli(baseUrl, ["api-keys", "create", "--name", "agents", ...flags], { controlOnly: true });
+      assert.equal(result.code, 0, result.stderr);
+      assert.deepEqual(JSON.parse(stdoutText(result)), created);
+      assert.deepEqual(requestsWithoutKeys(requests), [
+        { method: "POST", url: "/api/v1/api-keys", body: { name: "agents", ...(scopes ? { scopes } : {}) } },
+      ]);
+    });
+  }
+  const listed = [CLI_API_KEY, { ...CLI_API_KEY, api_key_id: "vms_1", scopes: [{ vm_id: "vm_a" }, { vm_id: "vm_b" }] }];
+  await withCapturedServer((_req, res) => jsonResponse(res, { api_keys: listed }), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["api-keys", "ls"], { controlOnly: true });
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(stdoutText(result), "agents_abc\torganization\t2026-10-17T00:00:00.000Z\nvms_1\tvm:vm_a,vm:vm_b\t2026-10-17T00:00:00.000Z\n");
+    assert.deepEqual(requests.map(r => [r.method, r.url]), [["GET", "/api/v1/api-keys"]]);
+  });
+  await withCapturedServer((_req, res) => { res.statusCode = 204; res.end(); }, async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["api-keys", "rm", "agents_abc"], { controlOnly: true });
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(stdoutText(result), "revoked agents_abc\n");
+    assert.deepEqual(requests.map(r => [r.method, r.url]), [["DELETE", "/api/v1/api-keys/agents_abc"]]);
+  });
+  await withCapturedServer((_req, res) => jsonResponse(res, {}), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["api-keys", "create", "--pool-id", "pool-1", "--vm-id", "vm_a"]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /mutually exclusive/);
+    assert.equal(requests.length, 0);
+  });
+  const shape = 'scopes must be 1..16 {"vm_id"} objects or one {"pool_id"}';
+  await withCapturedServer((_req, res) => jsonResponse(res, {
+    error: {
+      code: "bad_request",
+      message: shape,
+      timestamp: "2026-10-17T00:00:00Z",
+      request_id: "req_1",
+      request: { kind: "matched", operation_id: "createApiKey" },
+      details: { violations: [{ field: "request", message: shape }] },
+    },
+  }, 400), async (baseUrl, requests) => {
+    const vmFlags = Array.from({ length: 17 }, (_, i) => ["--vm-id", `vm_${i}`]).flat();
+    const result = await runCli(baseUrl, ["api-keys", "create", ...vmFlags], { controlOnly: true });
+    assert.equal(result.code, 1);
+    assert.equal(result.stderr, `arker: bad_request: ${shape}\n`);
+    assert.equal(requests.length, 1);
+  });
+}
+
 async function testRemovedSecretAndUrlFlagsFailLocally(): Promise<void> {
   for (const args of [
     ["--api-key", "secret", "ls"],
@@ -720,7 +792,7 @@ async function testPerCommandHelpIsCommandSpecific(): Promise<void> {
   for (const command of [
     "delete", "filesystems", "fork", "fs", "list", "ls", "policies", "regions",
     "rm", "run", "runs", "sessions", "shell", "signal", "sync", "sync-dir",
-    "mounts", "pools", "update", "vms", "whoami",
+    "mounts", "pools", "update", "vms", "whoami", "api-keys",
   ]) {
     const result = await runCli(undefined, [command, "--help"], { authenticated: false });
     assert.equal(result.code, 0, `${command} --help should succeed`);
@@ -1059,6 +1131,39 @@ async function testSignalForwardsSignalAndSession(): Promise<void> {
     assert.equal(result.code, 0, result.stderr);
     assert.equal(requests[0]?.url, "/api/v1/vms/vm_1/runs");
     assert.deepEqual(requests[0]?.body, { signal: "SIGTERM", session_id: "s_1" });
+  });
+}
+
+async function testStateFiltersMatchTheContract(): Promise<void> {
+  const sessions = { sessions: [{ session_id: "s_1", state: "pending", cwd: "/" }] };
+  await withCapturedServer((_request, res) => jsonResponse(res, sessions), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["sessions", "ls", "vm_1", "--state", "pending"]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(requests[0]?.url, "/api/v1/vms/vm_1/sessions?state=pending");
+    assert.equal(stdoutText(result), "s_1\tpending\t/\n");
+  });
+  await withCapturedServer((_request, res) => jsonResponse(res, { vms: [] }), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["ls", "--state", "pending"]);
+    assert.equal(result.code, 1, "a VM is never pending");
+    assert.equal(requests.length, 0);
+  });
+}
+
+async function testSignalOnAStoppedVmShowsInvalidState(): Promise<void> {
+  await withCapturedServer((_request, res) => jsonResponse(res, {
+    error: {
+      code: "invalid_state",
+      message: "The VM is not running.",
+      timestamp: "2026-10-16T00:00:00Z",
+      request_id: "req_1",
+      request: { kind: "matched", operation_id: "createRun" },
+      details: { resource: { kind: "vm" }, requirement: "running" },
+    },
+  }, 409), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["signal", "vm_1", "SIGINT"]);
+    assert.equal(result.code, 1);
+    assert.equal(result.stderr, "arker: invalid_state: The VM is not running.\n");
+    assert.equal(requests.length, 1);
   });
 }
 
@@ -1451,6 +1556,8 @@ await testWhoamiUsesAuthenticatedControlPlane();
 await testPoolsCreateShowsSetup();
 await testPoolsCreateJson();
 await testPoolManagementCommands();
+await testApiKeysCommands();
+await testUpdateSshPublicKeysFileWritesVmKeys();
 await testRemovedSecretAndUrlFlagsFailLocally();
 await testHelpMatchesSupportedSurface();
 await testPerCommandHelpIsCommandSpecific();
@@ -1464,6 +1571,8 @@ await testSyncReadFlagIgnoresPipedStdin();
 await testSyncReadFlagRejectsDataArgument();
 await testSignalValidatesNameBeforeRequest();
 await testSignalForwardsSignalAndSession();
+await testStateFiltersMatchTheContract();
+await testSignalOnAStoppedVmShowsInvalidState();
 await testSessionsUpdateForwardsPatch();
 await testSessionsUpdateRequiresAField();
 await testNoPipeReadsFileBytes();

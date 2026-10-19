@@ -15,7 +15,8 @@
  *     arker sync <vm> ...      → read or write files on <vm>
  *     arker shell [vm]         → native PTY shell over WebSocket
  *
- * Resources: vms, runs, sessions, mounts, filesystems (alias `fs`), pools.
+ * Resources: vms, runs, sessions, mounts, filesystems (alias `fs`), pools,
+ * api-keys.
  * Each supports `ls`, `get`, `rm`, and the resource-specific verbs.
  *
  * Auth: reads `ARKER_API_KEY` from the environment (or `~/.arker/config`).
@@ -35,6 +36,7 @@ import {
 } from "@arker-ai/sdk";
 import { bridgePty } from "./cli-pty.js";
 import type {
+  ApiKeyScope,
   PolicyDoc,
   CreatePoolRequest,
   UpdatePoolRequest,
@@ -212,6 +214,13 @@ const POOL_OPTIONS: Record<string, OptionSpecs> = {
   "add-commitment": { ...GLOBAL_OPTIONS, "starts-at": { type: "string" }, "ends-at": { type: "string" } },
 };
 
+const API_KEY_CREATE_OPTIONS: OptionSpecs = {
+  ...GLOBAL_OPTIONS,
+  name: { type: "string" },
+  "pool-id": { type: "string" },
+  "vm-id": { type: "string", repeatable: true },
+};
+
 const UPDATE_OPTIONS: OptionSpecs = {
   pool: { type: "string" },
   "pool-id": { type: "string" },
@@ -224,6 +233,7 @@ const UPDATE_OPTIONS: OptionSpecs = {
 };
 
 const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
+  "api-keys": API_KEY_CREATE_OPTIONS,
   config: { help: { type: "boolean" }, json: { type: "boolean" } },
   delete: GLOBAL_OPTIONS,
   filesystems: {
@@ -420,6 +430,9 @@ function invocationOptions(command: string, positional: string[]): { options: Op
     context = `pools ${subcommand ?? "ls"}`;
     const key = subcommand === undefined || subcommand === "list" ? "ls" : subcommand;
     allowed = POOL_OPTIONS[key] ?? GLOBAL_OPTIONS;
+  } else if (command === "api-keys") {
+    context = `api-keys ${subcommand ?? "ls"}`;
+    allowed = subcommand === "create" ? API_KEY_CREATE_OPTIONS : GLOBAL_OPTIONS;
   } else if (command === "policies") {
     context = `policies ${subcommand ?? "get"}`;
     allowed = subcommand === "set" ? COMMAND_OPTIONS.policies! : GLOBAL_OPTIONS;
@@ -429,6 +442,7 @@ function invocationOptions(command: string, positional: string[]): { options: Op
 }
 
 const POSITIONAL_LIMITS: Record<string, number | Record<string, number>> = {
+  "api-keys": { ls: 0, list: 0, create: 0, rm: 1, delete: 1 },
   config: { set: 2, get: 1, list: 0, unset: 1 },
   delete: 1,
   filesystems: { ls: 0, list: 0, create: 1, get: 1, rm: 1, delete: 1 },
@@ -701,7 +715,7 @@ function commandRequiresComputePlacement(
   args: ParsedArgs,
 ): boolean {
   if (command === "pools") return ![undefined, "ls", "list"].includes(args.positional[0]);
-  if (command === "ls" || command === "list" || command === "whoami") return false;
+  if (command === "ls" || command === "list" || command === "whoami" || command === "api-keys") return false;
   if (command === "runs") {
     const [subcommand, vm] = args.positional;
     if ((subcommand === "ls" || subcommand === "list") && vm === undefined) return false;
@@ -1551,6 +1565,44 @@ async function cmdFilesystems(args: ParsedArgs, client: Arker): Promise<void> {
   }
 }
 
+// ── API keys ───────────────────────────────────────────────────────
+
+async function cmdApiKeys(args: ParsedArgs, client: Arker): Promise<void> {
+  const [sub, id] = args.positional;
+  switch (sub) {
+    case undefined:
+    case "ls":
+    case "list": {
+      const res = await client.listApiKeys();
+      if (args.flags.json) return out(res);
+      for (const key of res.api_keys) out(`${key.api_key_id}\t${fmtApiKeyScopes(key.scopes)}\t${key.created_at}`);
+      return;
+    }
+    case "create": {
+      const poolId = args.flags["pool-id"] as string | undefined;
+      const vmIds = (args.flags["vm-id"] as string[] | undefined) ?? [];
+      if (poolId !== undefined && vmIds.length > 0) die("--pool-id and --vm-id are mutually exclusive");
+      const scopes: ApiKeyScope[] = poolId !== undefined ? [{ pool_id: poolId }] : vmIds.map((vm_id) => ({ vm_id }));
+      return out(await client.createApiKey({
+        name: args.flags.name as string | undefined,
+        ...(scopes.length > 0 ? { scopes } : {}),
+      }));
+    }
+    case "rm":
+    case "delete": {
+      const apiKeyId = id ?? die(`usage: arker api-keys ${sub} <api_key_id>`);
+      await client.revokeApiKey(apiKeyId);
+      return out(`revoked ${apiKeyId}`);
+    }
+    default: die("usage: arker api-keys <ls|create|rm> ...");
+  }
+}
+
+function fmtApiKeyScopes(scopes: ApiKeyScope[]): string {
+  if (scopes.length === 0) return "organization";
+  return scopes.map((scope) => "pool_id" in scope ? `pool:${scope.pool_id}` : `vm:${scope.vm_id}`).join(",");
+}
+
 // ── Pools ──────────────────────────────────────────────────────────
 
 async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
@@ -1927,6 +1979,19 @@ interface CommandHelp {
 }
 
 const COMMAND_HELP: Record<string, CommandHelp> = {
+  "api-keys": {
+    synopsis: [
+      "arker api-keys ls",
+      "arker api-keys create [--name <name>] [--pool-id <pool_id> | --vm-id <vm_id> ...]",
+      "arker api-keys rm <api_key_id>",
+    ],
+    summary: "Create, list and revoke API keys.",
+    subs: { ls: "list unrevoked keys, newest first", create: "create a key and print it once", rm: "revoke a key" },
+    notes: [
+      "A key has your role; --vm-id or --pool-id limits it to VMs or to one pool.",
+      "--vm-id is repeatable (1 to 16 VMs); --pool-id limits the key to one pool, and only admins create one.",
+    ],
+  },
   config: {
     synopsis: ["arker config set <provider|region> <value>", "arker config get <provider|region>", "arker config list", "arker config unset <provider|region>"],
     summary: "Manage stored provider and region defaults in ~/.arker/config.json.",
@@ -2169,6 +2234,7 @@ function usage(command?: string, positional: string[] = []): void {
       "  arker filesystems <ls|create|get|rm> ...   (alias: fs)",
       "  arker pools <ls|get|create|update|rename|rm|workers|add-commitment> ...",
       "                                              buy and manage prepaid capacity",
+      "  arker api-keys <ls|create|rm> ...          create, list and revoke API keys",
       "  arker sync <vm_id> <path> [data|-]          read a file, or write data/stdin",
       "  arker sync <vm_id> <path> --read            read a file, ignoring stdin",
       "  arker sync-dir <vm_id> <local> <remote>     sync a directory into the VM",
@@ -2307,6 +2373,8 @@ async function main(): Promise<void> {
         return await cmdFilesystems(args, client);
       case "pools":
         return await cmdPools(args, client);
+      case "api-keys":
+        return await cmdApiKeys(args, client);
       default:
         die(`unknown command: ${cmd}. Run 'arker --help'.`);
     }

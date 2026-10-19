@@ -115,7 +115,7 @@ type ForkRequest struct {
 	Durable         *bool         `json:"durable,omitempty"`
 	NestedVirt      *bool         `json:"nestedvirt,omitempty"`
 	QueueingTimeout *int          `json:"queueing_timeout,omitempty"`
-	Policies        *PolicyDoc    `json:"policies,omitempty"`
+	Policies        *PolicyUpdate `json:"policies,omitempty"`
 	RegistryAuth    *RegistryAuth `json:"registry_auth,omitempty"`
 
 	// Dockerfile is rejected by the API by design -- the SDKs build it
@@ -162,12 +162,14 @@ type VMInfo struct {
 	MinMemoryMiB        *int                 `json:"min_memory_mib,omitempty"`
 	MaxDiskMiB          *int                 `json:"max_disk_mib,omitempty"`
 	MinDiskMiB          *int                 `json:"min_disk_mib,omitempty"`
-	// State is exactly {"idle","running"} and means "is a command in flight",
-	// not "is the VM awake": a suspended VM also reports "idle".
+	// State is "running" while something uses the VM -- a run, an SSH
+	// connection, a terminal, an inbound request, a sync or a resize -- and
+	// "idle" otherwise, including while it is suspended.
 	State     string       `json:"state,omitempty"`
 	Network   *VMNetwork   `json:"network,omitempty"`
 	Resources *VMResources `json:"resources,omitempty"`
 	Sessions  []Session    `json:"sessions,omitempty"`
+	Policies  *PolicyDoc   `json:"policies,omitempty"`
 }
 
 // VM is a handle to one machine. Info is nil on a bare handle from Client.VM
@@ -337,12 +339,12 @@ func (v *VM) Fork(ctx context.Context, req ForkRequest) (*VM, error) {
 // against a live deployment: PATCH {"description":null} left the value intact
 // while {"description":""} cleared it.
 type UpdateRequest struct {
-	PoolID        *string    `json:"pool_id,omitempty"`
-	PoolName      *string    `json:"pool_name,omitempty"`
-	Description   *string    `json:"description,omitempty"`
-	Resources     *Resources `json:"resources,omitempty"`
-	SSHPublicKeys *[]string  `json:"ssh_public_keys,omitempty"`
-	Policies      *PolicyDoc `json:"policies,omitempty"`
+	PoolID        *string       `json:"pool_id,omitempty"`
+	PoolName      *string       `json:"pool_name,omitempty"`
+	Description   *string       `json:"description,omitempty"`
+	Resources     *Resources    `json:"resources,omitempty"`
+	SSHPublicKeys *[]string     `json:"ssh_public_keys,omitempty"`
+	Policies      *PolicyUpdate `json:"policies,omitempty"`
 }
 
 // Update changes this VM's description, resources, authorized SSH keys and/or

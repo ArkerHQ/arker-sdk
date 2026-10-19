@@ -89,6 +89,9 @@ class PolicyMatch:
     query_params: dict[str, list[str]] | None = None
     body_contains: list[str] | None = None
     vm_state: Literal['idle', 'running'] | None = None
+    via: list[Literal['port', 'ssh', 'pty']] | None = None
+    ssh_keys: list[str] | None = None
+    connection_state: list[Literal['new', 'open']] | None = None
 
 
 @dataclass(frozen=True)
@@ -1408,7 +1411,7 @@ class PoolCommitment:
     ends_at: str
 
 
-PoolState: TypeAlias = Literal['creating', 'active', 'deleting']
+PoolState: TypeAlias = Literal['creating', 'running', 'deleting']
 
 
 PoolIsolation: TypeAlias = Literal['vms']
@@ -1547,7 +1550,7 @@ WorkerHeartbeatState: TypeAlias = Literal['bootstrapping', 'active', 'draining',
 
 
 WorkerState: TypeAlias = Literal[
-    'bootstrapping', 'running', 'draining', 'unreachable', 'left'
+    'creating', 'running', 'draining', 'unreachable', 'left'
 ]
 
 
@@ -1632,47 +1635,14 @@ class WorkerRunRecord:
     stderr: str | None
 
 
-ApiKeyRole: TypeAlias = Literal['admin', 'developer', 'member', 'viewer']
+@dataclass(frozen=True)
+class ApiKeyVmScope:
+    vm_id: str
 
 
 @dataclass(frozen=True)
-class ApiKey:
-    api_key_id: str
-    role: ApiKeyRole
-    scopes: list[str]
-    vm_id: str | None
-    pool_id: str | None
-    action: None
-    created_at: str
-
-
-@dataclass(frozen=True)
-class CreatedApiKey:
-    api_key_id: str
-    role: ApiKeyRole
-    scopes: list[str]
-    vm_id: str | None
-    pool_id: str | None
-    action: None
-    created_at: str
-    key: str
-
-
-Scope: TypeAlias = str
-
-
-@dataclass(frozen=True)
-class CreateApiKeyRequest:
-    name: str | None = None
-    role: ApiKeyRole | None = None
-    scopes: list[Scope] | None = None
-    vm_id: str | None = None
-    pool_id: str | None = None
-
-
-@dataclass(frozen=True)
-class ListApiKeysResponse:
-    api_keys: list[ApiKey]
+class ApiKeyPoolScope:
+    pool_id: str
 
 
 @dataclass(frozen=True)
@@ -2072,6 +2042,43 @@ class WorkerHeartbeat:
     goldens: WorkerGoldens | None = None
     vm_activity: dict[str, WorkerVmActivity] | None = None
     cached_record_ids: list[str] | None = None
+
+
+ApiKeyScope: TypeAlias = ApiKeyVmScope | ApiKeyPoolScope
+
+
+@dataclass(frozen=True)
+class ApiKey:
+    api_key_id: str
+    role: Literal['admin', 'developer', 'member', 'viewer']
+    scopes: list[ApiKeyScope]
+    vm_id: str | None
+    pool_id: str | None
+    action: None
+    created_at: str
+
+
+@dataclass(frozen=True)
+class CreatedApiKey:
+    api_key_id: str
+    role: Literal['admin', 'developer', 'member', 'viewer']
+    scopes: list[ApiKeyScope]
+    vm_id: str | None
+    pool_id: str | None
+    action: None
+    created_at: str
+    key: str
+
+
+@dataclass(frozen=True)
+class CreateApiKeyRequest:
+    name: str | None = None
+    scopes: list[ApiKeyScope] | None = None
+
+
+@dataclass(frozen=True)
+class ListApiKeysResponse:
+    api_keys: list[ApiKey]
 
 
 @dataclass(frozen=True)
