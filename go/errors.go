@@ -17,6 +17,17 @@ type Error struct {
 	StatusCode int
 	Retryable  *bool
 	RetryAfter *float64
+	// work is the error's recovery.work: whether the server may have acted.
+	work string
+	// enveloped is whether the body was the service's error envelope, which
+	// carries recovery whenever the server may have acted.
+	enveloped bool
+}
+
+// nothingStarted reports that the server did nothing for the failed request,
+// so it is safe to send again.
+func (e *Error) nothingStarted() bool {
+	return e.work == "not_started" || (e.enveloped && e.work == "")
 }
 
 func (e *Error) Error() string {

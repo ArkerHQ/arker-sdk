@@ -20,7 +20,7 @@ if (!poolId) {
   console.log(`Run this example again with ARKER_POOL_ID=${pool.pool_id} to inspect readiness and fork.`);
 } else {
   const pool = await client.getPool(poolId);
-  if (pool.state !== "active") {
+  if (pool.state !== "running") {
     console.log(`${pool.state}: ${pool.reason ?? "Waiting for workers to join"}`);
   } else {
     const vm = await client.fork({ image: "ubuntu", pool_id: pool.pool_id });

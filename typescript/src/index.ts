@@ -2335,6 +2335,11 @@ function canRetryAgain(
 /** A policy read back (`vm.policies`) also reports fields an update refuses. */
 function withoutReadOnlyPolicyFields(policies: PolicyUpdate): PolicyUpdate {
   const { hostname: _h, mitm_domains: _m, warnings: _w, ...update } = policies as PolicyUpdate & Partial<PolicyDoc>;
+  // A policy read back masks its secret values as `***`, which a write
+  // refuses; a secret an update leaves out is kept as it is.
+  if (update.secrets) {
+    update.secrets = Object.fromEntries(Object.entries(update.secrets).filter(([, value]) => value !== "***"));
+  }
   return update;
 }
 
@@ -2366,7 +2371,9 @@ function wireRetryAfter(value: unknown): number | undefined {
 
 function isRetryable(status: number, error?: ArkerError, replaySafe = false): boolean {
   if (error?.code === "quota_exceeded") return false;
-  const work = error?.body?.recovery?.work;
+  // A valid error names `recovery` whenever the server may have acted, so
+  // one without it says the request did nothing and may be sent again.
+  const work = error?.body ? (error.body.recovery?.work ?? "not_started") : undefined;
   if (work !== undefined) {
     if (work !== "not_started") return false;
     replaySafe = true;

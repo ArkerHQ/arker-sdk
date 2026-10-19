@@ -1638,7 +1638,7 @@ async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
       const pool = await client.createPool(poolRequestFromArgs(args));
       out(pool);
       if (pool.type === "byoc" && !args.flags.json) {
-        out(`Open ${pool.byoc.setup_url} signed in to AWS account ${pool.byoc.account_id} and create the stack. Then run arker pools get ${pool.pool_id} until state is active.`);
+        out(`Open ${pool.byoc.setup_url} signed in to AWS account ${pool.byoc.account_id} and create the stack. Then run arker pools get ${pool.pool_id} until state is running.`);
       }
       return;
     }

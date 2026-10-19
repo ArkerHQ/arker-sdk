@@ -1919,8 +1919,14 @@ def _policy_update(policies: Any) -> Any:
         policies = {field.name: getattr(policies, field.name) for field in dataclasses.fields(policies)}
     if not isinstance(policies, dict):
         return policies
+    # A policy read back masks its secret values as ``***``, which a write
+    # refuses; a secret an update leaves out is kept as it is.
     return {
-        key: {name: _EXPLICIT_NULL if item is None else item for name, item in value.items()}
+        key: {
+            name: _EXPLICIT_NULL if item is None else item
+            for name, item in value.items()
+            if not (key == "secrets" and item == "***")
+        }
         if key in ("rules", "secrets") and isinstance(value, dict)
         else value
         for key, value in policies.items()
@@ -2070,8 +2076,11 @@ def _delete_after_failed_build(vm: VM, attempts: int = 3, base_delay_s: float = 
 def _is_retryable(status: int, error: ArkerError | None, *, replay_safe: bool = False) -> bool:
     if error and error.code == "quota_exceeded":
         return False
-    if error and error.body and error.body.recovery:
-        work = error.body.recovery.work
+    # A valid error names `recovery` whenever the server may have acted, so one
+    # without it says the request did nothing and may be sent again.
+    if error and error.body:
+        recovery = getattr(error.body, "recovery", None)
+        work = recovery.work if recovery else "not_started"
         if work != "not_started":
             return False
         replay_safe = True

@@ -159,7 +159,7 @@ def test_a_policy_read_back_updates_without_its_read_only_fields() -> None:
         vm = client().vm("vm_1").refresh()
         vm.update(policies=vm.policies)
     sent = json.loads(t.calls[1]["body"])["policies"]
-    assert sent == {"rules": POLICY_RULES, "secrets": {"KEY": "***"}}
+    assert sent == {"rules": POLICY_RULES, "secrets": {}}
 
 
 def test_typed_policy_surface_has_no_withdrawn_shapes() -> None:

@@ -1727,6 +1727,32 @@ async function testForkForwardsQueueingTimeout(): Promise<void> {
 }
 
 await testQueueingTimeoutRetriesPastTheAttemptCap();
+
+async function testAnErrorNamingNoRecoveryIsRetried(): Promise<void> {
+  // The contract names `recovery` whenever the server may have acted.
+  const runs = (m: string, u: string) => m === "POST" && u.includes("/runs");
+  const fetchImpl = new FakeFetch();
+  const { recovery: _r, ...error } = unavailableBody(0).error;
+  fetchImpl.addJson(runs, 503, { error });
+  fetchImpl.addJson(runs, 200, { run_id: "run_q", state: "completed", exit_code: 0, stdout: "ok", stdout_encoding: "utf-8", stderr: "", stderr_encoding: "utf-8" });
+  const client = new Arker({ apiKey: "k", baseUrl: "http://x", fetch: fetchImpl.fetch, retry: { attempts: 2, baseDelayMs: 1, jitterMs: 0 } });
+  await client.vm("vm-1").run("true");
+  assert.equal(fetchImpl.calls.length, 2);
+}
+await testAnErrorNamingNoRecoveryIsRetried();
+
+async function testAReadBackPolicyUpdateLeavesMaskedSecretsOut(): Promise<void> {
+  const patch = (m: string) => m === "PATCH";
+  const fetchImpl = new FakeFetch();
+  fetchImpl.addJson(patch, 200, {});
+  const client = new Arker({ apiKey: "k", baseUrl: "http://x", fetch: fetchImpl.fetch });
+  await client.vm("vm-1").update({
+    policies: { rules: {}, secrets: { KEPT: "***", NEW: "v" }, warnings: ["w"] } as never,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0]!.body ?? "{}") as { policies: unknown };
+  assert.deepEqual(sent.policies, { rules: {}, secrets: { NEW: "v" } });
+}
+await testAReadBackPolicyUpdateLeavesMaskedSecretsOut();
 await testQueueingWindowDrainsThenSurfacesUnavailable();
 await testQueueingTimeoutRespectsRetryFalse();
 await testForkForwardsQueueingTimeout();

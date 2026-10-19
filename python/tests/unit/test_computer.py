@@ -1401,6 +1401,30 @@ def test_mutation_does_not_retry_a_server_unknown_outcome() -> None:
     assert len(t.calls) == 1
 
 
+def test_mutation_retries_an_error_that_names_no_recovery() -> None:
+    # The contract names `recovery` whenever the server may have acted.
+    t = FakeTransport()
+    predicate = lambda method, url: method == "POST" and url.endswith("/v1/vms/vm_1/runs")
+    body = _unavailable_body(0)
+    del body["error"]["recovery"]
+    t.add_json(predicate, 503, body)
+    t.add_json(predicate, 200, _completed_run_body())
+
+    with use_transport(t):
+        sdk.Arker(
+            api_key="k",
+            base_url="https://test.invalid/api",
+            retry={"attempts": 2, "base_delay_s": 0, "jitter_s": 0},
+        ).vm("vm_1").run("true")
+
+    assert len(t.calls) == 2
+
+
+def test_a_read_back_policy_update_leaves_masked_secrets_out() -> None:
+    update = sdk._policy_update({"rules": {}, "secrets": {"KEPT": "***", "NEW": "v", "GONE": None}})
+    assert update["secrets"] == {"NEW": "v", "GONE": sdk._EXPLICIT_NULL}
+
+
 def test_sync_write_does_not_retry_an_ambiguous_network_failure() -> None:
     t = FakeTransport()
     predicate = lambda method, url: method == "POST" and url.endswith("/sync")
