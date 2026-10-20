@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/ArkerHQ/arker-sdk/security/advisories/new
+    about: Report it privately. Please do not open a public issue.
+  - name: Account or billing help
+    url: mailto:support@arker.ai
+    about: Email support for anything about your account.
