@@ -14,7 +14,7 @@ const apiKey = process.env.ARKER_API_KEY;
 const baseUrl = process.env.ARKER_BASE_URL;
 if (!apiKey || !baseUrl) throw new Error("set ARKER_API_KEY + ARKER_BASE_URL");
 
-// On a single-host feature env, control + compute are the same instance.
+// When one host serves both, control and compute share a base URL.
 const arker = new Arker({ apiKey, baseUrl, controlBaseUrl: baseUrl, retry: false });
 
 type Status = "PASS" | "FAIL" | "STUB";

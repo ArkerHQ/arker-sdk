@@ -47,6 +47,9 @@ packages = ["src/arker"]
 [tool.hatch.build]
 exclude = ["src/arker/_openapi.json"]
 
+[tool.hatch.build.targets.sdist]
+include = ["src/arker", "hatch_build.py", "README.md"]
+
 [tool.hatch.build.hooks.custom]
 
 [tool.pytest.ini_options]
