@@ -1,0 +1,29 @@
+name: Feature request
+description: Something you would like an SDK or the CLI to do.
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      multiple: true
+      options: [Python, TypeScript, Go, CLI]
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The task, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help?
+      description: An API shape, a CLI command, or an example of how you would use it.
+      render: shell
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today instead
