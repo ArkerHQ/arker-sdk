@@ -1175,7 +1175,7 @@ export interface components {
             session_idx?: number | null;
             /** @description Command submitted for execution. Omit it only for a signal request, or in a request naming nothing at all: a request with no `command` resumes any pending runs. */
             command?: string;
-            /** @description Maximum command runtime in seconds. Omitted means no limit; the run is killed only if you set a `timeout`. `0` is an explicit spelling of the same thing. This is separate from `time_to_background`, which controls how long the request waits for completion. A run is not complete until everything it spawned has exited, so this is also the bound on a run that leaves a daemon behind; when it fires, the run's processes are killed. */
+            /** @description Maximum command runtime in seconds. Omitted means no limit; the run is killed only if you set a `timeout`. `0` is an explicit spelling of the same thing. This is separate from `time_to_background`, which controls how long the request waits for completion. A run completes when its command exits; processes it leaves running in the background are not waited on, and this timeout does not apply to them once the run has completed. If it fires before the command exits, the command and every process it started are killed, including background ones. */
             timeout?: number | null;
             /**
              * Format: uint16
