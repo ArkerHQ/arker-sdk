@@ -101,6 +101,8 @@ from .generated.api_models import (
     SyncWriteResult,
     UpdatePoolRequest,
     Vm,
+    VmMetadata,
+    VmMetadataUpdate,
     VmNetwork,
     VmResources,
     WhoamiResponse,
@@ -385,6 +387,11 @@ class Arker:
         The key is one-shot and bound to the VM it made: reusing it for a
         different request is a 409, and reusing it once that VM is deleted is a
         404, never a second machine. Maximum 64 characters.
+
+        ``metadata`` is a change applied over the metadata the new VM copies
+        from its source VM: a string sets its key, ``None`` removes it, and
+        keys not named are kept. A fork from an image or a Dockerfile starts
+        with no metadata.
         """
         has_context = "context" in options
         context = options.pop("context", None)
@@ -476,9 +483,13 @@ class Arker:
         org_id: str | None = None,
         public: bool | None = None,
         state: str | None = None,
+        metadata: VmMetadata | None = None,
     ) -> VmList:
         """Admin call - goes through the control plane so it can
         aggregate across providers and regions.
+
+        ``metadata`` lists only VMs whose metadata holds every given key with
+        exactly that value.
         """
         parameters = ListVmsParameters(
             cursor=cursor,
@@ -488,6 +499,7 @@ class Arker:
             org_id=org_id,
             public=public,
             state=state,
+            metadata=metadata,
         )
         path = _build_query("/v1/vms", parameters)
         payload = self._request("GET", path, base_url=self._control_base_url)
@@ -700,6 +712,7 @@ class VM:
     pool_id: str | None
     name: str | None
     description: str | None
+    metadata: VmMetadata | None
     state: str | None
     owner_org_id: str | None
     created_at: str | None
@@ -736,7 +749,10 @@ class VM:
         return VM(self._client, self.id, self.base_url, info)
 
     def fork(self, **options: Any) -> VM:
-        """Fork this VM and return its child."""
+        """Fork this VM and return its child.
+
+        The child copies this VM's metadata; ``metadata`` changes that copy,
+        where a string sets its key and ``None`` removes it."""
         return self._client._fork(
             {**options, "source_vm_id": self.id},
             base_url=self.base_url,
@@ -919,11 +935,12 @@ class VM:
         description: str | _UnsetType | None = _UNSET,
         ssh_public_keys: list[str] | None = None,
         policies: PolicyUpdate | PolicyDoc | dict[str, Any] | None = None,
+        metadata: VmMetadataUpdate | None = None,
         immutable: bool | None = None,
     ) -> Vm:
-        """Update this VM's description, resources, SSH keys, or network
-        policy, or make it immutable, via ``PATCH /v1/vms/{id}``. A VM's pool
-        is set when it is forked and never changes.
+        """Update this VM's description, resources, SSH keys, network policy,
+        or metadata, or make it immutable, via ``PATCH /v1/vms/{id}``. A VM's
+        pool is set when it is forked and never changes.
 
         Pass an empty ``ssh_public_keys`` list to remove all authorized keys.
 
@@ -941,6 +958,11 @@ class VM:
                         "action": "suspend"},
                 "old": None,
             }})
+
+        ``metadata`` changes the VM's metadata by key: a string sets its key,
+        ``None`` removes it, and keys not named are kept::
+
+            vm.update(metadata={"team": "infra", "stale": None})
 
         ``immutable=True`` freezes the VM for good: it can still be viewed,
         listed, forked, and deleted, but anything that changes or starts it is
@@ -963,6 +985,7 @@ class VM:
                 resources=resources,
                 ssh_public_keys=ssh_public_keys,
                 policies=_policy_update(policies),
+                metadata=_explicit_nulls(metadata),
                 immutable=immutable,
             )
         else:
@@ -971,6 +994,7 @@ class VM:
                 "resources": resources,
                 "ssh_public_keys": ssh_public_keys,
                 "policies": _policy_update(policies),
+                "metadata": _explicit_nulls(metadata),
                 "immutable": immutable,
             }
         payload = self._client._request("PATCH", _vm_path(self.id), body, base_url=self.base_url)
@@ -1790,7 +1814,15 @@ def _build_query(
     values = _drop_none(parameters)
     if not isinstance(values, dict):
         raise TypeError("operation parameters must serialize to an object")
-    pairs = [(key, str(value)) for key, value in values.items() if key not in path_fields]
+    pairs: list[tuple[str, str]] = []
+    for key, value in values.items():
+        if key in path_fields:
+            continue
+        if isinstance(value, dict):
+            # A deepObject parameter: one `key[name]=value` pair per entry.
+            pairs.extend((f"{key}[{name}]", str(item)) for name, item in value.items())
+        else:
+            pairs.append((key, str(value)))
     qs = urllib.parse.urlencode(pairs)
     return f"{path}?{qs}" if qs else path
 
@@ -1922,12 +1954,18 @@ def _policy_update(policies: Any) -> Any:
     if not isinstance(policies, dict):
         return policies
     return {
-        key: {name: _EXPLICIT_NULL if item is None else item for name, item in value.items()}
-        if key in ("rules", "secrets") and isinstance(value, dict)
-        else value
+        key: _explicit_nulls(value) if key in ("rules", "secrets") and isinstance(value, dict) else value
         for key, value in policies.items()
         if key not in _READ_ONLY_POLICY_FIELDS
     }
+
+
+def _explicit_nulls(changes: dict[str, Any] | None) -> dict[str, Any] | None:
+    """A ``None`` value in a by-key change removes that key, so it must reach
+    the wire as ``null`` rather than be pruned like an unset field."""
+    if changes is None:
+        return None
+    return {name: _EXPLICIT_NULL if item is None else item for name, item in changes.items()}
 
 
 def _drop_none(value: Any) -> Any:
@@ -2154,7 +2192,8 @@ def _mount(payload: dict[str, Any]) -> Mount:
 
 
 def _vm_info(payload: dict[str, Any]) -> Vm:
-    return _decode_model(Vm, payload)
+    # A VM with no metadata reads as `{}`, never None.
+    return _decode_model(Vm, {**payload, "metadata": payload.get("metadata") or {}})
 
 
 def _terminal_state(state: str | None, exit_code: int | None) -> str:
