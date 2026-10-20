@@ -202,7 +202,7 @@ func (c *Client) VM(vmID string) *VM {
 // It deliberately does not derive an endpoint from the VM's provider/region.
 // Fork and GetVM already went to the endpoint the caller configured, and that
 // endpoint is what serves the machine; recomputing a public URL from the
-// response would send every later per-VM call for a feature env or a private
+// response would send every later per-VM call for a test or private
 // deployment to production instead. Only ListVMs, which aggregates across
 // regions through the control plane, needs a per-VM endpoint -- and it derives
 // one itself.
