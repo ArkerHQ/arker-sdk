@@ -917,14 +917,13 @@ class VM:
         disk_mib: int | None = None,
         vgpu: float | None = None,
         description: str | _UnsetType | None = _UNSET,
-        pool_id: str | None = None,
-        pool_name: str | None = None,
         ssh_public_keys: list[str] | None = None,
         policies: PolicyUpdate | PolicyDoc | dict[str, Any] | None = None,
         immutable: bool | None = None,
     ) -> Vm:
-        """Update this VM's description, resources, pool, SSH keys, or network
-        policy, or make it immutable, via ``PATCH /v1/vms/{id}``.
+        """Update this VM's description, resources, SSH keys, or network
+        policy, or make it immutable, via ``PATCH /v1/vms/{id}``. A VM's pool
+        is set when it is forked and never changes.
 
         Pass an empty ``ssh_public_keys`` list to remove all authorized keys.
 
@@ -962,8 +961,6 @@ class VM:
         if description is _UNSET:
             body = PatchVmRequest(
                 resources=resources,
-                pool_id=pool_id,
-                pool_name=pool_name,
                 ssh_public_keys=ssh_public_keys,
                 policies=_policy_update(policies),
                 immutable=immutable,
@@ -972,8 +969,6 @@ class VM:
             body = {
                 "description": _EXPLICIT_NULL if description is None else description,
                 "resources": resources,
-                "pool_id": pool_id,
-                "pool_name": pool_name,
                 "ssh_public_keys": ssh_public_keys,
                 "policies": _policy_update(policies),
                 "immutable": immutable,

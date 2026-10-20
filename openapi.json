@@ -5658,7 +5658,7 @@
           "pool_id": {
             "type": "string",
             "format": "uuid",
-            "description": "The pool the VM belongs to. Absent when the VM is in no pool."
+            "description": "The pool the VM belongs to, set when the VM is created and never changed. Absent when the VM is in no pool."
           }
         }
       },
@@ -7536,26 +7536,7 @@
                 "type": "null"
               }
             ]
-          },
-          "pool_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "Move the VM to another `managed` pool of the organization, or null to take it out of its pool. A VM cannot move into or out of a `byoc` or `self_hosted` pool (unsupported_operation). Mutually exclusive with pool_name. Omit both fields to keep the current pool."
-          },
-          "pool_name": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Move the VM to the `managed` pool with this name in the VM's region. Names are case-insensitive. Mutually exclusive with pool_id; otherwise the same as pool_id."
           }
-        },
-        "not": {
-          "required": [
-            "pool_id",
-            "pool_name"
-          ]
         }
       },
       "CompatiblePlatform": {
