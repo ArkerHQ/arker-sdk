@@ -93,7 +93,7 @@ function requestsWithoutKeys(requests: CapturedRequest[]): CapturedRequest[] {
 async function runCli(baseUrl: string | undefined, args: string[], options: CliOptions = {}): Promise<CliResult> {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    HOME: options.home ?? "/nonexistent/ark-202-cli-test-home",
+    HOME: options.home ?? "/nonexistent/arker-cli-test-home",
     NODE_NO_WARNINGS: "1",
   };
   if (options.authenticated !== false) env.ARKER_API_KEY = "ark_live_test";
