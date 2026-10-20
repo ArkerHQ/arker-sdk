@@ -63,6 +63,9 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/release-card
         with:
+          role-arn: ${{ vars.RELEASE_CARD_ROLE_ARN }}
+          token-parameter: ${{ vars.RELEASE_CARD_TOKEN_PARAMETER }}
+          post-channel: ${{ vars.RELEASE_CARD_CHANNEL }}
           state: publishing
           package: python
           version: ${{ steps.decide.outputs.version }}
@@ -135,6 +138,9 @@ jobs:
       - continue-on-error: true
         uses: ./.github/actions/release-card
         with:
+          role-arn: ${{ vars.RELEASE_CARD_ROLE_ARN }}
+          token-parameter: ${{ vars.RELEASE_CARD_TOKEN_PARAMETER }}
+          post-channel: ${{ vars.RELEASE_CARD_CHANNEL }}
           state: ${{ needs.build-and-publish.result == 'success' && 'published' || needs.build-and-publish.result == 'cancelled' && 'cancelled' || 'failed' }}
           package: python
           version: ${{ needs.check.outputs.version }}

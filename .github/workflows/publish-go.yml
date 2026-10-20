@@ -52,6 +52,9 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/release-card
         with:
+          role-arn: ${{ vars.RELEASE_CARD_ROLE_ARN }}
+          token-parameter: ${{ vars.RELEASE_CARD_TOKEN_PARAMETER }}
+          post-channel: ${{ vars.RELEASE_CARD_CHANNEL }}
           state: publishing
           package: go
           version: ${{ steps.decide.outputs.version }}
@@ -80,6 +83,9 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/release-card
         with:
+          role-arn: ${{ vars.RELEASE_CARD_ROLE_ARN }}
+          token-parameter: ${{ vars.RELEASE_CARD_TOKEN_PARAMETER }}
+          post-channel: ${{ vars.RELEASE_CARD_CHANNEL }}
           state: ${{ job.status == 'success' && 'published' || job.status == 'cancelled' && 'cancelled' || 'failed' }}
           package: go
           version: ${{ steps.decide.outputs.version }}

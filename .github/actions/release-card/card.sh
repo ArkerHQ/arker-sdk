@@ -3,14 +3,11 @@
 # with the outcome. Editing needs the message ts, hence chat.postMessage/update
 # with the bot token rather than a webhook.
 #
-# Env: STATE PACKAGE VERSION REGISTRY_URL TS CHANNEL, plus GitHub's own
+# Env: STATE PACKAGE VERSION REGISTRY_URL TS CHANNEL TOKEN_PARAMETER
+# POST_CHANNEL, plus GitHub's own
 # GITHUB_SHA GITHUB_ACTOR GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID.
 # CARD_DRY_RUN=1 prints the payload and touches neither AWS nor Slack.
 set -euo pipefail
-
-TOKEN_PARAMETER=/arkerd/staging-aws-us-west-2/test-runner/slack-bot-token
-# chat.postMessage resolves a name; chat.update needs the ID the post returned.
-POST_CHANNEL='#arker-cd'
 
 render() {
   local icon color status
@@ -41,12 +38,14 @@ if [ "${CARD_DRY_RUN:-}" = 1 ]; then
   exit 0
 fi
 
-token=$(aws ssm get-parameter --name "$TOKEN_PARAMETER" --with-decryption \
+token=$(aws ssm get-parameter --name "${TOKEN_PARAMETER:?}" --with-decryption \
   --query Parameter.Value --output text)
 echo "::add-mask::$token"
 
+# chat.postMessage resolves a channel name; chat.update needs the ID the post
+# returned.
 if [ -z "${TS:-}" ]; then
-  method=chat.postMessage target=$POST_CHANNEL edit_ts=
+  method=chat.postMessage target=${POST_CHANNEL:?} edit_ts=
 else
   method=chat.update target=${CHANNEL:?} edit_ts=$TS
 fi
