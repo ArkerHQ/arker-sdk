@@ -569,6 +569,24 @@ async function testExplicitZeroReturnsAckWithoutPolling(): Promise<void> {
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { command: "sleep 999", time_to_background: 0 });
 }
 
+async function testRunSendsEndAfterAllSubprocessesOnlyWhenSet(): Promise<void> {
+  for (const [options, expected] of [
+    [{ end_after_all_subprocesses: true }, { command: "true", end_after_all_subprocesses: true }],
+    [{}, { command: "true" }],
+  ] as const) {
+    const fetch = new FakeFetch();
+    fetch.addJson(
+      (method, url) => method === "POST" && url === "https://test.invalid/api/v1/vms/vm_1/runs",
+      200,
+      { stdout: "", stdout_encoding: "utf-8", stderr: "", stderr_encoding: "utf-8", exit_code: 0 },
+    );
+
+    await client(fetch).vm("vm_1").run("true", options);
+
+    assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), expected);
+  }
+}
+
 async function testConfiguredPlacementRoutesNamedSourcesToMainEndpoint(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(
@@ -1300,6 +1318,7 @@ await testCompletedRunDecodesOutput();
 await testSyncRunPollsBackgroundedRunToCompletion();
 await testRunPollBudgetIsUnboundedWithoutACallerTimeout();
 await testExplicitZeroReturnsAckWithoutPolling();
+await testRunSendsEndAfterAllSubprocessesOnlyWhenSet();
 await testConfiguredPlacementRoutesNamedSourcesToMainEndpoint();
 testArbitraryProviderBuildsEndpoint();
 testPlacementRequiresSeparateProviderAndRegion();
