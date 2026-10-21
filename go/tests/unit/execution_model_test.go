@@ -137,6 +137,32 @@ func TestEmptyRunRequestSendsNothing(t *testing.T) {
 	}
 }
 
+func TestRunSendsEndAfterAllSubprocessesOnlyWhenSet(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		req  arker.RunRequest
+		want string
+	}{
+		{"set", arker.RunRequest{Command: "true", EndAfterAllSubprocesses: arker.Ptr(true)}, `{"command":"true","end_after_all_subprocesses":true}`},
+		{"unset", arker.RunRequest{Command: "true"}, `{"command":"true"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var raw []byte
+			c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+				raw, _ = io.ReadAll(r.Body)
+				fmt.Fprint(w, `{"stdout":"","stdout_encoding":"utf-8","stderr":"","stderr_encoding":"utf-8","exit_code":0}`)
+			}, reject(t, "control"))
+
+			if _, err := c.VM("vm_1").Run(context.Background(), tc.req); err != nil {
+				t.Fatal(err)
+			}
+			if string(raw) != tc.want {
+				t.Fatalf("sent %s, want %s", raw, tc.want)
+			}
+		})
+	}
+}
+
 func TestBackgroundRunAckIsRunning(t *testing.T) {
 	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
