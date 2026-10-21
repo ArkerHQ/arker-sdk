@@ -56,6 +56,10 @@
     {
       "name": "API keys",
       "description": "Create, list and revoke API keys, optionally limited to one VM or pool and one action."
+    },
+    {
+      "name": "Logs",
+      "description": "Your organization's activity history."
     }
   ],
   "paths": {
@@ -582,6 +586,278 @@
             }
           }
         ]
+      }
+    },
+    "/v1/logs": {
+      "get": {
+        "operationId": "listLogs",
+        "tags": [
+          "Logs"
+        ],
+        "summary": "List logs",
+        "description": "Lists the organization's activity, one entry per action: API requests, runs, network and SSH traffic, automatic actions and account changes, across every region, within the retained history window. Filters combine with AND; the values of one filter with OR. Newly recorded actions appear within seconds.",
+        "parameters": [
+          {
+            "name": "actions",
+            "in": "query",
+            "required": false,
+            "description": "Only these actions. Repeat the parameter for more than one.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/LogAction"
+              }
+            }
+          },
+          {
+            "name": "outcomes",
+            "in": "query",
+            "required": false,
+            "description": "Only these outcomes.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/LogOutcome"
+              }
+            }
+          },
+          {
+            "name": "regions",
+            "in": "query",
+            "required": false,
+            "description": "Only actions these regions served.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "vm_ids",
+            "in": "query",
+            "required": false,
+            "description": "Only actions on these VMs.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "members",
+            "in": "query",
+            "required": false,
+            "description": "Only actions these members initiated, by email, or `me` for the member calling. With `keys`, an action either initiated matches.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "keys",
+            "in": "query",
+            "required": false,
+            "description": "Only actions these API keys initiated, by `api_key_id`. With `members`, an action either initiated matches.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "request_ids",
+            "in": "query",
+            "required": false,
+            "description": "Only actions these requests made.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "error_codes",
+            "in": "query",
+            "required": false,
+            "description": "Only actions that failed with these codes.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/ErrorCode"
+              }
+            }
+          },
+          {
+            "name": "exit_code",
+            "in": "query",
+            "required": false,
+            "description": "Only runs that exited with this code.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "requested_at_gte",
+            "in": "query",
+            "required": false,
+            "description": "Only entries whose `requested_at` is at or after this time. Entries without one do not match.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "requested_at_lt",
+            "in": "query",
+            "required": false,
+            "description": "Only entries whose `requested_at` is before this time. Entries without one do not match.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "started_at_gte",
+            "in": "query",
+            "required": false,
+            "description": "Only entries whose `started_at` is at or after this time. Entries without one do not match.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "started_at_lt",
+            "in": "query",
+            "required": false,
+            "description": "Only entries whose `started_at` is before this time. Entries without one do not match.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "completed_at_gte",
+            "in": "query",
+            "required": false,
+            "description": "Only entries whose `completed_at` is at or after this time. Entries without one do not match.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "completed_at_lt",
+            "in": "query",
+            "required": false,
+            "description": "Only entries whose `completed_at` is before this time. Entries without one do not match.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "duration_ms_gte",
+            "in": "query",
+            "required": false,
+            "description": "Only entries whose `duration_ms` is at or after this many milliseconds. Entries without one do not match.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "duration_ms_lt",
+            "in": "query",
+            "required": false,
+            "description": "Only entries whose `duration_ms` is before this many milliseconds. Entries without one do not match.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "order_by",
+            "in": "query",
+            "required": false,
+            "description": "What entries are ordered by; entries without it come last, and `id` breaks ties.",
+            "schema": {
+              "$ref": "#/components/schemas/LogOrderBy",
+              "default": "requested_at"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "The direction of `order_by`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Entries per page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "The previous page's `next_cursor`. It keeps that query's filters and order, so only `limit` may accompany it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of entries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListLogsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
       }
     },
     "/v1/vms/{id}": {
@@ -7734,6 +8010,7 @@
           "fork",
           "listVms",
           "listOrgRuns",
+          "listLogs",
           "getVm",
           "deleteVm",
           "patchVm",
@@ -12436,6 +12713,219 @@
               "$ref": "#/components/schemas/ApiKey"
             },
             "description": "Unrevoked API keys, newest first."
+          }
+        }
+      },
+      "LogAction": {
+        "type": "string",
+        "enum": [
+          "run",
+          "fork",
+          "sync",
+          "delete",
+          "signal",
+          "vm_update",
+          "vm_suspend",
+          "policies_update",
+          "run_cancel",
+          "session_create",
+          "session_update",
+          "session_delete",
+          "mount_create",
+          "mount_delete",
+          "filesystem_create",
+          "filesystem_delete",
+          "pool_create",
+          "pool_update",
+          "pool_delete",
+          "inbound_request",
+          "outbound_request",
+          "ssh_session",
+          "ssh_key_delete",
+          "api_key_create",
+          "api_key_revoke",
+          "member_update",
+          "member_remove",
+          "org_rename"
+        ],
+        "description": "What a log entry records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection."
+      },
+      "LogOutcome": {
+        "type": "string",
+        "enum": [
+          "in_progress",
+          "succeeded",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "LogOrderBy": {
+        "type": "string",
+        "enum": [
+          "requested_at",
+          "started_at",
+          "completed_at",
+          "duration_ms"
+        ]
+      },
+      "LogEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "action",
+          "outcome",
+          "vm_id",
+          "requested_at",
+          "started_at",
+          "completed_at",
+          "duration_ms",
+          "actor",
+          "region",
+          "request_id",
+          "error_code",
+          "attributes"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The action's id, the same while it is in progress and once it ends."
+          },
+          "action": {
+            "$ref": "#/components/schemas/LogAction"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/LogOutcome"
+          },
+          "vm_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The VM the action used; a fork's new VM. Null for an action on no VM."
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the request arrived, or an automatic action was triggered."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the action began executing; null before it does and for an action with no separate start."
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the action ended; null while it is in progress."
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "From `started_at`, or `requested_at` when there is none, to `completed_at`; null while in progress."
+          },
+          "actor": {
+            "description": "Who initiated the action: a member by email, or an API key by id. Null for an automatic action, or when Arker does not know who acted.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LogActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The region that served the action; null for one the console served, such as an API key's."
+          },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `x-request-id` of the request that made the action."
+          },
+          "error_code": {
+            "description": "Why the action failed or was refused.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "integer",
+                "boolean",
+                "null"
+              ]
+            },
+            "description": "Facts only some actions have, such as a run's `run_id` and `exit_code`, a fork's `source_vm_id`, or an inbound request's `port`."
+          }
+        }
+      },
+      "LogActor": {
+        "type": "object",
+        "required": [
+          "type",
+          "id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "description": "A member, or an API key.",
+            "type": "string",
+            "enum": [
+              "member",
+              "key"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "A member's email, or an API key's `api_key_id`."
+          }
+        }
+      },
+      "ListLogsResponse": {
+        "type": "object",
+        "required": [
+          "logs",
+          "next_cursor"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "logs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LogEntry"
+            },
+            "description": "Entries, in the requested order."
+          },
+          "next_cursor": {
+            "description": "Cursor for the next page, or null when there is none.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       }

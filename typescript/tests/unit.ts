@@ -793,6 +793,35 @@ function testExplicitVmHandleUsesPlacementEndpoint(): void {
   assert.equal(vm.baseUrl, "https://provider-two-region-two.arker.ai/api");
 }
 
+async function testListLogsSendsTheFilterAsFlatParameters(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson(
+    (method, url) => method === "GET" && url === "https://control.invalid/api/v1/logs?actions=run&actions=fork&vm_ids=vm_1&exit_code=1&completed_at_gte=2026-10-20T00%3A00%3A00Z&duration_ms_lt=5000&order_by=duration_ms&order=asc&limit=10",
+    200,
+    { logs: [], next_cursor: null },
+  );
+  const arker = new Arker({
+    apiKey: "ark_live_test",
+    baseUrl: "https://test.invalid/api/",
+    controlBaseUrl: "https://control.invalid/api/",
+    fetch: fetch.fetch,
+    retry: false,
+  });
+  const page = await arker.listLogs({
+    filter: {
+      actions: ["run", "fork"],
+      vmIds: ["vm_1"],
+      exitCode: 1,
+      completedAt: { gte: "2026-10-20T00:00:00Z" },
+      durationMs: { lt: 5000 },
+    },
+    orderBy: "duration_ms",
+    order: "asc",
+    limit: 10,
+  });
+  assert.deepEqual(page, { logs: [], next_cursor: null });
+}
+
 async function testListRunsUsesControlPlaneAndFilters(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(
@@ -1313,6 +1342,7 @@ await testDiscoverRegionsRequiresNoConfiguredClient();
 await testListedVmUsesItsPlacementEndpoint();
 testExplicitVmHandleUsesPlacementEndpoint();
 await testListRunsUsesControlPlaneAndFilters();
+await testListLogsSendsTheFilterAsFlatParameters();
 await testListVmsPreservesForkLimitFields();
 await testForkSendsDurableFlag();
 await testRunSendsIdempotencyKeyHeader();

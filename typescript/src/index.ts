@@ -427,6 +427,39 @@ export type ListOrgRunsResponse = ApiSchema<"ListOrgRunsResponse">;
 export type RunListRow = OrgRunListRow;
 export type CancelRunResponse = ApiSchema<"CancelRunResponse">;
 
+// ── Logs ───────────────────────────────────────────────────────────
+export type LogEntry = ApiSchema<"LogEntry">;
+export type ListLogsResponse = ApiSchema<"ListLogsResponse">;
+/** A `[gte, lt)` bound; either end may be left open. */
+export type LogRange<T> = { gte?: T; lt?: T };
+/** Which entries a page lists. Values of one filter match any of them;
+ *  filters combine, except `members` and `keys`, either of which matches. */
+export type LogFilter = {
+  actions?: ApiSchema<"LogAction">[];
+  outcomes?: ApiSchema<"LogOutcome">[];
+  regions?: string[];
+  vmIds?: string[];
+  /** Member emails, or `me`. */
+  members?: string[];
+  /** API key ids. */
+  keys?: string[];
+  requestIds?: string[];
+  errorCodes?: ApiSchema<"ErrorCode">[];
+  exitCode?: number;
+  requestedAt?: LogRange<string>;
+  startedAt?: LogRange<string>;
+  completedAt?: LogRange<string>;
+  durationMs?: LogRange<number>;
+};
+export type ListLogsOptions = {
+  filter?: LogFilter;
+  orderBy?: ApiSchema<"LogOrderBy">;
+  order?: "asc" | "desc";
+  limit?: number;
+  /** A previous page's `next_cursor`; it carries that page's filter and order. */
+  cursor?: string;
+};
+
 // ── Sessions ───────────────────────────────────────────────────────
 export type CreateSessionRequest = ApiSchema<"CreateSessionRequest">;
 export type PatchSessionRequest = ApiSchema<"PatchSessionRequest">;
@@ -436,6 +469,7 @@ export type PtyTicketResponse = ApiSchema<"PtyTicketResponse">;
 // ── Operation query parameters ─────────────────────────────────────
 export type ListVmsParameters = ApiQuery<"listVms">;
 export type ListOrgRunsParameters = ApiQuery<"listOrgRuns">;
+export type ListLogsParameters = ApiQuery<"listLogs">;
 export type ListFilesystemsParameters = ApiQuery<"listFilesystems">;
 export type ListPoolsParameters = ApiQuery<"listPools">;
 export type ListMountsParameters = ApiQuery<"listMounts">;
@@ -835,6 +869,35 @@ export class Arker {
       dir: opts.dir,
     };
     return this._request("GET", buildQuery("/v1/runs", query), undefined, this.controlBaseUrl);
+  }
+
+  /** List the organization's activity across regions, one entry per action. */
+  async listLogs(opts: ListLogsOptions = {}): Promise<ListLogsResponse> {
+    const filter = opts.filter ?? {};
+    const query: ListLogsParameters = {
+      actions: filter.actions,
+      outcomes: filter.outcomes,
+      regions: filter.regions,
+      vm_ids: filter.vmIds,
+      members: filter.members,
+      keys: filter.keys,
+      request_ids: filter.requestIds,
+      error_codes: filter.errorCodes,
+      exit_code: filter.exitCode,
+      requested_at_gte: filter.requestedAt?.gte,
+      requested_at_lt: filter.requestedAt?.lt,
+      started_at_gte: filter.startedAt?.gte,
+      started_at_lt: filter.startedAt?.lt,
+      completed_at_gte: filter.completedAt?.gte,
+      completed_at_lt: filter.completedAt?.lt,
+      duration_ms_gte: filter.durationMs?.gte,
+      duration_ms_lt: filter.durationMs?.lt,
+      order_by: opts.orderBy,
+      order: opts.order,
+      limit: opts.limit,
+      cursor: opts.cursor,
+    };
+    return this._request("GET", buildQuery("/v1/logs", query), undefined, this.controlBaseUrl);
   }
 
   /** Fetch a VM from its regional endpoint. */
@@ -1834,7 +1897,7 @@ function buildQuery(path: string, params: Record<string, unknown>): string {
   const usp = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null) continue;
-    usp.append(key, String(value));
+    for (const item of Array.isArray(value) ? value : [value]) usp.append(key, String(item));
   }
   const qs = usp.toString();
   return qs ? `${path}?${qs}` : path;

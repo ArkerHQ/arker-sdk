@@ -747,6 +747,39 @@ def test_listed_vm_uses_its_placement_endpoint() -> None:
         result.vms[0].run("printf ok")
 
 
+def test_list_logs_sends_the_filter_as_flat_parameters() -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: (
+            method == "GET"
+            and url
+            == "https://control.invalid/api/v1/logs?actions=run&actions=fork&vm_ids=vm_1&exit_code=1&completed_at_gte=2026-10-20T00%3A00%3A00Z&duration_ms_lt=5000&order_by=duration_ms&order=asc&limit=10"
+        ),
+        200,
+        {"logs": [], "next_cursor": None},
+    )
+    arker = sdk.Arker(
+        api_key="ark_live_test",
+        base_url="https://test.invalid/api/",
+        control_base_url="https://control.invalid/api/",
+        retry=False,
+    )
+    with use_transport(t):
+        page = arker.list_logs(
+            filter={
+                "actions": ["run", "fork"],
+                "vm_ids": ["vm_1"],
+                "exit_code": 1,
+                "completed_at": {"gte": "2026-10-20T00:00:00Z"},
+                "duration_ms": {"lt": 5000},
+            },
+            order_by="duration_ms",
+            order="asc",
+            limit=10,
+        )
+    assert page.logs == [] and page.next_cursor is None
+
+
 def test_list_runs_uses_control_plane_and_filters() -> None:
     t = FakeTransport()
     t.add_json(

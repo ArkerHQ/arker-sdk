@@ -124,6 +124,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List logs
+         * @description Lists the organization's activity, one entry per action: API requests, runs, network and SSH traffic, automatic actions and account changes, across every region, within the retained history window. Filters combine with AND; the values of one filter with OR. Newly recorded actions appear within seconds.
+         */
+        get: operations["listLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/vms/{id}": {
         parameters: {
             query?: never;
@@ -1828,7 +1848,7 @@ export interface components {
          * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
          * @enum {string}
          */
-        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey";
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "listLogs" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey";
         /** @enum {string} */
         HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
         /**
@@ -3473,6 +3493,67 @@ export interface components {
             /** @description Unrevoked API keys, newest first. */
             api_keys: components["schemas"]["ApiKey"][];
         };
+        /**
+         * @description What a log entry records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection.
+         * @enum {string}
+         */
+        LogAction: "run" | "fork" | "sync" | "delete" | "signal" | "vm_update" | "vm_suspend" | "policies_update" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "inbound_request" | "outbound_request" | "ssh_session" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_update" | "member_remove" | "org_rename";
+        /** @enum {string} */
+        LogOutcome: "in_progress" | "succeeded" | "failed" | "cancelled";
+        /** @enum {string} */
+        LogOrderBy: "requested_at" | "started_at" | "completed_at" | "duration_ms";
+        LogEntry: {
+            /** @description The action's id, the same while it is in progress and once it ends. */
+            id: string;
+            action: components["schemas"]["LogAction"];
+            outcome: components["schemas"]["LogOutcome"];
+            /** @description The VM the action used; a fork's new VM. Null for an action on no VM. */
+            vm_id: string | null;
+            /**
+             * Format: date-time
+             * @description When the request arrived, or an automatic action was triggered.
+             */
+            requested_at: string;
+            /**
+             * Format: date-time
+             * @description When the action began executing; null before it does and for an action with no separate start.
+             */
+            started_at: string | null;
+            /**
+             * Format: date-time
+             * @description When the action ended; null while it is in progress.
+             */
+            completed_at: string | null;
+            /** @description From `started_at`, or `requested_at` when there is none, to `completed_at`; null while in progress. */
+            duration_ms: number | null;
+            /** @description Who initiated the action: a member by email, or an API key by id. Null for an automatic action, or when Arker does not know who acted. */
+            actor: components["schemas"]["LogActor"] | null;
+            /** @description The region that served the action; null for one the console served, such as an API key's. */
+            region: string | null;
+            /** @description The `x-request-id` of the request that made the action. */
+            request_id: string | null;
+            /** @description Why the action failed or was refused. */
+            error_code: components["schemas"]["ErrorCode"] | null;
+            /** @description Facts only some actions have, such as a run's `run_id` and `exit_code`, a fork's `source_vm_id`, or an inbound request's `port`. */
+            attributes: {
+                [key: string]: string | number | boolean | null;
+            };
+        };
+        LogActor: {
+            /**
+             * @description A member, or an API key.
+             * @enum {string}
+             */
+            type: "member" | "key";
+            /** @description A member's email, or an API key's `api_key_id`. */
+            id: string;
+        };
+        ListLogsResponse: {
+            /** @description Entries, in the requested order. */
+            logs: components["schemas"]["LogEntry"][];
+            /** @description Cursor for the next page, or null when there is none. */
+            next_cursor: string | null;
+        };
     };
     responses: {
         Conflict: {
@@ -4127,6 +4208,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListOrgRunsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    listLogs: {
+        parameters: {
+            query?: {
+                /** @description Only these actions. Repeat the parameter for more than one. */
+                actions?: components["schemas"]["LogAction"][];
+                /** @description Only these outcomes. */
+                outcomes?: components["schemas"]["LogOutcome"][];
+                /** @description Only actions these regions served. */
+                regions?: string[];
+                /** @description Only actions on these VMs. */
+                vm_ids?: string[];
+                /** @description Only actions these members initiated, by email, or `me` for the member calling. With `keys`, an action either initiated matches. */
+                members?: string[];
+                /** @description Only actions these API keys initiated, by `api_key_id`. With `members`, an action either initiated matches. */
+                keys?: string[];
+                /** @description Only actions these requests made. */
+                request_ids?: string[];
+                /** @description Only actions that failed with these codes. */
+                error_codes?: components["schemas"]["ErrorCode"][];
+                /** @description Only runs that exited with this code. */
+                exit_code?: number;
+                /** @description Only entries whose `requested_at` is at or after this time. Entries without one do not match. */
+                requested_at_gte?: string;
+                /** @description Only entries whose `requested_at` is before this time. Entries without one do not match. */
+                requested_at_lt?: string;
+                /** @description Only entries whose `started_at` is at or after this time. Entries without one do not match. */
+                started_at_gte?: string;
+                /** @description Only entries whose `started_at` is before this time. Entries without one do not match. */
+                started_at_lt?: string;
+                /** @description Only entries whose `completed_at` is at or after this time. Entries without one do not match. */
+                completed_at_gte?: string;
+                /** @description Only entries whose `completed_at` is before this time. Entries without one do not match. */
+                completed_at_lt?: string;
+                /** @description Only entries whose `duration_ms` is at or after this many milliseconds. Entries without one do not match. */
+                duration_ms_gte?: number;
+                /** @description Only entries whose `duration_ms` is before this many milliseconds. Entries without one do not match. */
+                duration_ms_lt?: number;
+                /** @description What entries are ordered by; entries without it come last, and `id` breaks ties. */
+                order_by?: components["schemas"]["LogOrderBy"];
+                /** @description The direction of `order_by`. */
+                order?: "asc" | "desc";
+                /** @description Entries per page. */
+                limit?: number;
+                /** @description The previous page's `next_cursor`. It keeps that query's filters and order, so only `limit` may accompany it. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of entries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListLogsResponse"];
                 };
             };
             400: components["responses"]["BadRequestError"];

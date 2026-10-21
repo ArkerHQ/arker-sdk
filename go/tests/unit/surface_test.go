@@ -673,6 +673,38 @@ func sha256Hex(s string) string {
 
 // ── Regressions ─────────────────────────────────────────────────────────
 
+func TestListLogsSendsTheFilterAsFlatParameters(t *testing.T) {
+	var got string
+	c := twoPlane(t, reject(t, "regional"), func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Path + "?" + r.URL.RawQuery
+		fmt.Fprint(w, `{"logs":[],"next_cursor":null}`)
+	})
+	exit, under := 1, int64(5000)
+	page, err := c.ListLogs(context.Background(), arker.ListLogsOptions{
+		Filter: arker.LogFilter{
+			Actions:     []string{"run", "fork"},
+			VMIDs:       []string{"vm_1"},
+			ExitCode:    &exit,
+			CompletedAt: arker.TimeRange{GTE: "2026-10-20T00:00:00Z"},
+			DurationMS:  arker.DurationRange{LT: &under},
+		},
+		OrderBy: "duration_ms",
+		Order:   "asc",
+		Limit:   10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "/v1/logs?actions=run&actions=fork&completed_at_gte=2026-10-20T00%3A00%3A00Z" +
+		"&duration_ms_lt=5000&exit_code=1&limit=10&order=asc&order_by=duration_ms&vm_ids=vm_1"
+	if got != want {
+		t.Fatalf("control plane saw %q, want %q", got, want)
+	}
+	if len(page.Logs) != 0 || page.NextCursor != nil {
+		t.Fatalf("page = %+v", page)
+	}
+}
+
 func TestListRunsDecodesTheRowsEnvelope(t *testing.T) {
 	// GET /v1/runs answers {since,until,limit,offset,lite,rows} -- there is no
 	// "runs" key and no cursor. Decoding the wrong field is silent: the call

@@ -480,6 +480,7 @@ OpenApiOperationId: TypeAlias = Literal[
     'fork',
     'listVms',
     'listOrgRuns',
+    'listLogs',
     'getVm',
     'deleteVm',
     'patchVm',
@@ -1645,6 +1646,52 @@ class ApiKeyPoolScope:
     pool_id: str
 
 
+LogAction: TypeAlias = Literal[
+    'run',
+    'fork',
+    'sync',
+    'delete',
+    'signal',
+    'vm_update',
+    'vm_suspend',
+    'policies_update',
+    'run_cancel',
+    'session_create',
+    'session_update',
+    'session_delete',
+    'mount_create',
+    'mount_delete',
+    'filesystem_create',
+    'filesystem_delete',
+    'pool_create',
+    'pool_update',
+    'pool_delete',
+    'inbound_request',
+    'outbound_request',
+    'ssh_session',
+    'ssh_key_delete',
+    'api_key_create',
+    'api_key_revoke',
+    'member_update',
+    'member_remove',
+    'org_rename',
+]
+
+
+LogOutcome: TypeAlias = Literal['in_progress', 'succeeded', 'failed', 'cancelled']
+
+
+LogOrderBy: TypeAlias = Literal[
+    'requested_at', 'started_at', 'completed_at', 'duration_ms'
+]
+
+
+@dataclass(frozen=True)
+class LogActor:
+    type: Literal['member', 'key']
+    id: str
+
+
 @dataclass(frozen=True)
 class ListVmsParameters:
     cursor: str | None = None
@@ -1681,6 +1728,31 @@ class ListOrgRunsParameters:
         | None
     ) = None
     dir: Literal['asc', 'desc'] | None = None
+
+
+@dataclass(frozen=True)
+class ListLogsParameters:
+    actions: list[LogAction] | None = None
+    outcomes: list[LogOutcome] | None = None
+    regions: list[str] | None = None
+    vm_ids: list[str] | None = None
+    members: list[str] | None = None
+    keys: list[str] | None = None
+    request_ids: list[str] | None = None
+    error_codes: list[ErrorCode] | None = None
+    exit_code: int | None = None
+    requested_at_gte: str | None = None
+    requested_at_lt: str | None = None
+    started_at_gte: str | None = None
+    started_at_lt: str | None = None
+    completed_at_gte: str | None = None
+    completed_at_lt: str | None = None
+    duration_ms_gte: int | None = None
+    duration_ms_lt: int | None = None
+    order_by: LogOrderBy | None = 'requested_at'
+    order: Literal['asc', 'desc'] | None = 'desc'
+    limit: int | None = 50
+    cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2079,6 +2151,29 @@ class CreateApiKeyRequest:
 @dataclass(frozen=True)
 class ListApiKeysResponse:
     api_keys: list[ApiKey]
+
+
+@dataclass(frozen=True)
+class LogEntry:
+    id: str
+    action: LogAction
+    outcome: LogOutcome
+    vm_id: str | None
+    requested_at: str
+    started_at: str | None
+    completed_at: str | None
+    duration_ms: int | None
+    actor: LogActor | None
+    region: str | None
+    request_id: str | None
+    error_code: ErrorCode | None
+    attributes: dict[str, str | int | bool | None]
+
+
+@dataclass(frozen=True)
+class ListLogsResponse:
+    logs: list[LogEntry]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True)
