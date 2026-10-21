@@ -5820,6 +5820,10 @@
             ],
             "default": "auto"
           },
+          "end_after_all_subprocesses": {
+            "description": "When false (default), the run ends when its foreground command or interactive turn completes; processes it deliberately leaves running remain owned by the session. When true, the run remains active after the foreground command exits and ends only after every process started by this run has exited. The foreground command's exit code remains the run's exit code. Timeout and cancellation continue to apply while waiting. This option is rejected when an interactive `end_symbol` is effective or when the selected runtime or guest cannot guarantee process attribution. A brush run creates no subprocesses, so the condition is already satisfied.",
+            "type": "boolean"
+          },
           "signal": {
             "type": [
               "string",
@@ -5994,7 +5998,7 @@
               "string",
               "null"
             ],
-            "description": "Client-safe platform failure explanation when `state` is `failed`. Distinct from `stderr`, which is the program's own error output. Null for runs that ran to completion."
+            "description": "Client-safe explanation when `state` is `failed`: the platform became unavailable before the command finished, or the run was refused, such as `end_after_all_subprocesses` on a session that already has background processes. Distinct from `stderr`, which is the program's own error output. Null for runs that ran to completion."
           },
           "stdout": {
             "description": "Standard output produced by the command. Available while the run is still going: poll this run and `stdout` grows as the command writes, so a long task can be followed live rather than only read at the end.",

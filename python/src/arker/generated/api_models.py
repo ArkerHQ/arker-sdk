@@ -2340,6 +2340,7 @@ class RunRequest:
     background: bool | None = None
     queueing_timeout: int | None = None
     end_symbol: str | None = 'auto'
+    end_after_all_subprocesses: bool | None = None
     signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
     policies: PolicyUpdate | None = None
 

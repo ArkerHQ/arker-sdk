@@ -1194,6 +1194,8 @@ export interface components {
              * @default auto
              */
             end_symbol?: string | null;
+            /** @description When false (default), the run ends when its foreground command or interactive turn completes; processes it deliberately leaves running remain owned by the session. When true, the run remains active after the foreground command exits and ends only after every process started by this run has exited. The foreground command's exit code remains the run's exit code. Timeout and cancellation continue to apply while waiting. This option is rejected when an interactive `end_symbol` is effective or when the selected runtime or guest cannot guarantee process attribution. A brush run creates no subprocesses, so the condition is already satisfied. */
+            end_after_all_subprocesses?: boolean;
             /**
              * @description Deliver a signal to the selected persistent session's foreground process group: the run holding the session or, with no run in flight, an interpreter waiting between turns or an attached terminal's foreground job. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. When nothing is running in the session, the request fails with 404 and nothing is signalled. A run made only of shell builtins starts no process of its own, so it may have nothing to signal; the request then fails with 404 as well. Use `session_id` or `session_idx` to select the session. A signal is not a run and is not queued; a VM that is not running answers `409 invalid_state`.
              * @enum {string|null}
@@ -1246,7 +1248,7 @@ export interface components {
             completed_at?: string | null;
             /** @description Process exit code. Null when no process completed. */
             exit_code: number | null;
-            /** @description Client-safe platform failure explanation when `state` is `failed`. Distinct from `stderr`, which is the program's own error output. Null for runs that ran to completion. */
+            /** @description Client-safe explanation when `state` is `failed`: the platform became unavailable before the command finished, or the run was refused, such as `end_after_all_subprocesses` on a session that already has background processes. Distinct from `stderr`, which is the program's own error output. Null for runs that ran to completion. */
             fail_reason?: string | null;
             /** @description Standard output produced by the command. Available while the run is still going: poll this run and `stdout` grows as the command writes, so a long task can be followed live rather than only read at the end. */
             stdout: string;
