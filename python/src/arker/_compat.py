@@ -6,6 +6,7 @@ import os
 import queue
 import shlex
 import threading
+import time
 import uuid
 from collections.abc import Callable, Sequence
 from contextlib import suppress
@@ -15,6 +16,7 @@ from typing import Any
 from ._router import (
     JsonRouteCache,
     RouterConfig,
+    RouterLookupTimeoutError,
     load_router_config,
     provider_accepts_identifier,
     select_weighted_provider,
@@ -345,6 +347,38 @@ def routed_get(
     getters: dict[str, Any],
 ) -> tuple[str, Any] | None:
     router = router_config(config, native_provider)
+    started = time.monotonic()
+
+    def remaining() -> float:
+        seconds = router.existing.timeout_ms / 1000 - (time.monotonic() - started)
+        if seconds <= 0:
+            raise RouterLookupTimeoutError(f"ownership lookup timed out for {identifier}")
+        return min(seconds, threading.TIMEOUT_MAX)
+
+    def wait_result(results):
+        try:
+            result = results.get(timeout=remaining())
+            remaining()
+            return result
+        except queue.Empty:
+            raise RouterLookupTimeoutError(f"ownership lookup timed out for {identifier}") from None
+
+    def probe(name):
+        remaining()
+        results = queue.Queue()
+
+        def lookup():
+            try:
+                results.put((getters[name](), None))
+            except BaseException as error:
+                results.put((None, error))
+
+        threading.Thread(target=lookup, daemon=True).start()
+        result, error = wait_result(results)
+        if error is not None:
+            raise error
+        return result
+
     _validate_router_providers(list(router.existing.order), getters)
     eligible = {
         name
@@ -362,36 +396,45 @@ def routed_get(
                 cache.delete(identifier)
         cached = None
     if cached in getters:
-        result = getters[cached]()
+        result = probe(cached)
         if result is not None:
             return cached, result
         with suppress(Exception):
             cache.delete(identifier)
     order = [name for name in router.existing.order if name in getters and name != cached and name in eligible]
     if router.existing.strategy == "race" and len(order) > 1:
-        results: queue.Queue[tuple[str, Any, Exception | None]] = queue.Queue()
-        errors: list[Exception] = []
+        results: queue.Queue[tuple[str, Any, BaseException | None]] = queue.Queue()
+        completed: dict[str, tuple[Any, BaseException | None]] = {}
 
         def lookup(name: str) -> None:
             try:
                 results.put((name, getters[name](), None))
-            except Exception as error:
+            except BaseException as error:
                 results.put((name, None, error))
 
         for name in order:
+            remaining()
             threading.Thread(target=lookup, args=(name,), daemon=True).start()
         for _ in order:
-            name, result, error = results.get()
+            try:
+                name, result, error = wait_result(results)
+            except RouterLookupTimeoutError as error:
+                for name in order:
+                    completed.setdefault(name, (None, error))
+                break
+            completed[name] = (result, error)
+        for name in order:
+            error = completed[name][1]
             if error is not None:
-                errors.append(error)
-            elif result is not None:
+                raise error
+        for name in order:
+            result = completed[name][0]
+            if result is not None:
                 _cache_set(cache, identifier, name)
                 return name, result
-        if errors:
-            raise RuntimeError(f"lookup failed for {identifier}: {errors[-1]}") from errors[-1]
         return None
     for name in order:
-        result = getters[name]()
+        result = probe(name)
         if result is not None:
             _cache_set(cache, identifier, name)
             return name, result

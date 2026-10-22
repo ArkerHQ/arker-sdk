@@ -32,6 +32,11 @@ def provider_accepts_identifier(provider: str, identifier: str, *, arker_enabled
 class ExistingRoute:
     strategy: str
     order: tuple[str, ...]
+    timeout_ms: int = 30_000
+
+
+class RouterLookupTimeoutError(TimeoutError):
+    """The ownership lookup budget expired; this does not establish absence."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -64,11 +69,14 @@ class RouterConfig:
         if type(raw.get("version")) is not int or raw.get("version") != 1:
             raise ValueError(f"unsupported router config version {raw.get('version')}")
         existing_raw = _mapping(raw.get("existing"), "existing")
-        _reject_unknown(existing_raw, {"strategy", "order"}, "existing")
+        _reject_unknown(existing_raw, {"strategy", "order", "timeoutMs"}, "existing")
         existing_strategy = existing_raw.get("strategy")
         if existing_strategy not in {"race", "priority"}:
             raise ValueError("existing.strategy must be race or priority")
-        existing = ExistingRoute(existing_strategy, _names(existing_raw.get("order"), "existing.order"))
+        timeout_ms = existing_raw.get("timeoutMs", 30_000)
+        if type(timeout_ms) is not int or not 1 <= timeout_ms <= 9_007_199_254_740_991:
+            raise ValueError("existing.timeoutMs must be a positive safe integer")
+        existing = ExistingRoute(existing_strategy, _names(existing_raw.get("order"), "existing.order"), timeout_ms)
 
         create_raw = _mapping(raw.get("create"), "create")
         create_strategy = create_raw.get("strategy")

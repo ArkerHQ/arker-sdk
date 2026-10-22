@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AlreadyExistsError, InvalidError } from "modal";
 
-import { createRoutedProvider, JsonRouteCache, parseRouterConfig, isArkerVmIdentifier, providerAcceptsIdentifier } from "../src/compat/router.js";
+import { createRoutedProvider, JsonRouteCache, parseRouterConfig, isArkerVmIdentifier, providerAcceptsIdentifier, RouterLookupTimeoutError } from "../src/compat/router.js";
 import { CompatibilityCreationNotStartedError } from "../src/compat/common.js";
 
 function sandbox(id: string, provider: string) {
@@ -26,6 +26,143 @@ function provider(name: string, handlers: {
   };
 }
 
+async function testRaceErrorsAndPriorityAreDeterministic(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "arker-router-errors-"));
+  const path = join(directory, "router.json");
+  await writeFile(path, JSON.stringify({
+    version: 1,
+    existing: { strategy: "race", order: ["blaxel", "arker"] },
+    create: { strategy: "priority", order: ["blaxel", "arker"] },
+  }));
+  for (const status of [403, 429, 500]) {
+    for (const errorFirst of [true, false]) {
+      const error = Object.assign(new Error(`lookup HTTP ${status}`), { status });
+      let release!: () => void;
+      const firstFinished = new Promise<void>((resolve) => { release = resolve; });
+      const routed = createRoutedProvider([
+        provider("blaxel", { getById: async () => {
+          if (!errorFirst) await firstFinished;
+          release();
+          throw error;
+        } }),
+        provider("arker", { getById: async (id) => {
+          if (errorFirst) await firstFinished;
+          release();
+          return sandbox(id, "arker");
+        } }),
+      ], path).instances!;
+      await assert.rejects(routed.getById("shared"), (caught) => caught === error);
+    }
+  }
+  let release!: () => void;
+  const lowerFinished = new Promise<void>((resolve) => { release = resolve; });
+  const routed = createRoutedProvider([
+    provider("blaxel", { getById: async (id) => { await lowerFinished; return sandbox(id, "blaxel"); } }),
+    provider("arker", { getById: async (id) => { release(); return sandbox(id, "arker"); } }),
+  ], path).instances!;
+  assert.equal((await routed.getById("shared"))?.provider, "blaxel");
+  const preferredError = Object.assign(new Error("preferred provider denied access"), { status: 403 });
+  let releaseError!: () => void;
+  const lowerError = new Promise<void>((resolve) => { releaseError = resolve; });
+  const errors = createRoutedProvider([
+    provider("blaxel", { getById: async () => { await lowerError; throw preferredError; } }),
+    provider("arker", { getById: async () => { releaseError(); throw new Error("lower unavailable"); } }),
+  ], path).instances!;
+  await assert.rejects(errors.getById("shared"), (caught) => caught === preferredError);
+}
+await testRaceErrorsAndPriorityAreDeterministic();
+
+async function testLookupDeadlineNeverCachesLateSuccess(): Promise<void> {
+  for (const strategy of ["priority", "race"]) {
+    const directory = await mkdtemp(join(tmpdir(), "arker-router-deadline-"));
+    const cachePath = join(directory, "cache.json");
+    const raw = {
+      version: 1, existing: { strategy, order: ["blaxel", "arker"], timeoutMs: 20 },
+      create: { strategy: "priority", order: ["blaxel", "arker"] }, cache: { path: cachePath },
+    };
+    const path = await config(directory, raw);
+    let release!: () => void;
+    const delayed = new Promise<void>((resolve) => { release = resolve; });
+    const routed = createRoutedProvider([
+      provider("blaxel", { getById: async (id) => { await delayed; return sandbox(id, "blaxel"); } }),
+      provider("arker"),
+    ], path).instances!;
+    try {
+      await assert.rejects(routed.getById("late"), RouterLookupTimeoutError);
+    } finally { release(); }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(await new JsonRouteCache(cachePath).get("late"), null);
+    for (const timeoutMs of [true, 0, -1, 0.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      assert.throws(() => parseRouterConfig({ ...raw, existing: { ...raw.existing, timeoutMs } }, ["blaxel", "arker"]), /positive safe integer/);
+    }
+  }
+}
+await testLookupDeadlineNeverCachesLateSuccess();
+
+async function testCachedProbeSharesLookupBudget(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "arker-router-budget-"));
+  const cachePath = join(directory, "cache.json");
+  await new JsonRouteCache(cachePath).set("shared", "blaxel");
+  const path = await config(directory, {
+    version: 1, existing: { strategy: "priority", order: ["blaxel", "arker"], timeoutMs: 30 },
+    create: { strategy: "priority", order: ["blaxel", "arker"] }, cache: { path: cachePath },
+  });
+  const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
+  const routed = createRoutedProvider([
+    provider("blaxel", { getById: async () => { await pause(); return null; } }),
+    provider("arker", { getById: async (id) => { await pause(); return sandbox(id, "arker"); } }),
+  ], path).instances!;
+  await assert.rejects(routed.getById("shared"), RouterLookupTimeoutError);
+  await pause();
+  assert.equal(await new JsonRouteCache(cachePath).get("shared"), null);
+}
+await testCachedProbeSharesLookupBudget();
+
+async function testTimedOutProbeObservesLateRejection(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "arker-router-late-error-"));
+  const path = await config(directory, {
+    version: 1, existing: { strategy: "race", order: ["blaxel", "arker"], timeoutMs: 10 },
+    create: { strategy: "priority", order: ["blaxel", "arker"] },
+  });
+  let rejectNative!: (error: Error) => void;
+  const pending = new Promise<null>((_resolve, reject) => { rejectNative = reject; });
+  const unhandled: unknown[] = [];
+  const listener = (error: unknown) => { unhandled.push(error); };
+  process.on("unhandledRejection", listener);
+  try {
+    const routed = createRoutedProvider([
+      provider("blaxel", { getById: () => pending }), provider("arker"),
+    ], path).instances!;
+    await assert.rejects(routed.getById("shared"), RouterLookupTimeoutError);
+    rejectNative(new Error("late native read failure"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(unhandled, []);
+  } finally { process.off("unhandledRejection", listener); }
+}
+await testTimedOutProbeObservesLateRejection();
+
+async function testLateErrorCannotBeatElapsedDeadline(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "arker-router-clock-"));
+  const path = await config(directory, {
+    version: 1, existing: { strategy: "priority", order: ["blaxel"], timeoutMs: 30 },
+    create: { strategy: "priority", order: ["blaxel"] },
+  });
+  const descriptor = Object.getOwnPropertyDescriptor(performance, "now");
+  let clock = 0;
+  Object.defineProperty(performance, "now", { configurable: true, value: () => clock });
+  try {
+    const routed = createRoutedProvider([provider("blaxel", { getById: async () => {
+      clock = 31;
+      throw Object.assign(new Error("late forbidden response"), { status: 403 });
+    } })], path).instances!;
+    await assert.rejects(routed.getById("shared"), RouterLookupTimeoutError);
+  } finally {
+    if (descriptor) Object.defineProperty(performance, "now", descriptor);
+    else Reflect.deleteProperty(performance, "now");
+  }
+}
+await testLateErrorCannotBeatElapsedDeadline();
+
 async function config(directory: string, value: unknown): Promise<string> {
   const path = join(directory, "computesdk_router.json");
   await writeFile(path, JSON.stringify(value));
@@ -43,7 +180,7 @@ async function testPriorityAndRaceRouting(): Promise<void> {
   let arkerCreates = 0;
   const native = provider("blaxel", {
     create: async () => { nativeCreates += 1; return sandbox("native-new", "blaxel"); },
-    getById: async () => new Promise<null>(() => undefined),
+    getById: async () => null,
   });
   const arker = provider("arker", {
     create: async () => { arkerCreates += 1; return sandbox("arker-new", "arker"); },
@@ -278,6 +415,10 @@ async function testCacheCannotOverrideConfiguredProviders(): Promise<void> {
     provider("blaxel", { getById: async (id) => sandbox(id, "blaxel") }),
   ], path).instances!;
   assert.equal((await routed.getById("existing"))?.provider, "blaxel");
+  await new JsonRouteCache(cachePath).set("missing", "arker");
+  const absent = createRoutedProvider([provider("blaxel"), provider("arker")], path).instances!;
+  assert.equal(await absent.getById("missing"), null);
+  assert.equal(await new JsonRouteCache(cachePath).get("missing"), null);
 }
 
 await testCacheCannotOverrideConfiguredProviders();
@@ -326,10 +467,9 @@ async function testOwnershipProbesDoNotConnectLosingSandboxes(): Promise<void> {
     getById: async (id) => { connects++; return sandbox(id, "e2b"); },
   }), { ownershipProbe: () => new Promise<boolean>((resolve) => { release = resolve; }) });
   const routed = createRoutedProvider([
-    native, provider("arker", { getById: async (id) => sandbox(id, "arker") }),
+    native, provider("arker", { getById: async (id) => { release(false); return sandbox(id, "arker"); } }),
   ], path).instances!;
   assert.equal((await routed.getById("shared"))?.provider, "arker");
-  release(true);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(connects, 0);
 

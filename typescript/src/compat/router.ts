@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { CompatibilityCreationNotStartedError } from "./common.js";
+import { RouterLookupTimeoutError } from "./router-errors.js";
+export { RouterLookupTimeoutError } from "./router-errors.js";
 
 type Provider = {
   name?: string;
@@ -18,7 +20,7 @@ type ProviderInstances = {
 
 export type RouterConfig = {
   version: 1;
-  existing: { strategy: "race" | "priority"; order: string[] };
+  existing: { strategy: "race" | "priority"; order: string[]; timeoutMs?: number };
   create:
     | { strategy: "priority"; order: string[] }
     | { strategy: "weighted"; weights: Record<string, number>; fallback?: string[] };
@@ -74,7 +76,7 @@ export function parseRouterConfig(value: unknown, providers: Iterable<string>): 
   if (root.version !== 1) throw new Error(`unsupported router config version ${String(root.version)}`);
 
   const existingValue = record(root.existing, "router existing");
-  rejectUnknown(existingValue, ["strategy", "order"], "router existing");
+  rejectUnknown(existingValue, ["strategy", "order", "timeoutMs"], "router existing");
   if (existingValue.strategy !== "race" && existingValue.strategy !== "priority") {
     throw new Error("router existing.strategy must be race or priority");
   }
@@ -82,6 +84,12 @@ export function parseRouterConfig(value: unknown, providers: Iterable<string>): 
     strategy: existingValue.strategy,
     order: names(existingValue.order, "router existing.order"),
   };
+  if (existingValue.timeoutMs !== undefined) {
+    if (!Number.isSafeInteger(existingValue.timeoutMs) || (existingValue.timeoutMs as number) <= 0) {
+      throw new Error("router existing.timeoutMs must be a positive safe integer");
+    }
+    existing.timeoutMs = existingValue.timeoutMs as number;
+  }
 
   const createValue = record(root.create, "router create");
   let create: RouterConfig["create"];
@@ -325,53 +333,53 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
   };
   const find = async (id: string): Promise<Located | null> => {
     const router = await configured;
+    const started = performance.now();
+    const timeoutMs = router.existing.timeoutMs ?? 30_000;
+    const probe = (provider: Provider): Promise<Located | null> => new Promise((resolveProbe, rejectProbe) => {
+      let timer: ReturnType<typeof setTimeout>;
+      const check = () => {
+        const remaining = timeoutMs - (performance.now() - started);
+        if (remaining <= 0) rejectProbe(new RouterLookupTimeoutError(id));
+        else timer = setTimeout(check, Math.min(remaining, 2_147_483_647));
+      };
+      if (performance.now() - started >= timeoutMs) {
+        rejectProbe(new RouterLookupTimeoutError(id));
+        return;
+      }
+      check();
+      lookup(provider, id).then((located) => {
+        if (performance.now() - started >= timeoutMs) rejectProbe(new RouterLookupTimeoutError(id));
+        else resolveProbe(located);
+      }, (error) => {
+        if (performance.now() - started >= timeoutMs) rejectProbe(new RouterLookupTimeoutError(id));
+        else rejectProbe(error);
+      }).finally(() => clearTimeout(timer));
+    });
     let cachedName = await cache.get(id).catch(() => null);
     const eligible = (name: string) => providerAcceptsIdentifier(name, id, router.existing.order.includes("arker"));
-    if (cachedName && !eligible(cachedName)) {
+    if (cachedName && (!byName.has(cachedName) || !router.existing.order.includes(cachedName) || !eligible(cachedName))) {
       await cache.delete(id).catch(() => undefined);
       cachedName = null;
     }
     if (cachedName && byName.has(cachedName) && router.existing.order.includes(cachedName)) {
       const provider = byName.get(cachedName)!;
-      const located = await lookup(provider, id);
+      const located = await probe(provider);
       if (located) return rememberOwner(id, located);
       await cache.delete(id).catch(() => undefined);
     }
     const candidates = router.existing.order.filter((name) => name !== cachedName && eligible(name)).map((name) => byName.get(name)!);
     if (router.existing.strategy === "race") {
-      return new Promise((resolveRace, rejectRace) => {
-        let remaining = candidates.length;
-        let finished = false;
-        const errors: unknown[] = [];
-        if (remaining === 0) resolveRace(null);
-        for (const provider of candidates) {
-          lookup(provider, id).then(async (located) => {
-            if (finished) return;
-            if (located) {
-              finished = true;
-              resolveRace(await rememberOwner(id, located));
-              return;
-            }
-            remaining -= 1;
-            if (remaining === 0) {
-              finished = true;
-              if (errors.length) rejectRace(Object.assign(new Error(`Lookup failed for ${id}`), { errors }));
-              else resolveRace(null);
-            }
-          }).catch((error) => {
-            if (finished) return;
-            errors.push(error);
-            remaining -= 1;
-            if (remaining === 0) {
-              finished = true;
-              rejectRace(Object.assign(new Error(`Lookup failed for ${id}`), { errors }));
-            }
-          });
-        }
-      });
+      const completed = await Promise.allSettled(candidates.map(probe));
+      for (const result of completed) {
+        if (result.status === "rejected") throw result.reason;
+      }
+      for (const result of completed) {
+        if (result.status === "fulfilled" && result.value) return rememberOwner(id, result.value);
+      }
+      return null;
     }
     for (const provider of candidates) {
-      const located = await lookup(provider, id);
+      const located = await probe(provider);
       if (located) return rememberOwner(id, located);
     }
     return null;

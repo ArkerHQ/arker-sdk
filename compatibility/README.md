@@ -63,6 +63,24 @@ same identifier fixtures in `router-identifiers.json`.
 
 ## Measurement
 
+Ownership lookup uses one shared `existing.timeoutMs` client-wait budget
+(default30000ms), including a cached provider probe and subsequent priority or
+parallel probes. Local cache access consumes elapsed budget but depends on local
+filesystem responsiveness: a hung cache filesystem is not covered by a hard
+end-to-end deadline. JSON accepts a positive safe integer; TOML is not supported.
+A timeout is a typed
+`RouterLookupTimeoutError`, never absence and never permission to create on a
+different provider. It does not cancel native I/O or change a sandbox lifetime;
+an already-issued read may finish later, but cannot populate the routing cache.
+
+`existing.strategy="race"` starts metadata lookups in parallel but waits for
+their outcomes within that budget. Any non404 error fails the lookup even when
+another provider has a hit; errors and duplicate hits follow configured provider
+priority, not completion timing. This trades first-hit latency for fail-closed,
+deterministic routing. A validated cached owner remains the fast path. Routing
+lookups do not use weighted creation, and the losing E2B probe never connects or
+extends a sandbox lease. Only the selected E2B owner is connected afterward.
+
 Creation fallback is fail-closed. Only an explicit local preflight refusal
 before a creation request (such as a missing Arker source) permits trying the
 next provider. Remote errors, including opaque exceptions and HTTP 429, can

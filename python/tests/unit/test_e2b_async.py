@@ -240,7 +240,7 @@ def test_arker_async_handles_preserve_native_types_and_await_callbacks(monkeypat
     assert "eof" in calls
 
 
-def test_async_race_cancels_losing_metadata_without_connecting(tmp_path, monkeypatch):
+def test_async_race_checks_metadata_miss_without_connecting(tmp_path, monkeypatch):
     native = pytest.importorskip("e2b")
     path = tmp_path / "race.json"
     path.write_text(
@@ -254,8 +254,8 @@ def test_async_race_cancels_losing_metadata_without_connecting(tmp_path, monkeyp
     class Native:
         @classmethod
         async def get_info(cls, identifier):
-            await asyncio.sleep(10)
-            return object()
+            await asyncio.sleep(0)
+            return
 
         @classmethod
         async def connect(cls, identifier):

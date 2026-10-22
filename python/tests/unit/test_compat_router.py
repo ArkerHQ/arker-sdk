@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import enum
 import json
 import multiprocessing
@@ -14,6 +15,7 @@ from arker._compat import arker_source, get_or_none, routed_create, routed_get, 
 from arker._router import (
     JsonRouteCache,
     RouterConfig,
+    RouterLookupTimeoutError,
     is_arker_vm_identifier,
     load_router_config,
     provider_accepts_identifier,
@@ -65,6 +67,152 @@ def test_large_weights_do_not_overflow() -> None:
     weights = {"blaxel": 1e308, "arker": 1e308}
     assert select_weighted_provider(weights, random_value=0.25) == "blaxel"
     assert select_weighted_provider(weights, random_value=0.75) == "arker"
+
+
+@pytest.mark.parametrize("status", [403, 429, 500])
+@pytest.mark.parametrize("error_first", [True, False])
+def test_race_never_masks_provider_errors(router_file, status, error_first):
+    error = RuntimeError(f"lookup HTTP {status}")
+    error.status_code = status
+    first_finished = threading.Event()
+
+    def fail():
+        if not error_first:
+            assert first_finished.wait(2)
+        first_finished.set()
+        raise error
+
+    def found():
+        if error_first:
+            assert first_finished.wait(2)
+        first_finished.set()
+        return object()
+
+    with pytest.raises(RuntimeError) as caught:
+        routed_get("shared", "e2b", {"router_config_path": str(router_file)}, {"e2b": fail, "arker": found})
+    assert caught.value is error
+
+
+def test_race_two_hits_respect_configured_priority(router_file):
+    lower_finished = threading.Event()
+    higher = object()
+
+    def higher_priority():
+        assert lower_finished.wait(2)
+        return higher
+
+    def lower_priority():
+        lower_finished.set()
+        return object()
+
+    assert routed_get(
+        "shared",
+        "e2b",
+        {"router_config_path": str(router_file)},
+        {
+            "e2b": higher_priority,
+            "arker": lower_priority,
+        },
+    ) == ("e2b", higher)
+
+
+def test_race_preserves_provider_cancellation(router_file):
+    error = asyncio.CancelledError()
+
+    def cancelled():
+        raise error
+
+    with pytest.raises(asyncio.CancelledError) as caught:
+        routed_get(
+            "shared",
+            "e2b",
+            {"router_config_path": str(router_file)},
+            {
+                "e2b": cancelled,
+                "arker": lambda: object(),
+            },
+        )
+    assert caught.value is error
+
+
+def test_race_errors_follow_priority_not_completion(router_file):
+    lower_finished = threading.Event()
+    preferred_error = PermissionError("preferred provider denied access")
+
+    def preferred():
+        assert lower_finished.wait(2)
+        raise preferred_error
+
+    def lower():
+        lower_finished.set()
+        raise RuntimeError("lower provider unavailable")
+
+    with pytest.raises(PermissionError) as caught:
+        routed_get("shared", "e2b", {"router_config_path": str(router_file)}, {"e2b": preferred, "arker": lower})
+    assert caught.value is preferred_error
+
+
+@pytest.mark.parametrize("strategy", ["priority", "race"])
+def test_lookup_deadline_does_not_cache_late_success(router_file, strategy):
+    raw = json.loads(router_file.read_text())
+    raw["existing"].update(strategy=strategy, timeoutMs=20)
+    router_file.write_text(json.dumps(raw))
+    release = threading.Event()
+    completed = threading.Event()
+
+    def late_hit():
+        assert release.wait(2)
+        completed.set()
+        return object()
+
+    try:
+        with pytest.raises(RouterLookupTimeoutError):
+            routed_get(
+                "shared",
+                "e2b",
+                {"router_config_path": str(router_file)},
+                {
+                    "e2b": late_hit,
+                    "arker": lambda: None,
+                },
+            )
+    finally:
+        release.set()
+    assert completed.wait(2)
+    assert JsonRouteCache(raw["cache"]["path"]).get("shared") is None
+
+
+def test_cached_probe_and_fallback_share_one_lookup_budget(router_file, monkeypatch):
+    raw = json.loads(router_file.read_text())
+    raw["existing"].update(strategy="priority", timeoutMs=30)
+    router_file.write_text(json.dumps(raw))
+    JsonRouteCache(raw["cache"]["path"]).set("shared", "e2b")
+    now = [0.0]
+    monkeypatch.setattr("arker._compat.time.monotonic", lambda: now[0])
+    fallback_calls = []
+
+    def cached_miss():
+        now[0] = 0.031
+
+    with pytest.raises(RouterLookupTimeoutError):
+        routed_get(
+            "shared",
+            "e2b",
+            {"router_config_path": str(router_file)},
+            {
+                "e2b": cached_miss,
+                "arker": lambda: fallback_calls.append(True),
+            },
+        )
+    assert fallback_calls == []
+
+
+@pytest.mark.parametrize("timeout", [True, 0, -1, 0.5, float("inf"), 9_007_199_254_740_992])
+def test_lookup_budget_rejects_invalid_config_before_io(router_file, timeout):
+    raw = json.loads(router_file.read_text())
+    raw["existing"]["timeoutMs"] = timeout
+    with pytest.raises(ValueError, match="positive safe integer"):
+        RouterConfig.from_dict(raw)
 
 
 @pytest.mark.parametrize("status", [401, 403, 429, 500, 503])
@@ -264,7 +412,7 @@ def test_json_cache_preserves_updates_from_multiple_processes(tmp_path: Path) ->
     }
 
 
-def test_race_returns_without_waiting_for_losing_provider(tmp_path: Path) -> None:
+def test_race_waits_for_parallel_miss_before_accepting_hit(tmp_path: Path) -> None:
     config_path = tmp_path / "computesdk_router.json"
     config_path.write_text(
         json.dumps(
@@ -276,17 +424,21 @@ def test_race_returns_without_waiting_for_losing_provider(tmp_path: Path) -> Non
         )
     )
 
-    never_returns = threading.Event()
+    hit_finished = threading.Event()
 
     def slow_miss() -> None:
-        never_returns.wait()
+        assert hit_finished.wait(2)
+
+    def hit():
+        hit_finished.set()
+        return object()
 
     started = time.monotonic()
     found = routed_get(
         "vm-a",
         "e2b",
         {"router_config_path": config_path},
-        {"e2b": slow_miss, "arker": lambda: object()},
+        {"e2b": slow_miss, "arker": hit},
     )
 
     assert found is not None and found[0] == "arker"
@@ -334,7 +486,7 @@ def test_routing_rejects_provider_not_configured_by_shim(tmp_path: Path) -> None
         routed_get("vm-a", "e2b", {"router_config_path": config_path}, {"e2b": lambda: None})
 
 
-def test_race_continues_after_one_provider_errors(tmp_path: Path) -> None:
+def test_race_propagates_one_provider_error(tmp_path: Path) -> None:
     config_path = tmp_path / "computesdk_router.json"
     config_path.write_text(
         json.dumps(
@@ -349,13 +501,13 @@ def test_race_continues_after_one_provider_errors(tmp_path: Path) -> None:
     def fails() -> None:
         raise RuntimeError("temporary lookup failure")
 
-    found = routed_get(
-        "vm-a",
-        "e2b",
-        {"router_config_path": config_path},
-        {"e2b": fails, "arker": lambda: object()},
-    )
-    assert found is not None and found[0] == "arker"
+    with pytest.raises(RuntimeError, match="temporary lookup failure"):
+        routed_get(
+            "vm-a",
+            "e2b",
+            {"router_config_path": config_path},
+            {"e2b": fails, "arker": lambda: object()},
+        )
 
 
 def test_missing_arker_source_falls_back_to_native_provider(tmp_path: Path, monkeypatch) -> None:

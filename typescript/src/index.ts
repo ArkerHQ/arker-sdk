@@ -1,4 +1,5 @@
 import { validateHttpError, validateFileError } from "./generated/error-validators.js";
+export { RouterLookupTimeoutError } from "./compat/router-errors.js";
 /**
  * Arker TypeScript SDK.
  *

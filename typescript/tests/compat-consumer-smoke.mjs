@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { Arker } from "@arker-ai/sdk";
+import { Arker, RouterLookupTimeoutError } from "@arker-ai/sdk";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const require = createRequire(import.meta.url);
 const provider = process.argv[2];
@@ -21,6 +24,9 @@ for (const name of ["e2b", "blaxel", "daytona", "modal"]) {
 }
 assert.equal(typeof Arker, "function");
 assert.equal(typeof require("@arker-ai/sdk").Arker, "function");
+const CommonTimeout = require("@arker-ai/sdk").RouterLookupTimeoutError;
+assert.ok(new RouterLookupTimeoutError("test") instanceof CommonTimeout);
+assert.ok(new CommonTimeout("test") instanceof RouterLookupTimeoutError);
 delete process.env.ARKER_API_KEY;
 delete process.env.COMPUTESDK_ROUTER_CONFIG;
 
@@ -48,6 +54,24 @@ async function verifyE2B(native, shim) {
     );
   } finally {
     native.Sandbox.create = previous;
+  }
+  const directory = await mkdtemp(join(tmpdir(), "arker-packed-timeout-"));
+  const path = join(directory, "router.json");
+  await writeFile(path, JSON.stringify({
+    version: 1, existing: { strategy: "priority", order: ["e2b"], timeoutMs: 10 },
+    create: { strategy: "priority", order: ["e2b"] },
+  }));
+  const previousGetInfo = native.Sandbox.getInfo;
+  let release;
+  native.Sandbox.getInfo = () => new Promise((resolve) => { release = resolve; });
+  try {
+    await assert.rejects(shim.Sandbox.connect("consumer-timeout", { routerConfigPath: path }), (error) => (
+      error instanceof RouterLookupTimeoutError && error instanceof CommonTimeout
+    ));
+  } finally {
+    release?.(null);
+    native.Sandbox.getInfo = previousGetInfo;
+    await rm(directory, { recursive: true });
   }
 }
 
