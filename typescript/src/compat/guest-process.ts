@@ -61,7 +61,7 @@ export class GuestProcesses {
     let response: { stdout: string; stderr: string; exitCode: number };
     if (action === "exec") {
       const vm = (this.sandbox as unknown as { getInstance(): VM }).getInstance();
-      const session = await vm.createSession();
+      const session = await vm.createSession({ cwd: "/" });
       const started = await vm.run(`python3 ${shellQuote(this.path)} supervise ${shellQuote(payload)}`, {
         session_id: session.session_id, time_to_background: 0,
       });
@@ -80,7 +80,7 @@ export class GuestProcesses {
       }
     } else {
       const vm = (this.sandbox as unknown as { getInstance(): VM }).getInstance();
-      this.controlSession ??= vm.createSession().then((session) => session.session_id).catch((error) => {
+      this.controlSession ??= vm.createSession({ cwd: "/" }).then((session) => session.session_id).catch((error) => {
         this.controlSession = undefined;
         throw error;
       });

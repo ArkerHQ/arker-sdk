@@ -95,7 +95,7 @@ class GuestProcesses:
                 self._installed = True
         payload = base64.b64encode(json.dumps({"action": action, **values}).encode()).decode()
         if action == "exec":
-            session = self._vm.create_session()
+            session = self._vm.create_session(cwd="/")
             response = self._vm.run(
                 f"python3 {shlex.quote(self._path)} supervise {shlex.quote(payload)}",
                 session_id=session.session_id,
@@ -115,7 +115,7 @@ class GuestProcesses:
         else:
             with self._control_lock:
                 if self._control_session is None:
-                    self._control_session = self._vm.create_session().session_id
+                    self._control_session = self._vm.create_session(cwd="/").session_id
                 response = self._vm.run(
                     f"python3 {shlex.quote(self._path)} call {shlex.quote(payload)}",
                     session_id=self._control_session,

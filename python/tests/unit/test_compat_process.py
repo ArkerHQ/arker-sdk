@@ -22,8 +22,10 @@ class LocalVM:
         self.directory = directory
         self.calls = []
         self.runs = {}
+        self.session_directories = []
 
-    def create_session(self):
+    def create_session(self, *, cwd=None):
+        self.session_directories.append(cwd)
         return types.SimpleNamespace(session_id=uuid.uuid4().hex)
 
     def get_run(self, run_id):
@@ -98,9 +100,11 @@ def test_background_reconnect_stdin_eof_and_logs(processes):
             "waitForCompletion": False,
         }
     )
+    assert manager._vm.session_directories == ["/"]
     assert started.status == "running"
     reconnected = GuestProcesses(LocalVM(directory))
     assert reconnected.get(started.pid).name == "input"
+    assert reconnected._vm.session_directories == ["/"]
     reconnected.write_stdin("input", "hello λ\n")
     reconnected.write_stdin("input", b"second\n")
     reconnected.close_stdin("input")
