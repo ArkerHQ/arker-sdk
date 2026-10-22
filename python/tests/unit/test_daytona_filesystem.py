@@ -1,0 +1,381 @@
+import asyncio
+import os
+import pwd
+import shutil
+import stat
+import subprocess
+import tempfile
+import types
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("daytona")
+
+from daytona import DaytonaBadRequestError, DaytonaForbiddenError, DaytonaNotFoundError, FileUpload
+from daytona_toolbox_api_client import FileInfo
+from daytona_toolbox_api_client_async import FileInfo as AsyncFileInfo
+
+from arker import _daytona_filesystem as implementation
+from arker._compat import CommandResult, UnsupportedCompatibilityOption
+from arker._compat_daytona_async import AsyncSandbox
+from arker.daytona import Sandbox
+
+
+def test_daytona_exposes_filesystem_on_arker_and_preserves_native():
+    from arker.daytona import Sandbox
+
+    assert callable(Sandbox(vm=types.SimpleNamespace(id="local")).fs.upload_file)
+    native = types.SimpleNamespace(id="native", process=object(), fs=object())
+    assert Sandbox(native=native).fs is native.fs
+
+
+@pytest.fixture
+def guest(monkeypatch):
+    home = Path(tempfile.mkdtemp(prefix="daytona-guest-test-"))
+    home.chmod(0o777)
+    uid, gid = (65534, 65534) if os.getuid() == 0 else (os.getuid(), os.getgid())
+    account = pwd.getpwuid(uid)
+    replacement = "pwd.struct_passwd(" + repr((account.pw_name, "x", uid, gid, "", str(home), "/bin/sh")) + ")"
+    monkeypatch.setattr(
+        implementation, "_SOURCE", implementation._SOURCE.replace('pwd.getpwnam("daytona")', replacement)
+    )
+    stages = []
+
+    def run(vm, command, **kwargs):
+        command = command.replace(
+            'setpriv --reuid=daytona --regid="$(id -g daytona)" --init-groups --',
+            f"setpriv --reuid={uid} --regid={gid} --keep-groups --",
+        )
+        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=5)
+        return CommandResult(stdout=result.stdout, stderr=result.stderr, exit_code=result.returncode)
+
+    def sync(path, data=None):
+        stage = Path(path)
+        stages.append(stage)
+        assert stage.parent.name.startswith(".arker-daytona-fs-")
+        assert stat.S_IMODE(stage.parent.stat().st_mode) == 0o700
+        assert not stage.is_symlink() and stat.S_ISREG(stage.stat().st_mode)
+        if data is not None:
+            stage.write_bytes(data)
+            return None
+        return stage.read_bytes()
+
+    monkeypatch.setattr(implementation, "run_command", run)
+    monkeypatch.setattr("arker.daytona.run_command", run)
+    sandbox = Sandbox(vm=types.SimpleNamespace(id="local", sync=sync))
+    yield sandbox, home, uid, stages
+    assert all(not stage.parent.exists() for stage in stages)
+    shutil.rmtree(home)
+
+
+def test_core_binary_metadata_permissions_paths_and_mutations(guest, tmp_path):
+    sandbox, home, uid, _ = guest
+    fs = sandbox.fs
+    payload = bytes(range(256))
+    fs.create_folder("dir/nested", "750")
+    fs.upload_file(payload, "dir/nested/line\nbreak")
+    assert fs.download_file("dir/nested/line\nbreak") == payload
+    info = fs.get_file_info("dir/nested/line\nbreak")
+    assert isinstance(info, FileInfo)
+    assert (info.owner, info.size, info.name, info.is_dir) == (str(uid), 256, "line\nbreak", False)
+    fs.set_file_permissions("dir/nested/line\nbreak", mode="640")
+    fs.upload_file(b"short", "dir/nested/line\nbreak")
+    assert fs.get_file_info("dir/nested/line\nbreak").permissions == "0640"
+    local = tmp_path / "upload"
+    local.write_bytes(payload)
+    fs.upload_files([FileUpload(str(local), "dir/local"), FileUpload(b"", "dir/empty")])
+    output = tmp_path / "download"
+    assert fs.download_file("dir/local", str(output)) is None
+    assert output.read_bytes() == payload
+    assert fs.download_file("dir/empty") == b""
+    assert {v.path for v in fs.list_files("dir", depth=2)} == {
+        str(home / p) for p in ["dir/nested", "dir/nested/line\nbreak", "dir/local", "dir/empty"]
+    }
+    fs.move_files("dir/local", "dir/moved")
+    with pytest.raises(DaytonaNotFoundError):
+        fs.get_file_info("dir/local")
+    with pytest.raises(DaytonaBadRequestError):
+        fs.delete_file("dir")
+    assert fs.download_file("dir/moved") == payload
+    fs.delete_file("dir", recursive=True)
+    assert not (home / "dir").exists()
+
+
+def test_permissions_symlinks_and_fifos_never_gain_root_access(guest):
+    sandbox, home, _, _ = guest
+    fs = sandbox.fs
+    protected = home / "protected"
+    protected.write_bytes(b"protected")
+    protected.chmod(0o000)
+    (home / "link").symlink_to(protected)
+    for action in [lambda: fs.download_file("link"), lambda: fs.upload_file(b"bad", "link")]:
+        with pytest.raises(DaytonaForbiddenError):
+            action()
+    protected.chmod(0o444)
+    assert protected.read_bytes() == b"protected"
+    fs.upload_file(b"allowed", "owned")
+    (home / "owned-link").symlink_to(home / "owned")
+    assert fs.download_file("owned-link") == b"allowed"
+    fs.upload_file(b"changed", "owned-link")
+    assert fs.download_file("owned") == b"changed"
+    if os.getuid() == 0:
+        with pytest.raises(DaytonaForbiddenError):
+            fs.set_file_permissions("owned", owner="0")
+    os.mkfifo(home / "fifo", 0o666)
+    (home / "fifo").chmod(0o666)
+    for action in [lambda: fs.download_file("fifo"), lambda: fs.upload_file(b"bad", "fifo")]:
+        with pytest.raises(DaytonaBadRequestError):
+            action()
+
+
+def test_async_filesystem_preserves_native_model_types(guest):
+    sandbox, _, _, _ = guest
+
+    async def program():
+        fs = AsyncSandbox(sandbox).fs
+        await fs.upload_file(b"async", "async")
+        assert await fs.download_file("async") == b"async"
+        assert isinstance(await fs.get_file_info("async"), AsyncFileInfo)
+
+    asyncio.run(program())
+
+
+def test_untranslated_options_and_streams_fail_closed(guest):
+    fs = guest[0].fs
+    with pytest.raises(UnsupportedCompatibilityOption):
+        fs.upload_file(b"x", "x", timeout=0)
+    with pytest.raises(UnsupportedCompatibilityOption):
+        fs.list_files(".", request_timeout=1)
+    with pytest.raises(AttributeError):
+        _ = fs.upload_file_stream
+    with pytest.raises(DaytonaBadRequestError):
+        fs.upload_file(b"x", "")
+
+
+def test_interrupted_upload_cleans_staging_and_keeps_primary_error(guest, monkeypatch):
+    sandbox, _, _, stages = guest
+
+    def fail(path, data):
+        stages.append(Path(path))
+        Path(path).write_bytes(b"partial")
+        raise OSError("upload interrupted")
+
+    monkeypatch.setattr(sandbox._vm, "sync", fail)
+    with pytest.raises(OSError, match="upload interrupted"):
+        sandbox.fs.upload_file(b"data", "destination")
+
+
+def test_bulk_download_reports_each_failure_without_discarding_success(guest, tmp_path):
+    from daytona import FileDownloadRequest
+    from daytona.common.filesystem import FileDownloadResponse
+
+    fs = guest[0].fs
+    fs.upload_file(b"ok", "present")
+    output = tmp_path / "output"
+    results = fs.download_files(
+        [
+            FileDownloadRequest(source="missing"),
+            FileDownloadRequest(source="present"),
+            FileDownloadRequest(source="present", destination=str(output)),
+        ]
+    )
+    assert all(isinstance(result, FileDownloadResponse) for result in results)
+    assert results[0].error_details.status_code == 404
+    assert results[1].result == b"ok"
+    assert results[2].result == str(output)
+    assert output.read_bytes() == b"ok"
+
+
+def test_staging_collision_never_syncs_or_removes_an_unowned_path(monkeypatch):
+    commands = []
+
+    def fail(vm, command):
+        commands.append(command)
+        return CommandResult(stdout="", stderr="File exists", exit_code=1)
+
+    monkeypatch.setattr(implementation, "run_command", fail)
+    fs = implementation.FileSystem(types.SimpleNamespace(sync=lambda *args: pytest.fail("must not sync")))
+    with pytest.raises(Exception, match="File exists"):
+        fs.upload_file(b"x", "file")
+    assert len(commands) == 1 and commands[0].startswith("mkdir -m 700 -- ")
+
+
+def test_local_fifo_transfer_is_rejected_without_blocking(guest, tmp_path):
+    from daytona import DaytonaError
+
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)
+    fs = guest[0].fs
+    with pytest.raises(DaytonaError, match="regular file"):
+        fs.upload_file(str(fifo), "remote")
+    fs.upload_file(b"x", "remote")
+    with pytest.raises(DaytonaError):
+        fs.download_file("remote", str(fifo))
+
+
+@pytest.mark.parametrize("creation_fails", [False, True])
+def test_live_scenario_preserves_primary_failure_and_attempts_all_cleanup(monkeypatch, creation_fails):
+    import runpy
+
+    scenarios = Path(__file__).resolve().parents[1] / "e2e"
+    monkeypatch.syspath_prepend(str(scenarios))
+    monkeypatch.delenv("COMPAT_COVERAGE_EVIDENCE", raising=False)
+    program = runpy.run_path(str(scenarios / "test_daytona_filesystem_import_only.py"))["program"]
+    primary = ValueError("controlled primary failure")
+    actions = []
+
+    def fail(*args):
+        raise primary
+
+    class Client:
+        def create(self):
+            if creation_fails:
+                raise primary
+            return types.SimpleNamespace(fs=types.SimpleNamespace(create_folder=fail))
+
+        def delete(self, sandbox):
+            actions.append("delete")
+            raise RuntimeError("controlled deletion failure")
+
+        def close(self):
+            actions.append("close")
+            raise RuntimeError("controlled close failure")
+
+    with pytest.raises(ValueError) as captured:
+        asyncio.run(program(Client))
+    assert captured.value is primary
+    assert actions == (["close"] if creation_fails else ["delete", "close"])
+    assert primary.__notes__ == ["Owned-resource cleanup also failed; verify deletion independently."]
+
+
+def test_live_sync_scenario_without_close_completes_and_deletes(monkeypatch):
+    import runpy
+
+    from daytona import AsyncDaytona, Daytona
+
+    assert not hasattr(Daytona, "close")
+    assert callable(AsyncDaytona.close)
+    scenarios = Path(__file__).resolve().parents[1] / "e2e"
+    monkeypatch.syspath_prepend(str(scenarios))
+    program = runpy.run_path(str(scenarios / "test_daytona_filesystem_import_only.py"))["program"]
+    actions = []
+    fs = types.SimpleNamespace(
+        create_folder=lambda *args: None,
+        upload_file=lambda *args: None,
+        download_file=lambda *args: bytes(range(256)),
+        get_file_info=lambda *args: types.SimpleNamespace(size=256, is_dir=False, owner="1000", permissions="0640"),
+        set_file_permissions=lambda *args, **kwargs: None,
+        move_files=lambda *args: None,
+        list_files=lambda *args: [types.SimpleNamespace(name="moved")],
+        delete_file=lambda *args, **kwargs: None,
+    )
+
+    class Client:
+        def create(self):
+            return types.SimpleNamespace(
+                fs=fs, process=types.SimpleNamespace(exec=lambda *args: types.SimpleNamespace(result="1000\n"))
+            )
+
+        def delete(self, sandbox):
+            actions.append("delete")
+
+    stages = []
+    asyncio.run(program(Client, stages.append))
+    assert actions == ["delete"]
+    assert "identity" in stages
+    assert stages[-1] == "cleanup-delete"
+
+
+def test_live_scenario_creation_failure_stage_survives_cleanup(monkeypatch):
+    import runpy
+
+    from arker._compat import CompatibilityCreationNotStartedError
+
+    scenarios = Path(__file__).resolve().parents[1] / "e2e"
+    monkeypatch.syspath_prepend(str(scenarios))
+    program = runpy.run_path(str(scenarios / "test_daytona_filesystem_import_only.py"))["program"]
+    primary = CompatibilityCreationNotStartedError("controlled")
+
+    class Client:
+        def create(self):
+            raise primary
+
+    stages = []
+    with pytest.raises(CompatibilityCreationNotStartedError) as captured:
+        asyncio.run(program(Client, stages.append))
+    assert captured.value is primary
+    assert stages == ["client-init", "create"]
+
+
+def test_process_and_filesystem_share_actual_account_home_and_permissions(guest):
+    sandbox, home, uid, _ = guest
+    result = sandbox.process.exec('id -u; printf "%s\\n" "$HOME"; pwd')
+    assert result.exit_code == 0
+    assert result.result.splitlines() == [str(uid), str(home), str(home)]
+    sandbox.fs.create_folder("commands", "700")
+    result = sandbox.process.exec('printf "%s" "$VALUE" > from-command', cwd="commands", env={"VALUE": "user-owned"})
+    assert result.exit_code == 0
+    assert sandbox.fs.download_file("commands/from-command") == b"user-owned"
+    assert sandbox.fs.get_file_info("commands/from-command").owner == str(uid)
+    protected = home / "protected-command"
+    protected.write_text("unchanged")
+    protected.chmod(0o000)
+    assert sandbox.process.exec("cat protected-command").exit_code != 0
+    assert sandbox.process.exec("printf bad > protected-command").exit_code != 0
+    protected.chmod(0o600)
+    assert protected.read_text() == "unchanged"
+    assert sandbox.process.exec("exit 17").exit_code == 17
+    assert sandbox.process.exec("pwd").result.strip() == str(home)
+
+
+def test_native_process_positional_arguments_and_directory_accessors(guest):
+    sandbox, home, _, _ = guest
+    assert sandbox.get_user_home_dir() == str(home)
+    sandbox.fs.create_folder("positional", "700")
+    result = sandbox.process.exec('printf "%s" "$VALUE"', "positional", {"VALUE": "positional"}, 5)
+    assert result.exit_code == 0 and result.result == "positional"
+
+    async def check_async():
+        asynchronous = AsyncSandbox(sandbox)
+        assert await asynchronous.get_user_home_dir() == str(home)
+        result = await asynchronous.process.exec('printf "%s" "$VALUE"', "positional", {"VALUE": "async"}, 5)
+        assert result.result == "async"
+
+    asyncio.run(check_async())
+
+
+def test_home_directory_preserves_native_routes_and_does_not_hide_guest_failure(monkeypatch):
+    native = types.SimpleNamespace(id="native", process=object(), get_user_home_dir=lambda: "/native-home")
+    assert Sandbox(native=native).get_user_home_dir() == "/native-home"
+
+    async def native_home():
+        return "/async-home"
+
+    native.get_user_home_dir = native_home
+    assert asyncio.run(AsyncSandbox(Sandbox(native=native)).get_user_home_dir()) == "/async-home"
+    monkeypatch.setattr(
+        "arker.daytona.run_command", lambda *args, **kwargs: CommandResult(stdout="", stderr="", exit_code=1)
+    )
+    from daytona import DaytonaError
+
+    with pytest.raises(DaytonaError, match="Failed to get user home"):
+        Sandbox(vm=types.SimpleNamespace(id="local")).get_user_home_dir()
+
+
+def test_daytona_parent_id_selection_requires_independent_placement(monkeypatch):
+    from arker._compat import arker_create
+
+    monkeypatch.setenv("ARKER_API_KEY", "local-placeholder")
+    monkeypatch.setenv("ARKER_SOURCE_VM_ID", "local-parent")
+    for key in ("ARKER_SOURCE", "ARKER_SOURCE_VM", "ARKER_BASE_URL", "ARKER_PROVIDER", "ARKER_REGION"):
+        monkeypatch.delenv(key, raising=False)
+    with pytest.raises(ValueError, match="No placement configured"):
+        arker_create()
+    requests = []
+    monkeypatch.setattr(
+        "arker._compat.arker_client",
+        lambda config: types.SimpleNamespace(fork=lambda **kwargs: requests.append(kwargs)),
+    )
+    arker_create()
+    assert requests == [{"name": None, "source_vm_id": "local-parent"}]

@@ -495,6 +495,8 @@ OpenApiOperationId: TypeAlias = Literal[
     'patchSession',
     'deleteSession',
     'attachSessionPty',
+    'openVmPort',
+    'openVmSocket',
     'mintSessionPtyTicket',
     'createMount',
     'listMounts',
@@ -1088,6 +1090,7 @@ class ActionRequired(ErrorMetadata):
 
 @dataclass(frozen=True)
 class OperationFailed(ErrorMetadata):
+    recovery: RecoveryContext
     code: Literal['operation_failed'] = field(kw_only=True)
     details: OperationFailedDetails = field(kw_only=True)
 
@@ -1372,6 +1375,19 @@ OutputEncoding: TypeAlias = Literal['utf-8', 'base64']
 @dataclass(frozen=True)
 class Auth:
     token: str
+
+
+@dataclass(frozen=True)
+class OutboundGuardScope:
+    hosts: list[str] | None = None
+    ips: list[str] | None = None
+    ports: list[int | list[Port]] | None = None
+
+
+@dataclass(frozen=True)
+class OutboundGuardRule:
+    type: Literal['outbound_guard']
+    allow: list[OutboundGuardScope]
 
 
 @dataclass(frozen=True)
@@ -1768,6 +1784,18 @@ class DeleteSessionParameters:
 
 
 @dataclass(frozen=True)
+class OpenVmPortParameters:
+    id: str
+    port: int
+
+
+@dataclass(frozen=True)
+class OpenVmSocketParameters:
+    id: str
+    path: str
+
+
+@dataclass(frozen=True)
 class AttachSessionPtyParameters:
     id: str
     sid: str
@@ -2138,7 +2166,10 @@ class SyncCommitWriteResult:
 
 @dataclass(frozen=True)
 class PolicyUpdate:
-    rules: dict[str, PolicyRule | ScheduleRule | LifecycleRule | None] | None = None
+    rules: (
+        dict[str, PolicyRule | ScheduleRule | LifecycleRule | OutboundGuardRule | None]
+        | None
+    ) = None
     secrets: dict[str, str | None] | None = None
     policies: list[PolicyEntry] | None = None
 
@@ -2157,6 +2188,7 @@ class PolicyWriteRequest:
 
 @dataclass(frozen=True)
 class PolicyDoc:
+    outbound_guards: dict[str, OutboundGuardRule] | None = None
     policies: list[PolicyEntry] | None = None
     secrets: dict[str, str] | None = None
     hostname: str | None = None
@@ -2361,6 +2393,7 @@ class PatchVmRequest:
 
 @dataclass(frozen=True)
 class VmPolicies:
+    outbound_guards: dict[str, OutboundGuardRule] | None = None
     rules: PolicyRules | None = None
     secrets: dict[str, str] | None = None
     mitm_domains: list[str] | None = None

@@ -88,11 +88,32 @@ arker rm <vm-id>
 
 Run `arker --help` for the available commands and flags.
 
+## Secret file uploads (unreleased preview)
+
+The updated CLI supports `arker sync <vm-id> /run/credential - --secret`.
+Provide credential bytes on stdin, never as a command-line argument. Every
+uploaded chunk is marked secret to keep file contents out of sync logs and
+previews; this does not suppress deliberate later process output. `--secret` refuses reads.
+Before provisioning a VM, automated launchers must verify `arker sync --help`
+explicitly advertises `--secret`. Do not infer support from the version: the
+tracked package version is unchanged and published older CLIs lack this feature.
+
+The preview CLI also accepts `arker fork <source> --idempotency-key <key>`.
+Reuse the same key and unchanged request after an ambiguous lost response;
+the CLI sends it as the `Idempotency-Key` header, never in the request body.
+Unkeyed forks remain unkeyed. Launchers must check fork help before depending
+on explicit keys rather than assuming older versions support this option.
+
 ## JSON output
 
 `--json` prints one JSON object on stdout for every command, including `sync`
 and the delete and cancel commands. Run results use `run_id` in every state;
 completed results also keep `runId`.
+
+With `--json`, HTTP failures still exit nonzero with empty stdout; stderr starts
+`arker: HTTP <status>: <code>: <message>`. This preserves the actual HTTP status
+for automation. Network errors without an HTTP response do not invent a status.
+Human-mode error output is unchanged. This format is an unreleased preview.
 
 ## Running commands
 

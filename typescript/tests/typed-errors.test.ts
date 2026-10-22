@@ -18,6 +18,18 @@ test('HTTP reader preserves the generated error body', async () => {
   }
 });
 
+test('operation failure recovery is required in the generated public type', async () => {
+  const failure = {...raw, code: 'operation_failed', details: {reason: 'image_pull_failed'}, recovery: {work: 'unknown'}};
+  const client = new Arker({apiKey: 'k', baseUrl: 'https://test.invalid', retry: false,
+    fetch: (async () => Response.json({error: failure}, {status: 422})) as typeof fetch});
+  try { await client.vm('vm').delete(); throw new Error('expected failure'); }
+  catch (error) {
+    assert(error instanceof ArkerError);
+    assert(error.body?.code === 'operation_failed');
+    assert.equal(error.body.recovery.work, 'unknown');
+  }
+});
+
 test('unknown errors preserve their original fields', async () => {
   const future = {...raw, code: 'future_code', extra: 42};
   const client = new Arker({apiKey: 'k', baseUrl: 'https://test.invalid', retry: false,

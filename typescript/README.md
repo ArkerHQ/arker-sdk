@@ -20,6 +20,12 @@ bun add @arker-ai/sdk
 
 The SDK requires Node.js 18 or later.
 
+The compatibility modules have additional vendor/runtime requirements: the
+pinned E2B SDK requires Node.js 22.19 or later. Private-port and Blaxel HTTP
+compatibility on Bun is tested with Bun 1.4.3; Bun 1.3.8 lacks the WebSocket
+upgrade-response behavior these operations require. Repository development and
+CI use Bun 1.4.3. This does not certify every vendor API or runtime combination.
+
 ## Get started
 
 Sign up and get your API key at [arker.ai/console](https://arker.ai/console).
@@ -45,6 +51,13 @@ console.log(new TextDecoder().decode(data));
 
 await vm.delete();
 ```
+
+Unreleased preview: use
+`await vm.sync("/run/credential", credentialBytes, { isSecret: true })` to
+mark every uploaded chunk `is_secret` so file contents stay out of sync logs and
+previews. This is not a promise to suppress deliberate later process output.
+Ordinary writes default to `false`. This needs this branch's updated SDK; the unchanged version field does
+not establish availability in the published package.
 
 ## Documentation and examples
 

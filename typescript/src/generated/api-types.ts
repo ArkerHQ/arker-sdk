@@ -300,6 +300,57 @@ export interface paths {
         patch: operations["patchSession"];
         trace?: never;
     };
+    "/v1/vms/{id}/ports/{port}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                id: components["parameters"]["VmId"];
+                /** @description TCP port on the VM's loopback interface. */
+                port: number;
+            };
+            cookie?: never;
+        };
+        /**
+         * Open a private VM port (WebSocket upgrade)
+         * @description Upgrade to a WebSocket with subprotocol `vm-port.v1`, carrying a byte stream to 127.0.0.1:port inside the caller's VM. This owner-authenticated control-plane operation has the same authority as SSH port forwarding; it does not expose a public port or modify the VM's inbound policy. API credentials authenticate only the upgrade, never the guest byte stream. Binary frames carry bytes. A text frame containing exactly `eof` half-closes that direction without closing the other; bytes after EOF or any other text are protocol errors. Each binary message is limited to 65536 bytes. Closing the WebSocket closes the guest connection. VM ownership, key scope, mutability, billing, and activation quotas are checked before the upgrade. The stream holds runtime activity until disconnected.
+         */
+        get: operations["openVmPort"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/vms/{id}/sockets": {
+        parameters: {
+            query: {
+                /** @description Absolute Unix socket pathname inside the VM, at most 107 UTF-8 bytes and containing no NUL. */
+                path: string;
+            };
+            header?: never;
+            path: {
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                id: components["parameters"]["VmId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Open a private guest Unix socket (WebSocket upgrade)
+         * @description Upgrade to a WebSocket with subprotocol `vm-port.v1`, carrying a byte stream to the named Unix socket inside the caller's VM. This owner-authenticated operation has the same authority as SSH and never opens a public TCP listener or changes inbound policy. API credentials authenticate only the upgrade, never the guest byte stream. Binary frames carry bytes, with a maximum message size of 65536 bytes. A text frame containing exactly `eof` half-closes that direction; bytes after EOF or any other text are protocol errors. Closing the WebSocket closes the guest connection. Ownership, key scope, mutability, billing and activation quotas are checked before connecting. Runtime activity is held until disconnection. Unsupported runtimes return an explicit capability error.
+         */
+        get: operations["openVmSocket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/vms/{id}/sessions/{sid}/pty": {
         parameters: {
             query?: {
@@ -809,6 +860,10 @@ export interface components {
         };
         /** @description A VM's current network policy and its derived inbound exposure metadata. */
         PolicyDoc: {
+            /** @description Independent outbound permission floors, keyed by rule id. Every floor constrains the ordered policy and its default. Write or delete floors through PolicyUpdate.rules. */
+            readonly outbound_guards?: {
+                [key: string]: components["schemas"]["OutboundGuardRule"];
+            };
             /** @description Ordered network policy rules. An empty list allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With an outbound `allow` rule, unmatched outbound traffic is denied. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable. */
             policies?: components["schemas"]["PolicyEntry"][];
             /** @description Named secrets referenced by `${secret:NAME}` in rewrite actions, match values and `auth.token`. Stored values are represented as `***`; supply the original value when replacing a policy that uses it. */
@@ -1823,7 +1878,7 @@ export interface components {
          * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
          * @enum {string}
          */
-        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey";
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "openVmPort" | "openVmSocket" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey";
         /** @enum {string} */
         HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
         /**
@@ -2524,7 +2579,8 @@ export interface components {
             /** @constant */
             code: "operation_failed";
             details: components["schemas"]["OperationFailedDetails"];
-        } & unknown & {
+            recovery: components["schemas"]["RecoveryContext"];
+        } & {
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2875,7 +2931,7 @@ export interface components {
         PolicyUpdate: {
             /** @description Rules to write, keyed by rule id. A rule replaces any rule with the same id; `null` removes the rule with that id. Rules not named here are kept. The resulting policy must not give two rules of one `type` the same priority. */
             rules?: {
-                [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["ScheduleRule"] | components["schemas"]["LifecycleRule"] | null;
+                [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["ScheduleRule"] | components["schemas"]["LifecycleRule"] | components["schemas"]["OutboundGuardRule"] | null;
             };
             /** @description Secrets to write, referenced by `${secret:NAME}` in rewrite actions, match values and `auth.token`. A value replaces the secret with that name; `null` removes it. Secrets not named here are kept. Values are encrypted at rest and masked as `***` in responses; `***` is not accepted as a value. */
             secrets?: {
@@ -2883,12 +2939,16 @@ export interface components {
             };
             /**
              * @deprecated
-             * @description Deprecated: an ordered rule list that replaces the whole policy, first match wins. An empty list clears it. Use `rules`. Cannot be combined with `rules`.
+             * @description Deprecated: an ordered rule list that replaces the whole policy, first match wins. An empty list clears it. Use `rules`. Only outbound guards may accompany this replacement in `rules`; their ids must not collide with the generated `rule-0`, `rule-1`, ... ids.
              */
             policies?: components["schemas"]["PolicyEntry"][] | null;
         };
         /** @description The VM's network policy. Change it with `policies` on `PATCH /v1/vms/{id}`. */
         VmPolicies: {
+            /** @description Independent outbound permission floors, keyed by their rule ids. Each floor intersects every ranked or default outbound decision. The legacy rules map retains its existing rule variants. Write or delete floors through PolicyUpdate.rules. */
+            readonly outbound_guards?: {
+                [key: string]: components["schemas"]["OutboundGuardRule"];
+            };
             /** @description The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With an outbound `allow` rule, unmatched outbound traffic is denied. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable. */
             rules?: components["schemas"]["PolicyRules"];
             /** @description Names of the secrets referenced by `${secret:NAME}` in rewrite actions, match values and `auth.token`. Values are masked as `***`. */
@@ -2900,7 +2960,26 @@ export interface components {
             /** @description Non-fatal policy application notices. */
             readonly warnings?: string[];
         };
-        /** @description The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With an outbound `allow` rule, unmatched outbound traffic is denied. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable. */
+        /** @description A connection-layer permission scope. Present fields AND together; values within a field OR together. Hosts and IPs are mutually exclusive. No fields means any destination and port. Named-destination scopes constrain the guest DNS filter to their namespaces; every independent floor still has to admit DNS, so an IP-only guard without resolver permissions closes implicit DNS. */
+        OutboundGuardScope: {
+            /** @description Label-boundary suffix match on the request host: `github.com` matches `api.github.com`, not `evilgithub.com`. */
+            hosts?: string[];
+            /** @description Destination IPs or CIDRs. */
+            ips?: string[];
+            /** @description Destination ports and/or inclusive [start, end] ranges, e.g. [80, 443, [1000, 2000]]. Absent means any port; an empty list is refused. */
+            ports?: (number | number[])[];
+        };
+        /** @description An independent outbound permission floor, not a ranked allow rule. A connection must match at least one scope in each guard AND be admitted by the ordinary outbound policy. An empty allow list denies all outbound traffic. Guards preserve inbound, lifecycle and secret-rewrite rules, and apply again to the final proxy destination after host rewriting. With no ranked network rules, the base is open and the guards alone constrain it. At most 64 guards and 65,536 projected scopes are supported; excessive intersection work fails closed. */
+        OutboundGuardRule: {
+            /**
+             * @description Fixed rule family for an independent outbound permission floor.
+             * @enum {string}
+             */
+            type: "outbound_guard";
+            /** @description Alternative permitted scopes within this floor. An empty list denies all outbound traffic; every independent floor must admit a flow. */
+            allow: components["schemas"]["OutboundGuardScope"][];
+        };
+        /** @description The VM's policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Ranked network rules are evaluated highest priority first; the first match decides. With an outbound `allow` rule, unmatched outbound traffic is denied; otherwise the outbound base is open. Every outbound_guard independently constrains that base or ranked decision; no allow or rewrite bypasses a guard. Schedule rules do not change network permissions. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable. */
         PolicyRules: {
             [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["ScheduleRule"] | components["schemas"]["LifecycleRule"];
         };
@@ -4652,6 +4731,73 @@ export interface operations {
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
             504: components["responses"]["GatewayTimeoutError"];
+        };
+    };
+    openVmPort: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                id: components["parameters"]["VmId"];
+                /** @description TCP port on the VM's loopback interface. */
+                port: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The private VM byte stream is established. */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            402: components["responses"]["PaymentRequiredError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateOrResourceBusyError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    openVmSocket: {
+        parameters: {
+            query: {
+                /** @description Absolute Unix socket pathname inside the VM, at most 107 UTF-8 bytes and containing no NUL. */
+                path: string;
+            };
+            header?: never;
+            path: {
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                id: components["parameters"]["VmId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The private guest Unix socket byte stream is established. */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            402: components["responses"]["PaymentRequiredError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateOrResourceBusyError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
         };
     };
     attachSessionPty: {

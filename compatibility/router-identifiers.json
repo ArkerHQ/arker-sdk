@@ -1,0 +1,13 @@
+[
+  {"id": "vmh-b471cad989f2eab9-01M548DGAXJ48SGE3SRTRR8HNV", "arker": true},
+  {"id": "vmh-B471CAD989F2EAB9-01m548dgaxj48sge3srtrr8hnv", "arker": true},
+  {"id": "01M548DGAXJ48SGE3SRTRR8HNV", "arker": true},
+  {"id": "abcdefghijklmnopqrst", "arker": false},
+  {"id": "sb-abcdefghijklmnopqrstuv", "arker": false},
+  {"id": "my-sandbox", "arker": false},
+  {"id": "vmh-my-named-sandbox", "arker": false},
+  {"id": "vmh-b471cad989f2eab9-01M548DGAXJ48SGE3SRTRR8HNU", "arker": false},
+  {"id": "vmh-b471cad989f2eab-01M548DGAXJ48SGE3SRTRR8HNV", "arker": false},
+  {"id": "01M548DGAXJ48SGE3SRTRR8HNV\n", "arker": false},
+  {"id": "01M548DGAXJ48SGE3SRTRR8HN\u212a", "arker": false}
+]

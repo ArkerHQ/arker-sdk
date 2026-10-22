@@ -11,24 +11,24 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
     },
     "./daytona": {
-      "types": "./dist/daytona.d.ts",
-      "import": "./dist/daytona.js",
-      "require": "./dist/daytona.cjs"
+      "import": { "types": "./dist/daytona.d.ts", "default": "./dist/daytona.js" },
+      "require": { "types": "./dist/daytona.d.cts", "default": "./dist/daytona.cjs" }
     },
     "./e2b": {
-      "types": "./dist/e2b.d.ts",
-      "import": "./dist/e2b.js",
-      "require": "./dist/e2b.cjs"
+      "import": { "types": "./dist/e2b.d.ts", "default": "./dist/e2b.js" },
+      "require": { "types": "./dist/e2b.d.cts", "default": "./dist/e2b.cjs" }
     },
     "./modal": {
-      "types": "./dist/modal.d.ts",
-      "import": "./dist/modal.js",
-      "require": "./dist/modal.cjs"
+      "import": { "types": "./dist/modal.d.ts", "default": "./dist/modal.js" },
+      "require": { "types": "./dist/modal.d.cts", "default": "./dist/modal.cjs" }
+    },
+    "./blaxel": {
+      "import": { "types": "./dist/blaxel.d.ts", "default": "./dist/blaxel.js" },
+      "require": { "types": "./dist/blaxel.d.cts", "default": "./dist/blaxel.cjs" }
     }
   },
   "files": [
@@ -39,21 +39,31 @@
   "engines": {
     "node": ">=18"
   },
-  "packageManager": "bun@1.3.8",
+  "packageManager": "bun@1.4.3",
   "scripts": {
     "build": "bun run build:sdk && ../scripts/build-legacy-cli",
-    "build:sdk": "bun run generate:validators && tsup src/index.ts src/daytona.ts src/e2b.ts src/modal.ts --format esm,cjs --dts --clean --target=node18",
+    "build:sdk": "bun run generate:validators && tsup src/index.ts src/daytona.ts src/e2b.ts src/modal.ts src/blaxel.ts --format esm,cjs --dts --clean --target=node18",
     "check:api-types": "openapi-typescript ../openapi.json --default-non-nullable false -o src/generated/api-types.ts --check",
     "example:ios-qa": "bun examples/ios-qa.ts",
     "generate:api-types": "openapi-typescript ../openapi.json --default-non-nullable false -o src/generated/api-types.ts",
     "smoke": "bun tests/conformance/fork-run-sync.ts",
-    "test": "bun run generate:validators && bun test tests/typed-errors.test.ts tests/execution-model.test.ts tests/api-keys.test.ts && bun tests/unit.ts && bun tests/compat.ts && bun run build && bun tests/http2.ts",
+    "test": "bun run generate:validators && bun test tests/typed-errors.test.ts tests/execution-model.test.ts tests/api-keys.test.ts && bun run test:port && bun tests/unit.ts && bun tests/compat.ts && bun tests/compat-router.ts && bun tests/compat-coverage.ts && bun run build && bun tests/http2.ts && bun run test:consumer",
+    "test:consumer": "node scripts/test-consumer.mjs",
+    "test:port": "bun build tests/port-stream.test.ts --target=node --external=ws --outfile=node_modules/.cache/port-tests.cjs --format=cjs && node node_modules/.cache/port-tests.cjs && bun test tests/port-stream.test.ts && bun run test:private-fetch && bun run test:e2b-handles",
+    "test:e2b-handles": "bun run test:compat-handles",
+    "test:compat-handles": "bun build tests/e2b-command-handle.test.ts tests/e2b-lifecycle.test.ts tests/e2b-filesystem.test.ts tests/e2b-staging.test.ts tests/blaxel-provider.test.ts tests/daytona-provider.test.ts tests/daytona-filesystem.test.ts tests/modal-provider.test.ts tests/modal-sandbox.test.ts tests/modal-command.test.ts tests/modal-filesystem.test.ts tests/guest-process-input.test.ts --target=node --external=e2b --external=@blaxel/core --external=@daytona/sdk --external=modal --outdir=node_modules/.cache/compat-tests --root=tests --format=cjs && node node_modules/.cache/compat-tests/e2b-command-handle.test.js && node node_modules/.cache/compat-tests/e2b-lifecycle.test.js && node node_modules/.cache/compat-tests/e2b-filesystem.test.js && node node_modules/.cache/compat-tests/e2b-staging.test.js && node node_modules/.cache/compat-tests/blaxel-provider.test.js && node node_modules/.cache/compat-tests/daytona-provider.test.js && node node_modules/.cache/compat-tests/daytona-filesystem.test.js && node node_modules/.cache/compat-tests/modal-provider.test.js && node node_modules/.cache/compat-tests/modal-sandbox.test.js && node node_modules/.cache/compat-tests/modal-command.test.js && node node_modules/.cache/compat-tests/modal-filesystem.test.js && node node_modules/.cache/compat-tests/guest-process-input.test.js",
+    "test:private-fetch": "bun build tests/private-fetch.test.ts --target=node --outfile=node_modules/.cache/private-fetch-tests.cjs --format=cjs && node node_modules/.cache/private-fetch-tests.cjs",
+    "coverage:compat": "bun scripts/compat-coverage.ts",
     "test:compat": "bun tests/compat.ts",
+    "test:router": "bun tests/compat-router.ts",
     "test:compat-live": "bun tests/compat-live.ts",
     "test:compat-fallback-live": "bun tests/compat-fallback-live.ts",
+    "test:compat-equivalence-live": "bun tests/compat-equivalence-live.ts",
+    "test:compat-policy-live": "bun tests/compat-policy-live.ts",
+    "test:compat-blaxel-live": "bun tests/compat-blaxel-live.ts",
     "typecheck": "bun run generate:validators && tsc -p tsconfig.test.json",
     "prepublishOnly": "bun run build",
-    "generate:validators": "bun scripts/generate-error-validators.ts"
+    "generate:validators": "bun scripts/generate-compat-process.ts && bun scripts/generate-error-validators.ts"
   },
   "keywords": [
     "arker",
@@ -71,12 +81,17 @@
   },
   "bugs": "https://github.com/ArkerHQ/arker-sdk/issues",
   "devDependencies": {
-    "@computesdk/daytona": "^1.7.30",
-    "@computesdk/e2b": "^1.7.51",
-    "@computesdk/modal": "^1.9.3",
+    "e2b": "2.58.0",
+    "@daytona/sdk": "0.226.0",
+    "modal": "0.11.1",
+    "@blaxel/core": "0.3.31",
+    "@computesdk/daytona": "^1.7.43",
+    "@computesdk/e2b": "^1.7.62",
+    "@computesdk/modal": "^1.9.19",
+    "@computesdk/blaxel": "^1.6.33",
     "@types/node": "^25.6.0",
     "@types/ws": "^8.18.1",
-    "computesdk": "^4.1.3",
+    "computesdk": "^4.1.12",
     "openapi-typescript": "^7.13.0",
     "tsup": "^8.3.0",
     "typescript": "^5.6.0",
@@ -84,27 +99,26 @@
     "ajv-formats": "^3.0.1"
   },
   "peerDependencies": {
-    "@computesdk/daytona": "^1.7.30",
-    "@computesdk/e2b": "^1.7.51",
-    "@computesdk/modal": "^1.9.3",
-    "computesdk": "^4.1.3"
+    "e2b": "^2.56.0",
+    "@daytona/sdk": "^0.224.1 || ^0.226.0",
+    "modal": "^0.11.1",
+    "@blaxel/core": "^0.3.30"
   },
   "peerDependenciesMeta": {
-    "@computesdk/daytona": {
-      "optional": true
-    },
-    "@computesdk/e2b": {
-      "optional": true
-    },
-    "@computesdk/modal": {
-      "optional": true
-    },
-    "computesdk": {
+    "e2b": { "optional": true },
+    "@daytona/sdk": { "optional": true },
+    "modal": { "optional": true },
+    "@blaxel/core": {
       "optional": true
     }
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.15.0",
+    "@computesdk/provider": "^2.1.14",
+    "@types/ws": "^8.18.1",
+    "computesdk": "^4.1.12",
     "dockerfile-ast": "^0.7.1",
+    "vscode-languageserver-types": "3.18.0",
     "tar": "^7.5.22",
     "ws": "^8.21.0"
   }

@@ -605,6 +605,7 @@ async function testConfiguredPlacementRoutesNamedSourcesToMainEndpoint(): Promis
 
   assert.equal(arker.baseUrl, "https://provider-one-region-one.arker.ai/api");
   assert.equal(vm.baseUrl, "https://provider-one-region-one.arker.ai/api");
+  assert.equal(new Arker({ apiKey: "k", baseUrl: `https://test.invalid/api${"/".repeat(10_000)}` }).baseUrl, "https://test.invalid/api");
 }
 
 function testArbitraryProviderBuildsEndpoint(): void {
@@ -1105,6 +1106,47 @@ async function testSyncWriteDoesNotRetryAmbiguousNetworkFailure(): Promise<void>
   );
   assert.equal(fetch.calls.length, 1);
 }
+
+async function testSecretSyncMarksEveryChunkIncludingEmptyFiles(): Promise<void> {
+  for (const data of [new Uint8Array(0), new Uint8Array(4 * 1024 * 1024 + 1), "private-fixture"]) {
+    const fetch = new FakeFetch();
+    const match = (method: string, url: string) => method === "POST" && url.endsWith("/sync");
+    const chunks = typeof data === "string" || data.length === 0 ? 1 : 2;
+    for (let index = 0; index < chunks; index++) {
+      fetch.addJson(match, 200, { results: [{ complete: index === chunks - 1, written: index === chunks - 1 }] });
+    }
+    await client(fetch).vm("vm_1").sync("/run/credential", data, { isSecret: true });
+    assert.equal(fetch.calls.length, chunks);
+    for (const call of fetch.calls) {
+      const write = JSON.parse(call.body!).writes[0];
+      assert.equal(write.is_secret, true);
+      assert.equal(write.path, "/run/credential");
+    }
+  }
+}
+
+await testSecretSyncMarksEveryChunkIncludingEmptyFiles();
+
+async function testSyncSnapshotsSecretClassificationAcrossChunks(): Promise<void> {
+  for (const initial of [true, false]) {
+    const options = { isSecret: initial };
+    const fetch = new FakeFetch();
+    const match = (method: string, url: string) => method === "POST" && url.endsWith("/sync");
+    fetch.addJson(match, 200, { results: [{ complete: false, written: false }] });
+    fetch.addJson(match, 200, { results: [{ complete: true, written: true }] });
+    const originalFetch = fetch.fetch;
+    fetch.fetch = async (...args) => {
+      const result = await originalFetch(...args);
+      options.isSecret = !initial;
+      return result;
+    };
+    await client(fetch).vm("vm_1").sync("/run/credential", new Uint8Array(4 * 1024 * 1024 + 1), options);
+    assert.equal(fetch.calls.length, 2);
+    for (const call of fetch.calls) assert.equal(JSON.parse(call.body!).writes[0].is_secret, initial);
+  }
+}
+
+await testSyncSnapshotsSecretClassificationAcrossChunks();
 
 async function testGetAndSetPolicies(): Promise<void> {
   const fetch = new FakeFetch();
@@ -2113,13 +2155,15 @@ async function testStatCacheCatchesForgedMtimeEdit(): Promise<void> {
     const cacheFile = nodePath.join(sub, fs.readdirSync(sub)[0]!);
     const parsed = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
     const entry = parsed.entries["a.txt"];
-    // Match size and mtime while leaving ctime stale.
+    // Forge matching fields and a stale ctime explicitly: some filesystems give
+    // both writes the same timestamp, so elapsed wall time cannot set up this case.
     entry.size = Number(now.size);
     entry.mtimeNs = String(now.mtimeNs);
     entry.ino = String(now.ino);
     entry.dev = String(now.dev);
     entry.mode = Number(now.mode);
     entry.ctimeNs = String(BigInt(now.ctimeNs) - 1n);
+    assert.notEqual(entry.ctimeNs, String(now.ctimeNs), "ctime must differ after a write");
     // Keep it outside the racily-clean window so ctime forces the rehash.
     parsed.writtenNs = String(BigInt(entry.mtimeNs) + 10_000_000_000n);
     fs.writeFileSync(cacheFile, JSON.stringify(parsed));

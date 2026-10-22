@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "exclusions": [
+    {
+      "provider": "modal",
+      "pattern": "^(App(?:\\.|$)|ModalClient\\.(?:apps|functions|cls)(?:\\.|$)|ModalClient\\.cpClient\\.(?:app|function|class)[A-Z])",
+      "reason": "App deployment and Function execution APIs are outside core sandbox scope. Sandbox, image, secret, volume and mount APIs remain in scope."
+    }
+  ]
+}

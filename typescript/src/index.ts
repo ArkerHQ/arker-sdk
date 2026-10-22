@@ -1,4 +1,5 @@
 import { validateHttpError, validateFileError } from "./generated/error-validators.js";
+export { RouterLookupTimeoutError } from "./compat/router-errors.js";
 /**
  * Arker TypeScript SDK.
  *
@@ -726,6 +727,7 @@ export class Arker {
     // on, unnamed and billable. The header object is bound once, before the
     // retry loop, so every attempt of one call presents the same key.
     const { idempotencyKey, idempotency, ...request } = options;
+    if (request.policies) request.policies = withoutReadOnlyPolicyFields(request.policies);
     const key = forkIdempotencyKey(idempotencyKey, idempotency);
     const wire = await this._request<Vm>(
       "POST",
@@ -1027,6 +1029,7 @@ export class VM {
   readonly vm_id?: Vm["vm_id"];
   readonly pool_id?: Vm["pool_id"];
   readonly name?: Vm["name"];
+  readonly hostname?: Vm["hostname"];
   readonly state?: Vm["state"];
   readonly owner_org_id?: Vm["owner_org_id"];
   readonly created_at?: Vm["created_at"];
@@ -1100,7 +1103,9 @@ export class VM {
     rejectUnsupportedRunNetworkInputs(options);
     const { idempotencyKey, onOutput, ...body } = options;
     const headers = idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined;
-    const request: RunRequest = { ...body, command };
+    const request: RunRequest = { ...body, command,
+      ...(body.policies ? {policies: withoutReadOnlyPolicyFields(body.policies)} : {}),
+    };
     const response = await this._client._request<unknown>(
       "POST",
       `${vmPath(this.id)}/runs`,
@@ -1260,11 +1265,11 @@ export class VM {
    * To mount a standalone filesystem into the VM, use `vm.createMount`.
    */
   async sync(path: string): Promise<Uint8Array>;
-  async sync(path: string, data: Uint8Array | string): Promise<void>;
-  async sync(path: string, data?: Uint8Array | string): Promise<Uint8Array | void> {
+  async sync(path: string, data: Uint8Array | string, options?: SyncOptions): Promise<void>;
+  async sync(path: string, data?: Uint8Array | string, options: SyncOptions = {}): Promise<Uint8Array | void> {
     if (data === undefined) return this.syncRead(path);
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
-    await this.syncWriteInline(path, bytes);
+    await this.syncWriteInline(path, bytes, options);
   }
 
   /**
@@ -1587,13 +1592,14 @@ export class VM {
     return new Uint8Array(await signed.arrayBuffer());
   }
 
-  private async syncWriteInline(path: string, data: Uint8Array): Promise<void> {
-    await this.syncWriteChunks(path, data.length, async (start, length) => data.subarray(start, start + length));
+  private async syncWriteInline(path: string, data: Uint8Array, options: SyncOptions): Promise<void> {
+    await this.syncWriteChunks(path, data.length, async (start, length) => data.subarray(start, start + length), options);
   }
 
   private async syncWriteChunks(
-    path: string, size: number, read: (start: number, length: number) => Promise<Uint8Array>,
+    path: string, size: number, read: (start: number, length: number) => Promise<Uint8Array>, options: SyncOptions = {},
   ): Promise<void> {
+    const isSecret = options.isSecret ?? false;
     const uploadId = ulid();
     let result: SyncWriteResult | undefined;
     for (let start = 0; start < Math.max(size, 1); start += CHUNK_SIZE) {
@@ -1601,7 +1607,7 @@ export class VM {
       const data = await read(start, end - start);
       result = await this.sendOneWrite({
         path, size, upload_id: uploadId, content: bytesToBase64(data),
-        start, end, is_secret: false,
+        start, end, is_secret: isSecret,
       });
     }
     assertWriteComplete(result!, "inline write");
@@ -1694,7 +1700,7 @@ export class VM {
    *     });
    */
   async setPolicies(doc: PolicyDoc): Promise<PolicyDoc> {
-    return this._client._request<PolicyDoc>("PUT", `${vmPath(this.id)}/policies`, doc, this.baseUrl);
+    return this._client._request<PolicyDoc>("PUT", `${vmPath(this.id)}/policies`, withoutReadOnlyPolicyFields(doc), this.baseUrl);
   }
 
   // ── Mounts: bindings of a filesystem into this VM at a path ────────
@@ -1792,6 +1798,35 @@ export class VM {
       `${vmPath(this.id)}/sessions/${pathSegment(sessionId)}`,
       request,
       this.baseUrl,
+    );
+  }
+
+  /** Open an owner-authenticated VM-local TCP stream without public ingress. Node only. */
+  async connectPort(port: number, options: { timeoutMs?: number } = {}): Promise<import("node:stream").Duplex> {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new RangeError("port must be an integer from 1 through 65535");
+    }
+    return this._connectPrivateStream(`/ports/${port}`, options);
+  }
+
+  /** Open an owner-authenticated guest Unix socket without public ingress. Node only. */
+  async connectUnix(path: string, options: { timeoutMs?: number } = {}): Promise<import("node:stream").Duplex> {
+    if (typeof path !== "string" || !path.startsWith("/") || path.includes("\0") || new TextEncoder().encode(path).length > 107) {
+      throw new RangeError("socket path must be absolute, NUL-free, and at most 107 UTF-8 bytes");
+    }
+    return this._connectPrivateStream(`/sockets?${new URLSearchParams({ path })}`, options);
+  }
+
+  private async _connectPrivateStream(endpoint: string, options: { timeoutMs?: number }): Promise<import("node:stream").Duplex> {
+    const timeout = options.timeoutMs ?? 300000;
+    if (!Number.isFinite(timeout) || timeout <= 0) throw new RangeError("timeoutMs must be finite and positive");
+    const url = new URL(`${normalizeBaseUrl(this.baseUrl)}${vmPath(this.id)}${endpoint}`);
+    if (url.protocol === "https:") url.protocol = "wss:";
+    else if (url.protocol === "http:") url.protocol = "ws:";
+    else throw new Error("private port requires an HTTP or HTTPS API URL");
+    const { connectPortStream } = await import("./internal/port.js");
+    return connectPortStream(url.toString(), this._client._authHeaders(), timeout, (body, status) =>
+      extractError(parseJson(body), status) ?? new ArkerError("internal", "Malformed private port upgrade error", status),
     );
   }
 
@@ -2036,7 +2071,10 @@ function clampPtyDimension(value: number): number {
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  const whitespaceTrimmed = baseUrl.trim();
+  let end = whitespaceTrimmed.length;
+  while (end > 0 && whitespaceTrimmed.charCodeAt(end - 1) === 47) end -= 1;
+  const trimmed = whitespaceTrimmed.slice(0, end);
   if (!trimmed) throw new Error("baseUrl must not be empty");
   return trimmed;
 }
@@ -2312,7 +2350,10 @@ function canRetryAgain(
 
 /** A policy read back (`vm.policies`) also reports fields an update refuses. */
 function withoutReadOnlyPolicyFields(policies: PolicyUpdate): PolicyUpdate {
-  const { hostname: _h, mitm_domains: _m, warnings: _w, ...update } = policies as PolicyUpdate & Partial<PolicyDoc>;
+  const { hostname: _h, mitm_domains: _m, warnings: _w, outbound_guards, ...update } = policies as PolicyUpdate & Partial<PolicyDoc>;
+  if (outbound_guards && Object.keys(outbound_guards).length) {
+    update.rules = {...outbound_guards, ...update.rules};
+  }
   return update;
 }
 
@@ -2463,6 +2504,11 @@ export interface SyncDirResult {
 }
 
 /** Options for {@link VM.syncDir}. */
+export interface SyncOptions {
+  /** Register uploaded bytes for secret redaction. Applies to every chunk. */
+  isSecret?: boolean;
+}
+
 export interface SyncDirOptions {
   /** Caller-owned accelerator cache: absolute local path -> {size, mtimeMs, hash}.
    * Reused across calls it skips re-hashing files whose (size, mtime) are

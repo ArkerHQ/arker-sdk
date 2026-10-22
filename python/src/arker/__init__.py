@@ -1,6 +1,7 @@
 """Python client for the Arker VM API."""
 
 from . import daytona, e2b, modal
+from ._router import RouterLookupTimeoutError
 from .computer import (
     ARKER_ORG_ID,
     VM,
@@ -24,6 +25,7 @@ from .computer import (
     ListSessionsResponse,
     Mount,
     Pool,
+    PortStream,
     Pty,
     RetryOptions,
     Run,
@@ -111,9 +113,11 @@ __all__ = [
     "PoolByoc",
     "PoolCommitment",
     "PoolResources",
+    "PortStream",
     "Pty",
     "RegionPlacement",
     "RetryOptions",
+    "RouterLookupTimeoutError",
     "Run",
     "RunRecord",
     "RunResult",
