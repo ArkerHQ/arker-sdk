@@ -85,6 +85,11 @@ def test_inventory_includes_modal_returned_process_and_stream_surfaces():
         assert (style, "ContainerProcess.stdin", "modal.io_streams:StreamWriter") in roots
 
 
+def test_inventory_includes_e2b_returned_stream_input_handle():
+    roots = {(style, prefix, native) for style, prefix, native, _ in coverage.ROOTS["e2b"]}
+    assert ("async", "CommandInputHandle", "e2b:AsyncCommandInputHandle") in roots
+
+
 def test_inventory_includes_public_context_and_iteration_protocols():
     class Native:
         def __enter__(self): ...

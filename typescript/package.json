@@ -81,10 +81,10 @@
   },
   "bugs": "https://github.com/ArkerHQ/arker-sdk/issues",
   "devDependencies": {
-    "e2b": "2.56.0",
-    "@daytona/sdk": "0.224.1",
+    "e2b": "2.58.0",
+    "@daytona/sdk": "0.226.0",
     "modal": "0.11.1",
-    "@blaxel/core": "^0.3.30",
+    "@blaxel/core": "0.3.31",
     "@computesdk/daytona": "^1.7.43",
     "@computesdk/e2b": "^1.7.62",
     "@computesdk/modal": "^1.9.19",
@@ -100,7 +100,7 @@
   },
   "peerDependencies": {
     "e2b": "^2.56.0",
-    "@daytona/sdk": "^0.224.1",
+    "@daytona/sdk": "^0.224.1 || ^0.226.0",
     "modal": "^0.11.1",
     "@blaxel/core": "^0.3.30"
   },
@@ -118,6 +118,7 @@
     "@types/ws": "^8.18.1",
     "computesdk": "^4.1.12",
     "dockerfile-ast": "^0.7.1",
+    "vscode-languageserver-types": "3.18.0",
     "tar": "^7.5.22",
     "ws": "^8.21.0"
   }

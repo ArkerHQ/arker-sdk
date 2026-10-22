@@ -1,0 +1,103 @@
+{
+  "date": "2026-10-22",
+  "scope": "core-sandbox",
+  "note": "Native-only APIs remain unverified on Arker; inventory growth is not parity credit.",
+  "languages": {
+    "python": {
+      "before_versions": {
+        "e2b": "2.56.0",
+        "daytona": "0.224.1",
+        "modal": "1.6.2",
+        "blaxel": "0.4.18"
+      },
+      "after_versions": {
+        "e2b": "2.58.0",
+        "daytona": "0.226.0",
+        "modal": "1.6.2",
+        "blaxel": "0.4.19"
+      },
+      "before_api_count": 1115,
+      "after_api_count": 1123,
+      "added": [
+        {
+          "id": "python:e2b:sync:Sandbox.commands.stream_input",
+          "signature": "(self, pid: int, data: Iterable[Union[str, bytes]], *, timeout: Optional[float] = 60.0) -> None"
+        },
+        {
+          "id": "python:e2b:sync:Sandbox.pty.stream_input",
+          "signature": "(self, pid: int, data: Iterable[Union[str, bytes]], *, timeout: Optional[float] = 60.0) -> None"
+        },
+        {
+          "id": "python:e2b:async:Sandbox.commands.stream_input",
+          "signature": "(self, pid: int, *, timeout: Optional[float] = 60.0) -> e2b.sandbox_async.commands.command_input_handle.AsyncCommandInputHandle"
+        },
+        {
+          "id": "python:e2b:async:Sandbox.pty.stream_input",
+          "signature": "(self, pid: int, *, timeout: Optional[float] = 60.0) -> e2b.sandbox_async.commands.command_input_handle.AsyncCommandInputHandle"
+        },
+        {
+          "id": "python:e2b:async:CommandInputHandle.__aenter__",
+          "signature": "(self) -> 'AsyncCommandInputHandle'"
+        },
+        {
+          "id": "python:e2b:async:CommandInputHandle.__aexit__",
+          "signature": "(self, exc_type: Any, exc_value: Any, traceback: Any) -> None"
+        },
+        {
+          "id": "python:e2b:async:CommandInputHandle.close",
+          "signature": "(self) -> None"
+        },
+        {
+          "id": "python:e2b:async:CommandInputHandle.send",
+          "signature": "(self, data: Union[str, bytes]) -> None"
+        }
+      ],
+      "removed": [],
+      "changed": []
+    },
+    "node": {
+      "before_versions": {
+        "e2b": "2.56.0",
+        "@daytona/sdk": "0.224.1",
+        "modal": "0.11.1",
+        "@blaxel/core": "0.3.30"
+      },
+      "after_versions": {
+        "e2b": "2.58.0",
+        "@daytona/sdk": "0.226.0",
+        "modal": "0.11.1",
+        "@blaxel/core": "0.3.31"
+      },
+      "before_api_count": 978,
+      "after_api_count": 982,
+      "added": [
+        {
+          "id": "typescript:e2b:async:CommandInputHandle.close",
+          "signature": [
+            "(): Promise<void>"
+          ]
+        },
+        {
+          "id": "typescript:e2b:async:CommandInputHandle.send",
+          "signature": [
+            "(data: string | Uint8Array<ArrayBufferLike>): Promise<void>"
+          ]
+        },
+        {
+          "id": "typescript:e2b:async:Sandbox.commands.streamInput",
+          "signature": [
+            "(pid: number, opts?: CommandStreamInputOpts | undefined): CommandInputHandle"
+          ]
+        },
+        {
+          "id": "typescript:e2b:async:Sandbox.pty.streamInput",
+          "signature": [
+            "(pid: number, opts?: CommandStreamInputOpts | undefined): CommandInputHandle"
+          ]
+        }
+      ],
+      "removed": [],
+      "changed": []
+    }
+  }
+}

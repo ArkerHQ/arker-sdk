@@ -5,6 +5,7 @@ import { implementationFingerprint, runtimeInfo, verifiedScenarios } from "./com
 
 const roots = [
   ["e2b", "e2b", "CommandHandle", "../src/e2b.js"],
+  ["e2b", "e2b", "CommandInputHandle", "../src/e2b.js"],
   ["e2b", "e2b", "Sandbox", "../src/e2b.js"],
   ["e2b", "e2b", "Template", "../src/e2b.js"],
   ["e2b", "e2b", "Volume", "../src/e2b.js"],

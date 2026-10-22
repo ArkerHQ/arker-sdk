@@ -26,6 +26,11 @@ const coreInventory = JSON.parse(execFileSync("bun", ["scripts/compat-coverage.t
 assert.equal(coreInventory.selected_scope, "core-sandbox");
 assert.ok(coreInventory.scope_exclusions.some((row: { api: string }) => row.api.startsWith("App.")));
 assert.ok(!coreInventory.apis.some((row: { api: string }) => row.api.startsWith("App.")));
+for (const method of ["send", "close"]) {
+  const input = coreInventory.apis.find((row: { provider: string; api: string }) => row.provider === "e2b" && row.api === `CommandInputHandle.${method}`);
+  assert.ok(input, `Returned E2B input handle ${method} must be inventoried`);
+  assert.equal(input.status, "unverified", "a native-only handle export is not Arker parity evidence");
+}
 for (const prefix of ["Sandbox.", "Image.", "Volume.", "Secret.", "DriveInstance.", "ModalClient.cloudBucketMounts.", "ModalClient.cpClient.sandbox"]) {
   assert.ok(coreInventory.apis.some((row: { api: string }) => row.api.startsWith(prefix)), `${prefix} stays in core scope`);
 }

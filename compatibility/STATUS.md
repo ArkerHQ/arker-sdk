@@ -1,5 +1,36 @@
 # Recorded coverage baseline
 
+## Current provider SDK pins
+
+Python fixtures now pin E2B **2.58.0**, Daytona **0.226.0**, Blaxel **0.4.19**
+and unchanged Modal **1.6.2**. TypeScript pins E2B **2.58.0**, Daytona **0.226.0**,
+Blaxel **0.3.31** and unchanged Modal **0.11.1**. Daytona's optional peer range
+retains the previously tested 0.224 series alongside the current 0.226 series.
+`provider-upgrade-20261022.json` records the exact core API delta: **eight Python
+and four Node APIs added**, none removed or signature-changed. This includes
+E2B's new command/PTY input-stream methods and returned input handles, including
+Python async context-manager protocols. Inventory regressions failed before
+the returned-handle roots were added. Core totals increase to **1,123 Python /
+982 Node**; these new APIs remain unverified on Arker, not parity credit.
+
+Current-pin gates pass **523 vendor Python / 514 lean Python** (nine optional
+skips), Ruff, TypeScript typecheck/full tests/build/isolated packed ESM+CJS
+consumers, 25 repository tooling tests and generated-contract checking. Packed
+npm SHA-256:
+`7c5a4ec978c0dd6c9465326f785b5bcebc4ac338130a74dec4a0766d4e2543b0`.
+Fresh matching-version differential cohorts are pending; all preceding live
+fingerprints below are historical after these dependency changes.
+
+The first fresh packed-consumer install failed because `dockerfile-ast`'s
+floating dependency resolved to `vscode-languageserver-types@3.18.5`, whose
+[registry-advertised tarball](https://registry.npmjs.org/vscode-languageserver-types/-/vscode-languageserver-types-3.18.5.tgz)
+returned HTTP 404. An explicit compatible 3.18.0 dependency constraint restores
+actual fresh installs; this is not a test-only npm override. The failing run is
+retained. Production-only npm audit reports **zero advisories**; the development
+and fixture graph still reports **12 advisories (11 high / one low)**, including
+the old ComputeSDK Daytona fixture's transitive dependency chain. Those are not
+waived or represented as a clean full dependency audit.
+
 ## Current SDK main integration
 
 Source `8cb23cf` includes SDK main `4f1b1d9` and its 1.3.0 SDK release,
