@@ -98,6 +98,12 @@ Before provisioning a VM, automated launchers must verify `arker sync --help`
 explicitly advertises `--secret`. Do not infer support from the version: the
 tracked package version is unchanged and published older CLIs lack this feature.
 
+The preview CLI also accepts `arker fork <source> --idempotency-key <key>`.
+Reuse the same key and unchanged request after an ambiguous lost response;
+the CLI sends it as the `Idempotency-Key` header, never in the request body.
+Unkeyed forks remain unkeyed. Launchers must check fork help before depending
+on explicit keys rather than assuming older versions support this option.
+
 ## JSON output
 
 `--json` prints one JSON object on stdout for every command, including `sync`

@@ -470,6 +470,23 @@ async function testForkForwardsImageOptionsAndRedactsSecrets(): Promise<void> {
   }
 }
 
+async function testForkForwardsExplicitIdempotencyKey(): Promise<void> {
+  const help = await runCli(undefined, ["fork", "--help"], { authenticated: false });
+  assert.match(stdoutText(help), /--idempotency-key\b/);
+  await withCapturedServer((_request, res) => jsonResponse(res, { vm_id: "vm_1" }), async (baseUrl, requests) => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await runCli(baseUrl, ["fork", "ubuntu", "--idempotency-key", "owned-fork-1", "--json"]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(JSON.parse(stdoutText(result)).vm_id, "vm_1");
+    }
+    assert.equal(requests.length, 2);
+    for (const request of requests) {
+      assert.equal(request.idempotencyKey, "owned-fork-1");
+      assert.deepEqual(request.body, { source_vm_name: "ubuntu" });
+    }
+  });
+}
+
 async function testForkUsesDockerfileAndContext(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "arker-cli-dockerfile-"));
   const dockerfile = join(dir, "Dockerfile");
@@ -1570,6 +1587,7 @@ await testInvalidNumbersFailBeforeRequest();
 await testForkOmitsRetiredGpuResourceKeys();
 await testForkForwardsVgpu();
 await testForkForwardsImageOptionsAndRedactsSecrets();
+await testForkForwardsExplicitIdempotencyKey();
 await testForkUsesDockerfileAndContext();
 await testOrgRunListForwardsFilters();
 await testGlobalOptionsBeforeCommand();
