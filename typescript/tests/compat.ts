@@ -321,6 +321,51 @@ async function testE2BNativeErrorIdentity(): Promise<void> {
   }
 }
 
+async function testE2BArkerGitRunsOfficialWorkflowAgainstLocalRepository(): Promise<void> {
+  const root = mkdtempSync(join(tmpdir(), "arker-e2b-git-"));
+  const remote = join(root, "remote.git");
+  const checkout = join(root, "checkout");
+  const box = new FakeSandbox("git-vm");
+  box.runCommand = async (command, options) => {
+    box.runCalls.push({ command, options });
+    try {
+      return {
+        stdout: execFileSync("/bin/bash", ["-lc", command], { encoding: "utf8" }),
+        stderr: "",
+        exitCode: 0,
+        durationMs: 0,
+      };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string; status?: number };
+      return {
+        stdout: failure.stdout ?? "",
+        stderr: failure.stderr ?? "",
+        exitCode: failure.status ?? 1,
+        durationMs: 0,
+      };
+    }
+  };
+  const fake = installFakeCompute(box);
+  try {
+    const sandbox = await E2BSandbox.create();
+    await sandbox.git.init(remote, { bare: true, initialBranch: "main" });
+    await sandbox.git.clone(remote, { path: checkout });
+    await sandbox.git.configureUser("Arker Test", "test@arker.invalid", { scope: "local", path: checkout });
+    writeFileSync(join(checkout, "hello.txt"), "hello\n");
+    await sandbox.git.add(checkout, { files: ["hello.txt"] });
+    await sandbox.git.commit(checkout, "initial");
+    await sandbox.git.createBranch(checkout, "feature");
+
+    assert.equal((await sandbox.git.status(checkout)).isClean, true);
+    const branches = await sandbox.git.branches(checkout);
+    assert.equal(branches.currentBranch, "feature");
+    assert.deepEqual(new Set(branches.branches), new Set(["feature", "main"]));
+  } finally {
+    fake.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 async function testModalSurface(): Promise<void> {
   const box = new FakeSandbox("modal-box");
   const fake = installFakeCompute(box);
@@ -919,6 +964,7 @@ await testDaytonaImageBuilderIsNotDiscarded();
 await testDaytonaNativeExecutionPreservesResponseAndInputs();
 await testE2BSurface();
 await testE2BNativeErrorIdentity();
+await testE2BArkerGitRunsOfficialWorkflowAgainstLocalRepository();
 await testModalSurface();
 await testInternalArkerProvider();
 await testInternalArkerProviderImageAndResources();

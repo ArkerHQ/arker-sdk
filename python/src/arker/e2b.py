@@ -253,6 +253,23 @@ class Files(UnsupportedMixin):
         return None
 
 
+class Git:
+    """Bind E2B's Git command translation to either provider's command runner."""
+
+    def __init__(self, commands: Commands) -> None:
+        module = import_optional("e2b")
+        native_git = getattr(module, "Git", None) if module is not None else None
+        if native_git is None:
+            self._delegate = None
+        else:
+            self._delegate = native_git(commands)
+
+    def __getattr__(self, name: str) -> Any:
+        if self._delegate is None:
+            raise AttributeError("E2B Git compatibility requires the optional 'arker[e2b]' dependency")
+        return getattr(self._delegate, name)
+
+
 class Sandbox(UnsupportedMixin):
     _compat_name = "e2b"
 
@@ -264,6 +281,8 @@ class Sandbox(UnsupportedMixin):
         self.commands = Commands(vm, getattr(native, "commands", None) if native is not None else None)
         native_files = getattr(native, "files", None) if native is not None else None
         self.files = native_files if native_files is not None else Files(vm)
+        native_git = getattr(native, "git", None) if native is not None else None
+        self.git = native_git if native_git is not None else Git(self.commands)
 
     def get_host(self, port: int) -> str:
         if self._vm is None:

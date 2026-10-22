@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import subprocess
 import sys
 import types
 from contextlib import contextmanager
@@ -486,6 +487,45 @@ def test_e2b_nested_native_surface_delegates_provider_extensions() -> None:
     assert sandbox.commands.list() == ["command-1"]
     assert sandbox.files.watch("/tmp") == "watch:/tmp"
     assert sandbox.get_host(3000) == "native-3000.example"
+
+
+def test_e2b_arker_git_runs_official_workflow_against_local_repository(tmp_path) -> None:
+    class LocalVM:
+        id = "local-git"
+
+        def run(self, command, **_options):
+            completed = subprocess.run(
+                command,
+                shell=True,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            return sdk.CompletedRunResult(
+                stdout=completed.stdout,
+                stderr=completed.stderr,
+                stdout_bytes=completed.stdout.encode(),
+                stderr_bytes=completed.stderr.encode(),
+                exit_code=completed.returncode,
+            )
+
+    remote = tmp_path / "remote.git"
+    checkout = tmp_path / "checkout"
+    sandbox = E2BSandbox(vm=LocalVM())
+
+    sandbox.git.init(str(remote), bare=True, initial_branch="main")
+    sandbox.git.clone(str(remote), str(checkout))
+    sandbox.git.configure_user("Arker Test", "test@arker.invalid", scope="local", path=str(checkout))
+    (checkout / "hello.txt").write_text("hello\n")
+    sandbox.git.add(str(checkout), files=["hello.txt"])
+    sandbox.git.commit(str(checkout), "initial")
+    sandbox.git.create_branch(str(checkout), "feature")
+
+    status = sandbox.git.status(str(checkout))
+    branches = sandbox.git.branches(str(checkout))
+    assert status.is_clean
+    assert branches.current_branch == "feature"
+    assert set(branches.branches) == {"feature", "main"}
 
 
 def test_modal_official_surface(monkeypatch) -> None:

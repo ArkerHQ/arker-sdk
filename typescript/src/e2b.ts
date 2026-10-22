@@ -1,6 +1,6 @@
 import type { RunCommandOptions } from "computesdk";
 import { ArkerError, type VM } from "./index.js";
-import { CommandExitError, Sandbox as VendorSandbox, type CommandStartOpts, type CommandHandle,
+import { CommandExitError, Git, Sandbox as VendorSandbox, type CommandStartOpts, type CommandHandle,
   type Commands as VendorCommands, type CommandConnectOpts, type CommandRequestOpts } from "e2b";
 
 export { CommandExitError } from "e2b";
@@ -39,6 +39,20 @@ interface NativeSandbox {
   getHost?: (port: number) => string;
   commands?: VendorCommands;
   files?: VendorSandbox["files"];
+  git?: VendorSandbox["git"];
+}
+
+function gitCommands(commands: Sandbox["commands"]): VendorCommands {
+  return {
+    run: (command: string, options?: CommandStartOpts) =>
+      commands.run(command, {
+        ...(options?.envs !== undefined ? { envs: options.envs } : {}),
+        ...(options?.cwd !== undefined ? { cwd: options.cwd } : {}),
+        ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+        ...(options?.user !== undefined ? { user: options.user } : {}),
+        ...(options?.requestTimeoutMs !== undefined ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
+      }),
+  } as VendorCommands;
 }
 
 const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess"] as const;
@@ -71,6 +85,7 @@ export class Sandbox {
   };
 
   readonly files: VendorSandbox["files"];
+  readonly git: VendorSandbox["git"];
 
   private constructor(box: UniversalSandbox, native?: object, arkerHostname?: string) {
     this.#box = box;
@@ -203,6 +218,7 @@ export class Sandbox {
         await this.#box.filesystem.remove(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path);
       },
     } as unknown as VendorSandbox["files"]);
+    this.git = this.#native?.git ?? new Git(gitCommands(this.commands));
   }
 
   private static async wrap(box: UniversalSandbox): Promise<Sandbox> {
