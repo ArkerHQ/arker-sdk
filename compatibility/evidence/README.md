@@ -4,6 +4,15 @@ These are observations, not a claim of full compatibility. They contain API
 names, outcome, route, run ID, provider SDK version and implementation
 fingerprints; no credentials or returned file contents.
 
+`production-secret-sync-20261022-node.jsonl` records source `56c7175` after
+adding secret-aware sync writes. All31 Node cases execute:26 pass/five fail,
+the same production private-port404/guard-schema400 blockers. Core51/982 and
+expanded51/1052 remain strict-red, exit1 each. Fingerprint:
+`ff2472a96fc8bab8a62a269e0f664fcc8da38906233636038f17dd4d22b3adef`.
+This supersedes Node observations below for current-source credit; matching
+Python additive-source evidence remains unchanged. No backend deployment or full
+equivalence claim.
+
 `production-additive-20261022-{python,node}.jsonl` record source `9fdf196`
 after additive guard readback normalization. All 36 Python and 31 Node cases
 execute: Python 32 pass/four fail, Node 26 pass/five fail. Missing production

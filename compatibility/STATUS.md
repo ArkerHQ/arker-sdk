@@ -1,5 +1,31 @@
 # Recorded coverage baseline
 
+## Secret-aware sync preview
+
+The TypeScript SDK accepts `SyncOptions.isSecret`; CLI `sync --secret` marks
+every upload chunk, including empty files. CLI reads with `--secret` are refused.
+Actual regressions first observed `is_secret:false` and an unsupported CLI flag;
+SDK units, full TypeScript suite/typecheck/build, five fresh packed consumers and
+CLI plus PTY tests pass after correction. Package versions remain unchanged:
+launchers must check `arker sync --help` for explicit support before provisioning.
+This is unreleased preview functionality, not published availability.
+
+Fresh Node production source `56c7175` repeats all31 cases: **26 pass/five fail**,
+with unchanged private-port404/guard-schema400 blockers. Core strict coverage
+remains **51/982**, expanded **51/1,052**, both strict exits1. Source-bound safe
+evidence is `evidence/production-secret-sync-20261022-node.jsonl`; fingerprint
+`ff2472a96fc8bab8a62a269e0f664fcc8da38906233636038f17dd4d22b3adef`.
+Python production evidence at9fdf196 remains matching-source94/1123 core; no
+Python runtime changed. New packed SHA256:
+`bc176b068351c89663bbb3834a9c81905cdf773947e56c90a25ae81266827a7a`.
+These passes do not certify unpublished backend changes or full parity.
+An additional owned production VM verifies built-SDK and CLI secret uploads
+preserve exact binary bytes and set mode0600, including replacing an ordinary
+file; the VM is deleted in `finally`. This is Arker-only evidence, not vendor
+API coverage credit or suppression of deliberate later process output. The
+initial raw-source scratch invocation failed before VM creation; the corrected
+public built entry point passes.
+
 ## Additive policy readback preview
 
 The companion backend now keeps the legacy policy response rule union unchanged

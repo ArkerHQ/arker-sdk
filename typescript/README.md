@@ -54,8 +54,9 @@ await vm.delete();
 
 Unreleased preview: use
 `await vm.sync("/run/credential", credentialBytes, { isSecret: true })` to
-register every uploaded chunk for secret redaction. Ordinary writes default to
-`false`. This needs this branch's updated SDK; the unchanged version field does
+mark every uploaded chunk `is_secret` so file contents stay out of sync logs and
+previews. This is not a promise to suppress deliberate later process output.
+Ordinary writes default to `false`. This needs this branch's updated SDK; the unchanged version field does
 not establish availability in the published package.
 
 ## Documentation and examples

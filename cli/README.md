@@ -92,7 +92,8 @@ Run `arker --help` for the available commands and flags.
 
 The updated CLI supports `arker sync <vm-id> /run/credential - --secret`.
 Provide credential bytes on stdin, never as a command-line argument. Every
-uploaded chunk is registered for secret redaction; `--secret` refuses reads.
+uploaded chunk is marked secret to keep file contents out of sync logs and
+previews; this does not suppress deliberate later process output. `--secret` refuses reads.
 Before provisioning a VM, automated launchers must verify `arker sync --help`
 explicitly advertises `--secret`. Do not infer support from the version: the
 tracked package version is unchanged and published older CLIs lack this feature.
