@@ -1110,6 +1110,26 @@ async function testSyncWriteDoesNotRetryAmbiguousNetworkFailure(): Promise<void>
   assert.equal(fetch.calls.length, 1);
 }
 
+async function testSecretSyncMarksEveryChunkIncludingEmptyFiles(): Promise<void> {
+  for (const data of [new Uint8Array(0), new Uint8Array(4 * 1024 * 1024 + 1), "private-fixture"]) {
+    const fetch = new FakeFetch();
+    const match = (method: string, url: string) => method === "POST" && url.endsWith("/sync");
+    const chunks = typeof data === "string" || data.length === 0 ? 1 : 2;
+    for (let index = 0; index < chunks; index++) {
+      fetch.addJson(match, 200, { results: [{ complete: index === chunks - 1, written: index === chunks - 1 }] });
+    }
+    await client(fetch).vm("vm_1").sync("/run/credential", data, { isSecret: true });
+    assert.equal(fetch.calls.length, chunks);
+    for (const call of fetch.calls) {
+      const write = JSON.parse(call.body!).writes[0];
+      assert.equal(write.is_secret, true);
+      assert.equal(write.path, "/run/credential");
+    }
+  }
+}
+
+await testSecretSyncMarksEveryChunkIncludingEmptyFiles();
+
 async function testGetAndSetPolicies(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(

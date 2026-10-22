@@ -1086,6 +1086,27 @@ async function testSyncDashWritesStdin(): Promise<void> {
   });
 }
 
+async function testSyncSecretWritesAndRefusesReads(): Promise<void> {
+  const help = await runCli(undefined, ["sync", "--help"], { authenticated: false });
+  assert.equal(help.code, 0);
+  assert.match(stdoutText(help), /--secret\b/);
+  await withCapturedServer((_request, res) => jsonResponse(res, {
+    results: [{ complete: true, written: true }],
+  }), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["sync", "vm_1", "/run/credential", "-", "--secret", "--json"], { stdin: "private-fixture" });
+    assert.equal(result.code, 0, result.stderr);
+    const body = requests[0]?.body as { writes: Array<{ is_secret: boolean; content: string }> };
+    assert.equal(body.writes[0]?.is_secret, true);
+    assert.equal(Buffer.from(body.writes[0]!.content, "base64").toString(), "private-fixture");
+    assert.ok(!stdoutText(result).includes("private-fixture"));
+    requests.length = 0;
+    const read = await runCli(baseUrl, ["sync", "vm_1", "/run/credential", "--read", "--secret"]);
+    assert.equal(read.code, 1);
+    assert.match(read.stderr, /--secret.*write/);
+    assert.equal(requests.length, 0);
+  });
+}
+
 // --read is the explicit "read" form: it must win even when data is piped in,
 // so a script can force the direction rather than inherit it from its parent.
 async function testSyncReadFlagIgnoresPipedStdin(): Promise<void> {
@@ -1572,6 +1593,7 @@ await testRunFailureReasonIsVisible();
 await testRunsGetUsesRunFormatter();
 await testEmptyPipedInputWritesZeroBytes();
 await testSyncDashWritesStdin();
+await testSyncSecretWritesAndRefusesReads();
 await testSyncReadFlagIgnoresPipedStdin();
 await testSyncReadFlagRejectsDataArgument();
 await testSignalValidatesNameBeforeRequest();

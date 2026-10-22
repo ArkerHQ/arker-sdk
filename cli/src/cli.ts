@@ -273,6 +273,7 @@ const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
   sync: {
     ...GLOBAL_OPTIONS,
     read: { type: "boolean" },
+    secret: { type: "boolean" },
   },
   "sync-dir": {
     ...GLOBAL_OPTIONS,
@@ -1418,13 +1419,14 @@ async function cmdSync(args: ParsedArgs, client: Arker): Promise<void> {
   const inline = args.positional[2];
 
   const read = async (): Promise<void> => {
+    if (args.flags.secret) die("sync: --secret requires a write, not a read");
     const data = await client.vm(vm).sync(path);
     if (args.flags.json) out({ path, content: Buffer.from(data).toString("base64"), encoding: "base64" });
     else output.write(data);
   };
 
   const write = async (data: Uint8Array | string): Promise<void> => {
-    await client.vm(vm).sync(path, data);
+    await client.vm(vm).sync(path, data, { isSecret: boolFlag(args, "secret") });
     const n = typeof data === "string" ? Buffer.byteLength(data) : data.length;
     if (args.flags.json) out({ path, written: true, bytes: n });
     else out(`wrote ${n} bytes to ${path}`);
@@ -1901,6 +1903,7 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   "queueing-timeout": { placeholder: "<seconds>", desc: "queue up to this long instead of failing fast" },
   "registry-auth-file": { placeholder: "<path>", desc: "JSON registry credentials for an image pull" },
   read: { desc: "read the file, ignoring stdin" },
+  secret: { desc: "register uploaded file bytes for secret redaction (sync writes only)" },
   region: { placeholder: "<region>", desc: "service region or activity filter (or env ARKER_REGION)" },
   rows: { placeholder: "<n>", desc: "initial terminal height" },
   runtime: { placeholder: "<runtime>", desc: "filter organization-wide activity by runtime" },

@@ -1264,11 +1264,11 @@ export class VM {
    * To mount a standalone filesystem into the VM, use `vm.createMount`.
    */
   async sync(path: string): Promise<Uint8Array>;
-  async sync(path: string, data: Uint8Array | string): Promise<void>;
-  async sync(path: string, data?: Uint8Array | string): Promise<Uint8Array | void> {
+  async sync(path: string, data: Uint8Array | string, options?: SyncOptions): Promise<void>;
+  async sync(path: string, data?: Uint8Array | string, options: SyncOptions = {}): Promise<Uint8Array | void> {
     if (data === undefined) return this.syncRead(path);
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
-    await this.syncWriteInline(path, bytes);
+    await this.syncWriteInline(path, bytes, options);
   }
 
   /**
@@ -1591,12 +1591,12 @@ export class VM {
     return new Uint8Array(await signed.arrayBuffer());
   }
 
-  private async syncWriteInline(path: string, data: Uint8Array): Promise<void> {
-    await this.syncWriteChunks(path, data.length, async (start, length) => data.subarray(start, start + length));
+  private async syncWriteInline(path: string, data: Uint8Array, options: SyncOptions): Promise<void> {
+    await this.syncWriteChunks(path, data.length, async (start, length) => data.subarray(start, start + length), options);
   }
 
   private async syncWriteChunks(
-    path: string, size: number, read: (start: number, length: number) => Promise<Uint8Array>,
+    path: string, size: number, read: (start: number, length: number) => Promise<Uint8Array>, options: SyncOptions = {},
   ): Promise<void> {
     const uploadId = ulid();
     let result: SyncWriteResult | undefined;
@@ -1605,7 +1605,7 @@ export class VM {
       const data = await read(start, end - start);
       result = await this.sendOneWrite({
         path, size, upload_id: uploadId, content: bytesToBase64(data),
-        start, end, is_secret: false,
+        start, end, is_secret: options.isSecret ?? false,
       });
     }
     assertWriteComplete(result!, "inline write");
@@ -2504,6 +2504,11 @@ export interface SyncDirResult {
 }
 
 /** Options for {@link VM.syncDir}. */
+export interface SyncOptions {
+  /** Register uploaded bytes for secret redaction. Applies to every chunk. */
+  isSecret?: boolean;
+}
+
 export interface SyncDirOptions {
   /** Caller-owned accelerator cache: absolute local path -> {size, mtimeMs, hash}.
    * Reused across calls it skips re-hashing files whose (size, mtime) are

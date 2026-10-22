@@ -52,6 +52,12 @@ console.log(new TextDecoder().decode(data));
 await vm.delete();
 ```
 
+Unreleased preview: use
+`await vm.sync("/run/credential", credentialBytes, { isSecret: true })` to
+register every uploaded chunk for secret redaction. Ordinary writes default to
+`false`. This needs this branch's updated SDK; the unchanged version field does
+not establish availability in the published package.
+
 ## Documentation and examples
 
 Read the [Arker documentation](https://arker.ai/docs) and browse the runnable [examples](../examples).
