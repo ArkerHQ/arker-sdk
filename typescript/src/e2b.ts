@@ -1,4 +1,5 @@
 import type { RunCommandOptions } from "computesdk";
+import { randomUUID } from "node:crypto";
 import { ArkerError, type VM } from "./index.js";
 import { CommandExitError, FileType, Git, Sandbox as VendorSandbox, type CommandStartOpts, type CommandHandle,
   type Commands as VendorCommands, type CommandConnectOpts, type CommandRequestOpts } from "e2b";
@@ -192,14 +193,30 @@ export class Sandbox {
       write: async (path: string, content: string | ArrayBuffer, options?: Record<string, unknown>) => {
         assertSupportedObjectKeys(options, [], "e2b", "files.write");
         const resolved = resolveCompatPath(path, "/home/user");
-        if (typeof content === "string") {
-          await this.#box.filesystem.writeFile(resolved, content);
-        } else if (content instanceof ArrayBuffer) {
-          const vm = (this.#box as unknown as { getInstance(): VM }).getInstance();
-          await vm.sync(resolved, new Uint8Array(content));
-        } else {
+        if (typeof content !== "string" && !(content instanceof ArrayBuffer)) {
           throw new ArkerError("unsupported_operation", "Arker files.write supports string/ArrayBuffer data, not this input", 422);
         }
+        const staged = `/tmp/.computesdk-e2b-write-${randomUUID()}`;
+        const vm = (this.#box as unknown as { getInstance(): VM }).getInstance();
+        const parent = resolved.slice(0, resolved.lastIndexOf("/")) || "/";
+        const userCommand = `mkdir -p -- ${shellQuote(parent)} && cat -- ${shellQuote(staged)} > ${shellQuote(resolved)}`;
+        let writeError: Error | undefined;
+        try {
+          await vm.sync(staged, typeof content === "string" ? new TextEncoder().encode(content) : new Uint8Array(content));
+          const written = await this.#box.runCommand(`runuser -u user -- sh -c ${shellQuote(userCommand)}`);
+          if (written.exitCode !== 0) writeError = new Error(written.stderr || `write failed with exit ${written.exitCode}`);
+        } catch (error) {
+          writeError = error instanceof Error ? error : new Error(String(error));
+        }
+        let cleanupError: Error | undefined;
+        try {
+          const cleanup = await this.#box.runCommand(`rm -f -- ${shellQuote(staged)}`);
+          if (cleanup.exitCode !== 0) cleanupError = new Error(cleanup.stderr || `temporary file cleanup failed with exit ${cleanup.exitCode}`);
+        } catch (error) {
+          cleanupError = error instanceof Error ? error : new Error(String(error));
+        }
+        if (writeError) throw writeError;
+        if (cleanupError) throw cleanupError;
         return { name: resolved.split("/").at(-1)!, type: FileType.FILE, path: resolved };
       },
       writeFiles: async (
@@ -250,7 +267,7 @@ export class Sandbox {
           path: name,
           size: Number(size),
           mode: Number.parseInt(mode, 16),
-          permissions: permissions.length === 10 ? permissions.slice(1) : permissions,
+          permissions,
           owner,
           group,
           modifiedTime: new Date(Number(modified) * 1000),

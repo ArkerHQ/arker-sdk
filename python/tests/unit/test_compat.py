@@ -551,6 +551,7 @@ def test_e2b_arker_files_write_batch_metadata_and_rename(tmp_path) -> None:
             return None
 
         def run(self, command, **_options):
+            command = command.replace("runuser -u user -- ", "")
             completed = subprocess.run(command, shell=True, text=True, capture_output=True, check=False)
             return sdk.CompletedRunResult(
                 stdout=completed.stdout,
@@ -580,7 +581,7 @@ def test_e2b_arker_files_write_batch_metadata_and_rename(tmp_path) -> None:
         "first.txt",
         str(first),
         5,
-        "rw-r--r--",
+        "-rw-r--r--",
         first.owner(),
         first.group(),
     )

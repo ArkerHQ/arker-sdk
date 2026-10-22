@@ -3,6 +3,7 @@ from __future__ import annotations
 import posixpath
 import re
 import shlex
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal, overload
@@ -272,7 +273,34 @@ class Files(UnsupportedMixin):
             raise UnsupportedCompatibilityOption(
                 "Arker files.write cannot represent option(s): " + ", ".join(unsupported)
             )
-        self._vm.sync(resolve_compat_path(path, "/home/user"), content)
+        resolved = resolve_compat_path(path, "/home/user")
+        staged = f"/tmp/.computesdk-e2b-write-{uuid.uuid4().hex}"
+        parent = posixpath.dirname(resolved) or "/"
+        user_command = f"mkdir -p -- {shlex.quote(parent)} && cat -- {shlex.quote(staged)} > {shlex.quote(resolved)}"
+        write_error: BaseException | None = None
+        try:
+            self._vm.sync(staged, content)
+            written = run_command(
+                self._vm,
+                "runuser -u user -- sh -c " + shlex.quote(user_command),
+            )
+            if written.exit_code != 0:
+                raise RuntimeError(written.stderr or f"write failed with exit {written.exit_code}")
+        except BaseException as error:
+            write_error = error
+        cleanup_error: BaseException | None = None
+        try:
+            cleanup = run_command(self._vm, "rm -f -- " + shlex.quote(staged))
+            if cleanup.exit_code != 0:
+                cleanup_error = RuntimeError(
+                    cleanup.stderr or f"temporary file cleanup failed with exit {cleanup.exit_code}"
+                )
+        except BaseException as error:
+            cleanup_error = error
+        if write_error is not None:
+            raise write_error
+        if cleanup_error is not None:
+            raise cleanup_error
         return _write_info(path)
 
     def write_files(
@@ -337,7 +365,7 @@ class Files(UnsupportedMixin):
             path=name,
             size=int(size),
             mode=int(mode, 16),
-            permissions=permissions[1:] if len(permissions) == 10 else permissions,
+            permissions=permissions,
             owner=owner,
             group=group,
             modified_time=datetime.fromtimestamp(int(modified), tz=timezone.utc),

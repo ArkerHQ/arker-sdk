@@ -38,8 +38,13 @@ class FakeSandbox implements SandboxInterface {
 
   getInstance(): object { return this.native ?? this; }
 
+  async sync(_path: string, content?: Uint8Array): Promise<Uint8Array | void> {
+    return content === undefined ? new Uint8Array() : undefined;
+  }
+
   async runCommand(command: string, options?: RunCommandOptions): Promise<CommandResult> {
     this.runCalls.push({ command, options });
+    if (command.startsWith("runuser -u user -- ") || command.startsWith("rm -f -- ")) return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
     return {
       stdout: `stdout:${command}`,
       stderr: `stderr:${command}`,
@@ -325,6 +330,7 @@ async function testE2BArkerGitRunsOfficialWorkflowAgainstLocalRepository(): Prom
   const box = new FakeSandbox("git-vm");
   box.runCommand = async (command, options) => {
     box.runCalls.push({ command, options });
+    command = command.replace("runuser -u user -- ", "");
     try {
       return {
         stdout: execFileSync("/bin/bash", ["-lc", command], { encoding: "utf8" }),
@@ -382,6 +388,7 @@ async function testE2BArkerFilesBatchMetadataAndRename(): Promise<void> {
   };
   box.runCommand = async (command, options) => {
     box.runCalls.push({ command, options });
+    command = command.replace("runuser -u user -- ", "");
     try {
       return {
         stdout: execFileSync("/bin/bash", ["-lc", command], { encoding: "utf8" }),
@@ -408,7 +415,7 @@ async function testE2BArkerFilesBatchMetadataAndRename(): Promise<void> {
     const info = await sandbox.files.getInfo(first);
     assert.deepEqual(
       { name: info.name, path: info.path, size: info.size, permissions: info.permissions },
-      { name: "first.txt", path: first, size: 5, permissions: "rw-r--r--" },
+      { name: "first.txt", path: first, size: 5, permissions: "-rw-r--r--" },
     );
     const moved = await sandbox.files.rename(first, renamed);
     assert.deepEqual({ name: moved.name, path: moved.path, size: moved.size }, { name: "first.txt", path: renamed, size: 5 });

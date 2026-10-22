@@ -36,7 +36,7 @@ try:
     assert info.type == FileType.FILE
     assert info.size == 6
     assert info.mode & 0o777 == 0o644
-    assert info.permissions == "rw-r--r--"
+    assert info.permissions == "-rw-r--r--"
     assert info.owner == "user"
     assert info.group == "user"
     assert info.modified_time is not None
@@ -82,7 +82,7 @@ async def main():
         assert info.type == FileType.FILE
         assert info.size == 6
         assert info.mode & 0o777 == 0o644
-        assert info.permissions == "rw-r--r--"
+        assert info.permissions == "-rw-r--r--"
         assert info.owner == "user"
         assert info.group == "user"
         entries = {entry.name: entry for entry in await sandbox.files.list(root)}

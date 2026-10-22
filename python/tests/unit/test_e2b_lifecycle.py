@@ -67,6 +67,71 @@ def test_arker_stream_reads_are_not_faked_with_a_buffer():
         sandbox.files.read("/binary", format="stream")
 
 
+def test_arker_writes_and_metadata_match_e2b_default_user(monkeypatch):
+    commands = []
+    staged = []
+    vm = types.SimpleNamespace(id="arker", sync=lambda path, content: staged.append((path, content)))
+    monkeypatch.setattr(
+        shim,
+        "run_command",
+        lambda vm, command, **kwargs: (
+            commands.append(command)
+            or shim._CommonCommandResult(
+                stdout="/tmp/file\x1f4\x1f81a4\x1f-rw-r--r--\x1fuser\x1fuser\x1f1\x1fregular file",
+                stderr="",
+                exit_code=0,
+            )
+        ),
+    )
+    files = shim.Sandbox(vm=vm).files
+    files.write("/tmp/file", "data")
+    info = files.get_info("/tmp/file")
+    assert commands[0].startswith("runuser -u user -- sh -c ")
+    assert "cat -- /tmp/.computesdk-e2b-write-" in commands[0]
+    assert commands[0].endswith("> /tmp/file'")
+    assert commands[1].startswith("rm -f -- /tmp/.computesdk-e2b-write-")
+    assert staged[0][0].startswith("/tmp/.computesdk-e2b-write-")
+    assert info.permissions == "-rw-r--r--"
+    assert (info.owner, info.group) == ("user", "user")
+
+
+def test_arker_write_preserves_user_permission_failure_and_cleans_staging(monkeypatch):
+    commands = []
+    vm = types.SimpleNamespace(id="arker", sync=lambda path, content: None)
+
+    def run(vm, command, **kwargs):
+        commands.append(command)
+        denied = command.startswith("runuser ")
+        return shim._CommonCommandResult(
+            stdout="", stderr="Permission denied" if denied else "", exit_code=1 if denied else 0
+        )
+
+    monkeypatch.setattr(shim, "run_command", run)
+    with pytest.raises(RuntimeError, match="Permission denied"):
+        shim.Sandbox(vm=vm).files.write("/root/owned", "data")
+    assert commands[0].startswith("runuser -u user -- ")
+    assert commands[1].startswith("rm -f -- /tmp/.computesdk-e2b-write-")
+
+
+def test_arker_write_cleans_partial_staging_after_sync_failure(monkeypatch):
+    commands = []
+
+    def fail_sync(path, content):
+        raise OSError("upload interrupted")
+
+    monkeypatch.setattr(
+        shim,
+        "run_command",
+        lambda vm, command, **kwargs: (
+            commands.append(command) or shim._CommonCommandResult(stdout="", stderr="", exit_code=0)
+        ),
+    )
+    with pytest.raises(OSError, match="upload interrupted"):
+        shim.Sandbox(vm=types.SimpleNamespace(id="arker", sync=fail_sync)).files.write("/tmp/file", "data")
+    assert len(commands) == 1
+    assert commands[0].startswith("rm -f -- /tmp/.computesdk-e2b-write-")
+
+
 @pytest.mark.parametrize("deleted", [True, False])
 def test_kill_preserves_provider_boolean(deleted):
     assert (

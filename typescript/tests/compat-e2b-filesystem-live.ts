@@ -51,7 +51,7 @@ async function program(Sandbox: SandboxConstructor): Promise<void> {
     assert.equal(info.type, FileType.FILE);
     assert.equal(info.size, 6);
     assert.equal(info.mode & 0o777, 0o644);
-    assert.equal(info.permissions, "rw-r--r--");
+    assert.equal(info.permissions, "-rw-r--r--");
     assert.equal(info.owner, "user");
     assert.equal(info.group, "user");
     assert.ok(info.modifiedTime instanceof Date);

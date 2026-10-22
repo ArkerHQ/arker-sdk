@@ -61,13 +61,15 @@ test("Arker binary reads preserve every byte and the native Uint8Array type", as
   let calls = 0;
   const sandbox = Reflect.construct(Sandbox, [{
     provider: "arker", sandboxId: "arker",
+    runCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
     getInstance: () => ({ sync: async (path: string, data?: Uint8Array) => {
       calls++;
-      assert.equal(path, "/binary");
       if (data !== undefined) {
+        assert.match(path, /^\/tmp\/\.computesdk-e2b-write-/);
         assert.deepEqual(data, payload);
         return;
       }
+      assert.equal(path, "/binary");
       return Buffer.from(payload);
     } }),
   }]) as Sandbox;
@@ -79,6 +81,60 @@ test("Arker binary reads preserve every byte and the native Uint8Array type", as
   assert.equal(calls, 2);
   await assert.rejects(sandbox.files.read("/binary", { format: "stream" }), /format/);
   assert.equal(calls, 2);
+});
+
+test("Arker writes and metadata match the E2B default user", async () => {
+  const commands: string[] = [];
+  const sandbox = Reflect.construct(Sandbox, [{
+    provider: "arker", sandboxId: "arker",
+    filesystem: { writeFile: async () => undefined },
+    getInstance: () => ({ sync: async () => undefined }),
+    runCommand: async (command: string) => {
+      commands.push(command);
+      return {
+        stdout: command.startsWith("stat ") ? "/tmp/file\x1f4\x1f81a4\x1f-rw-r--r--\x1fuser\x1fuser\x1f1\x1fregular file" : "",
+        stderr: "", exitCode: 0,
+      };
+    },
+  }]) as Sandbox;
+  await sandbox.files.write("/tmp/file", "data");
+  const info = await sandbox.files.getInfo("/tmp/file");
+  assert.match(commands[0]!, /^runuser -u user -- sh -c /);
+  assert.match(commands[0]!, /cat -- \/tmp\/.computesdk-e2b-write-/);
+  assert.match(commands[0]!, /> \/tmp\/file'$/);
+  assert.match(commands[1]!, /^rm -f -- \/tmp\/.computesdk-e2b-write-/);
+  assert.equal(info.permissions, "-rw-r--r--");
+  assert.deepEqual([info.owner, info.group], ["user", "user"]);
+});
+
+test("Arker writes preserve user permission failures and clean staging", async () => {
+  const commands: string[] = [];
+  const sandbox = Reflect.construct(Sandbox, [{
+    provider: "arker", sandboxId: "arker",
+    getInstance: () => ({ sync: async () => undefined }),
+    runCommand: async (command: string) => {
+      commands.push(command);
+      return { stdout: "", stderr: command.startsWith("runuser ") ? "Permission denied" : "", exitCode: command.startsWith("runuser ") ? 1 : 0 };
+    },
+  }]) as Sandbox;
+  await assert.rejects(sandbox.files.write("/root/owned", "data"), /Permission denied/);
+  assert.match(commands[0]!, /^runuser -u user -- /);
+  assert.match(commands[1]!, /^rm -f -- \/tmp\/.computesdk-e2b-write-/);
+});
+
+test("Arker writes clean partial staging after sync failure", async () => {
+  const commands: string[] = [];
+  const sandbox = Reflect.construct(Sandbox, [{
+    provider: "arker", sandboxId: "arker",
+    getInstance: () => ({ sync: async () => { throw new Error("upload interrupted"); } }),
+    runCommand: async (command: string) => {
+      commands.push(command);
+      return { stdout: "", stderr: "", exitCode: 0 };
+    },
+  }]) as Sandbox;
+  await assert.rejects(sandbox.files.write("/tmp/file", "data"), /upload interrupted/);
+  assert.equal(commands.length, 1);
+  assert.match(commands[0]!, /^rm -f -- \/tmp\/.computesdk-e2b-write-/);
 });
 
 test("the shim provider preserves embedding SDK identity, native filesystem metadata and errors", async () => {
