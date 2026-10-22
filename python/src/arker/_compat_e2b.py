@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from importlib.resources import files
+from threading import Lock
 
 from ._compat import UnsupportedCompatibilityOption
 from ._compat_process import GuestProcessError
@@ -117,13 +118,22 @@ def command_handle(processes, current, timeout):
             time.sleep(0.05 if remaining is None else min(0.05, remaining))
 
     kill, stdin, eof = _control_callbacks(processes, identifier)
-    return native_handle(
+    handle = native_handle(
         pid=int(current.pid),
         events=events(),
         handle_kill=kill,
         handle_send_stdin=stdin,
         handle_close_stdin=eof,
     )
+    wait = handle.wait
+    wait_lock = Lock()
+
+    def serialized_wait(*args, **kwargs):
+        with wait_lock:
+            return wait(*args, **kwargs)
+
+    handle.wait = serialized_wait
+    return handle
 
 
 def async_command_handle(processes, current, timeout, on_stdout=None, on_stderr=None):

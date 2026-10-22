@@ -1,4 +1,6 @@
 import types
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 import pytest
 
@@ -103,3 +105,29 @@ def test_kill_only_returns_false_for_a_structured_missing_process(monkeypatch):
     with pytest.raises(RuntimeError) as raised:
         commands.kill(42)
     assert raised.value is unavailable
+
+
+def test_background_handle_supports_simultaneous_waiters(monkeypatch):
+    pytest.importorskip("e2b")
+    entered = Event()
+    release = Event()
+    current = types.SimpleNamespace(pid="42", name="job", status="completed", stdout="done\n", stderr="", exit_code=0)
+
+    class Processes:
+        def get(self, identifier, **options):
+            assert identifier == "42"
+            entered.set()
+            assert release.wait(timeout=1)
+            return current
+
+    from arker._compat_e2b import command_handle
+
+    handle = command_handle(Processes(), current, timeout=1)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(handle.wait)
+        assert entered.wait(timeout=1)
+        second = pool.submit(handle.wait)
+        release.set()
+        results = [first.result(timeout=1), second.result(timeout=1)]
+
+    assert [(result.stdout, result.exit_code) for result in results] == [("done\n", 0), ("done\n", 0)]
