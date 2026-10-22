@@ -1,5 +1,11 @@
 # Recorded coverage baseline
 
+Current source adds deterministic fail-closed parallel ownership lookup with a
+shared client-wait budget, and aborts owned Modal upload helpers after interrupted
+input without committing partial files. These runtime changes invalidate both
+recorded language fingerprints below. Fresh combined cohorts are pending;
+130/78 is a historical checkpoint, not current-source verification.
+
 ## Completed filesystem cohort — strict parity remains red
 
 Runtime/scenario source8abf31c completed 91 selections: Python47/51 and
