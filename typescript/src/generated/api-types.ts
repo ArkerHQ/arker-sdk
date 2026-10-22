@@ -113,9 +113,30 @@ export interface paths {
         };
         /**
          * List organization runs
-         * @description Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
+         * @deprecated
+         * @description Deprecated: use `GET /v1/events`, which lists every action across regions. Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
          */
         get: operations["listOrgRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List events
+         * @description Lists the organization's activity, one event per action: API requests, runs, network and SSH traffic, automatic actions and account changes, across every region, within the retained history window. Filters combine with AND; the values of one filter with OR. Newly recorded actions appear within seconds.
+         */
+        get: operations["listEvents"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1823,7 +1844,7 @@ export interface components {
          * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
          * @enum {string}
          */
-        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey";
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "listEvents" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey";
         /** @enum {string} */
         HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
         /**
@@ -3468,6 +3489,68 @@ export interface components {
             /** @description Unrevoked API keys, newest first. */
             api_keys: components["schemas"]["ApiKey"][];
         };
+        /**
+         * @description What an event records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection; `sign_in` a member's session entering the organization, by signing in or switching to it.
+         * @enum {string}
+         */
+        EventAction: "run" | "fork" | "sync" | "delete" | "signal" | "vm_update" | "vm_suspend" | "policies_update" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "inbound_request" | "outbound_request" | "ssh_session" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_update" | "member_remove" | "org_rename" | "member_add" | "member_invite" | "member_invite_revoke" | "org_create" | "org_delete" | "sign_in" | "sign_out" | "terms_accept" | "billing_checkout" | "payment_method_update" | "billing_block" | "billing_unblock" | "credit_grant" | "org_access_update" | "billing_class_update" | "quota_update";
+        /** @enum {string} */
+        EventState: "running" | "completed" | "failed" | "cancelled";
+        /** @enum {string} */
+        EventOrderBy: "requested_at" | "started_at" | "ended_at" | "duration_ms";
+        Event: {
+            /** @description The action's id, the same while it is running and once it ends. */
+            id: string;
+            action: components["schemas"]["EventAction"];
+            state: components["schemas"]["EventState"];
+            /** @description The VM the action used; a fork's new VM. Null for an action on no VM. */
+            vm_id: string | null;
+            /**
+             * Format: date-time
+             * @description When the request arrived, or an automatic action was triggered.
+             */
+            requested_at: string;
+            /**
+             * Format: date-time
+             * @description When the action began executing; null before it does and for an action with no separate start.
+             */
+            started_at: string | null;
+            /**
+             * Format: date-time
+             * @description When the action ended; null while it is running.
+             */
+            ended_at: string | null;
+            /** @description From `started_at`, or `requested_at` when there is none, to `ended_at`; null while running. */
+            duration_ms: number | null;
+            /** @description Who initiated the action, and how. Null for an automatic action, or when Arker does not know who acted. */
+            actor: components["schemas"]["EventActor"] | null;
+            /** @description The region that served the action; null for one the console served, such as an API key's. */
+            region: string | null;
+            /** @description The `x-request-id` of the request that made the action. */
+            request_id: string | null;
+            /** @description Why the action failed or was refused. */
+            error_code: components["schemas"]["ErrorCode"] | null;
+            /** @description Facts only some actions have, such as a run's `run_id` and `exit_code`, a fork's `source_vm_id`, or an inbound request's `port`. */
+            attributes: {
+                [key: string]: string | number | boolean | null;
+            };
+        };
+        EventActor: {
+            via: components["schemas"]["EventVia"];
+            /** @description Who: a member's email in the console; an API key's `api_key_id`; an SSH key's id, or its fingerprint when it is no account key. None when Arker acted. */
+            id?: string;
+        };
+        /**
+         * @description How an action was initiated: by a member in the console, with an API key, over SSH with an SSH key, or by Arker.
+         * @enum {string}
+         */
+        EventVia: "console" | "api" | "ssh" | "arker";
+        ListEventsResponse: {
+            /** @description Events, in the requested order. */
+            events: components["schemas"]["Event"][];
+            /** @description Cursor for the next page, or null when there is none. */
+            next_cursor: string | null;
+        };
     };
     responses: {
         Conflict: {
@@ -4122,6 +4205,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListOrgRunsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    listEvents: {
+        parameters: {
+            query?: {
+                /** @description Only these actions. Repeat the parameter for more than one. */
+                actions?: components["schemas"]["EventAction"][];
+                /** @description Only events in these states. */
+                states?: components["schemas"]["EventState"][];
+                /** @description Only actions these regions served. */
+                regions?: string[];
+                /** @description Only actions on these VMs. */
+                vm_ids?: string[];
+                /** @description Only actions these actors initiated: members by email, or `me` for the member calling, and API keys and SSH keys by id. */
+                actors?: string[];
+                /** @description Only actions initiated this way. */
+                via?: components["schemas"]["EventVia"][];
+                /** @description Only actions these requests made. */
+                request_ids?: string[];
+                /** @description Only actions that failed with these codes. */
+                error_codes?: components["schemas"]["ErrorCode"][];
+                /** @description Only runs that exited with this code. */
+                exit_code?: number;
+                /** @description Only events whose `requested_at` is at or after this time. Events without one do not match. */
+                requested_at_gte?: string;
+                /** @description Only events whose `requested_at` is before this time. Events without one do not match. */
+                requested_at_lt?: string;
+                /** @description Only events whose `started_at` is at or after this time. Events without one do not match. */
+                started_at_gte?: string;
+                /** @description Only events whose `started_at` is before this time. Events without one do not match. */
+                started_at_lt?: string;
+                /** @description Only events whose `ended_at` is at or after this time. Events without one do not match. */
+                ended_at_gte?: string;
+                /** @description Only events whose `ended_at` is before this time. Events without one do not match. */
+                ended_at_lt?: string;
+                /** @description Only events whose `duration_ms` is at or after this many milliseconds. Events without one do not match. */
+                duration_ms_gte?: number;
+                /** @description Only events whose `duration_ms` is before this many milliseconds. Events without one do not match. */
+                duration_ms_lt?: number;
+                /** @description What events are ordered by; events without it come last, and `id` breaks ties. */
+                order_by?: components["schemas"]["EventOrderBy"];
+                /** @description The direction of `order_by`. */
+                order?: "asc" | "desc";
+                /** @description Events per page. */
+                limit?: number;
+                /** @description The previous page's `next_cursor`. It keeps that query's filters and order, so only `limit` may accompany it. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListEventsResponse"];
                 };
             };
             400: components["responses"]["BadRequestError"];

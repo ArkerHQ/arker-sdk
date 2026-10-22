@@ -29,6 +29,7 @@ from importlib.resources import files as package_files
 from typing import (
     Any,
     Literal,
+    TypedDict,
     TypeVar,
     Union,
     get_args,
@@ -57,6 +58,8 @@ from .generated.api_models import (
     Filesystem,
     FilesystemCreateRequest,
     ListApiKeysResponse,
+    ListEventsParameters,
+    ListEventsResponse,
     ListFilesystemsParameters,
     ListFilesystemsResponse,
     ListMountsParameters,
@@ -283,6 +286,33 @@ class BackgroundRunResult:
 # yields a BackgroundRunResult (the running ack, returned immediately for the
 # caller to poll via VM.get_run()).
 RunResult = CompletedRunResult | BackgroundRunResult
+
+
+class EventRange(TypedDict, total=False):
+    """A `[gte, lt)` bound; either end may be left open."""
+
+    gte: Any
+    lt: Any
+
+
+class EventFilter(TypedDict, total=False):
+    """Which events `list_events` lists. Values of one filter match any of
+    them; filters combine. `actors` takes member emails or `me`, API key ids
+    and SSH key ids."""
+
+    actions: list[str]
+    states: list[str]
+    regions: list[str]
+    vm_ids: list[str]
+    actors: list[str]
+    via: list[str]
+    request_ids: list[str]
+    error_codes: list[str]
+    exit_code: int
+    requested_at: EventRange
+    started_at: EventRange
+    ended_at: EventRange
+    duration_ms: EventRange
 
 
 @dataclasses.dataclass(eq=False)
@@ -541,6 +571,52 @@ class Arker:
         path = _build_query("/v1/runs", parameters)
         payload = self._request("GET", path, base_url=self._control_base_url)
         return _org_runs_response(payload)
+
+    def list_events(
+        self,
+        *,
+        filter: EventFilter | None = None,
+        order_by: str | None = None,
+        order: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> ListEventsResponse:
+        """List the organization's activity across regions, one event per action.
+
+        A `cursor` is a previous page's `next_cursor`; it carries that page's
+        filter and order.
+        """
+        filter = filter or {}
+
+        def bound(name: str, end: str) -> Any:
+            return filter.get(name, {}).get(end)
+
+        parameters = ListEventsParameters(
+            actions=filter.get("actions"),
+            states=filter.get("states"),
+            regions=filter.get("regions"),
+            vm_ids=filter.get("vm_ids"),
+            actors=filter.get("actors"),
+            via=filter.get("via"),
+            request_ids=filter.get("request_ids"),
+            error_codes=filter.get("error_codes"),
+            exit_code=filter.get("exit_code"),
+            requested_at_gte=bound("requested_at", "gte"),
+            requested_at_lt=bound("requested_at", "lt"),
+            started_at_gte=bound("started_at", "gte"),
+            started_at_lt=bound("started_at", "lt"),
+            ended_at_gte=bound("ended_at", "gte"),
+            ended_at_lt=bound("ended_at", "lt"),
+            duration_ms_gte=bound("duration_ms", "gte"),
+            duration_ms_lt=bound("duration_ms", "lt"),
+            order_by=order_by,
+            order=order,
+            limit=limit,
+            cursor=cursor,
+        )
+        path = _build_query("/v1/events", parameters)
+        payload = self._request("GET", path, base_url=self._control_base_url)
+        return _decode_model(ListEventsResponse, payload)
 
     def list_regions(self) -> ListRegionsResponse:
         """List available public provider and region placements."""
@@ -1790,8 +1866,12 @@ def _build_query(
     values = _drop_none(parameters)
     if not isinstance(values, dict):
         raise TypeError("operation parameters must serialize to an object")
-    pairs = [(key, str(value)) for key, value in values.items() if key not in path_fields]
-    qs = urllib.parse.urlencode(pairs)
+    pairs = [
+        (key, value if isinstance(value, list) else str(value))
+        for key, value in values.items()
+        if key not in path_fields
+    ]
+    qs = urllib.parse.urlencode(pairs, doseq=True)
     return f"{path}?{qs}" if qs else path
 
 

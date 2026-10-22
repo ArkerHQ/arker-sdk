@@ -480,6 +480,7 @@ OpenApiOperationId: TypeAlias = Literal[
     'fork',
     'listVms',
     'listOrgRuns',
+    'listEvents',
     'getVm',
     'deleteVm',
     'patchVm',
@@ -1645,6 +1646,65 @@ class ApiKeyPoolScope:
     pool_id: str
 
 
+EventAction: TypeAlias = Literal[
+    'run',
+    'fork',
+    'sync',
+    'delete',
+    'signal',
+    'vm_update',
+    'vm_suspend',
+    'policies_update',
+    'run_cancel',
+    'session_create',
+    'session_update',
+    'session_delete',
+    'mount_create',
+    'mount_delete',
+    'filesystem_create',
+    'filesystem_delete',
+    'pool_create',
+    'pool_update',
+    'pool_delete',
+    'inbound_request',
+    'outbound_request',
+    'ssh_session',
+    'ssh_key_delete',
+    'api_key_create',
+    'api_key_revoke',
+    'member_update',
+    'member_remove',
+    'org_rename',
+    'member_add',
+    'member_invite',
+    'member_invite_revoke',
+    'org_create',
+    'org_delete',
+    'sign_in',
+    'sign_out',
+    'terms_accept',
+    'billing_checkout',
+    'payment_method_update',
+    'billing_block',
+    'billing_unblock',
+    'credit_grant',
+    'org_access_update',
+    'billing_class_update',
+    'quota_update',
+]
+
+
+EventState: TypeAlias = Literal['running', 'completed', 'failed', 'cancelled']
+
+
+EventOrderBy: TypeAlias = Literal[
+    'requested_at', 'started_at', 'ended_at', 'duration_ms'
+]
+
+
+EventVia: TypeAlias = Literal['console', 'api', 'ssh', 'arker']
+
+
 @dataclass(frozen=True)
 class ListVmsParameters:
     cursor: str | None = None
@@ -1681,6 +1741,31 @@ class ListOrgRunsParameters:
         | None
     ) = None
     dir: Literal['asc', 'desc'] | None = None
+
+
+@dataclass(frozen=True)
+class ListEventsParameters:
+    actions: list[EventAction] | None = None
+    states: list[EventState] | None = None
+    regions: list[str] | None = None
+    vm_ids: list[str] | None = None
+    actors: list[str] | None = None
+    via: list[EventVia] | None = None
+    request_ids: list[str] | None = None
+    error_codes: list[ErrorCode] | None = None
+    exit_code: int | None = None
+    requested_at_gte: str | None = None
+    requested_at_lt: str | None = None
+    started_at_gte: str | None = None
+    started_at_lt: str | None = None
+    ended_at_gte: str | None = None
+    ended_at_lt: str | None = None
+    duration_ms_gte: int | None = None
+    duration_ms_lt: int | None = None
+    order_by: EventOrderBy | None = 'requested_at'
+    order: Literal['asc', 'desc'] | None = 'desc'
+    limit: int | None = 50
+    cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2082,6 +2167,12 @@ class ListApiKeysResponse:
 
 
 @dataclass(frozen=True)
+class EventActor:
+    via: EventVia
+    id: str | None = None
+
+
+@dataclass(frozen=True)
 class PolicyEntry:
     type: Literal['outbound', 'inbound']
     action: PolicyAction
@@ -2144,6 +2235,29 @@ class PolicyUpdate:
 
 
 PolicyRules: TypeAlias = dict[str, PolicyRule | ScheduleRule | LifecycleRule]
+
+
+@dataclass(frozen=True)
+class Event:
+    id: str
+    action: EventAction
+    state: EventState
+    vm_id: str | None
+    requested_at: str
+    started_at: str | None
+    ended_at: str | None
+    duration_ms: int | None
+    actor: EventActor | None
+    region: str | None
+    request_id: str | None
+    error_code: ErrorCode | None
+    attributes: dict[str, str | int | bool | None]
+
+
+@dataclass(frozen=True)
+class ListEventsResponse:
+    events: list[Event]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True)
