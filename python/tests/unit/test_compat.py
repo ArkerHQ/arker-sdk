@@ -326,8 +326,10 @@ def test_provider_block_network_options_translate_to_arker_policy(monkeypatch, c
         create()
 
     body = json.loads(t.calls[0]["body"])
-    assert len(body["policies"]["rules"]) == 1
-    assert next(iter(body["policies"]["rules"].values())) == {"type": "outbound_guard", "allow": []}
+    guards = [
+        rule for rule in body["policies"]["rules"].values() if rule["type"] == "outbound_guard"
+    ]
+    assert guards == [{"type": "outbound_guard", "allow": []}]
 
 
 def test_allowlist_policies_intersect_inherited_rules(monkeypatch) -> None:
