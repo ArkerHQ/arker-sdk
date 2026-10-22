@@ -162,6 +162,53 @@ def test_a_policy_read_back_updates_without_its_read_only_fields() -> None:
     assert sent == {"rules": POLICY_RULES, "secrets": {"KEY": "***"}}
 
 
+@pytest.mark.parametrize("operation", ["update", "fork", "run", "set_policies"])
+def test_readback_floors_are_preserved_when_a_policy_is_written_again(operation: str) -> None:
+    floor = {"type": "outbound_guard", "allow": [{"ips": ["1.1.1.1"], "ports": [443]}]}
+    payload = vm_payload("idle")
+    payload["policies"] = {"rules": POLICY_RULES, "outbound_guards": {"floor": floor}}
+    t = FakeTransport()
+    t.add_json(lambda m, u: m == "GET", 200, payload)
+    response = (
+        {"run_id": "run_1", "session_id": "s1", "state": "running"}
+        if operation == "run"
+        else {"policies": [], "outbound_guards": {"floor": floor}}
+        if operation == "set_policies"
+        else payload
+    )
+    t.add_json(lambda m, u: m != "GET", 202 if operation == "run" else 200, response)
+    with use_transport(t):
+        vm = client().vm("vm_1").refresh()
+        assert vm.policies.outbound_guards["floor"].type == "outbound_guard"
+        if operation == "update":
+            vm.update(policies=vm.policies)
+        elif operation == "fork":
+            vm.fork(policies=vm.policies)
+        elif operation == "run":
+            vm.run("sleep 1", policies=vm.policies, time_to_background=0)
+        else:
+            vm.set_policies(vm.policies)
+    body = json.loads(t.calls[1]["body"])
+    sent = body if operation == "set_policies" else body["policies"]
+    assert sent == {"rules": {**POLICY_RULES, "floor": floor}}
+
+
+@pytest.mark.parametrize("operation", ["update", "fork"])
+def test_explicit_floor_removal_overrides_readback_without_mutating_it(operation: str) -> None:
+    floor = {"type": "outbound_guard", "allow": []}
+    policies = {"outbound_guards": {"floor": floor}, "rules": {"floor": None}}
+    t = FakeTransport()
+    t.add_json(lambda *_: True, 200, vm_payload("idle"))
+    with use_transport(t):
+        vm = client().vm("vm_1")
+        if operation == "update":
+            vm.update(policies=policies)
+        else:
+            vm.fork(policies=policies)
+    assert json.loads(t.calls[0]["body"])["policies"] == {"rules": {"floor": None}}
+    assert policies == {"outbound_guards": {"floor": floor}, "rules": {"floor": None}}
+
+
 def test_typed_policy_surface_has_no_withdrawn_shapes() -> None:
     verbs = next(arg for arg in get_args(models.PolicyAction) if not dataclasses.is_dataclass(arg))
     assert set(get_args(verbs)) == {"allow", "deny", "delete", "suspend"}
@@ -178,7 +225,6 @@ def test_typed_policy_surface_has_no_withdrawn_shapes() -> None:
         models.PolicyRule,
         models.ScheduleRule,
         models.LifecycleRule,
-        models.OutboundGuardRule,
     }
     assert get_type_hints(models.PolicyRule)["type"] == Literal["outbound", "inbound"]
     for withdrawn in ("ResourcesRule", "WebhookRule", "Webhook"):

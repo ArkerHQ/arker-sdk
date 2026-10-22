@@ -406,6 +406,8 @@ class Arker:
         return self._fork(options, base_url=self.base_url)
 
     def _fork(self, options: dict[str, Any], *, base_url: str) -> VM:
+        if options.get("policies") is not None:
+            options["policies"] = _drop_none(_policy_update(options["policies"]))
         queueing_timeout = options.get("queueing_timeout")
         # Headers, not contract fields: pop both before the body is built, or
         # the server's validator rejects the unknown keys and every fork 400s.
@@ -855,7 +857,7 @@ class VM:
             end_symbol=end_symbol,
             end_after_all_subprocesses=end_after_all_subprocesses,
             signal=signal,
-            policies=policies,
+            policies=_policy_update(policies),
         )
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
         result = _run_response(
@@ -1022,7 +1024,9 @@ class VM:
                 ],
             })
         """
-        payload = self._client._request("PUT", f"{_vm_path(self.id)}/policies", doc, base_url=self.base_url)
+        payload = self._client._request(
+            "PUT", f"{_vm_path(self.id)}/policies", _policy_update(doc), base_url=self.base_url
+        )
         return _decode_model(PolicyDoc, payload)
 
     def sync(self, path: str, data: bytes | str | None = None) -> bytes | None:
@@ -1991,6 +1995,17 @@ def _policy_update(policies: Any) -> Any:
         policies = {field.name: getattr(policies, field.name) for field in dataclasses.fields(policies)}
     if not isinstance(policies, dict):
         return policies
+    policies = dict(policies)
+    guards = policies.pop("outbound_guards", None)
+    if guards:
+        if not isinstance(guards, dict):
+            raise TypeError("outbound_guards must be a rule map")
+        rules = policies.get("rules") or {}
+        if not isinstance(rules, dict):
+            raise TypeError("rules must be a rule map")
+        # Explicit changes, including null removals, take precedence over the
+        # floor read back from the VM. Never discard unedited floors.
+        policies["rules"] = {**guards, **rules}
     return {
         key: {name: _EXPLICIT_NULL if item is None else item for name, item in value.items()}
         if key in ("rules", "secrets") and isinstance(value, dict)

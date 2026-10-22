@@ -4761,6 +4761,12 @@
         "additionalProperties": false,
         "description": "A VM's current network policy and its derived inbound exposure metadata.",
         "properties": {
+          "outbound_guards": {
+            "type": "object",
+            "readOnly": true,
+            "additionalProperties": { "$ref": "#/components/schemas/OutboundGuardRule" },
+            "description": "Independent outbound permission floors, keyed by rule id. Every floor constrains the ordered policy and its default. Write or delete floors through PolicyUpdate.rules."
+          },
           "policies": {
             "type": "array",
             "description": "Ordered network policy rules. An empty list allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With an outbound `allow` rule, unmatched outbound traffic is denied. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable.",
@@ -11113,6 +11119,12 @@
         "additionalProperties": false,
         "description": "The VM's network policy. Change it with `policies` on `PATCH /v1/vms/{id}`.",
         "properties": {
+          "outbound_guards": {
+            "type": "object",
+            "readOnly": true,
+            "additionalProperties": { "$ref": "#/components/schemas/OutboundGuardRule" },
+            "description": "Independent outbound permission floors, keyed by their rule ids. Each floor intersects every ranked or default outbound decision. The legacy rules map retains its existing rule variants. Write or delete floors through PolicyUpdate.rules."
+          },
           "rules": {
             "$ref": "#/components/schemas/PolicyRules",
             "description": "The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With an outbound `allow` rule, unmatched outbound traffic is denied. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable."
@@ -11145,7 +11157,7 @@
       "OutboundGuardScope": {
         "type": "object",
         "additionalProperties": false,
-        "description": "A connection-layer permission scope. Present fields AND together; values within a field OR together. Hosts and IPs are mutually exclusive. No fields means any destination and port. Named-destination scopes permit DNS through Arker's guest resolvers, but another independent IP-only guard must also admit that resolver.",
+        "description": "A connection-layer permission scope. Present fields AND together; values within a field OR together. Hosts and IPs are mutually exclusive. No fields means any destination and port. Named-destination scopes constrain the guest DNS filter to their namespaces; every independent floor still has to admit DNS, so an IP-only guard without resolver permissions closes implicit DNS.",
         "properties": {
           "hosts": {
             "type": "array",
@@ -11157,12 +11169,12 @@
             "type": "array",
             "minItems": 1,
             "items": { "type": "string" },
-            "description": "IPs or CIDRs. Outbound rules match destination IPs; inbound rules match the caller source IP."
+            "description": "Destination IPs or CIDRs."
           },
           "ports": {
             "type": "array",
             "minItems": 1,
-            "description": "Single ports and/or inclusive [start, end] ranges, e.g. [80, 443, [1000, 2000]]. Absent = any port; an empty list is refused. Inbound allow rules require one or more individual ports and reject ranges.",
+            "description": "Destination ports and/or inclusive [start, end] ranges, e.g. [80, 443, [1000, 2000]]. Absent means any port; an empty list is refused.",
             "items": {
               "oneOf": [
                 { "type": "integer", "minimum": 1, "maximum": 65535, "format": "uint16" },
@@ -11212,13 +11224,10 @@
             },
             {
               "$ref": "#/components/schemas/LifecycleRule"
-            },
-            {
-              "$ref": "#/components/schemas/OutboundGuardRule"
             }
           ]
         },
-        "description": "The VM's policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Ranked network rules are evaluated highest priority first; the first match decides, and unmatched outbound traffic is denied. With no ranked network rules, the outbound base is open. Every outbound_guard independently constrains that base or ranked decision; no allow or rewrite bypasses a guard. Schedule rules do not change network permissions. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable."
+        "description": "The VM's policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Ranked network rules are evaluated highest priority first; the first match decides. With an outbound `allow` rule, unmatched outbound traffic is denied; otherwise the outbound base is open. Every outbound_guard independently constrains that base or ranked decision; no allow or rewrite bypasses a guard. Schedule rules do not change network permissions. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable."
       },
       "SshKeyInput": {
         "type": "object",

@@ -2174,9 +2174,7 @@ class PolicyUpdate:
     policies: list[PolicyEntry] | None = None
 
 
-PolicyRules: TypeAlias = dict[
-    str, PolicyRule | ScheduleRule | LifecycleRule | OutboundGuardRule
-]
+PolicyRules: TypeAlias = dict[str, PolicyRule | ScheduleRule | LifecycleRule]
 
 
 @dataclass(frozen=True)
@@ -2190,6 +2188,7 @@ class PolicyWriteRequest:
 
 @dataclass(frozen=True)
 class PolicyDoc:
+    outbound_guards: dict[str, OutboundGuardRule] | None = None
     policies: list[PolicyEntry] | None = None
     secrets: dict[str, str] | None = None
     hostname: str | None = None
@@ -2396,6 +2395,7 @@ class PatchVmRequest:
 
 @dataclass(frozen=True)
 class VmPolicies:
+    outbound_guards: dict[str, OutboundGuardRule] | None = None
     rules: PolicyRules | None = None
     secrets: dict[str, str] | None = None
     mitm_domains: list[str] | None = None

@@ -28,6 +28,11 @@ secret rewrites; even an inherited allow cannot bypass a block-all guard.
 An explicitly configured deprecated ordered policy list still replaces the
 parent policy, while the new guard constrains that replacement. This requires
 the matching backend guard API and is not yet live-certified or published.
+Guard readback is additive: `policies.outbound_guards` contains the independent
+floors, while the legacy `policies.rules` response union is unchanged. The
+shared SDK preserves these floors when a policy read back is passed to update,
+fork, run or the deprecated policy writer, translating them back to tagged
+input rules. Explicit rule updates and null removals take precedence.
 Registry credentials are configured as `registry_auth` in Python or
 `registryAuth` in TypeScript, with `username` and `password`. They are sent only
 for an image import, never for a child fork from an existing VM. Keep these

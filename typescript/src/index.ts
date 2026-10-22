@@ -726,6 +726,7 @@ export class Arker {
     // on, unnamed and billable. The header object is bound once, before the
     // retry loop, so every attempt of one call presents the same key.
     const { idempotencyKey, idempotency, ...request } = options;
+    if (request.policies) request.policies = withoutReadOnlyPolicyFields(request.policies);
     const key = forkIdempotencyKey(idempotencyKey, idempotency);
     const wire = await this._request<Vm>(
       "POST",
@@ -1101,7 +1102,9 @@ export class VM {
     rejectUnsupportedRunNetworkInputs(options);
     const { idempotencyKey, onOutput, ...body } = options;
     const headers = idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined;
-    const request: RunRequest = { ...body, command };
+    const request: RunRequest = { ...body, command,
+      ...(body.policies ? {policies: withoutReadOnlyPolicyFields(body.policies)} : {}),
+    };
     const response = await this._client._request<unknown>(
       "POST",
       `${vmPath(this.id)}/runs`,
@@ -1697,7 +1700,7 @@ export class VM {
    *     });
    */
   async setPolicies(doc: PolicyDoc): Promise<PolicyDoc> {
-    return this._client._request<PolicyDoc>("PUT", `${vmPath(this.id)}/policies`, doc, this.baseUrl);
+    return this._client._request<PolicyDoc>("PUT", `${vmPath(this.id)}/policies`, withoutReadOnlyPolicyFields(doc), this.baseUrl);
   }
 
   // ── Mounts: bindings of a filesystem into this VM at a path ────────
@@ -2347,7 +2350,10 @@ function canRetryAgain(
 
 /** A policy read back (`vm.policies`) also reports fields an update refuses. */
 function withoutReadOnlyPolicyFields(policies: PolicyUpdate): PolicyUpdate {
-  const { hostname: _h, mitm_domains: _m, warnings: _w, ...update } = policies as PolicyUpdate & Partial<PolicyDoc>;
+  const { hostname: _h, mitm_domains: _m, warnings: _w, outbound_guards, ...update } = policies as PolicyUpdate & Partial<PolicyDoc>;
+  if (outbound_guards && Object.keys(outbound_guards).length) {
+    update.rules = {...outbound_guards, ...update.rules};
+  }
   return update;
 }
 

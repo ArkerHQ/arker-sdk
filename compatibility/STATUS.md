@@ -1,5 +1,21 @@
 # Recorded coverage baseline
 
+## Additive policy readback preview
+
+The companion backend now keeps the legacy policy response rule union unchanged
+and returns independent floors in optional `outbound_guards` maps. SDK reads
+preserve the map, and policy writes through update, fork, run and the deprecated
+policy writer convert it back to tagged input rules without mutating callers.
+Explicit edits and null removals override the corresponding readback floor.
+Real Python and Node regressions failed before this change. The contract is
+regenerated from app source `8bd63a20`; its exact current-main oasdiff gate passes
+without severity changes or accepted-breaking-change exemptions.
+
+Fresh validation of this new source is in progress. The source-bound production
+traces and coverage totals below certify their recorded earlier implementation,
+not this changed source. Production still lacks guard-schema/private-port support;
+no backend deployment or full-parity claim is made.
+
 ## Current provider SDK pins
 
 Python fixtures now pin E2B **2.58.0**, Daytona **0.226.0**, Blaxel **0.4.19**
