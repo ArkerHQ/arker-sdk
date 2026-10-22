@@ -23,6 +23,7 @@ const directory = await mkdtemp(join(tmpdir(), "compat-modal-egress-"));
 const previous = process.env.COMPUTESDK_ROUTER_CONFIG;
 const native = new Native();
 let parent: Awaited<ReturnType<Arker["fork"]>> | undefined;
+const failures: unknown[] = [];
 try {
   const app = await native.apps.fromName("arker-compat-image-test", { createIfMissing: true });
   const image = await native.images.fromRegistry("python:3.12-slim").build(app);
@@ -40,19 +41,23 @@ try {
     try {
       for (const option of [undefined, "outboundCidrAllowlist", "outboundDomainAllowlist"] as const) {
         const options = option ? { [option]: [] } : {};
-        const sandbox: NativeSandbox | ShimSandbox = route === "reference"
-          ? await native.sandboxes.create(app, image, { timeoutMs: 90_000, ...options })
-          : route === "native"
-            ? await shim.sandboxes.create(app, image, { timeoutMs: 90_000, ...options })
-            : await shim.sandboxes.create(options);
+        let sandbox: NativeSandbox | ShimSandbox | undefined;
         try {
+          sandbox = route === "reference"
+            ? await native.sandboxes.create(app, image, { timeoutMs: 90_000, ...options })
+            : route === "native"
+              ? await shim.sandboxes.create(app, image, { timeoutMs: 90_000, ...options })
+              : await shim.sandboxes.create(options);
           const child: ContainerProcess<string> = await sandbox.exec(["python3", "-c", connect]);
           const output = await child.stdout.readText();
           assert.equal(await child.wait(), 0);
           assert.equal(output, option ? "blocked\n" : "connected\n", `${route}: ${option ?? "unrestricted"}`);
           console.log(`PASS Modal egress: ${route}, ${option ?? "unrestricted"}`);
+        } catch (error) {
+          failures.push(error);
+          console.error(`FAIL Modal egress: ${route}, ${option ?? "unrestricted"}`);
         } finally {
-          await sandbox.terminate();
+          await sandbox?.terminate();
         }
       }
     } finally {
@@ -69,3 +74,4 @@ try {
     await rm(directory, { recursive: true, force: true });
   }
 }
+if (failures.length) throw new AggregateError(failures, "Modal egress configurations failed");

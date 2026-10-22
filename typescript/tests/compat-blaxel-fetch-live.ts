@@ -143,6 +143,7 @@ const directory = await mkdtemp(join(tmpdir(), "compat-private-fetch-"));
 const previous = process.env.COMPUTESDK_ROUTER_CONFIG;
 const previousH2 = settings.config.disableH2;
 const previousRegion = process.env.BL_REGION;
+const failures: unknown[] = [];
 try {
   for (const [mode, disableH2, region] of [
     ["h2", false, previousRegion],
@@ -198,6 +199,9 @@ try {
           "Operations changed the requested HTTP transport profile",
         );
         outcome = "passed";
+      } catch (error) {
+        failures.push(error);
+        console.error(`FAIL Blaxel private fetch: ${constructor === Native ? "original" : "shim"} on ${provider}, ${mode}`);
       } finally {
         await recordEvidence(
           "blaxel",
@@ -211,7 +215,7 @@ try {
           outcome,
         );
       }
-      console.log(
+      if (outcome === "passed") console.log(
         "PASS Blaxel private fetch: " +
           (constructor === Native ? "original" : "shim") +
           " on " +
@@ -227,3 +231,4 @@ try {
   else process.env.COMPUTESDK_ROUTER_CONFIG = previous;
   await rm(directory, { recursive: true });
 }
+if (failures.length) throw new AggregateError(failures, "Blaxel private-fetch configurations failed");
