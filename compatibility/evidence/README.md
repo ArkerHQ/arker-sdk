@@ -4,6 +4,19 @@ These are observations, not a claim of full compatibility. They contain API
 names, outcome, route, run ID, provider SDK version and implementation
 fingerprints; no credentials or returned file contents.
 
+`production-current-20261022-{python,node}.jsonl` record source `816cdc6`
+against current provider pins (see `../provider-upgrade-20261022.json`). All
+36 Python and31 Node configurations execute: Python32 pass/four fail;
+Node26 pass/five fail. Failures remain missing production private-port routes
+and outbound-guard support. All four core/expanded strict gates fail exit1.
+Core coverage is94/1123 Python and51/982 Node; expanded94/1146 and51/1052.
+No new native-version mismatch is seen in these selections; this does not
+certify all APIs, option combinations, lifecycle or untested input streams.
+The45 records include failed observations. Current fingerprints:
+
+- Python: `09c95b7cb492211532b0021ff91d66f4f5f3e866e63be5778a802c52c780e864`.
+- Node: `4dadbae44b4d046135aa0338bd0883d820995f5d7444bc5348838e2f894181ae`.
+
 `production-main-20261022-{python,node}.jsonl` supersede that day's earlier
 cohort at source `8cb23cf`, now including SDK main `4f1b1d9`. All 36 Python and
 31 Node configurations execute: Python 32 pass/four fail; Node 26 pass/five fail.

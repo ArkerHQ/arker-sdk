@@ -18,8 +18,17 @@ skips), Ruff, TypeScript typecheck/full tests/build/isolated packed ESM+CJS
 consumers, 25 repository tooling tests and generated-contract checking. Packed
 npm SHA-256:
 `7c5a4ec978c0dd6c9465326f785b5bcebc4ac338130a74dec4a0766d4e2543b0`.
-Fresh matching-version differential cohorts are pending; all preceding live
-fingerprints below are historical after these dependency changes.
+Fresh matching-version production cohorts at source `816cdc6` execute all
+36 Python and 31 Node cases: **32 Python pass / four fail; 26 Node pass / five
+fail**. Every failing case is a missing private-port route or rejected
+outbound-guard rule, with no new native-provider-version mismatch in this
+selection. All four core/expanded strict gates are actually invoked and fail
+exit 1. Core coverage: **94/1,123 Python and 51/982 Node**; expanded:
+**94/1,146 and 51/1,052**. Full API equivalence remains false. The 45 safe
+records, including failures, are committed as
+`evidence/production-current-20261022-*.jsonl`. All 11 GitHub checks pass at
+the tested source. Owned fixtures are cleaned up; no feature deployment or
+IAM changes are used. Earlier fingerprints below remain historical.
 
 The first fresh packed-consumer install failed because `dockerfile-ast`'s
 floating dependency resolved to `vscode-languageserver-types@3.18.5`, whose
