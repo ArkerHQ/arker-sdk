@@ -1,5 +1,10 @@
 # Recorded differential evidence
 
+Current42ba277 core-hardening source changes both runtime fingerprints. All
+observations below are historical for this source until fresh matching-source
+cohorts complete. Unit regressions, new unrun live instrumentation and native
+passthrough do not earn Arker equivalence credit.
+
 These are observations, not a claim of full compatibility. They contain API
 names, outcome, route, run ID, provider SDK version and implementation
 fingerprints; no credentials or returned file contents.

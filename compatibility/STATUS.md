@@ -1,5 +1,24 @@
 # Recorded coverage baseline
 
+## Further core hardening — live validation pending
+
+Current source42ba277 includes atomic guest-process replay, serialized concurrent
+E2B waits, official E2B Git helper binding, Blaxel filesystem path/metadata
+corrections and immutable per-upload secret classification. Regressions reproduce
+partial replay state, concurrent generator iteration and secret classification
+changing between chunks; fixes retain native handle types and passthrough.
+
+Combined local gates pass539 vendor Python tests,530 lean tests with9 optional
+skips, Ruff, TypeScript typecheck/full tests/build and all five fresh packed
+consumers. Packed SHA256:
+`8ddf04531e3804a7702caa0e8b1fac95f1c2620413d630f808d54c59e7027db5`.
+These are not live API coverage credit. Both runtime fingerprints changed;
+production observations and totals below certify earlier source only until a
+new matching-source cohort completes. New concurrent live instrumentation has
+not yet run. Unsupported watches, Python-free images, opaque resource handles
+and other documented core gaps remain explicit; Apps/Functions alone are outside
+core scope. No backend deployment or full-parity claim.
+
 ## Final automation and packed CLI gates
 
 The preview CLI explicitly forwards fork `--idempotency-key` as an HTTP header
