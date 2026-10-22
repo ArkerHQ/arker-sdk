@@ -1,9 +1,14 @@
 # Recorded differential evidence
 
-Current42ba277 core-hardening source changes both runtime fingerprints. All
-observations below are historical for this source until fresh matching-source
-cohorts complete. Unit regressions, new unrun live instrumentation and native
-passthrough do not earn Arker equivalence credit.
+Current `production-hardening-20261022-{python,node}.jsonl` records matching-source
+core hardening at e46af69 (unit-only fixes through80f492a). Python32/36 and Node26/31
+selections pass, plus six of six Git differential selections. Core coverage is
+103/1123 Python and60/982 TypeScript; expanded103/1146 and60/1052. All four strict
+gates exit1. Nine production selections still fail on private-port404 or guard-
+schema400. No backend deployment, full parity or untested option coverage is claimed.
+Fingerprints are Python `306a60eea7d3c4ca014dc207f804c2ac66748d3506347b90c313bd4fc7afe1fc`
+and Node `e5a249aabcb1f058f59e147d5fc74c43a80cf7b01d227452a0870398082bf6fd`.
+Earlier observations below are historical, not current-source credit.
 
 These are observations, not a claim of full compatibility. They contain API
 names, outcome, route, run ID, provider SDK version and implementation

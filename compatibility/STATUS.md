@@ -1,6 +1,24 @@
 # Recorded coverage baseline
 
-## Further core hardening — live validation pending
+## Further core hardening — matching production observations
+
+Source e46af69 (unit fixture fixes through80f492a) has completed fresh matching-
+fingerprint cohorts: Python32/36 and Node26/31, plus all six local-Git differential
+selections pass. Total64/73 selections pass. Production private-port404 and guard-
+schema400 remain the nine failures; no unpublished backend capability is credited.
+Core strict coverage is **103/1123 Python and60/982 TypeScript**; expanded is
+103/1146 and60/1052. All four strict gates exit1. Apps/Functions are excluded from
+core scope; images, secrets, mounts and drives remain included.
+
+Current sanitized evidence is `evidence/production-hardening-20261022-{python,node}.jsonl`.
+Python fingerprint: `306a60eea7d3c4ca014dc207f804c2ac66748d3506347b90c313bd4fc7afe1fc`.
+Node fingerprint: `e5a249aabcb1f058f59e147d5fc74c43a80cf7b01d227452a0870398082bf6fd`.
+Local vendor Python540 tests, TypeScript full tests/typecheck/build and five packed
+consumers pass (pack SHA256 `619aaa567b8a79f06a903ac3e0b435b493fcf59ee20e51549d05f38a70a671bf`).
+Unsupported watches, Python-free images and other documented unverified core APIs
+remain gaps. This is not full parity or deployment readiness.
+
+## Earlier hardening checkpoint (superseded)
 
 Current source42ba277 includes atomic guest-process replay, serialized concurrent
 E2B waits, official E2B Git helper binding, Blaxel filesystem path/metadata
