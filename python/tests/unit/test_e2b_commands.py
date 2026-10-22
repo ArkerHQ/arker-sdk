@@ -14,7 +14,12 @@ from arker._compat import CommandResult
 def test_identity_command_exec_preserves_pid_and_signal_target():
     command = shim._identity_command(
         'printf \'%s %s\\n\' "$$" "$(id -u)"; exec sleep 30',
-        user="root",
+    )
+    assert command.startswith("setpriv --reuid=user --regid=user --init-groups -- ")
+    command = command.replace(
+        "setpriv --reuid=user --regid=user --init-groups -- ",
+        f"setpriv --reuid={os.getuid()} --regid={os.getgid()} --keep-groups -- ",
+        1,
     )
     process = subprocess.Popen(
         ["bash", "-c", "exec " + command],
@@ -24,7 +29,7 @@ def test_identity_command_exec_preserves_pid_and_signal_target():
     )
     assert process.stdout is not None
     pid, actual_uid = process.stdout.readline().split()
-    assert (int(pid), int(actual_uid)) == (process.pid, 0)
+    assert (int(pid), int(actual_uid)) == (process.pid, os.getuid())
     os.kill(process.pid, signal.SIGTERM)
     assert process.wait(timeout=2) == -signal.SIGTERM
 

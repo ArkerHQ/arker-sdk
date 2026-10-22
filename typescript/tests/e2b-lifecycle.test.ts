@@ -17,6 +17,11 @@ test("Arker identity execution preserves the process PID while dropping privileg
   const sandbox = Reflect.construct(Sandbox, [{
     provider: "arker", sandboxId: "arker",
     runCommand: async (command: string) => {
+      assert.match(command, /^setpriv --reuid=user --regid=user --init-groups -- /);
+      command = command.replace(
+        /^setpriv --reuid=user --regid=user --init-groups -- /,
+        `setpriv --reuid=${process.getuid!()} --regid=${process.getgid!()} --keep-groups -- `,
+      );
       const child = spawn("bash", ["-c", `exec ${command}`], { stdio: ["ignore", "pipe", "pipe"] });
       processId = child.pid!;
       let stdout = "";
@@ -27,10 +32,10 @@ test("Arker identity execution preserves the process PID while dropping privileg
       return { stdout, stderr, exitCode };
     },
   }]) as Sandbox;
-  const identity = await sandbox.commands.run(`printf '%s %s' "$$" "$(id -u)"`, { user: "root" });
-  assert.equal(identity.stdout, `${processId} 0`);
+  const identity = await sandbox.commands.run(`printf '%s %s' "$$" "$(id -u)"`);
+  assert.equal(identity.stdout, `${processId} ${process.getuid!()}`);
   await assert.rejects(
-    sandbox.commands.run("kill -TERM $$", { user: "root" }),
+    sandbox.commands.run("kill -TERM $$"),
     (error: unknown) => error instanceof CommandExitError && error.exitCode === 143,
   );
 });
