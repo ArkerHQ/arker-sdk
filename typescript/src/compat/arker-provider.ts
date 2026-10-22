@@ -359,7 +359,7 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
         }
         const image = typeof values.image === "string" ? values.image : undefined;
         if (!sourceVmId && !sourceVmName && !image) {
-          throw new CompatibilityCreationNotStartedError("Arker source is required; pass templateId, snapshotId, image, configure source, or set ARKER_SOURCE");
+          throw new CompatibilityCreationNotStartedError("Arker source is required; pass templateId, snapshotId, image, configure source, or set ARKER_SOURCE/ARKER_SOURCE_VM_ID");
         }
         const vcpu = typeof values.cpu === "number" ? values.cpu : typeof values.vcpus === "number" ? values.vcpus : undefined;
         const memoryMiB = typeof values.memoryMiB === "number" ? values.memoryMiB : typeof values.memory === "number" ? values.memory : undefined;

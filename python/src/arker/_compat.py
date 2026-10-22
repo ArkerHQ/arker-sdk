@@ -86,7 +86,7 @@ def arker_source(config: dict[str, Any] | None = None) -> str:
     source = cfg.get("source") or os.environ.get("ARKER_SOURCE") or os.environ.get("ARKER_SOURCE_VM")
     if not source:
         raise CompatibilityCreationNotStartedError(
-            "Arker source is required; set source, ARKER_SOURCE, or ARKER_SOURCE_VM"
+            "Arker source is required; set source, ARKER_SOURCE, or ARKER_SOURCE_VM_ID"
         )
     return str(source)
 
