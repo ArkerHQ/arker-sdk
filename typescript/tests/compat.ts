@@ -344,6 +344,9 @@ async function testE2BArkerGitRunsOfficialWorkflowAgainstLocalRepository(): Prom
   const checkout = join(root, "checkout");
   const box = new FakeSandbox("git-vm");
   box.runCommand = async (command, options) => {
+    if (command.startsWith("command -v setpriv >/dev/null ")) {
+      return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
+    }
     box.runCalls.push({ command, options });
     command = command.replace("setpriv --reuid=user --regid=user --init-groups -- ", "");
     try {
@@ -402,6 +405,9 @@ async function testE2BArkerFilesBatchMetadataAndRename(): Promise<void> {
     writeFileSync(path, content);
   };
   box.runCommand = async (command, options) => {
+    if (command.startsWith("command -v setpriv >/dev/null ")) {
+      return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
+    }
     box.runCalls.push({ command, options });
     command = command.replace("setpriv --reuid=user --regid=user --init-groups -- ", "");
     try {
