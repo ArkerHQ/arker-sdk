@@ -1,5 +1,29 @@
 # Recorded coverage baseline
 
+## Current SDK main integration
+
+Source `8cb23cf` includes SDK main `4f1b1d9` and its 1.3.0 SDK release,
+API-key contracts and subprocess-lifetime controls. Generated contracts match;
+522 Python units, Ruff, TypeScript typecheck/full tests/build/packed consumers,
+25 tooling tests, CLI checks and Go vet/build/unit tests pass. All 11 GitHub
+checks pass. Initial merged-unit validation found the new upstream exact policy
+union assertion omitted this branch's intentional `OutboundGuardRule`; the
+corrected exact union preserves the remaining withdrawn-shape checks.
+
+Fresh production cohorts at this source execute **all 36 Python and all 31
+Node configurations**, with independent Node cases continuing after failure.
+Results: **32 Python pass / four fail; 26 Node pass / five fail**. Failures are
+the missing private-port route and rejected outbound-guard schema described
+below, now exercised in all HTTP transport/allowlist profiles. All four core
+and expanded strict gates are invoked and remain red, exit 1. Core coverage:
+**94/1,115 Python and 51/978 Node**; expanded: **94/1,138 and 51/1,048**.
+The 45 credential-free records, including failed cases, are retained under
+`evidence/production-main-20261022-*.jsonl`. This is not full API parity or
+certification of unpublished backend changes. Python wheel SHA-256:
+`42f0136cd3035355ab76dcef9ede2ac41703cffb32708ec3b42dd4ba29b9ded5`.
+Packed npm SHA-256:
+`4e7776a24ecb4a4924fb4ffe25aee7c2b5e561fe097bfc2f3cb655d55f652a5d`.
+
 ## Native Blaxel watcher workspace isolation
 
 The TypeScript native adapter now gives synchronous filesystem watchers their

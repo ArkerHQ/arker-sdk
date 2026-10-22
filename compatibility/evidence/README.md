@@ -4,6 +4,19 @@ These are observations, not a claim of full compatibility. They contain API
 names, outcome, route, run ID, provider SDK version and implementation
 fingerprints; no credentials or returned file contents.
 
+`production-main-20261022-{python,node}.jsonl` supersede that day's earlier
+cohort at source `8cb23cf`, now including SDK main `4f1b1d9`. All 36 Python and
+31 Node configurations execute: Python 32 pass/four fail; Node 26 pass/five fail.
+The same missing production private-port route and outbound-guard schema cause
+the failures; no policy relaxation is used. All four strict gates fail exit 1.
+Core coverage is 94/1,115 Python and 51/978 Node; expanded is 94/1,138 and
+51/1,048. The 45 traces retain failed private-fetch outcomes too. Fingerprints:
+
+- Python: `9ddf67ea7c3c5ca29f0fff89b5f603280351948956428638daa63499415ef4b7`.
+- Node: `0c7a409da8d47d1ca637f2b2d946329c7420912ee25087b48a04345b31fa110f`.
+
+These remain tied to the prior pinned vendor versions, not subsequent upgrades.
+
 `production-20261022-python.jsonl` and `production-20261022-node.jsonl` record
 source `8361b4a` against the existing us-west-2 production API using the supplied
 key, without a feature deployment. Python executes 36 cases: 32 pass and four
