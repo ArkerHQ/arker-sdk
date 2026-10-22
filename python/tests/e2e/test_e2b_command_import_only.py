@@ -7,6 +7,7 @@ import pytest
 from compat_evidence import record
 
 PROGRAM = """
+import concurrent.futures
 from e2b import Sandbox, CommandResult, CommandExitException, CommandHandle, NotFoundException
 
 sandbox = Sandbox.create()
@@ -53,6 +54,23 @@ try:
     connected.send_stdin("shared\\n")
     connected.close_stdin()
     assert connected.wait().stdout == "shared\\nreconnected"
+    sandbox.commands.run("mkdir -p /tmp/compat-process-a /tmp/compat-process-b")
+    isolated = [
+        sandbox.commands.run(
+            'printf "%s|" "$COMPAT_PROCESS"; pwd; sleep 0.1',
+            background=True,
+            cwd=directory,
+            envs={"COMPAT_PROCESS": value},
+        )
+        for directory, value in (("/tmp/compat-process-a", "one"), ("/tmp/compat-process-b", "two"))
+    ]
+    assert isolated[0].pid != isolated[1].pid
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        isolated_results = list(executor.map(lambda current: current.wait(), isolated))
+    assert [result.stdout for result in isolated_results] == [
+        "one|/tmp/compat-process-a\\n",
+        "two|/tmp/compat-process-b\\n",
+    ]
     killed = sandbox.commands.run("cat", background=True, stdin=True)
     assert killed.kill() is True
     try:
