@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import shlex
 from typing import Any
 
 from ._compat import UnsupportedCompatibilityOption, _InstanceOrClassMethod, import_optional
@@ -84,17 +83,18 @@ class _AsyncCommands:
                 timeout=timeout,
                 request_timeout=request_timeout,
             )
-        if user is not None or request_timeout is not None:
-            raise UnsupportedCompatibilityOption("E2B user and per-request timeouts are not yet supported on Arker")
+        if request_timeout is not None:
+            raise UnsupportedCompatibilityOption("E2B per-request timeouts are not yet supported on Arker")
         from ._compat_e2b import async_command_handle, require_native_handle
+        from .e2b import _identity_command
 
         require_native_handle()
         current = await _call(
             self._commands._processes.exec,
             {
-                "command": f"exec /bin/bash -lc {shlex.quote(cmd)}",
-                "workingDir": cwd or "/home/user",
-                "env": envs or {},
+                "command": "exec " + _identity_command(cmd, user=user, cwd=cwd, env=envs),
+                "workingDir": "/",
+                "env": {},
                 "stdin": bool(stdin),
             },
         )

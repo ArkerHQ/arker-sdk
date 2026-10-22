@@ -57,6 +57,40 @@ function gitCommands(commands: Sandbox["commands"]): VendorCommands {
 }
 
 const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess"] as const;
+const E2B_HOME = "/home/user";
+
+function identityCommand(command: string, options?: { user?: string; cwd?: string; env?: Record<string, string> }): string {
+  const user = options?.user ?? "user";
+  if (user !== "user" && user !== "root") {
+    throw new ArkerError("unsupported_operation", "Arker E2B commands support only the default user or root", 422);
+  }
+  const assignments = { HOME: user === "user" ? E2B_HOME : "/root", USER: user, LOGNAME: user, ...options?.env };
+  const exports = Object.entries(assignments).map(([key, value]) => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new TypeError(`Invalid environment variable name: ${key}`);
+    return `export ${key}=${shellQuote(value)};`;
+  }).join(" ");
+  const shell = `cd ${shellQuote(options?.cwd ?? E2B_HOME)} && ${exports} exec /bin/bash -c ${shellQuote(command)}`;
+  return `runuser -u ${user} -- sh -c ${shellQuote(shell)}`;
+}
+
+function filesystemCommand(command: string, user: unknown): string {
+  return user === undefined ? command : identityCommand(command, { user: user as string, cwd: "/" });
+}
+
+async function validateE2BIdentity(box: UniversalSandbox): Promise<void> {
+  const result = await box.runCommand(
+    "test \"$(getent passwd user)\" = 'user:x:1000:1000::/home/user:/bin/bash' "
+      + "&& test \"$(getent group user)\" = 'user:x:1000:' "
+      + "&& test \"$(stat -c '%u:%g:%a' /home/user)\" = '1000:1000:755'",
+  );
+  if (result.exitCode !== 0) {
+    throw new ArkerError(
+      "unsupported_operation",
+      "Arker E2B compatibility requires an explicitly configured source VM with user:user at UID/GID 1000 and /home/user owned 1000:1000 mode 0755",
+      422,
+    );
+  }
+}
 
 function routingOptions(routerConfigPath?: string) {
   return {
@@ -97,13 +131,15 @@ export class Sandbox {
     this.#processes = box.provider === "arker" ? new GuestProcesses(box) : undefined;
     this.commands = {
       run: (async (command: string, options?: CommandOptions): Promise<CommandExitResult | CommandHandle> => {
-        const { env, envs, timeout, timeoutMs, ...rest } = options ?? {};
+        const { env, envs, timeout, timeoutMs, cwd, user, ...rest } = options ?? {};
         if (env !== undefined && envs !== undefined) throw new TypeError("Pass envs, not both env and envs");
         if (timeout !== undefined && timeoutMs !== undefined) throw new TypeError("Pass timeoutMs, not both timeout and timeoutMs");
         if (this.#native?.commands) {
           try {
             return await this.#native.commands.run(command, {
               ...rest,
+              ...(cwd !== undefined ? { cwd } : {}),
+              ...(user !== undefined ? { user } : {}),
               ...(envs !== undefined || env !== undefined ? { envs: envs ?? env } : {}),
               ...(timeoutMs !== undefined || timeout !== undefined ? { timeoutMs: timeoutMs ?? timeout } : {}),
             });
@@ -119,24 +155,22 @@ export class Sandbox {
             throw error;
           }
         }
-        assertSupportedObjectKeys(options, ["cwd", "env", "envs", "timeout", "timeoutMs", "background", "stdin", "onStdout", "onStderr"], "e2b", "commands.run");
+        assertSupportedObjectKeys(options, ["cwd", "env", "envs", "timeout", "timeoutMs", "background", "stdin", "onStdout", "onStderr", "user"], "e2b", "commands.run");
         const limit = timeoutMs ?? timeout;
         if (limit !== undefined && (!Number.isFinite(limit) || limit < 0)) throw new RangeError("timeoutMs must be nonnegative and finite");
         if (options?.background || options?.stdin || options?.onStdout || options?.onStderr) {
           const current = await this.#processes!.exec({
-            command: `exec /bin/bash -lc ${shellQuote(command)}`, workingDir: options?.cwd ?? "/home/user",
-            env: envs ?? env ?? {}, stdin: options?.stdin ?? false,
+            command: `exec ${identityCommand(command, { user, cwd, env: envs ?? env })}`,
+            workingDir: "/", env: {}, stdin: options?.stdin ?? false,
           });
           const handle = e2bCommandHandle(this.#processes!, current, {
             timeoutMs: limit, onStdout: options?.onStdout, onStderr: options?.onStderr,
           });
           return options?.background ? handle : handle.wait();
         }
-        const result = await this.#box.runCommand(command, {
+        const result = await this.#box.runCommand(identityCommand(command, { user, cwd, env: envs ?? env }), {
           ...rest,
-          ...(envs !== undefined || env !== undefined ? { env: envs ?? env } : {}),
           ...(timeoutMs !== undefined || timeout !== undefined ? { timeout: timeoutMs ?? timeout } : {}),
-          ...(this.provider === "arker" && options?.cwd === undefined ? { cwd: "/home/user" } : {}),
         });
         const output = {
           stdout: result.stdout,
@@ -178,12 +212,31 @@ export class Sandbox {
     };
     this.files = this.#native?.files ?? ({
       read: async (path: string, options?: Record<string, unknown>) => {
-        assertSupportedObjectKeys(options, ["format"], "e2b", "files.read");
+        assertSupportedObjectKeys(options, ["format", "user"], "e2b", "files.read");
         const format = options?.format ?? "text";
         if (format !== "text" && format !== "bytes") {
           throw new ArkerError("unsupported_operation", "Arker files.read supports buffered text/bytes formats, not this format", 422);
         }
-        const resolved = resolveCompatPath(path, "/home/user");
+        const resolved = resolveCompatPath(path, E2B_HOME);
+        if (options?.user !== undefined) {
+          const staged = `/tmp/.computesdk-e2b-read-${randomUUID()}`;
+          const vm = (this.#box as unknown as { getInstance(): VM }).getInstance();
+          let readError: Error | undefined;
+          let content: Uint8Array | undefined;
+          try {
+            const copied = await this.#box.runCommand(identityCommand(
+              `cat -- ${shellQuote(resolved)} > ${shellQuote(staged)}`,
+              { user: options.user as string },
+            ));
+            if (copied.exitCode !== 0) throw new Error(copied.stderr || `read failed with exit ${copied.exitCode}`);
+            content = Uint8Array.from(await vm.sync(staged));
+          } catch (error) { readError = error instanceof Error ? error : new Error(String(error)); }
+          const cleanup = await this.#box.runCommand(`rm -f -- ${shellQuote(staged)}`);
+          if (readError) throw readError;
+          if (cleanup.exitCode !== 0) throw new Error(cleanup.stderr || `temporary file cleanup failed with exit ${cleanup.exitCode}`);
+          if (!content) throw new Error("Arker file read returned no data");
+          return format === "bytes" ? content : new TextDecoder().decode(content);
+        }
         if (format === "bytes") {
           const vm = (this.#box as unknown as { getInstance(): VM }).getInstance();
           return Uint8Array.from(await vm.sync(resolved));
@@ -191,7 +244,7 @@ export class Sandbox {
         return this.#box.filesystem.readFile(resolved);
       },
       write: async (path: string, content: string | ArrayBuffer, options?: Record<string, unknown>) => {
-        assertSupportedObjectKeys(options, [], "e2b", "files.write");
+        assertSupportedObjectKeys(options, ["user"], "e2b", "files.write");
         const resolved = resolveCompatPath(path, "/home/user");
         if (typeof content !== "string" && !(content instanceof ArrayBuffer)) {
           throw new ArkerError("unsupported_operation", "Arker files.write supports string/ArrayBuffer data, not this input", 422);
@@ -203,7 +256,9 @@ export class Sandbox {
         let writeError: Error | undefined;
         try {
           await vm.sync(staged, typeof content === "string" ? new TextEncoder().encode(content) : new Uint8Array(content));
-          const written = await this.#box.runCommand(`runuser -u user -- sh -c ${shellQuote(userCommand)}`);
+          const written = await this.#box.runCommand(identityCommand(userCommand, {
+            user: options?.user as string | undefined, cwd: "/",
+          }));
           if (written.exitCode !== 0) writeError = new Error(written.stderr || `write failed with exit ${written.exitCode}`);
         } catch (error) {
           writeError = error instanceof Error ? error : new Error(String(error));
@@ -223,33 +278,57 @@ export class Sandbox {
         files: Array<{ path: string; data: string | ArrayBuffer | Blob | ReadableStream }>,
         options?: Record<string, unknown>,
       ) => {
-        assertSupportedObjectKeys(options, [], "e2b", "files.writeFiles");
+        assertSupportedObjectKeys(options, ["user"], "e2b", "files.writeFiles");
         const written = [];
-        for (const file of files) written.push(await (this.files as any).write(file.path, file.data));
+        for (const file of files) written.push(await (this.files as any).write(file.path, file.data, options));
         return written;
       },
       makeDir: async (path: string, options?: Record<string, unknown>) => {
-        assertSupportedObjectKeys(options, [], "e2b", "files.makeDir");
-        await this.#box.filesystem.mkdir(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path);
+        assertSupportedObjectKeys(options, ["user"], "e2b", "files.makeDir");
+        const result = await this.#box.runCommand(identityCommand(
+          `mkdir -p -- ${shellQuote(resolveCompatPath(path, E2B_HOME))}`,
+          { user: options?.user as string | undefined, cwd: "/" },
+        ));
+        if (result.exitCode !== 0) throw new Error(result.stderr || `mkdir failed with exit ${result.exitCode}`);
       },
       list: async (path: string, options?: Record<string, unknown>) => {
-        assertSupportedObjectKeys(options, [], "e2b", "files.list");
-        return this.#box.filesystem.readdir(resolveCompatPath(path, "/home/user"));
+        assertSupportedObjectKeys(options, ["user"], "e2b", "files.list");
+        const resolved = resolveCompatPath(path, E2B_HOME);
+        const script = `cd ${shellQuote(resolved)} 2>/dev/null || exit 3; for e in * .*; do `
+          + `[ "$e" = "." ] && continue; [ "$e" = ".." ] && continue; [ -e "$e" ] || continue; `
+          + `if [ -d "$e" ]; then t=dir; else t=file; fi; printf '%s\\t%s\\n' "$t" "$e"; done`;
+        const result = await this.#box.runCommand(filesystemCommand(script, options?.user));
+        if (result.exitCode !== 0) throw new Error(result.stderr || `list failed with exit ${result.exitCode}`);
+        const names = result.stdout.split("\n").filter((line) => line.includes("\t")).map((line) => line.split("\t", 2)[1]!);
+        return Promise.all(names.map((name) => (this.files as any).getInfo(`${resolved.replace(/\/$/, "")}/${name}`, options)));
       },
       exists: async (path: string, options?: Record<string, unknown>) => {
-        assertSupportedObjectKeys(options, [], "e2b", "files.exists");
+        assertSupportedObjectKeys(options, ["user"], "e2b", "files.exists");
+        if (options?.user !== undefined) {
+          return (await this.#box.runCommand(filesystemCommand(
+            `test -e ${shellQuote(resolveCompatPath(path, E2B_HOME))}`, options.user,
+          ))).exitCode === 0;
+        }
         return this.#box.filesystem.exists(resolveCompatPath(path, "/home/user"));
       },
       remove: async (path: string, options?: Record<string, unknown>) => {
-        assertSupportedObjectKeys(options, [], "e2b", "files.remove");
+        assertSupportedObjectKeys(options, ["user"], "e2b", "files.remove");
+        if (options?.user !== undefined) {
+          const result = await this.#box.runCommand(filesystemCommand(
+            `rm -rf -- ${shellQuote(resolveCompatPath(path, E2B_HOME))}`, options.user,
+          ));
+          if (result.exitCode !== 0) throw new Error(result.stderr || `remove failed with exit ${result.exitCode}`);
+          return;
+        }
         await this.#box.filesystem.remove(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path);
       },
       getInfo: async (path: string, options?: Record<string, unknown>) => {
-        assertSupportedObjectKeys(options, [], "e2b", "files.getInfo");
+        assertSupportedObjectKeys(options, ["user"], "e2b", "files.getInfo");
         const resolved = resolveCompatPath(path, "/home/user");
-        const result = await this.#box.runCommand(
+        const result = await this.#box.runCommand(filesystemCommand(
           `stat --printf '%n\\037%s\\037%f\\037%A\\037%U\\037%G\\037%Y\\037%F' -- ${shellQuote(resolved)}`,
-        );
+          options?.user,
+        ));
         if (result.exitCode !== 0) throw new Error(result.stderr || `stat failed with exit ${result.exitCode}`);
         const values = result.stdout.split("\x1f");
         if (values.length !== 8) throw new Error("Incomplete file information response");
@@ -258,7 +337,7 @@ export class Sandbox {
         let symlinkTarget: string | undefined;
         if (description.includes("symbolic link")) {
           type = FileType.SYMLINK;
-          const target = await this.#box.runCommand(`readlink -- ${shellQuote(resolved)}`);
+          const target = await this.#box.runCommand(filesystemCommand(`readlink -- ${shellQuote(resolved)}`, options?.user));
           if (target.exitCode === 0) symlinkTarget = target.stdout.replace(/\n$/, "");
         }
         return {
@@ -275,22 +354,37 @@ export class Sandbox {
         };
       },
       rename: async (oldPath: string, newPath: string, options?: Record<string, unknown>) => {
-        assertSupportedObjectKeys(options, [], "e2b", "files.rename");
+        assertSupportedObjectKeys(options, ["user"], "e2b", "files.rename");
         const oldResolved = resolveCompatPath(oldPath, "/home/user");
         const newResolved = resolveCompatPath(newPath, "/home/user");
         const parent = newResolved.slice(0, newResolved.lastIndexOf("/")) || "/";
-        const result = await this.#box.runCommand(
+        const result = await this.#box.runCommand(filesystemCommand(
           `mkdir -p -- ${shellQuote(parent)} && mv -- ${shellQuote(oldResolved)} ${shellQuote(newResolved)}`,
-        );
+          options?.user,
+        ));
         if (result.exitCode !== 0) throw new Error(result.stderr || `rename failed with exit ${result.exitCode}`);
-        return (this.files as any).getInfo(newResolved);
+        return (this.files as any).getInfo(newResolved, options);
       },
     } as unknown as VendorSandbox["files"]);
     this.git = this.#native?.git ?? new Git(gitCommands(this.commands));
   }
 
-  private static async wrap(box: UniversalSandbox): Promise<Sandbox> {
+  private static async wrap(
+    box: UniversalSandbox,
+    options: { validateIdentity?: boolean; deleteOnValidationFailure?: boolean } = {},
+  ): Promise<Sandbox> {
     const native = nativeInstance(box);
+    if (!native && box.provider === "arker" && options.validateIdentity !== false) {
+      try {
+        await validateE2BIdentity(box);
+      } catch (error) {
+        if (options.deleteOnValidationFailure) {
+          const vm = (box as UniversalSandbox & { getInstance(): VM }).getInstance();
+          await vm.delete().catch(() => undefined);
+        }
+        throw error;
+      }
+    }
     const arkerHostname = box.provider === "arker"
       ? await box.getUrl({ port: 8080 }).then((url) => new URL(url).hostname).catch(() => undefined)
       : undefined;
@@ -311,7 +405,7 @@ export class Sandbox {
       ...((opts as any)?.metadata ? { metadata: (opts as any).metadata } : {}),
       ...((opts as any)?.allowInternetAccess !== undefined ? { allowInternetAccess: (opts as any).allowInternetAccess } : {}),
     });
-    return Sandbox.wrap(box);
+    return Sandbox.wrap(box, { deleteOnValidationFailure: true });
   }
 
   static async connect(sandboxId: string, opts?: Pick<CreateOptions, "routerConfigPath">): Promise<Sandbox> {
@@ -326,7 +420,7 @@ export class Sandbox {
     const owner = await createCompatRouter(routingOptions(opts?.routerConfigPath)).getOwner(sandboxId);
     if (!owner) return false;
     if (owner.provider === "e2b") return VendorSandbox.kill(sandboxId);
-    return (await Sandbox.wrap(owner.instance)).kill();
+    return (await Sandbox.wrap(owner.instance, { validateIdentity: false })).kill();
   }
 
   getHost(port: number): string {

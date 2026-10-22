@@ -7,6 +7,11 @@ import pytest
 import arker.e2b as shim
 
 
+@pytest.fixture(autouse=True)
+def _valid_e2b_parent_identity(monkeypatch):
+    monkeypatch.setattr(shim, "_validate_e2b_identity", lambda vm: None)
+
+
 def test_native_creation_that_suppresses_cancellation_is_not_leaked(tmp_path, monkeypatch):
     native = pytest.importorskip("e2b")
     _router(tmp_path, monkeypatch, ["e2b"])

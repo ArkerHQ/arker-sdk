@@ -14,11 +14,17 @@ import httpx2 as httpx
 import pytest
 
 import arker.computer as sdk
+import arker.e2b as e2b_shim
 from arker._compat import arker_create, arker_source, compat_network_policies
 from arker.blaxel import SyncSandboxInstance as BlaxelSandbox
 from arker.daytona import Daytona
 from arker.e2b import Sandbox as E2BSandbox
 from arker.modal import Sandbox as ModalSandbox
+
+
+@pytest.fixture(autouse=True)
+def _valid_e2b_parent_identity(monkeypatch):
+    monkeypatch.setattr(e2b_shim, "_validate_e2b_identity", lambda vm: None)
 
 
 def test_blaxel_native_filesystem_retains_options_and_operation_identity():
@@ -494,7 +500,10 @@ def test_e2b_official_surface(monkeypatch) -> None:
         sandbox.kill()
 
     run = json.loads(t.calls[1]["body"])
-    assert run["command"] == '(\nexport FOO=bar; cd /workspace && echo "Hello from E2B Sandbox!"\n)'
+    assert run["command"].startswith("(\nrunuser -u user -- sh -c ")
+    assert "cd /workspace" in run["command"]
+    assert "export HOME=/home/user" in run["command"]
+    assert "export FOO=bar" in run["command"]
     assert run["timeout"] == 8
 
 
@@ -515,6 +524,9 @@ def test_e2b_nested_native_surface_delegates_provider_extensions() -> None:
 
 
 def test_e2b_arker_git_runs_official_workflow_against_local_repository(tmp_path) -> None:
+    for directory in (tmp_path.parent.parent, tmp_path.parent, tmp_path):
+        directory.chmod(0o777)
+
     class LocalVM:
         id = "local-git"
 

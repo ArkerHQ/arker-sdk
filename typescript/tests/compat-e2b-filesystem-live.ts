@@ -14,6 +14,17 @@ async function program(Sandbox: SandboxConstructor): Promise<void> {
   const root = "/tmp/compat-e2b-files";
   const relative = "compat-e2b-relative";
   try {
+    const identityCommand = `printf '%s|%s|%s|%s|%s|%s|%s' "$(id -un)" "$(id -u)" "$(id -g)" "$HOME" "$USER" "$LOGNAME" "$PWD"`;
+    assert.equal((await sandbox.commands.run(identityCommand)).stdout, "user|1000|1000|/home/user|user|user|/home/user");
+    assert.equal((await sandbox.commands.run(identityCommand, { user: "root" })).stdout, "root|0|0|/root|root|root|/home/user");
+    assert.equal((await sandbox.commands.run(`printf %s "$COMPAT_ONCE"`, { envs: { COMPAT_ONCE: "one" } })).stdout, "one");
+    assert.equal((await sandbox.commands.run(`printf %s "\${COMPAT_ONCE-unset}"`)).stdout, "unset");
+    assert.equal((await sandbox.commands.run("pwd", { cwd: "/tmp" })).stdout.trim(), "/tmp");
+    assert.equal((await sandbox.commands.run("pwd")).stdout.trim(), "/home/user");
+    await sandbox.commands.run("umask 077");
+    await sandbox.commands.run("printf secret > /tmp/compat-e2b-root-only && chmod 600 /tmp/compat-e2b-root-only", { user: "root" });
+    assert.equal(await sandbox.files.read("/tmp/compat-e2b-root-only"), "secret");
+    await sandbox.commands.run("rm -f /tmp/compat-e2b-root-only", { user: "root" });
     await sandbox.commands.run(`rm -rf ${root} /home/user/${relative}`);
     await sandbox.files.makeDir(root);
     const text = await sandbox.files.write(`${root}/text.txt`, "hello\n");

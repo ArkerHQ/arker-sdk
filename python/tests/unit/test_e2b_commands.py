@@ -44,7 +44,11 @@ def test_arker_command_accepts_vendor_environment_and_raises_vendor_exit(monkeyp
     assert raised.value.stdout == "output"
     assert raised.value.stderr == "failure"
     assert raised.value.error == "exit status 17"
-    assert calls == ["export VALUE=kept; cd /home/user && exit 17"]
+    assert len(calls) == 1
+    assert calls[0].startswith("runuser -u user -- sh -c ")
+    assert "export HOME=/home/user" in calls[0]
+    assert "export VALUE=kept" in calls[0]
+    assert "cd /home/user" in calls[0]
 
 
 def test_background_returns_a_native_handle_with_stdin_eof_and_typed_wait(monkeypatch):

@@ -40,6 +40,8 @@ test("Arker filesystem options are rejected instead of silently ignored", async 
   let calls = 0;
   const sandbox = Reflect.construct(Sandbox, [{
     provider: "arker", sandboxId: "arker",
+    getInstance: () => ({ sync: async () => undefined }),
+    runCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
     filesystem: {
       readFile: async () => { calls++; return "wrong"; },
       writeFile: async () => { calls++; },
@@ -50,9 +52,9 @@ test("Arker filesystem options are rejected instead of silently ignored", async 
     },
   }]) as Sandbox;
   for (const method of ["read", "list", "exists", "remove", "makeDir"] as const) {
-    await assert.rejects(sandbox.files[method]("/owned", { user: "another" }), /received unsupported option\(s\) 'user'/);
+    await assert.rejects(sandbox.files[method]("/owned", { user: "another" }), /only the default user or root/);
   }
-  await assert.rejects(sandbox.files.write("/owned", "data", { user: "another" }), /received unsupported option\(s\) 'user'/);
+  await assert.rejects(sandbox.files.write("/owned", "data", { user: "another" }), /only the default user or root/);
   assert.equal(calls, 0);
 });
 
@@ -92,7 +94,7 @@ test("Arker writes and metadata match the E2B default user", async () => {
     runCommand: async (command: string) => {
       commands.push(command);
       return {
-        stdout: command.startsWith("stat ") ? "/tmp/file\x1f4\x1f81a4\x1f-rw-r--r--\x1fuser\x1fuser\x1f1\x1fregular file" : "",
+        stdout: command.includes("stat --printf") ? "/tmp/file\x1f4\x1f81a4\x1f-rw-r--r--\x1fuser\x1fuser\x1f1\x1fregular file" : "",
         stderr: "", exitCode: 0,
       };
     },
@@ -101,7 +103,7 @@ test("Arker writes and metadata match the E2B default user", async () => {
   const info = await sandbox.files.getInfo("/tmp/file");
   assert.match(commands[0]!, /^runuser -u user -- sh -c /);
   assert.match(commands[0]!, /cat -- \/tmp\/.computesdk-e2b-write-/);
-  assert.match(commands[0]!, /> \/tmp\/file'$/);
+  assert.match(commands[0]!, /> \/tmp\/file/);
   assert.match(commands[1]!, /^rm -f -- \/tmp\/.computesdk-e2b-write-/);
   assert.equal(info.permissions, "-rw-r--r--");
   assert.deepEqual([info.owner, info.group], ["user", "user"]);

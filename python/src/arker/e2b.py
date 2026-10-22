@@ -4,6 +4,7 @@ import posixpath
 import re
 import shlex
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal, overload
@@ -30,6 +31,49 @@ from ._compat import (
 from ._compat_e2b_async import AsyncSandbox as AsyncSandbox
 from ._compat_process import GuestProcessError, GuestProcesses
 from .computer import VM, ArkerError
+
+_E2B_USER = "user"
+_E2B_HOME = "/home/user"
+
+
+def _identity_command(
+    command: str,
+    *,
+    user: str | None = None,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+) -> str:
+    selected = user or _E2B_USER
+    if selected not in {_E2B_USER, "root"}:
+        raise UnsupportedCompatibilityOption("Arker E2B commands support only the default user or root")
+    home = _E2B_HOME if selected == _E2B_USER else "/root"
+    working_directory = cwd or _E2B_HOME
+    exports = {"HOME": home, "USER": selected, "LOGNAME": selected, **(env or {})}
+    assignments = []
+    for key, value in exports.items():
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) is None:
+            raise ValueError(f"Invalid environment variable name: {key}")
+        assignments.append(f"export {key}={shlex.quote(value)};")
+    shell = f"cd {shlex.quote(working_directory)} && {' '.join(assignments)} exec /bin/bash -c {shlex.quote(command)}"
+    return f"runuser -u {selected} -- sh -c {shlex.quote(shell)}"
+
+
+def _validate_e2b_identity(vm: VM) -> None:
+    check = run_command(
+        vm,
+        "test \"$(getent passwd user)\" = 'user:x:1000:1000::/home/user:/bin/bash' "
+        "&& test \"$(getent group user)\" = 'user:x:1000:' "
+        "&& test \"$(stat -c '%u:%g:%a' /home/user)\" = '1000:1000:755'",
+    )
+    if check.exit_code != 0:
+        raise UnsupportedCompatibilityOption(
+            "Arker E2B compatibility requires an explicitly configured source VM with "
+            "user:user at UID/GID 1000 and /home/user owned 1000:1000 mode 0755"
+        )
+
+
+def _filesystem_command(command: str, *, user: str | None) -> str:
+    return command if user is None else _identity_command(command, user=user, cwd="/")
 
 
 @dataclass(frozen=True)
@@ -118,34 +162,23 @@ class Commands(UnsupportedMixin):
             raise TypeError("Pass envs, not both env and envs")
         environment = envs if envs is not None else env
         if self._vm is not None:
-            if user is not None or request_timeout is not None:
-                raise UnsupportedCompatibilityOption(
-                    "E2B user and per-request timeout options are not yet supported on Arker"
-                )
+            if request_timeout is not None:
+                raise UnsupportedCompatibilityOption("E2B per-request timeout options are not yet supported on Arker")
             if background or stdin or on_stdout is not None or on_stderr is not None:
                 from ._compat_e2b import command_handle, require_native_handle
 
                 require_native_handle()
                 current = self._processes.exec(
                     {
-                        "command": f"exec /bin/bash -lc {shlex.quote(command)}",
-                        "workingDir": cwd or "/home/user",
-                        "env": environment or {},
+                        "command": "exec " + _identity_command(command, user=user, cwd=cwd, env=environment),
+                        "workingDir": "/",
+                        "env": {},
                         "stdin": bool(stdin),
                     }
                 )
                 handle = command_handle(self._processes, current, timeout)
                 return handle if background else handle.wait(on_stdout=on_stdout, on_stderr=on_stderr)
-            prefix = ""
-            if environment:
-                exports = []
-                for key, value in environment.items():
-                    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) is None:
-                        raise ValueError(f"Invalid environment variable name: {key}")
-                    exports.append(f"export {key}={shlex.quote(value)};")
-                prefix += " ".join(exports) + " "
-            prefix += f"cd {shlex.quote(cwd or '/home/user')} && "
-            full_command = prefix + command
+            full_command = _identity_command(command, user=user, cwd=cwd, env=environment)
             result = run_command(self._vm, full_command, timeout=timeout)
             module = import_optional("e2b")
             fields = {"stdout": result.stdout, "stderr": result.stderr, "exit_code": result.exit_code, "error": None}
@@ -233,7 +266,7 @@ class Files(UnsupportedMixin):
             raise UnsupportedCompatibilityOption(
                 "Arker files.read supports buffered text/bytes formats, not this format"
             )
-        raw = self._vm.sync(resolve_compat_path(path, "/home/user"))
+        raw = self._vm.sync(resolve_compat_path(path, _E2B_HOME))
         if raw is None:
             raise RuntimeError("Arker file read returned no data")
         return bytearray(raw) if format == "bytes" else raw.decode("utf-8", "replace")
@@ -261,7 +294,6 @@ class Files(UnsupportedMixin):
         unsupported = [
             name
             for name, enabled in (
-                ("user", user is not None),
                 ("request_timeout", request_timeout is not None),
                 ("gzip", gzip),
                 ("use_octet_stream", use_octet_stream is not None),
@@ -282,7 +314,7 @@ class Files(UnsupportedMixin):
             self._vm.sync(staged, content)
             written = run_command(
                 self._vm,
-                "runuser -u user -- sh -c " + shlex.quote(user_command),
+                _identity_command(user_command, user=user, cwd="/"),
             )
             if written.exit_code != 0:
                 raise RuntimeError(written.stderr or f"write failed with exit {written.exit_code}")
@@ -337,12 +369,15 @@ class Files(UnsupportedMixin):
     def get_info(self, path: str, user: str | None = None, request_timeout: float | None = None) -> Any:
         if self._vm is None:
             return self._native.get_info(path, user=user, request_timeout=request_timeout)
-        if user is not None or request_timeout is not None:
-            raise UnsupportedCompatibilityOption("Arker files.get_info does not support user or request_timeout")
+        if request_timeout is not None:
+            raise UnsupportedCompatibilityOption("Arker files.get_info does not support request_timeout")
         resolved = resolve_compat_path(path, "/home/user")
         result = run_command(
             self._vm,
-            "stat --printf '%n\\037%s\\037%f\\037%A\\037%U\\037%G\\037%Y\\037%F' -- " + shlex.quote(resolved),
+            _filesystem_command(
+                "stat --printf '%n\\037%s\\037%f\\037%A\\037%U\\037%G\\037%Y\\037%F' -- " + shlex.quote(resolved),
+                user=user,
+            ),
         )
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"stat failed with exit {result.exit_code}")
@@ -352,7 +387,10 @@ class Files(UnsupportedMixin):
         name, size, mode, permissions, owner, group, modified, description = values
         if "symbolic link" in description:
             file_type = _file_type("SYMLINK")
-            target_result = run_command(self._vm, "readlink -- " + shlex.quote(resolved))
+            target_result = run_command(
+                self._vm,
+                _filesystem_command("readlink -- " + shlex.quote(resolved), user=user),
+            )
             symlink_target = target_result.stdout.rstrip("\n") if target_result.exit_code == 0 else None
         else:
             file_type = _file_type("DIR" if "directory" in description else "FILE")
@@ -382,14 +420,17 @@ class Files(UnsupportedMixin):
     ) -> Any:
         if self._vm is None:
             return self._native.rename(old_path, new_path, user=user, request_timeout=request_timeout)
-        if user is not None or request_timeout is not None:
-            raise UnsupportedCompatibilityOption("Arker files.rename does not support user or request_timeout")
+        if request_timeout is not None:
+            raise UnsupportedCompatibilityOption("Arker files.rename does not support request_timeout")
         old_resolved = resolve_compat_path(old_path, "/home/user")
         new_resolved = resolve_compat_path(new_path, "/home/user")
         result = run_command(
             self._vm,
-            f"mkdir -p -- {shlex.quote(posixpath.dirname(new_resolved))} && "
-            f"mv -- {shlex.quote(old_resolved)} {shlex.quote(new_resolved)}",
+            _filesystem_command(
+                f"mkdir -p -- {shlex.quote(posixpath.dirname(new_resolved))} && "
+                f"mv -- {shlex.quote(old_resolved)} {shlex.quote(new_resolved)}",
+                user=user,
+            ),
         )
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"rename failed with exit {result.exit_code}")
@@ -400,7 +441,10 @@ class Files(UnsupportedMixin):
             if hasattr(self._native, "make_dir"):
                 return self._native.make_dir(path)
             return self._native.makeDir(path)
-        result = run_command(self._vm, f"mkdir -p {shlex.quote(resolve_compat_path(path, '/home/user'))}")
+        result = run_command(
+            self._vm,
+            _identity_command(f"mkdir -p {shlex.quote(resolve_compat_path(path, _E2B_HOME))}", cwd="/"),
+        )
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"mkdir failed with exit {result.exit_code}")
         return None
@@ -422,22 +466,29 @@ class Files(UnsupportedMixin):
         result = run_command(self._vm, script)
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"list failed with exit {result.exit_code}")
-        return [
-            {"type": line.split("\t", 1)[0], "name": line.split("\t", 1)[1]}
-            for line in result.stdout.splitlines()
-            if "\t" in line
-        ]
+        names = [line.split("\t", 1)[1] for line in result.stdout.splitlines() if "\t" in line]
+        base = resolve_compat_path(path, _E2B_HOME)
+        return [self.get_info(posixpath.join(base, name)) for name in names]
 
     def exists(self, path: str) -> bool:
         if self._vm is None:
             return bool(self._native.exists(path))
-        return run_command(self._vm, f"test -e {shlex.quote(resolve_compat_path(path, '/home/user'))}").exit_code == 0
+        return (
+            run_command(
+                self._vm,
+                f"test -e {shlex.quote(resolve_compat_path(path, _E2B_HOME))}",
+            ).exit_code
+            == 0
+        )
 
     def remove(self, path: str) -> None:
         if self._vm is None:
             result = self._native.remove(path)
             return None if result is None else result
-        result = run_command(self._vm, f"rm -rf {shlex.quote(resolve_compat_path(path, '/home/user'))}")
+        result = run_command(
+            self._vm,
+            f"rm -rf {shlex.quote(resolve_compat_path(path, _E2B_HOME))}",
+        )
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"remove failed with exit {result.exit_code}")
         return None
@@ -533,6 +584,13 @@ class Sandbox(UnsupportedMixin):
                 "e2b": create_native,
             },
         )
+        if provider == "arker":
+            try:
+                _validate_e2b_identity(result)
+            except BaseException:
+                with suppress(BaseException):
+                    result.delete()
+                raise
         return cls(vm=result if provider == "arker" else None, native=result if provider == "e2b" else None)
 
     @staticmethod
@@ -580,6 +638,8 @@ class Sandbox(UnsupportedMixin):
         found, native = cls._lookup(sandbox_id, kwargs)
         if found is not None:
             provider, result = found
+            if provider == "arker":
+                _validate_e2b_identity(result)
             return cls(
                 vm=result if provider == "arker" else None,
                 native=native.connect(sandbox_id) if provider == "e2b" else None,

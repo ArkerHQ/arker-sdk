@@ -6,6 +6,31 @@ import pytest
 import arker.e2b as shim
 
 
+def test_arker_identity_validation_fails_closed_without_mutation(monkeypatch):
+    vm = types.SimpleNamespace(id="custom", deleted=False, delete=lambda: pytest.fail("validation must not mutate"))
+    monkeypatch.setattr(
+        shim,
+        "run_command",
+        lambda vm, command: shim._CommonCommandResult(stdout="", stderr="mismatch", exit_code=1),
+    )
+    with pytest.raises(shim.UnsupportedCompatibilityOption, match="UID/GID 1000"):
+        shim._validate_e2b_identity(vm)
+
+
+def test_arker_creation_validation_deletes_only_the_known_child(monkeypatch):
+    deleted = []
+    child = types.SimpleNamespace(id="child", delete=lambda: deleted.append("child"))
+    monkeypatch.setattr(shim, "routed_create", lambda *args, **kwargs: ("arker", child))
+    monkeypatch.setattr(
+        shim,
+        "_validate_e2b_identity",
+        lambda vm: (_ for _ in ()).throw(shim.UnsupportedCompatibilityOption("identity mismatch")),
+    )
+    with pytest.raises(shim.UnsupportedCompatibilityOption, match="identity mismatch"):
+        shim.Sandbox.create()
+    assert deleted == ["child"]
+
+
 def test_native_filesystem_is_preserved_with_binary_options_and_metadata():
     marker = object()
 
@@ -41,9 +66,14 @@ def test_async_native_filesystem_is_preserved_without_sync_translation():
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
-def test_arker_binary_reads_preserve_every_byte_and_native_return_type(asynchronous):
+def test_arker_binary_reads_preserve_every_byte_and_native_return_type(asynchronous, monkeypatch):
     payload = bytes(range(256))
     vm = types.SimpleNamespace(id="arker", sync=lambda path: payload)
+    monkeypatch.setattr(
+        shim,
+        "run_command",
+        lambda vm, command, **kwargs: shim._CommonCommandResult(stdout="", stderr="", exit_code=0),
+    )
     sandbox = shim.Sandbox(vm=vm)
     if asynchronous:
         from arker._compat_e2b_async import AsyncSandbox
@@ -88,7 +118,7 @@ def test_arker_writes_and_metadata_match_e2b_default_user(monkeypatch):
     info = files.get_info("/tmp/file")
     assert commands[0].startswith("runuser -u user -- sh -c ")
     assert "cat -- /tmp/.computesdk-e2b-write-" in commands[0]
-    assert commands[0].endswith("> /tmp/file'")
+    assert "> /tmp/file" in commands[0]
     assert commands[1].startswith("rm -f -- /tmp/.computesdk-e2b-write-")
     assert staged[0][0].startswith("/tmp/.computesdk-e2b-write-")
     assert info.permissions == "-rw-r--r--"
@@ -183,6 +213,7 @@ def test_connect_probes_metadata_before_connecting_only_the_winner(monkeypatch):
         ),
     )
     monkeypatch.setattr(shim.Sandbox, "_native_sandbox", staticmethod(lambda: native))
+    monkeypatch.setattr(shim, "_validate_e2b_identity", lambda vm: None)
 
     def route(identifier, provider, config, getters):
         getters["e2b"]()

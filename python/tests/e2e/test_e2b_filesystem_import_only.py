@@ -12,7 +12,26 @@ from e2b import FileType, Sandbox
 sandbox = Sandbox.create()
 root = "/tmp/compat-e2b-files-sync"
 relative = "compat-e2b-relative-sync"
+identity_command = (
+    "printf '%s|%s|%s|%s|%s|%s|%s' "
+    '"$(id -un)" "$(id -u)" "$(id -g)" "$HOME" "$USER" "$LOGNAME" "$PWD"'
+)
 try:
+    identity = sandbox.commands.run(identity_command)
+    assert identity.stdout == "user|1000|1000|/home/user|user|user|/home/user"
+    root_identity = sandbox.commands.run(identity_command, user="root")
+    assert root_identity.stdout == "root|0|0|/root|root|root|/home/user"
+    assert sandbox.commands.run("printf %s \"$COMPAT_ONCE\"", envs={"COMPAT_ONCE": "one"}).stdout == "one"
+    assert sandbox.commands.run("printf %s \"${COMPAT_ONCE-unset}\"").stdout == "unset"
+    assert sandbox.commands.run("pwd", cwd="/tmp").stdout.strip() == "/tmp"
+    assert sandbox.commands.run("pwd").stdout.strip() == "/home/user"
+    sandbox.commands.run("umask 077")
+    sandbox.commands.run(
+        "printf secret > /tmp/compat-e2b-root-only && chmod 600 /tmp/compat-e2b-root-only",
+        user="root",
+    )
+    assert sandbox.files.read("/tmp/compat-e2b-root-only") == "secret"
+    sandbox.commands.run("rm -f /tmp/compat-e2b-root-only", user="root")
     sandbox.commands.run("rm -rf " + root + " /home/user/" + relative)
     sandbox.files.make_dir(root)
     text = sandbox.files.write(root + "/text.txt", "hello\n")
@@ -65,7 +84,26 @@ async def main():
     sandbox = await AsyncSandbox.create()
     root = "/tmp/compat-e2b-files-async"
     relative = "compat-e2b-relative-async"
+    identity_command = (
+        "printf '%s|%s|%s|%s|%s|%s|%s' "
+        '"$(id -un)" "$(id -u)" "$(id -g)" "$HOME" "$USER" "$LOGNAME" "$PWD"'
+    )
     try:
+        identity = await sandbox.commands.run(identity_command)
+        assert identity.stdout == "user|1000|1000|/home/user|user|user|/home/user"
+        root_identity = await sandbox.commands.run(identity_command, user="root")
+        assert root_identity.stdout == "root|0|0|/root|root|root|/home/user"
+        assert (await sandbox.commands.run("printf %s \"$COMPAT_ONCE\"", envs={"COMPAT_ONCE": "one"})).stdout == "one"
+        assert (await sandbox.commands.run("printf %s \"${COMPAT_ONCE-unset}\"")).stdout == "unset"
+        assert (await sandbox.commands.run("pwd", cwd="/tmp")).stdout.strip() == "/tmp"
+        assert (await sandbox.commands.run("pwd")).stdout.strip() == "/home/user"
+        await sandbox.commands.run("umask 077")
+        await sandbox.commands.run(
+            "printf secret > /tmp/compat-e2b-root-only-async && chmod 600 /tmp/compat-e2b-root-only-async",
+            user="root",
+        )
+        assert await sandbox.files.read("/tmp/compat-e2b-root-only-async") == "secret"
+        await sandbox.commands.run("rm -f /tmp/compat-e2b-root-only-async", user="root")
         await sandbox.commands.run("rm -rf " + root + " /home/user/" + relative)
         await sandbox.files.make_dir(root)
         await sandbox.files.write(root + "/text.txt", "hello\n")
