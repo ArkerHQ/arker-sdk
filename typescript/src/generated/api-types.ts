@@ -1182,7 +1182,7 @@ export interface components {
             compatible_platforms?: components["schemas"]["CompatiblePlatform"][] | null;
             /**
              * Format: uuid
-             * @description The pool the VM belongs to. Absent when the VM is in no pool.
+             * @description The pool the VM belongs to, set when the VM is created and never changed. Absent when the VM is in no pool.
              */
             pool_id?: string;
         };
@@ -1806,13 +1806,6 @@ export interface components {
             ssh_public_keys?: components["schemas"]["SshKeysUpdate"] | string[];
             /** @description A change to the VM's network policy. Rules and secrets named are written or removed; the rest are kept, so concurrent changes to different rules do not overwrite each other. Omit it to leave the policy unchanged. If the policy cannot be stored and applied, the request fails. Changing only `policies` is allowed while the organization's billing is restricted. */
             policies?: components["schemas"]["PolicyUpdate"] | null;
-            /**
-             * Format: uuid
-             * @description Move the VM to another `managed` pool of the organization, or null to take it out of its pool. A VM cannot move into or out of a `byoc` or `self_hosted` pool (unsupported_operation). Mutually exclusive with pool_name. Omit both fields to keep the current pool.
-             */
-            pool_id?: string | null;
-            /** @description Move the VM to the `managed` pool with this name in the VM's region. Names are case-insensitive. Mutually exclusive with pool_id; otherwise the same as pool_id. */
-            pool_name?: string;
         };
         /** @description One platform this source can be forked onto, with the resource limits that apply there. This is the authoritative per-platform record: when an entry carries bounds they win over the flat `min_*`/`max_*` fields on the VM, which are a single-platform convenience projection of the same data. CPU, memory, and disk limits come from the source VM; GPU limits come from the platform catalog. */
         CompatiblePlatform: {

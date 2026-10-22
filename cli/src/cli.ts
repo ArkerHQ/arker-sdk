@@ -198,8 +198,6 @@ const API_KEY_CREATE_OPTIONS: OptionSpecs = {
 };
 
 const UPDATE_OPTIONS: OptionSpecs = {
-  pool: { type: "string" },
-  "pool-id": { type: "string" },
   ...GLOBAL_OPTIONS,
   ...FORK_RESOURCE_OPTIONS,
   description: { type: "string", allowEmpty: true },
@@ -1469,7 +1467,6 @@ async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
   const vcpu = numFlag(args, "vcpu");
   const diskMib = numFlag(args, "disk-mib");
   const vgpu = numFlag(args, "vgpu");
-  const pool = poolFlags(args);
   const description = args.flags.description as string | undefined;
   const sshPublicKeys = sshPublicKeysFromArgs(args);
   const policiesFile = args.flags["policies-file"] as string | undefined;
@@ -1479,15 +1476,13 @@ async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
   const immutable = boolFlag(args, "immutable");
   if (
     memoryMib === undefined && vcpu === undefined && diskMib === undefined && vgpu === undefined &&
-    description === undefined && !sshPublicKeys.provided && policies === undefined && pool === undefined &&
-    immutable === undefined
+    description === undefined && !sshPublicKeys.provided && policies === undefined && immutable === undefined
   ) {
-    die("update: pass at least one description, resource, pool, SSH key, policy, or --immutable flag");
+    die("update: pass at least one description, resource, SSH key, policy, or --immutable flag");
   }
   const updated = await withSecretRedaction(
     policySecretValues(policies),
     () => client.vm(vm).update({
-      ...pool,
       ...(description !== undefined ? { description } : {}),
       ...(memoryMib !== undefined || vcpu !== undefined || diskMib !== undefined || vgpu !== undefined
         ? {
