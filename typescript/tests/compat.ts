@@ -18,6 +18,9 @@ import { createArkerComputeProvider } from "../src/compat/arker-provider.js";
 import { createCompatSdk, setCompatComputeFactoryForTests } from "../src/compat/runtime.js";
 import { GuestProcesses } from "../src/compat/guest-process.js";
 
+// Source-selection tests configure their own IDs rather than inheriting a live baseline.
+delete process.env.ARKER_SOURCE_VM_ID;
+
 type CapturedComputeConfig = {
   providers: Array<{ name?: string }>;
 };
