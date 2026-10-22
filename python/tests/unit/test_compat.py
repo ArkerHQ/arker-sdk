@@ -326,9 +326,7 @@ def test_provider_block_network_options_translate_to_arker_policy(monkeypatch, c
         create()
 
     body = json.loads(t.calls[0]["body"])
-    guards = [
-        rule for rule in body["policies"]["rules"].values() if rule["type"] == "outbound_guard"
-    ]
+    guards = [rule for rule in body["policies"]["rules"].values() if rule["type"] == "outbound_guard"]
     assert guards == [{"type": "outbound_guard", "allow": []}]
 
 
