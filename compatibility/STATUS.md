@@ -13,8 +13,13 @@ Source741bf95 corrects metadata and performs destination writes as `user`, not
 privileged writes followed by chown. Existing permissions/ownership remain
 authoritative; temporary staging is cleaned even after a partial upload failure,
 with the primary error preserved. New focused regressions pass; fresh live
-filesystem rerun and the enlarged combined cohort are pending. Read/delete/chmod
-and command identity semantics are not certified by this write-path correction.
+filesystem rerun has six native/reference passes and three Arker failures because
+the Ubuntu source has no `user` account. Native E2B uses UID/GID1000; this source
+already assigns1000 to `ubuntu`. A same-name/different-UID workaround, account
+rename, or customer-home chown is not accepted as parity. An explicit compatible
+baseline and shared execution identity remain required before the enlarged
+combined cohort. Read/delete/chmod and command identity semantics are not
+certified by this write-path correction; current source is not deployment-ready.
 
 ## Further core hardening — matching production observations
 
