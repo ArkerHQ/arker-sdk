@@ -632,6 +632,49 @@ async function testInternalArkerProviderImageAndResources(): Promise<void> {
   });
 }
 
+async function testInternalArkerProviderMapsLifetimeToServerSchedule(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson(
+    (method, url) => method === "POST" && url === "https://arker.invalid/api/v1/fork",
+    200,
+    { vm_id: "vm_ttl", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] },
+  );
+  const configuredPolicies = {
+    secrets: { TOKEN: "synthetic" },
+    policies: [{ type: "outbound", priority: 1, action: "deny" }],
+    rules: { custom: { type: "outbound", priority: 7, action: "allow" } },
+  } as any;
+  const provider = createArkerComputeProvider({
+    apiKey: "ark-key", source: "ubuntu", baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false,
+    policies: configuredPolicies,
+  });
+  await provider.sandbox.create({ timeout: 17_000, blockNetwork: true });
+  const rules = (JSON.parse(fetch.calls[0]!.body!) as any).policies.rules;
+  assert.deepEqual(rules.custom, { type: "outbound", priority: 7, action: "allow" });
+  assert.deepEqual(Object.values(rules).filter((rule: any) => rule.type === "schedule"), [
+    { type: "schedule", after_created: 17, action: "delete" },
+  ]);
+  assert.equal(Object.values(rules).filter((rule: any) => rule.type === "outbound_guard").length, 1);
+  const sentPolicies = (JSON.parse(fetch.calls[0]!.body!) as any).policies;
+  assert.deepEqual(sentPolicies.secrets, { TOKEN: "synthetic" });
+  assert.deepEqual(sentPolicies.policies, [{ type: "outbound", priority: 1, action: "deny" }]);
+  assert.deepEqual(configuredPolicies, {
+    secrets: { TOKEN: "synthetic" },
+    policies: [{ type: "outbound", priority: 1, action: "deny" }],
+    rules: { custom: { type: "outbound", priority: 7, action: "allow" } },
+  });
+  for (const timeout of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 86_400_001]) {
+    await assert.rejects(() => provider.sandbox.create({ timeout }), /timeout must be a positive finite number/);
+  }
+  assert.equal(fetch.calls.length, 1, "invalid lifetimes must not issue a fork request");
+  const conflicting = createArkerComputeProvider({
+    apiKey: "ark-key", source: "ubuntu", baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false,
+    policies: { rules: { "computesdk-e2b-lifetime": null } } as any,
+  });
+  await assert.rejects(() => conflicting.sandbox.create({ timeout: 1000 }), /policy id.*reserved/);
+  assert.equal(fetch.calls.length, 1, "reserved policy collisions must not issue a fork request");
+}
+
 async function testInternalArkerProviderRejectsUntranslatedPolicyControls(): Promise<void> {
   for (const [key, value] of Object.entries({
     networkPolicy: { allowInternetAccess: false }, networkPolicies: [],
@@ -1122,6 +1165,7 @@ await testE2BArkerFilesBatchMetadataAndRename();
 await testModalSurface();
 await testInternalArkerProvider();
 await testInternalArkerProviderImageAndResources();
+await testInternalArkerProviderMapsLifetimeToServerSchedule();
 await testInternalArkerProviderRejectsUntranslatedPolicyControls();
 await testModalEmptyAllowlistIsNotUnrestricted();
 await testInvalidNetworkAllowlistsNeverMeanUnrestricted();

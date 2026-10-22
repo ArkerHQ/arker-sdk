@@ -34,6 +34,9 @@ from .computer import VM, ArkerError
 
 _E2B_USER = "user"
 _E2B_HOME = "/home/user"
+_E2B_DEFAULT_TIMEOUT_SECONDS = 300
+_E2B_MAX_TIMEOUT_SECONDS = 86_400
+_E2B_LIFETIME_POLICY_ID = "computesdk-e2b-lifetime"
 
 
 def _identity_command(
@@ -550,7 +553,13 @@ class Sandbox(UnsupportedMixin):
 
     @classmethod
     def create(cls, template_id: str | None = None, **kwargs: Any) -> Sandbox:
-        timeout = kwargs.pop("timeout", kwargs.pop("timeout_ms", kwargs.pop("timeoutMs", None)))
+        timeout = kwargs.pop("timeout", None)
+        timeout_aliases = sorted({"timeout_ms", "timeoutMs"}.intersection(kwargs))
+        if timeout_aliases:
+            raise TypeError(
+                f"Sandbox.create does not accept {', '.join(timeout_aliases)}; "
+                "the E2B Python API uses timeout in seconds"
+            )
         allow_internet_access = kwargs.pop("allow_internet_access", kwargs.pop("allowInternetAccess", None))
         arker_config = kwargs.pop("arker", None) or {}
         router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
@@ -601,15 +610,34 @@ class Sandbox(UnsupportedMixin):
         allow_internet_access: bool | None,
         native_options: dict[str, Any],
     ) -> VM:
-        unsupported = [*([] if timeout is None else ["timeout"]), *sorted(native_options)]
+        unsupported = sorted(native_options)
         if unsupported:
             raise UnsupportedCompatibilityOption(
                 f"Sandbox.create option(s) are not supported by Arker: {', '.join(unsupported)}"
             )
+        lifetime = _E2B_DEFAULT_TIMEOUT_SECONDS if timeout is None else timeout
+        if isinstance(lifetime, bool) or not isinstance(lifetime, int):
+            raise TypeError("timeout must be an integer number of seconds")
+        if not 1 <= lifetime <= _E2B_MAX_TIMEOUT_SECONDS:
+            raise ValueError(f"timeout must be between 1 and {_E2B_MAX_TIMEOUT_SECONDS} seconds")
+        configured_rules = (arker_config.get("policies") or {}).get("rules", {})
+        if _E2B_LIFETIME_POLICY_ID in configured_rules:
+            raise ValueError(f"policy id {_E2B_LIFETIME_POLICY_ID!r} is reserved for the E2B sandbox lifetime")
+        network = compat_network_policies(block_all=allow_internet_access is False)
+        policies = {
+            "rules": {
+                **((network or {}).get("rules", {})),
+                _E2B_LIFETIME_POLICY_ID: {
+                    "type": "schedule",
+                    "after_created": lifetime,
+                    "action": "delete",
+                },
+            }
+        }
         return arker_create(
             arker_config,
             template_id=template_id,
-            policies=compat_network_policies(block_all=allow_internet_access is False),
+            policies=policies,
         )
 
     @classmethod

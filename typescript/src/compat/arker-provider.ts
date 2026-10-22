@@ -338,6 +338,7 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
         const supported = new Set([
           "name", "image", "memory", "memoryMiB", "cpu", "vcpus", "diskMiB", "snapshotId", "templateId",
           "allowInternetAccess",
+          "timeout",
           "networkBlockAll", "blockNetwork", "domainAllowList", "outboundDomainAllowlist", "networkAllowList",
           "outboundCidrAllowlist", "createIfNotExist",
         ]);
@@ -373,9 +374,22 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
             ? { source_vm_id: sourceVmId }
             : { source_vm_name: sourceVmName! };
         const network = networkPolicies(values);
-        const policies = config.policies || network ? {
+        const timeoutMs = values.timeout;
+        if (timeoutMs !== undefined && (
+          typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 86_400_000
+        )) {
+          throw new ArkerError("invalid_request", "timeout must be a positive finite number no greater than 86400000 milliseconds", 422);
+        }
+        const lifetimePolicyId = "computesdk-e2b-lifetime";
+        if (timeoutMs !== undefined && Object.hasOwn(config.policies?.rules ?? {}, lifetimePolicyId)) {
+          throw new ArkerError("invalid_request", `policy id '${lifetimePolicyId}' is reserved for the E2B sandbox lifetime`, 422);
+        }
+        const lifetime = timeoutMs === undefined ? undefined : {
+          [lifetimePolicyId]: { type: "schedule" as const, after_created: Math.ceil(timeoutMs / 1000), action: "delete" as const },
+        };
+        const policies = config.policies || network || lifetime ? {
           ...config.policies,
-          ...(network ? { rules: { ...config.policies?.rules, ...network.rules } } : {}),
+          ...((network || lifetime) ? { rules: { ...config.policies?.rules, ...network?.rules, ...lifetime } } : {}),
         } : undefined;
         const request: ForkOptions = {
           ...sourceRequest,

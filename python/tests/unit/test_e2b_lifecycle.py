@@ -6,6 +6,61 @@ import pytest
 import arker.e2b as shim
 
 
+@pytest.mark.parametrize("timeout", [None, 17])
+def test_arker_creation_maps_e2b_lifetime_to_server_delete_schedule(timeout, monkeypatch):
+    requests = []
+    child = types.SimpleNamespace(id="child")
+    config = {
+        "source": "template",
+        "policies": {
+            "secrets": {"TOKEN": "synthetic"},
+            "rules": {"custom": {"type": "outbound", "priority": 7, "action": "allow"}},
+        },
+    }
+    monkeypatch.setattr(
+        "arker._compat.arker_client",
+        lambda config: types.SimpleNamespace(fork=lambda **request: requests.append(request) or child),
+    )
+
+    assert (
+        shim.Sandbox._create_arker(
+            config,
+            "template",
+            timeout,
+            False,
+            {},
+        )
+        is child
+    )
+
+    rules = requests[0]["policies"]["rules"]
+    schedules = [rule for rule in rules.values() if rule["type"] == "schedule"]
+    assert schedules == [
+        {
+            "type": "schedule",
+            "after_created": 300 if timeout is None else timeout,
+            "action": "delete",
+        }
+    ]
+    assert len([rule for rule in rules.values() if rule["type"] == "outbound_guard"]) == 1
+    assert rules["custom"] == {"type": "outbound", "priority": 7, "action": "allow"}
+    assert requests[0]["policies"]["secrets"] == {"TOKEN": "synthetic"}
+    assert set(config["policies"]["rules"]) == {"custom"}
+
+
+@pytest.mark.parametrize("timeout", [True, 0, -1, 86_401, 1.5, "300"])
+def test_arker_creation_rejects_invalid_e2b_lifetime_before_fork(timeout, monkeypatch):
+    monkeypatch.setattr(shim, "arker_create", lambda *args, **kwargs: pytest.fail("must not fork"))
+    with pytest.raises((TypeError, ValueError), match="timeout"):
+        shim.Sandbox._create_arker({}, None, timeout, None, {})
+
+
+def test_arker_creation_rejects_reserved_lifetime_policy_without_fork(monkeypatch):
+    monkeypatch.setattr(shim, "arker_create", lambda *args, **kwargs: pytest.fail("must not fork"))
+    with pytest.raises(ValueError, match="reserved"):
+        shim.Sandbox._create_arker({"policies": {"rules": {"computesdk-e2b-lifetime": None}}}, None, None, None, {})
+
+
 def test_arker_identity_validation_fails_closed_without_mutation(monkeypatch):
     vm = types.SimpleNamespace(id="custom", deleted=False, delete=lambda: pytest.fail("validation must not mutate"))
     monkeypatch.setattr(
@@ -141,6 +196,31 @@ def test_arker_write_preserves_user_permission_failure_and_cleans_staging(monkey
         shim.Sandbox(vm=vm).files.write("/root/owned", "data")
     assert commands[0].startswith("runuser -u user -- ")
     assert commands[1].startswith("rm -f -- /tmp/.computesdk-e2b-write-")
+
+
+@pytest.mark.parametrize("alias", ["timeout_ms", "timeoutMs"])
+def test_python_create_does_not_misread_millisecond_alias_as_seconds(alias, monkeypatch):
+    monkeypatch.setattr(shim, "routed_create", lambda *args, **kwargs: pytest.fail("must not route"))
+    with pytest.raises(TypeError, match="E2B Python API uses timeout in seconds"):
+        shim.Sandbox.create(**{alias: 300_000})
+
+
+def test_arker_creation_preserves_legacy_ordered_policy(monkeypatch):
+    requests = []
+    ordered = [{"type": "outbound", "priority": 1, "action": "deny"}]
+    config = {"source": "template", "policies": {"policies": ordered}}
+    monkeypatch.setattr(
+        "arker._compat.arker_client",
+        lambda config: types.SimpleNamespace(fork=lambda **request: requests.append(request) or object()),
+    )
+
+    shim.Sandbox._create_arker(config, None, None, None, {})
+
+    assert requests[0]["policies"]["policies"] == ordered
+    assert list(requests[0]["policies"]["rules"].values()) == [
+        {"type": "schedule", "after_created": 300, "action": "delete"}
+    ]
+    assert config == {"source": "template", "policies": {"policies": ordered}}
 
 
 def test_arker_write_cleans_partial_staging_after_sync_failure(monkeypatch):

@@ -397,10 +397,10 @@ export class Sandbox {
     const templateId = typeof templateOrOptions === "string" ? templateOrOptions : undefined;
     const opts = typeof templateOrOptions === "string" ? options : templateOrOptions ?? options;
     assertSupportedObjectKeys(opts, E2B_CREATE_OPTION_KEYS, "e2b", "Sandbox.create");
-    const timeout = resolveTimeout(opts);
+    const timeout = resolveTimeout(opts) ?? 300_000;
     const box = await sdk((opts as any)?.routerConfigPath).sandbox.create({
       ...(templateId ? { templateId } : {}),
-      ...(timeout !== undefined ? { timeout } : {}),
+      timeout,
       ...((opts as any)?.envs ? { envs: (opts as any).envs } : {}),
       ...((opts as any)?.metadata ? { metadata: (opts as any).metadata } : {}),
       ...((opts as any)?.allowInternetAccess !== undefined ? { allowInternetAccess: (opts as any).allowInternetAccess } : {}),
