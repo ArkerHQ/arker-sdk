@@ -525,14 +525,14 @@ def test_e2b_arker_git_runs_official_workflow_against_local_repository(tmp_path)
 
     sandbox.git.init(str(remote), bare=True, initial_branch="main", cwd=str(tmp_path))
     sandbox.git.clone(str(remote), str(checkout), cwd=str(tmp_path))
-    sandbox.git.configure_user("Arker Test", "test@arker.invalid", scope="local", path=str(checkout))
+    sandbox.git.configure_user("Arker Test", "test@arker.invalid", scope="local", path=str(checkout), cwd=str(tmp_path))
     (checkout / "hello.txt").write_text("hello\n")
-    sandbox.git.add(str(checkout), files=["hello.txt"])
-    sandbox.git.commit(str(checkout), "initial")
-    sandbox.git.create_branch(str(checkout), "feature")
+    sandbox.git.add(str(checkout), files=["hello.txt"], cwd=str(tmp_path))
+    sandbox.git.commit(str(checkout), "initial", cwd=str(tmp_path))
+    sandbox.git.create_branch(str(checkout), "feature", cwd=str(tmp_path))
 
-    status = sandbox.git.status(str(checkout))
-    branches = sandbox.git.branches(str(checkout))
+    status = sandbox.git.status(str(checkout), cwd=str(tmp_path))
+    branches = sandbox.git.branches(str(checkout), cwd=str(tmp_path))
     assert status.is_clean
     assert branches.current_branch == "feature"
     assert set(branches.branches) == {"feature", "main"}
@@ -581,8 +581,8 @@ def test_e2b_arker_files_write_batch_metadata_and_rename(tmp_path) -> None:
         str(first),
         5,
         "rw-r--r--",
-        "root",
-        "root",
+        first.owner(),
+        first.group(),
     )
     moved = sandbox.files.rename(str(first), str(renamed))
     assert (moved.name, moved.path, moved.size) == ("first.txt", str(renamed), 5)
