@@ -118,6 +118,9 @@ def test_modal_filesystem_import_only(provider, shim, asynchronous, tmp_path, mo
     finally:
         try:
             cleanup()
+        except BaseException:
+            outcome = "failed"
+            raise
         finally:
             record(
                 "modal",

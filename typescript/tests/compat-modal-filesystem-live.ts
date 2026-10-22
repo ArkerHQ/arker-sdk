@@ -123,6 +123,9 @@ try {
       try {
         if ("terminate" in fixture) await fixture.terminate();
         else await fixture.delete();
+      } catch (error) {
+        outcome = "failed";
+        throw error;
       } finally {
         await recordEvidence(
           "modal",
