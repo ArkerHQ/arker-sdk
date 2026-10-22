@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import posixpath
 import re
 import shlex
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Literal, overload
 
 from ._compat import (
@@ -38,6 +40,43 @@ class _CommandExitException(RuntimeError):
     def __init__(self, *, stdout: str, stderr: str, exit_code: int, error: str | None = None):
         self.stdout, self.stderr, self.exit_code, self.error = stdout, stderr, exit_code, error
         super().__init__(f"Command exited with code {exit_code} and error:\n{stderr}")
+
+
+@dataclass(frozen=True)
+class _WriteInfo:
+    name: str
+    type: Any
+    path: str
+    metadata: dict[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class _EntryInfo(_WriteInfo):
+    size: int = 0
+    mode: int = 0
+    permissions: str = ""
+    owner: str = ""
+    group: str = ""
+    modified_time: datetime | None = None
+    symlink_target: str | None = None
+
+
+def _file_type(name: str) -> Any:
+    module = import_optional("e2b")
+    enum_type = getattr(module, "FileType", None) if module is not None else None
+    return getattr(enum_type, name, name.lower()) if enum_type is not None else name.lower()
+
+
+def _write_info(path: str, metadata: dict[str, str] | None = None) -> Any:
+    module = import_optional("e2b")
+    info_type = getattr(module, "WriteInfo", _WriteInfo) if module is not None else _WriteInfo
+    resolved = resolve_compat_path(path, "/home/user")
+    return info_type(
+        name=resolved.rstrip("/").rsplit("/", 1)[-1],
+        type=_file_type("FILE"),
+        path=resolved,
+        metadata=metadata,
+    )
 
 
 def __getattr__(name: str) -> Any:
@@ -198,12 +237,135 @@ class Files(UnsupportedMixin):
             raise RuntimeError("Arker file read returned no data")
         return bytearray(raw) if format == "bytes" else raw.decode("utf-8", "replace")
 
-    def write(self, path: str, content: str | bytes) -> None:
+    def write(
+        self,
+        path: str,
+        content: str | bytes,
+        user: str | None = None,
+        request_timeout: float | None = None,
+        gzip: bool = False,
+        use_octet_stream: bool | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> Any:
         if self._vm is None:
-            result = self._native.write(path, content)
-            return None if result is None else result
+            return self._native.write(
+                path,
+                content,
+                user=user,
+                request_timeout=request_timeout,
+                gzip=gzip,
+                use_octet_stream=use_octet_stream,
+                metadata=metadata,
+            )
+        unsupported = [
+            name
+            for name, enabled in (
+                ("user", user is not None),
+                ("request_timeout", request_timeout is not None),
+                ("gzip", gzip),
+                ("use_octet_stream", use_octet_stream is not None),
+                ("metadata", metadata is not None),
+            )
+            if enabled
+        ]
+        if unsupported:
+            raise UnsupportedCompatibilityOption(
+                "Arker files.write cannot represent option(s): " + ", ".join(unsupported)
+            )
         self._vm.sync(resolve_compat_path(path, "/home/user"), content)
-        return None
+        return _write_info(path)
+
+    def write_files(
+        self,
+        files: list[Any],
+        user: str | None = None,
+        request_timeout: float | None = None,
+        gzip: bool = False,
+        use_octet_stream: bool | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> list[Any]:
+        if self._vm is None:
+            return self._native.write_files(
+                files,
+                user=user,
+                request_timeout=request_timeout,
+                gzip=gzip,
+                use_octet_stream=use_octet_stream,
+                metadata=metadata,
+            )
+        return [
+            self.write(
+                file["path"] if isinstance(file, dict) else file.path,
+                file["data"] if isinstance(file, dict) else file.data,
+                user=user,
+                request_timeout=request_timeout,
+                gzip=gzip,
+                use_octet_stream=use_octet_stream,
+                metadata=metadata,
+            )
+            for file in files
+        ]
+
+    def get_info(self, path: str, user: str | None = None, request_timeout: float | None = None) -> Any:
+        if self._vm is None:
+            return self._native.get_info(path, user=user, request_timeout=request_timeout)
+        if user is not None or request_timeout is not None:
+            raise UnsupportedCompatibilityOption("Arker files.get_info does not support user or request_timeout")
+        resolved = resolve_compat_path(path, "/home/user")
+        result = run_command(
+            self._vm,
+            "stat --printf '%n\\037%s\\037%f\\037%A\\037%U\\037%G\\037%Y\\037%F' -- " + shlex.quote(resolved),
+        )
+        if result.exit_code != 0:
+            raise RuntimeError(result.stderr or f"stat failed with exit {result.exit_code}")
+        values = result.stdout.split("\x1f")
+        if len(values) != 8:
+            raise RuntimeError("Incomplete file information response")
+        name, size, mode, permissions, owner, group, modified, description = values
+        if "symbolic link" in description:
+            file_type = _file_type("SYMLINK")
+            target_result = run_command(self._vm, "readlink -- " + shlex.quote(resolved))
+            symlink_target = target_result.stdout.rstrip("\n") if target_result.exit_code == 0 else None
+        else:
+            file_type = _file_type("DIR" if "directory" in description else "FILE")
+            symlink_target = None
+        module = import_optional("e2b")
+        info_type = getattr(module, "EntryInfo", _EntryInfo) if module is not None else _EntryInfo
+        return info_type(
+            name=name.rstrip("/").rsplit("/", 1)[-1],
+            type=file_type,
+            path=name,
+            size=int(size),
+            mode=int(mode, 16),
+            permissions=permissions[1:] if len(permissions) == 10 else permissions,
+            owner=owner,
+            group=group,
+            modified_time=datetime.fromtimestamp(int(modified), tz=timezone.utc),
+            symlink_target=symlink_target,
+            metadata=None,
+        )
+
+    def rename(
+        self,
+        old_path: str,
+        new_path: str,
+        user: str | None = None,
+        request_timeout: float | None = None,
+    ) -> Any:
+        if self._vm is None:
+            return self._native.rename(old_path, new_path, user=user, request_timeout=request_timeout)
+        if user is not None or request_timeout is not None:
+            raise UnsupportedCompatibilityOption("Arker files.rename does not support user or request_timeout")
+        old_resolved = resolve_compat_path(old_path, "/home/user")
+        new_resolved = resolve_compat_path(new_path, "/home/user")
+        result = run_command(
+            self._vm,
+            f"mkdir -p -- {shlex.quote(posixpath.dirname(new_resolved))} && "
+            f"mv -- {shlex.quote(old_resolved)} {shlex.quote(new_resolved)}",
+        )
+        if result.exit_code != 0:
+            raise RuntimeError(result.stderr or f"rename failed with exit {result.exit_code}")
+        return self.get_info(new_resolved)
 
     def make_dir(self, path: str) -> None:
         if self._vm is None:

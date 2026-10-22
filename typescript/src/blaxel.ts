@@ -196,9 +196,13 @@ export class SandboxInstance {
         await chmod(destinationPath, mode);
       },
       mkdir: async (path, permissions = "0755") => {
-        if (permissions !== "0755") throw new Error("fs.mkdir custom permissions are not supported by Arker");
+        if (!/^0?[0-7]{3}$/.test(permissions)) {
+          throw new Error("fs.mkdir permissions must be a three- or four-digit octal mode");
+        }
         const resolved = filesystemPath(path);
-        await box.filesystem.mkdir(resolved);
+        const quoted = shellQuote(resolved);
+        const result = await box.runCommand(`mkdir -p -- ${quoted} && chmod -- ${permissions} ${quoted}`);
+        if (result.exitCode !== 0) throw new Error(result.stderr || `mkdir failed with exit ${result.exitCode}`);
         return { message: "Directory created successfully", path: filesystemDisplayPath(path) };
       },
       ls: async (path) => {
@@ -301,6 +305,9 @@ export class SandboxInstance {
       },
       watch: () => {
         throw new Error("Arker fs.watch requires an ordered filesystem event stream and is not supported");
+      },
+      search: async () => {
+        throw new Error("Arker fs.search cannot reproduce Blaxel's server-side fuzzy scoring and ordering");
       },
     }) as BlaxelCompatFileSystem;
     return guardUnsupported(this, "blaxel", native);

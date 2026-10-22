@@ -236,10 +236,11 @@ class FileSystem:
     def mkdir(self, path: str, permissions: str = "0755") -> Any:
         if self._vm is None:
             return self._native.mkdir(path, permissions=permissions)
-        if permissions != "0755":
-            raise UnsupportedCompatibilityOption("fs.mkdir custom permissions are not supported by Arker")
+        if re.fullmatch(r"0?[0-7]{3}", permissions) is None:
+            raise ValueError("fs.mkdir permissions must be a three- or four-digit octal mode")
         resolved = _filesystem_path(path)
-        result = run_command(self._vm, f"mkdir -p {shlex.quote(resolved)}")
+        quoted = shlex.quote(resolved)
+        result = run_command(self._vm, f"mkdir -p -- {quoted} && chmod -- {permissions} {quoted}")
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"mkdir failed with exit {result.exit_code}")
         return success({"message": "Directory created successfully", "path": _filesystem_display_path(path)})
@@ -457,6 +458,13 @@ class FileSystem:
             return self._native.watch(path, callback, options)
         raise UnsupportedCompatibilityOption(
             "Arker fs.watch requires an ordered filesystem event stream and is not supported"
+        )
+
+    def search(self, query: str, path: str = "/", options: dict[str, Any] | None = None) -> Any:
+        if self._vm is None:
+            return self._native.search(query, path, options)
+        raise UnsupportedCompatibilityOption(
+            "Arker fs.search cannot reproduce Blaxel's server-side fuzzy scoring and ordering"
         )
 
     def __getattr__(self, name: str) -> Any:

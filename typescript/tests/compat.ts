@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, symlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import type { CommandResult, FileEntry, RunCommandOptions, SandboxInfo, SandboxInterface } from "computesdk";
 
@@ -277,10 +277,7 @@ async function testE2BSurface(): Promise<void> {
     assert.equal(await sandbox.kill(), false);
     assert.equal(box.destroyed, true);
 
-    assert.throws(
-      () => (sandbox.files as any).rename,
-      /not supported by the Arker compatibility layer for e2b/,
-    );
+    assert.equal(typeof sandbox.files.rename, "function");
     await assert.rejects(
       () => E2BSandbox.create({ template: "bad" } as any),
       /unsupported option\(s\) 'template'/,
@@ -360,6 +357,68 @@ async function testE2BArkerGitRunsOfficialWorkflowAgainstLocalRepository(): Prom
     const branches = await sandbox.git.branches(checkout);
     assert.equal(branches.currentBranch, "feature");
     assert.deepEqual(new Set(branches.branches), new Set(["feature", "main"]));
+  } finally {
+    fake.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testE2BArkerFilesBatchMetadataAndRename(): Promise<void> {
+  const root = mkdtempSync(join(tmpdir(), "arker-e2b-files-"));
+  const first = join(root, "nested", "first.txt");
+  const second = join(root, "second.bin");
+  const renamed = join(root, "renamed", "first.txt");
+  const vm = {
+    sync: async (path: string, content?: Uint8Array) => {
+      if (content === undefined) return new Uint8Array(readFileSync(path));
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, content);
+    },
+  };
+  const box = new FakeSandbox("files-vm", "arker", vm);
+  box.filesystem.writeFile = async (path, content) => {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content);
+  };
+  box.runCommand = async (command, options) => {
+    box.runCalls.push({ command, options });
+    try {
+      return {
+        stdout: execFileSync("/bin/bash", ["-lc", command], { encoding: "utf8" }),
+        stderr: "",
+        exitCode: 0,
+        durationMs: 0,
+      };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string; status?: number };
+      return { stdout: failure.stdout ?? "", stderr: failure.stderr ?? "", exitCode: failure.status ?? 1, durationMs: 0 };
+    }
+  };
+  const fake = installFakeCompute(box);
+  try {
+    const sandbox = await E2BSandbox.create();
+    const written = await sandbox.files.writeFiles([
+      { path: first, data: "hello" },
+      { path: second, data: Uint8Array.from([0, 1, 2, 255]).buffer },
+    ]);
+    assert.deepEqual(written.map(({ name, path, type }) => ({ name, path, type })), [
+      { name: "first.txt", path: first, type: "file" },
+      { name: "second.bin", path: second, type: "file" },
+    ]);
+    const info = await sandbox.files.getInfo(first);
+    assert.deepEqual(
+      { name: info.name, path: info.path, size: info.size, permissions: info.permissions },
+      { name: "first.txt", path: first, size: 5, permissions: "rw-r--r--" },
+    );
+    const moved = await sandbox.files.rename(first, renamed);
+    assert.deepEqual({ name: moved.name, path: moved.path, size: moved.size }, { name: "first.txt", path: renamed, size: 5 });
+    assert.equal(existsSync(first), false);
+    assert.equal(readFileSync(renamed, "utf8"), "hello");
+    await assert.rejects(
+      () => sandbox.files.write(join(root, "blocked"), "secret", { metadata: { kind: "test" } }),
+      /metadata/,
+    );
+    assert.equal(existsSync(join(root, "blocked")), false);
   } finally {
     fake.cleanup();
     rmSync(root, { recursive: true, force: true });
@@ -823,6 +882,10 @@ async function testBlaxelBinaryFiles(): Promise<void> {
     },
   };
   const box = new FakeSandbox("binary-vm", "arker", vm);
+  box.runCommand = async (command, options) => {
+    box.runCalls.push({ command, options });
+    return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
+  };
   const fake = installFakeCompute(box);
   try {
     const sandbox = await BlaxelSandbox.create();
@@ -830,9 +893,11 @@ async function testBlaxelBinaryFiles(): Promise<void> {
     assert.deepEqual(await sandbox.fs.mkdir("relative"), {
       message: "Directory created successfully", path: "/blaxel/relative",
     });
-    const writesBefore = box.createOptions.length;
-    await assert.rejects(() => sandbox.fs.mkdir("private", "0700"), /permissions.*not supported/);
-    assert.equal(box.createOptions.length, writesBefore);
+    assert.deepEqual(await sandbox.fs.mkdir("private", "0700"), {
+      message: "Directory created successfully", path: "/blaxel/private",
+    });
+    assert.match(box.runCalls.at(-1)!.command, /chmod -- 0700 \/blaxel\/private/);
+    await assert.rejects(() => sandbox.fs.mkdir("invalid", "u+rwx"), /octal/);
     await sandbox.fs.writeBinary("binary", payload);
     assert.deepEqual(new Uint8Array(await (await sandbox.fs.readBinary("binary")).arrayBuffer()), payload);
     await sandbox.fs.writeBinary("binary", new Blob([payload]));
@@ -893,6 +958,7 @@ async function testBlaxelFilesystemOperationsAndRelativePaths(): Promise<void> {
     assert.deepEqual(box.runCalls[2]!.options, { timeout: 3000 });
     await assert.rejects(() => sandbox.fs.grep("hello", "/work", { contextLines: 2 }), /contextLines/);
     assert.throws(() => sandbox.fs.watch("/work", () => undefined), /ordered filesystem event stream/);
+    await assert.rejects(() => sandbox.fs.search("needle", "/work"), /fuzzy scoring/);
   } finally {
     fake.cleanup();
   }
@@ -1021,6 +1087,7 @@ await testDaytonaNativeExecutionPreservesResponseAndInputs();
 await testE2BSurface();
 await testE2BNativeErrorIdentity();
 await testE2BArkerGitRunsOfficialWorkflowAgainstLocalRepository();
+await testE2BArkerFilesBatchMetadataAndRename();
 await testModalSurface();
 await testInternalArkerProvider();
 await testInternalArkerProviderImageAndResources();

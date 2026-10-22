@@ -7,6 +7,7 @@ import subprocess
 import sys
 import types
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 import httpx2 as httpx
@@ -32,12 +33,21 @@ def test_blaxel_native_filesystem_retains_options_and_operation_identity():
     assert calls == [(("private",), {"permissions": "0700"})]
 
 
-def test_blaxel_custom_permissions_refuse_before_arker_io():
-    from arker._compat import UnsupportedCompatibilityOption
+def test_blaxel_custom_permissions_are_validated_and_applied_before_success(monkeypatch):
+    from arker._compat import CommandResult
     from arker.blaxel import FileSystem
 
-    with pytest.raises(UnsupportedCompatibilityOption, match=r"permissions.*not supported"):
-        FileSystem(vm=object()).mkdir("private", "0700")
+    commands = []
+    monkeypatch.setattr(
+        "arker.blaxel.run_command",
+        lambda _vm, command: commands.append(command) or CommandResult("", "", 0),
+    )
+    filesystem = FileSystem(vm=object())
+    filesystem.mkdir("private", "0700")
+    assert commands == ["mkdir -p -- /blaxel/private && chmod -- 0700 /blaxel/private"]
+    with pytest.raises(ValueError, match="octal"):
+        filesystem.mkdir("invalid", "u+rwx")
+    assert len(commands) == 1
 
 
 @pytest.mark.parametrize("option", ["outbound_cidr_allowlist", "outbound_domain_allowlist"])
@@ -528,6 +538,62 @@ def test_e2b_arker_git_runs_official_workflow_against_local_repository(tmp_path)
     assert set(branches.branches) == {"feature", "main"}
 
 
+def test_e2b_arker_files_write_batch_metadata_and_rename(tmp_path) -> None:
+    class LocalVM:
+        id = "local-files"
+
+        def sync(self, path, content=None):
+            target = Path(path)
+            if content is None:
+                return target.read_bytes()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content.encode() if isinstance(content, str) else content)
+            return None
+
+        def run(self, command, **_options):
+            completed = subprocess.run(command, shell=True, text=True, capture_output=True, check=False)
+            return sdk.CompletedRunResult(
+                stdout=completed.stdout,
+                stderr=completed.stderr,
+                stdout_bytes=completed.stdout.encode(),
+                stderr_bytes=completed.stderr.encode(),
+                exit_code=completed.returncode,
+            )
+
+    sandbox = E2BSandbox(vm=LocalVM())
+    first = tmp_path / "nested" / "first.txt"
+    second = tmp_path / "second.bin"
+    renamed = tmp_path / "renamed" / "first.txt"
+
+    written = sandbox.files.write_files(
+        [
+            {"path": str(first), "data": "hello"},
+            {"path": str(second), "data": bytes(range(16))},
+        ]
+    )
+    assert [(entry.name, entry.path) for entry in written] == [
+        ("first.txt", str(first)),
+        ("second.bin", str(second)),
+    ]
+    info = sandbox.files.get_info(str(first))
+    assert (info.name, info.path, info.size, info.permissions, info.owner, info.group) == (
+        "first.txt",
+        str(first),
+        5,
+        "rw-r--r--",
+        "root",
+        "root",
+    )
+    moved = sandbox.files.rename(str(first), str(renamed))
+    assert (moved.name, moved.path, moved.size) == ("first.txt", str(renamed), 5)
+    assert not first.exists()
+    assert renamed.read_text() == "hello"
+
+    with pytest.raises(Exception, match="metadata"):
+        sandbox.files.write(str(tmp_path / "blocked"), "secret", metadata={"kind": "test"})
+    assert not (tmp_path / "blocked").exists()
+
+
 def test_modal_official_surface(monkeypatch) -> None:
     monkeypatch.setattr("arker.modal.import_optional", lambda _: None)
     monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
@@ -807,6 +873,8 @@ def test_blaxel_arker_watcher_fails_explicitly_before_io() -> None:
 
     with pytest.raises(UnsupportedCompatibilityOption, match="ordered filesystem event stream"):
         FileSystem(vm=object()).watch("/work", lambda _event: None)
+    with pytest.raises(UnsupportedCompatibilityOption, match="fuzzy scoring"):
+        FileSystem(vm=object()).search("needle", "/work")
 
 
 def test_blaxel_listing_preserves_native_file_metadata(monkeypatch) -> None:
@@ -932,11 +1000,9 @@ def test_unsupported_calls_fail_fast(monkeypatch) -> None:
 
     with use_transport(t):
         sandbox = E2BSandbox.create()
-        with pytest.raises(
-            AttributeError,
-            match="not supported by the Arker compatibility layer for e2b",
-        ):
-            sandbox.files.rename  # noqa: B018
+        assert callable(sandbox.files.rename)
+        with pytest.raises(AttributeError, match="not supported by the Arker compatibility layer for e2b"):
+            sandbox.files.watch_dir  # noqa: B018
         with pytest.raises(TypeError, match="not supported by Arker: image"):
             ModalSandbox.create(image="alpine")
 

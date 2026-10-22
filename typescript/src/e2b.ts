@@ -1,6 +1,6 @@
 import type { RunCommandOptions } from "computesdk";
 import { ArkerError, type VM } from "./index.js";
-import { CommandExitError, Git, Sandbox as VendorSandbox, type CommandStartOpts, type CommandHandle,
+import { CommandExitError, FileType, Git, Sandbox as VendorSandbox, type CommandStartOpts, type CommandHandle,
   type Commands as VendorCommands, type CommandConnectOpts, type CommandRequestOpts } from "e2b";
 
 export { CommandExitError } from "e2b";
@@ -200,6 +200,16 @@ export class Sandbox {
         } else {
           throw new ArkerError("unsupported_operation", "Arker files.write supports string/ArrayBuffer data, not this input", 422);
         }
+        return { name: resolved.split("/").at(-1)!, type: FileType.FILE, path: resolved };
+      },
+      writeFiles: async (
+        files: Array<{ path: string; data: string | ArrayBuffer | Blob | ReadableStream }>,
+        options?: Record<string, unknown>,
+      ) => {
+        assertSupportedObjectKeys(options, [], "e2b", "files.writeFiles");
+        const written = [];
+        for (const file of files) written.push(await (this.files as any).write(file.path, file.data));
+        return written;
       },
       makeDir: async (path: string, options?: Record<string, unknown>) => {
         assertSupportedObjectKeys(options, [], "e2b", "files.makeDir");
@@ -216,6 +226,47 @@ export class Sandbox {
       remove: async (path: string, options?: Record<string, unknown>) => {
         assertSupportedObjectKeys(options, [], "e2b", "files.remove");
         await this.#box.filesystem.remove(this.provider === "arker" ? resolveCompatPath(path, "/home/user") : path);
+      },
+      getInfo: async (path: string, options?: Record<string, unknown>) => {
+        assertSupportedObjectKeys(options, [], "e2b", "files.getInfo");
+        const resolved = resolveCompatPath(path, "/home/user");
+        const result = await this.#box.runCommand(
+          `stat --printf '%n\\037%s\\037%f\\037%A\\037%U\\037%G\\037%Y\\037%F' -- ${shellQuote(resolved)}`,
+        );
+        if (result.exitCode !== 0) throw new Error(result.stderr || `stat failed with exit ${result.exitCode}`);
+        const values = result.stdout.split("\x1f");
+        if (values.length !== 8) throw new Error("Incomplete file information response");
+        const [name, size, mode, permissions, owner, group, modified, description] = values as string[];
+        let type = description.includes("directory") ? FileType.DIR : FileType.FILE;
+        let symlinkTarget: string | undefined;
+        if (description.includes("symbolic link")) {
+          type = FileType.SYMLINK;
+          const target = await this.#box.runCommand(`readlink -- ${shellQuote(resolved)}`);
+          if (target.exitCode === 0) symlinkTarget = target.stdout.replace(/\n$/, "");
+        }
+        return {
+          name: name.replace(/\/$/, "").split("/").at(-1)!,
+          type,
+          path: name,
+          size: Number(size),
+          mode: Number.parseInt(mode, 16),
+          permissions: permissions.length === 10 ? permissions.slice(1) : permissions,
+          owner,
+          group,
+          modifiedTime: new Date(Number(modified) * 1000),
+          ...(symlinkTarget === undefined ? {} : { symlinkTarget }),
+        };
+      },
+      rename: async (oldPath: string, newPath: string, options?: Record<string, unknown>) => {
+        assertSupportedObjectKeys(options, [], "e2b", "files.rename");
+        const oldResolved = resolveCompatPath(oldPath, "/home/user");
+        const newResolved = resolveCompatPath(newPath, "/home/user");
+        const parent = newResolved.slice(0, newResolved.lastIndexOf("/")) || "/";
+        const result = await this.#box.runCommand(
+          `mkdir -p -- ${shellQuote(parent)} && mv -- ${shellQuote(oldResolved)} ${shellQuote(newResolved)}`,
+        );
+        if (result.exitCode !== 0) throw new Error(result.stderr || `rename failed with exit ${result.exitCode}`);
+        return (this.files as any).getInfo(newResolved);
       },
     } as unknown as VendorSandbox["files"]);
     this.git = this.#native?.git ?? new Git(gitCommands(this.commands));
