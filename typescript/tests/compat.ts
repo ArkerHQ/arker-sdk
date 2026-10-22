@@ -1023,10 +1023,7 @@ async function testBlaxelAbsoluteDirectoryDisplayPaths(): Promise<void> {
 async function testBackgroundProcessOwnsAnArkerRun(): Promise<void> {
   const calls: any[] = [];
   const vm = {
-    createSession: async (request: unknown) => {
-      assert.deepEqual(request, { cwd: "/" });
-      return { session_id: "process-session" };
-    },
+    createSession: async () => ({ session_id: "process-session" }),
     run: async (command: string, options: unknown) => {
       calls.push({ command, options });
       return { type: "background", runId: "supervisor-run" };
@@ -1045,10 +1042,7 @@ async function testProcessControlHasAnIsolatedSerializedSession(): Promise<void>
   let active = 0;
   const ids: string[] = [];
   const vm = {
-    createSession: async (request: unknown) => {
-      assert.deepEqual(request, { cwd: "/" });
-      return { session_id: `control-${++sessions}` };
-    },
+    createSession: async () => ({ session_id: `control-${++sessions}` }),
     run: async (_command: string, options: { session_id: string }) => {
       ids.push(options.session_id);
       assert.equal(++active, 1, "control requests must not collide within a shared session");
