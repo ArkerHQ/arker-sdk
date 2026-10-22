@@ -24,8 +24,8 @@ cohorts are not current-source validation after runtime or scenario changes.
 
 ## Current validation
 
-- Python combined unit suite: 652 passed. The subsequent live-derived E2B and
-  Blaxel corrections passed 75 focused regression tests.
+- Python combined unit suite: 650 passed after integrating current main.
+  Live-derived E2B and Blaxel corrections also passed 75 focused regressions.
 - TypeScript combined tests, build and packed ESM/CommonJS consumers passed for
   the base SDK and all four optional vendor packages. Dedicated filesystem and
   sandbox regression files are included in the standard handle-test command.
@@ -34,9 +34,19 @@ cohorts are not current-source validation after runtime or scenario changes.
 - Native live probes established that E2B `depth=None` uses one directory level,
   and Blaxel async grep returns relative paths and preserves context newlines.
   The pinned Blaxel Python sync filesystem has no grep API.
-- A prepared-source Daytona filesystem cohort passed six Python and three
-  TypeScript routes. Subsequent runtime changes invalidate its coverage credit.
-- A fresh combined live cohort is in progress; no passing release gate is claimed.
+- At `6e4480e`, nine of eleven live suites pass using prepared source parents.
+  E2B and Daytona filesystem and Modal process/filesystem comparisons pass in
+  both languages. Python Blaxel grep/process/filesystem and TypeScript native
+  Blaxel tests pass. Strict named creation and private fetch still fail on Arker.
+- Current evidence contains 30 passing Python events and 18 passing/3 failing
+  TypeScript events. The separate strict-name test also fails. Both evidence
+  files are in `evidence/core-filesystem-20261022-{python,typescript}.jsonl`.
+- Core scenario coverage is **105/1123 Python** and **41/982 TypeScript**; expanded
+  coverage is 105/1146 and 41/1052. No events are rejected as stale. All four
+  strict gates exit 1. Signature-tested/live counts remain zero because the
+  recorders do not attest signatures. These counts are not full API equivalence.
+- Prepared source cleanup was independently confirmed by a not-found response.
+  Source preparation is not evidence of default-image or arbitrary-image parity.
 
 ## Remaining release requirements
 
