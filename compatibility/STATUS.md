@@ -1,5 +1,12 @@
 # Recorded coverage baseline
 
+## New filesystem differential scenarios — validation pending
+
+Source cd7e0eb adds sync/async Python and TypeScript E2B filesystem differential
+programs. Live scenarios are part of each implementation fingerprint, so the
+103/60 checkpoint below is historical until the enlarged cohort is repeated.
+New scenarios are not credited before execution; no full-parity claim.
+
 ## Further core hardening — matching production observations
 
 Source e46af69 (unit fixture fixes through80f492a) has completed fresh matching-

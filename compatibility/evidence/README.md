@@ -1,5 +1,9 @@
 # Recorded differential evidence
 
+Source cd7e0eb adds filesystem scenarios, which changes fingerprints even without
+a runtime edit. The completed103/60 checkpoint below remains source-bound to
+the prior scenario set until fresh enlarged cohorts execute; no relabeling.
+
 Current `production-hardening-20261022-{python,node}.jsonl` records matching-source
 core hardening at e46af69 (unit-only fixes through80f492a). Python32/36 and Node26/31
 selections pass, plus six of six Git differential selections. Core coverage is
