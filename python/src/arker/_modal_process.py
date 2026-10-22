@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import time
 
 
@@ -68,6 +69,12 @@ def modal_process(processes, identifier, *, text=True, by_line=False, stdout=Non
             from ._compat_process import GuestProcessError
 
             total = 0
+
+            async def abort():
+                # EOF would commit a truncated filesystem upload.
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(processes.kill, identifier)
+
             try:
                 while True:
                     chunk = await asyncio.to_thread(source.read, 32 * 1024)
@@ -79,6 +86,10 @@ def modal_process(processes, identifier, *, text=True, by_line=False, stdout=Non
             except GuestProcessError as error:
                 if error.code == "process_stdin_closed":
                     raise ConflictError(str(error)) from error
+                await abort()
+                raise
+            except BaseException:
+                await abort()
                 raise
             return total
 

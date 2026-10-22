@@ -8,7 +8,7 @@ import {
 
 type Processes = Pick<
   GuestProcesses,
-  "get" | "readOutput" | "writeStdin" | "closeStdin"
+  "get" | "readOutput" | "writeStdin" | "closeStdin" | "kill"
 >;
 
 export function modalCommandHandle(
@@ -112,12 +112,17 @@ export function modalCommandHandle(
         await processes.closeStdin(id);
       } catch (error) {
         if (
-          !(error instanceof GuestProcessError) ||
-          error.code !== "process_stdin_closed"
-        )
-          throw error;
-        const status = await poll(deadline);
-        if (!("code" in status || "signal" in status)) throw error;
+          error instanceof GuestProcessError &&
+          error.code === "process_stdin_closed"
+        ) {
+          const status = await poll(deadline);
+          if ("code" in status || "signal" in status) return total;
+        }
+        // EOF would commit a truncated filesystem upload. Keep its primary error.
+        try {
+          await processes.kill(id);
+        } catch {}
+        throw error;
       }
       return total;
     },

@@ -129,6 +129,30 @@ def test_modal_guest_interrupted_upload_never_changes_destination_or_leaves_stag
     assert list(tmp_path.iterdir()) == [destination]
 
 
+def test_failed_source_aborts_real_guest_upload_and_preserves_destination(modal_box, tmp_path):
+    from modal._utils.async_utils import synchronizer
+
+    class BrokenSource(io.BytesIO):
+        def read(self, size=-1):
+            if self.tell():
+                raise OSError("controlled source interruption")
+            return super().read(8)
+
+    directory = tmp_path / "aborted-upload"
+    directory.mkdir()
+    destination = directory / "existing"
+    destination.write_bytes(b"original")
+    filesystem = synchronizer._translate_in(modal_box.filesystem)
+    with pytest.raises(OSError, match="controlled source interruption"):
+        asyncio.run(filesystem._exec_fs_tool_write(BrokenSource(b"partial payload"), str(destination), "write_bytes"))
+    processes = modal_box._processes.list()
+    assert len(processes) == 1
+    result = modal_box._processes.wait(processes[0].name, max_wait=5000, interval=10)
+    assert result.status != "running"
+    assert destination.read_bytes() == b"original"
+    assert list(directory.iterdir()) == [destination]
+
+
 @pytest.mark.parametrize("nonempty", [False, True])
 def test_modal_write_to_a_directory_always_has_the_native_type(modal_box, tmp_path, nonempty):
     from modal.exception import SandboxFilesystemIsADirectoryError

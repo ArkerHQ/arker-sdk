@@ -5,46 +5,55 @@ import { modalCommandHandle } from "../src/compat/modal-command.js";
 import type { GuestProcessResult } from "../src/compat/guest-process.js";
 import { GuestProcessError } from "../src/compat/guest-process.js";
 
-test("Modal streaming stdin preserves source failures without sending EOF", async () => {
-  const failure = new Error("controlled source read failure");
-  const writes: Uint8Array[] = [];
-  let closed = false;
-  const current = {
-    pid: "source",
-    status: "running",
-    exitCode: 0,
-  } as GuestProcessResult;
-  const handle = modalCommandHandle(
-    {
-      get: async () => current,
-      readOutput: async () => ({
-        data: new Uint8Array(),
-        nextOffset: 0,
-        eof: true,
+for (const cleanupFails of [false, true]) {
+  test(`Modal streaming stdin aborts its process and preserves the source error (cleanup fails: ${cleanupFails})`, async () => {
+    const failure = new Error("controlled source read failure");
+    const writes: Uint8Array[] = [];
+    const killed: string[] = [];
+    let closed = false;
+    const current = {
+      pid: "source",
+      status: "running",
+      exitCode: 0,
+    } as GuestProcessResult;
+    const handle = modalCommandHandle(
+      {
+        get: async () => current,
+        readOutput: async () => ({
+          data: new Uint8Array(),
+          nextOffset: 0,
+          eof: true,
+        }),
+        writeStdin: async (_id, data) => {
+          writes.push(data as Uint8Array);
+          return { message: "written" };
+        },
+        closeStdin: async () => {
+          closed = true;
+          return { message: "closed" };
+        },
+        kill: async (id: string) => {
+          killed.push(id);
+          if (cleanupFails) throw new Error("controlled cleanup failure");
+          return { message: "killed" };
+        },
+      },
+      current,
+    );
+    await assert.rejects(
+      handle._stdinWriteStream({
+        async *readFrom() {
+          yield new Uint8Array([1, 2]);
+          throw failure;
+        },
       }),
-      writeStdin: async (_id, data) => {
-        writes.push(data as Uint8Array);
-        return { message: "written" };
-      },
-      closeStdin: async () => {
-        closed = true;
-        return { message: "closed" };
-      },
-    },
-    current,
-  );
-  await assert.rejects(
-    handle._stdinWriteStream({
-      async *readFrom() {
-        yield new Uint8Array([1, 2]);
-        throw failure;
-      },
-    }),
-    (error) => error === failure,
-  );
-  assert.deepEqual(writes, [new Uint8Array([1, 2])]);
-  assert.equal(closed, false);
-});
+      (error) => error === failure,
+    );
+    assert.deepEqual(writes, [new Uint8Array([1, 2])]);
+    assert.equal(closed, false);
+    assert.deepEqual(killed, ["source"]);
+  });
+}
 
 test("Modal streaming stdin lets the native filesystem inspect a terminal helper's error", async () => {
   const current = {
@@ -59,6 +68,9 @@ test("Modal streaming stdin lets the native filesystem inspect a terminal helper
   const handle = modalCommandHandle(
     {
       get: async () => current,
+      kill: async () => {
+        throw new Error("Terminal helper must not be killed");
+      },
       readOutput: async () => ({
         data: new Uint8Array(),
         nextOffset: 0,
@@ -94,6 +106,9 @@ test("Modal handles use native streaming classes, binary bytes and stdin EOF", a
     exitCode: 0,
   } as GuestProcessResult;
   const processes = {
+    async kill(): Promise<never> {
+      throw new Error("Successful input must not kill the process");
+    },
     async get() {
       return {
         ...current,
@@ -139,6 +154,9 @@ test("Modal native text decoding preserves multibyte boundaries and signed signa
   } as GuestProcessResult;
   const processes = {
     get: async () => current,
+    async kill(): Promise<never> {
+      throw new Error("Terminal process must not be killed");
+    },
     async readOutput(_id: string, _stream: string, offset: number) {
       const data = bytes.slice(offset, offset + 1);
       return {
