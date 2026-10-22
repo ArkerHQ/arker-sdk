@@ -7,6 +7,15 @@ programs. Live scenarios are part of each implementation fingerprint, so the
 103/60 checkpoint below is historical until the enlarged cohort is repeated.
 New scenarios are not credited before execution; no full-parity claim.
 
+The first filesystem run exposed native permission strings retaining the leading
+file-type character, and new-file ownership `user:user` versus Arker root.
+Source741bf95 corrects metadata and performs destination writes as `user`, not
+privileged writes followed by chown. Existing permissions/ownership remain
+authoritative; temporary staging is cleaned even after a partial upload failure,
+with the primary error preserved. New focused regressions pass; fresh live
+filesystem rerun and the enlarged combined cohort are pending. Read/delete/chmod
+and command identity semantics are not certified by this write-path correction.
+
 ## Further core hardening — matching production observations
 
 Source e46af69 (unit fixture fixes through80f492a) has completed fresh matching-
