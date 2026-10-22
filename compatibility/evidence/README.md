@@ -4,6 +4,17 @@ These are observations, not a claim of full compatibility. They contain API
 names, outcome, route, run ID, provider SDK version and implementation
 fingerprints; no credentials or returned file contents.
 
+`production-additive-20261022-{python,node}.jsonl` record source `9fdf196`
+after additive guard readback normalization. All 36 Python and 31 Node cases
+execute: Python 32 pass/four fail, Node 26 pass/five fail. Missing production
+private-port routes and outbound-guard support remain explicit; all four strict
+gates fail exit 1. Core coverage is 94/1,123 Python and 51/982 Node, expanded
+94/1,146 and 51/1,052. These observations do not certify unpublished backend
+changes or full parity. Fingerprints:
+
+- Python: `cc005c65831c75308c32d4a604602cbf07982590d953e169c101ec460e6407d3`.
+- Node: `4b446d7f26dcbfa9a6d927922d9598d380a8492b01f33c8383715d4e510ee77a`.
+
 `production-current-20261022-{python,node}.jsonl` record source `816cdc6`
 against current provider pins (see `../provider-upgrade-20261022.json`). All
 36 Python and31 Node configurations execute: Python32 pass/four fail;

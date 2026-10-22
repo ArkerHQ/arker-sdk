@@ -11,12 +11,23 @@ Real Python and Node regressions failed before this change. The contract is
 regenerated from app source `8bd63a20`; its exact current-main oasdiff gate passes
 without severity changes or accepted-breaking-change exemptions.
 
-Fresh validation of this new source is in progress. The source-bound production
-traces and coverage totals below certify their recorded earlier implementation,
-not this changed source. Production still lacks guard-schema/private-port support;
-no backend deployment or full-parity claim is made.
+Fresh production cohorts at source `9fdf196` complete all 36 Python and 31 Node
+configurations: **32/36 Python and 26/31 Node pass**. Production still lacks
+guard-schema/private-port support; all four core/expanded strict gates exit 1.
+Core coverage remains **94/1,123 Python and 51/982 Node**, expanded **94/1,146
+and 51/1,052**. Safe source-bound observations are committed as
+`evidence/production-additive-20261022-*.jsonl`. This does not certify the
+unpublished backend or full API equivalence. No deployment or policy weakening
+is used.
 
-## Current provider SDK pins
+Current local gates pass **529 vendor Python / 520 lean Python** (nine optional
+skips), Ruff, TypeScript full typecheck/tests/build, five isolated packed
+ESM+CJS consumers, and CLI plus PTY tests. Packed npm SHA-256:
+`7bf89113067575bcbdf991e0f42fa8aa0dec8ada35b636c4e6def26935fcf3a9`.
+The CLI test oracle now expects response-only `mitm_domains` to be omitted from
+updates, matching the SDK writer; its prior CI failure is retained.
+
+## Current provider SDK pins and earlier source-bound validation
 
 Python fixtures now pin E2B **2.58.0**, Daytona **0.226.0**, Blaxel **0.4.19**
 and unchanged Modal **1.6.2**. TypeScript pins E2B **2.58.0**, Daytona **0.226.0**,
