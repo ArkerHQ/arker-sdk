@@ -1,5 +1,23 @@
 # Recorded coverage baseline
 
+## Final automation and packed CLI gates
+
+The preview CLI explicitly forwards fork `--idempotency-key` as an HTTP header
+and advertises the option in fork help. Tests replay the same key unchanged and
+retain unkeyed-fork behavior. In JSON mode real HTTP errors retain their status
+in stderr as `arker: HTTP <status>: <code>: <message>`; stdout stays empty and
+human output is unchanged. Real CLI-over-HTTP403/500 regressions fail before the
+fix and pass afterward, with no authorization retry.
+
+Full CLI/PTY/typecheck and TypeScript tests/build pass. All five fresh isolated
+packed consumers pass, including vendor-free base CLI help checks for secret
+writes and keyed forks. Final packed SHA256:
+`4c48e194ff1fe01c34a56c369996ca13775e66dd642014150a4aae82bb387395`.
+These CLI-only changes do not alter the compatibility runtime fingerprints;
+the current Python9fdf196 and Node56c7175 production evidence below remains
+source-matching and strict-red. Unreleased availability is not inferred from
+the unchanged version fields.
+
 ## Secret-aware sync preview
 
 The TypeScript SDK accepts `SyncOptions.isSecret`; CLI `sync --secret` marks

@@ -2352,7 +2352,7 @@ async function main(): Promise<void> {
     }
   } catch (e) {
     if (e instanceof ArkerError) {
-      err(e.message);
+      err(args.flags.json && e.status > 0 ? `HTTP ${e.status}: ${e.message}` : e.message);
       if (e.code === "not_found" && client) await hintAuthenticatedOrg(client);
       process.exit(1);
     }

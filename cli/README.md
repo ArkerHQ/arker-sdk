@@ -110,6 +110,11 @@ on explicit keys rather than assuming older versions support this option.
 and the delete and cancel commands. Run results use `run_id` in every state;
 completed results also keep `runId`.
 
+With `--json`, HTTP failures still exit nonzero with empty stdout; stderr starts
+`arker: HTTP <status>: <code>: <message>`. This preserves the actual HTTP status
+for automation. Network errors without an HTTP response do not invent a status.
+Human-mode error output is unchanged. This format is an unreleased preview.
+
 ## Running commands
 
 `arker run` prints output as the command runs and exits with the command's

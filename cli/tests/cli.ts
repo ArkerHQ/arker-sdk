@@ -1360,6 +1360,23 @@ async function testStructuredErrorsDoNotRepeatCode(): Promise<void> {
   });
 }
 
+async function testJsonErrorsRetainActualHttpStatus(): Promise<void> {
+  for (const [status, code] of [[403, "forbidden"], [500, "internal"]] as const) {
+    await withCapturedServer((_request, res) => jsonResponse(res, {
+      error: { code, message: "fixture refusal", timestamp: "2026-07-21T00:00:00Z" },
+    }, status), async (baseUrl, requests) => {
+      const result = await runCli(baseUrl, ["vms", "get", "vm_1", "--json"]);
+      assert.equal(result.code, 1);
+      assert.equal(result.stderr, `arker: HTTP ${status}: ${code}: fixture refusal\n`);
+      assert.equal(stdoutText(result), "");
+      if (status === 403) assert.equal(requests.length, 1);
+      const human = await runCli(baseUrl, ["vms", "get", "vm_1"]);
+      assert.equal(human.code, 1);
+      assert.equal(human.stderr, `arker: ${code}: fixture refusal\n`);
+    });
+  }
+}
+
 async function testFalseMutationResultsExitNonzero(): Promise<void> {
   const cases = [
     { args: ["runs", "rm", "vm_1", "run_1"], response: { cancelled: false } },
@@ -1625,6 +1642,7 @@ await testShellSetupUsesPackagedCli();
 await testShellRequiresVmOrSourceBeforeRequest();
 await testRunShowsPartialOutputBeforeCompletion();
 await testStructuredErrorsDoNotRepeatCode();
+await testJsonErrorsRetainActualHttpStatus();
 await testFalseMutationResultsExitNonzero();
 await testRemainingHttpCommandSurface();
 await testPoliciesGetAndSet();

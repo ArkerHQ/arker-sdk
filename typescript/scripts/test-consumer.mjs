@@ -81,6 +81,12 @@ try {
       consumer,
     );
     process.stdout.write(run(process.execPath, ["smoke.mjs", label], consumer));
+    if (label === "base") {
+      const cli = join(consumer, "node_modules/@arker-ai/sdk/dist/cli.js");
+      assert.match(run(process.execPath, [cli, "sync", "--help"], consumer), /--secret\b/);
+      assert.match(run(process.execPath, [cli, "fork", "--help"], consumer), /--idempotency-key\b/);
+      console.log("PASS packed SDK CLI advertises secret writes and keyed forks without vendor SDKs");
+    }
     const compiler = join(root, "node_modules/typescript/bin/tsc");
     const flags = [
       "--noEmit",
