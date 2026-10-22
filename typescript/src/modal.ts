@@ -11,6 +11,7 @@ import {
 } from "./compat/common.js";
 import { createNativeModalProvider } from "./compat/modal-provider.js";
 import { modalCommandHandle } from "./compat/modal-command.js";
+import { modalFilesystem } from "./compat/modal-filesystem.js";
 import { GuestProcesses } from "./compat/guest-process.js";
 import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
@@ -79,6 +80,7 @@ export class Sandbox {
   #box: UniversalSandbox;
   #native: NativeSandbox | undefined;
   #processes: GuestProcesses | undefined;
+  #filesystem: NativeSandbox["filesystem"] | undefined;
 
   constructor(box: UniversalSandbox) {
     this.#box = box;
@@ -86,6 +88,11 @@ export class Sandbox {
     this.provider = box.provider;
     this.#native = nativeInstance(box) as NativeSandbox | undefined;
     this.#processes = box.provider === "arker" ? new GuestProcesses(box) : undefined;
+  }
+
+  get filesystem(): NativeSandbox["filesystem"] {
+    if (this.#native) return this.#native.filesystem;
+    return this.#filesystem ??= modalFilesystem((command, options) => this.exec(command, options as ModalExecOptions & { mode?: "text" }));
   }
 
   async exec(cmd: string[] | string, opts: ModalExecOptions & { mode: "binary" }): Promise<ContainerProcess<Uint8Array>>;

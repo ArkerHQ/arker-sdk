@@ -112,8 +112,9 @@ def test_background_reconnect_stdin_eof_and_logs(processes):
     assert reconnected.logs("input", "stdout") == finished.stdout
     assert reconnected.logs("input", "stderr") == "error"
     assert any(item.name == "input" for item in reconnected.list())
-    with pytest.raises(RuntimeError, match="stdin is closed"):
+    with pytest.raises(RuntimeError, match="stdin is closed") as raised:
         reconnected.write_stdin("input", "late")
+    assert getattr(raised.value, "code", None) == "process_stdin_closed"
 
 
 def test_missing_process_has_a_structured_code_instead_of_message_matching(processes):

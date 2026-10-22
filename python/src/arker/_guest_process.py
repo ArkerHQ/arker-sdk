@@ -29,6 +29,10 @@ class ProcessNotFound(ValueError):
     pass
 
 
+class ProcessStdinClosed(ValueError):
+    pass
+
+
 def timestamp():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -306,7 +310,7 @@ def dispatch(request):
                 (directory / "eof").touch()
             else:
                 if state["status"] in TERMINAL or (directory / "eof").exists():
-                    raise ValueError("Process stdin is closed")
+                    raise ProcessStdinClosed("Process stdin is closed")
                 with (directory / "input").open("ab", buffering=0) as incoming:
                     incoming.write(base64.b64decode(request["data"]))
         return {"message": "Process stdin updated"}
@@ -341,6 +345,7 @@ if __name__ == "__main__":
                     {
                         "error": str(error),
                         **({"code": "process_not_found"} if isinstance(error, ProcessNotFound) else {}),
+                        **({"code": "process_stdin_closed"} if isinstance(error, ProcessStdinClosed) else {}),
                     }
                 )
             )

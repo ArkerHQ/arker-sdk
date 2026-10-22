@@ -73,12 +73,25 @@ class Sandbox(UnsupportedMixin):
         self._vm = vm
         self._native = native
         self._processes = None
+        self._filesystem_container = None
+        self._filesystem = None
         self.sandbox_id = (
             vm.id
             if vm is not None
             else getattr(native, "object_id", getattr(native, "sandbox_id", getattr(native, "id", None)))
         )
         self.sandboxId = self.sandbox_id
+
+    @property
+    def filesystem(self):
+        if self._native is not None:
+            return self._native.filesystem
+        if self._filesystem is None:
+            from ._modal_filesystem import FilesystemContainer, filesystem
+
+            self._filesystem_container = FilesystemContainer(self)
+            self._filesystem = filesystem(self._filesystem_container)
+        return self._filesystem
 
     @property
     def object_id(self) -> str:

@@ -1,6 +1,10 @@
 import { ContainerProcess, type SandboxExecParams } from "modal";
 import { setTimeout as delay } from "node:timers/promises";
-import type { GuestProcesses, GuestProcessResult } from "./guest-process.js";
+import {
+  GuestProcessError,
+  type GuestProcesses,
+  type GuestProcessResult,
+} from "./guest-process.js";
 
 type Processes = Pick<
   GuestProcesses,
@@ -92,6 +96,30 @@ export function modalCommandHandle(
     ) {
       if (data.length) await processes.writeStdin(id, data);
       if (eof) await processes.closeStdin(id);
+    },
+    async execStdinWriteStream(
+      _task: string,
+      _exec: string,
+      source: { readFrom(offset: number): AsyncIterable<Uint8Array> },
+    ) {
+      let total = 0;
+      try {
+        for await (const chunk of source.readFrom(0)) {
+          check(deadline, "writing stdin");
+          if (chunk.length) await processes.writeStdin(id, chunk);
+          total += chunk.length;
+        }
+        await processes.closeStdin(id);
+      } catch (error) {
+        if (
+          !(error instanceof GuestProcessError) ||
+          error.code !== "process_stdin_closed"
+        )
+          throw error;
+        const status = await poll(deadline);
+        if (!("code" in status || "signal" in status)) throw error;
+      }
+      return total;
     },
   };
   return new ContainerProcess<string | Uint8Array>(

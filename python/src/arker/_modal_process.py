@@ -62,6 +62,26 @@ def modal_process(processes, identifier, *, text=True, by_line=False, stdout=Non
             if eof:
                 await asyncio.to_thread(processes.close_stdin, identifier)
 
+        async def exec_stdin_write_stream(self, *, task_id, exec_id, source):
+            from modal.exception import ConflictError
+
+            from ._compat_process import GuestProcessError
+
+            total = 0
+            try:
+                while True:
+                    chunk = await asyncio.to_thread(source.read, 32 * 1024)
+                    if not chunk:
+                        break
+                    await asyncio.to_thread(processes.write_stdin, identifier, chunk)
+                    total += len(chunk)
+                await asyncio.to_thread(processes.close_stdin, identifier)
+            except GuestProcessError as error:
+                if error.code == "process_stdin_closed":
+                    raise ConflictError(str(error)) from error
+                raise
+            return total
+
     async def create():
         return _ContainerProcess(
             process_id=identifier,

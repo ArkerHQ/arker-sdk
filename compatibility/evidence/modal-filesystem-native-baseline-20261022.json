@@ -1,0 +1,34 @@
+{
+  "scope": "Native Modal filesystem semantics only; not Arker equivalence or source-bound strict coverage credit",
+  "vendor_version": "1.6.2",
+  "blocking_and_aio_reference_and_shim_native_selections": 4,
+  "passed_selections": 4,
+  "native_semantic_observation": {
+    "initial_mode": 33188,
+    "initial_permissions": "0644",
+    "old_target_mode": 33152,
+    "old_target_permissions": "0600",
+    "old_target_owner": "nobody",
+    "symlink_type_after_write": "file",
+    "symlink_target_after_write": null,
+    "replacement_mode": 33188,
+    "replacement_owner": "root",
+    "original_target_content_after_aborted_source": "original",
+    "successful_overwrite_mode": 33188,
+    "successful_overwrite_permissions": "0644",
+    "successful_overwrite_owner": "root",
+    "successful_overwrite_group": "root"
+  },
+  "interpretation": [
+    "FileInfo.mode contains the complete Unix mode; permissions is an octal string, not symbolic rwx text",
+    "Writing through a symlink replaces the symlink itself, leaving the original target unchanged",
+    "Successful overwrite replaces old ownership and permissions with the writer and default permissions",
+    "A controlled local source-read failure did not replace visible original target contents"
+  ],
+  "cleanup": "All fixture termination requests succeeded in finally blocks; no independent absence assertion",
+  "excluded_probe_attempts": [
+    "Private async helper called outside Modal's owning event loop: harness assertion, not a vendor failure",
+    "Attempt to synchronize a bound private method: harness construction error, not a vendor failure"
+  ],
+  "coverage_note": "The implementation and scenarios were still changing, so these exploratory results are not relabeled as current-fingerprint Arker parity evidence."
+}

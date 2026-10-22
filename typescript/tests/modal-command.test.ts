@@ -3,6 +3,86 @@ import { test } from "node:test";
 import { ContainerProcess } from "modal";
 import { modalCommandHandle } from "../src/compat/modal-command.js";
 import type { GuestProcessResult } from "../src/compat/guest-process.js";
+import { GuestProcessError } from "../src/compat/guest-process.js";
+
+test("Modal streaming stdin preserves source failures without sending EOF", async () => {
+  const failure = new Error("controlled source read failure");
+  const writes: Uint8Array[] = [];
+  let closed = false;
+  const current = {
+    pid: "source",
+    status: "running",
+    exitCode: 0,
+  } as GuestProcessResult;
+  const handle = modalCommandHandle(
+    {
+      get: async () => current,
+      readOutput: async () => ({
+        data: new Uint8Array(),
+        nextOffset: 0,
+        eof: true,
+      }),
+      writeStdin: async (_id, data) => {
+        writes.push(data as Uint8Array);
+        return { message: "written" };
+      },
+      closeStdin: async () => {
+        closed = true;
+        return { message: "closed" };
+      },
+    },
+    current,
+  );
+  await assert.rejects(
+    handle._stdinWriteStream({
+      async *readFrom() {
+        yield new Uint8Array([1, 2]);
+        throw failure;
+      },
+    }),
+    (error) => error === failure,
+  );
+  assert.deepEqual(writes, [new Uint8Array([1, 2])]);
+  assert.equal(closed, false);
+});
+
+test("Modal streaming stdin lets the native filesystem inspect a terminal helper's error", async () => {
+  const current = {
+    pid: "closed",
+    status: "failed",
+    exitCode: 1,
+  } as GuestProcessResult;
+  const closed = new GuestProcessError(
+    "Process stdin is closed",
+    "process_stdin_closed",
+  );
+  const handle = modalCommandHandle(
+    {
+      get: async () => current,
+      readOutput: async () => ({
+        data: new Uint8Array(),
+        nextOffset: 0,
+        eof: true,
+      }),
+      writeStdin: async () => {
+        throw closed;
+      },
+      closeStdin: async () => {
+        throw new Error("EOF must not be sent after a write failure");
+      },
+    },
+    current,
+  );
+  assert.equal(
+    await handle._stdinWriteStream({
+      async *readFrom() {
+        yield new Uint8Array([1]);
+      },
+    }),
+    0,
+  );
+  assert.equal(await handle.wait(), 1);
+});
 
 test("Modal handles use native streaming classes, binary bytes and stdin EOF", async () => {
   const payload = Uint8Array.from({ length: 256 }, (_, index) => index);
