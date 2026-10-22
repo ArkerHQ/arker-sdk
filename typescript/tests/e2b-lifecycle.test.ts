@@ -130,10 +130,10 @@ test("Arker writes and metadata match the E2B default user", async () => {
   }]) as Sandbox;
   await sandbox.files.write("/tmp/file", "data");
   const info = await sandbox.files.getInfo("/tmp/file");
-  assert.match(commands[0]!, /^setpriv --reuid=user --regid=user --init-groups -- sh -c /);
-  assert.match(commands[0]!, /cat -- \/tmp\/.computesdk-e2b-write-/);
-  assert.match(commands[0]!, /> \/tmp\/file/);
-  assert.match(commands[1]!, /^rm -f -- \/tmp\/.computesdk-e2b-write-/);
+  assert.match(commands[2]!, /^setpriv --reuid=user --regid=user --init-groups -- sh -c /);
+  assert.match(commands[2]!, /write \/tmp\/file/);
+  assert.match(commands[2]!, / < \/tmp\/.computesdk-e2b-write-/);
+  assert.match(commands[3]!, /^rm -rf -- \/tmp\/.computesdk-e2b-write-/);
   assert.equal(info.permissions, "-rw-r--r--");
   assert.deepEqual([info.owner, info.group], ["user", "user"]);
 });
@@ -149,8 +149,8 @@ test("Arker writes preserve user permission failures and clean staging", async (
     },
   }]) as Sandbox;
   await assert.rejects(sandbox.files.write("/root/owned", "data"), /Permission denied/);
-  assert.match(commands[0]!, /^setpriv --reuid=user --regid=user --init-groups -- /);
-  assert.match(commands[1]!, /^rm -f -- \/tmp\/.computesdk-e2b-write-/);
+  assert.match(commands[2]!, /^setpriv --reuid=user --regid=user --init-groups -- /);
+  assert.match(commands[3]!, /^rm -rf -- \/tmp\/.computesdk-e2b-write-/);
 });
 
 test("Arker writes clean partial staging after sync failure", async () => {
@@ -164,8 +164,8 @@ test("Arker writes clean partial staging after sync failure", async () => {
     },
   }]) as Sandbox;
   await assert.rejects(sandbox.files.write("/tmp/file", "data"), /upload interrupted/);
-  assert.equal(commands.length, 1);
-  assert.match(commands[0]!, /^rm -f -- \/tmp\/.computesdk-e2b-write-/);
+  assert.equal(commands.length, 3);
+  assert.match(commands[2]!, /^rm -rf -- \/tmp\/.computesdk-e2b-write-/);
 });
 
 test("the shim provider preserves embedding SDK identity, native filesystem metadata and errors", async () => {

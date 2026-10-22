@@ -1,5 +1,6 @@
 import type { RunCommandOptions } from "computesdk";
 import { randomUUID } from "node:crypto";
+import fileIO from "./compat/e2b-file-io.generated.js";
 import { ArkerError, type VM } from "./index.js";
 import { CommandExitError, FileType, Git, Sandbox as VendorSandbox, type CommandStartOpts, type CommandHandle,
   type Commands as VendorCommands, type CommandConnectOpts, type CommandRequestOpts } from "e2b";
@@ -220,21 +221,26 @@ export class Sandbox {
         }
         const resolved = resolveCompatPath(path, E2B_HOME);
         if (options?.user !== undefined) {
-          const staged = `/tmp/.computesdk-e2b-read-${randomUUID()}`;
           const vm = (this.#box as unknown as { getInstance(): VM }).getInstance();
+          const directory = `/tmp/.computesdk-e2b-read-${randomUUID()}`;
+          const staged = `${directory}/data`;
+          const command = identityCommand(`python3 -c ${shellQuote(fileIO)} read ${shellQuote(resolved)}`, { user: options.user as string, cwd: "/" });
+          const created = await this.#box.runCommand(`mkdir -m 700 -- ${shellQuote(directory)}`);
+          if (created.exitCode !== 0) throw new Error(created.stderr || "private staging directory creation failed");
           let readError: Error | undefined;
           let content: Uint8Array | undefined;
           try {
-            const copied = await this.#box.runCommand(identityCommand(
-              `cat -- ${shellQuote(resolved)} > ${shellQuote(staged)}`,
-              { user: options.user as string },
-            ));
+            const copied = await this.#box.runCommand(`umask 077; set -C; ${command} > ${shellQuote(staged)}`);
             if (copied.exitCode !== 0) throw new Error(copied.stderr || `read failed with exit ${copied.exitCode}`);
             content = Uint8Array.from(await vm.sync(staged));
           } catch (error) { readError = error instanceof Error ? error : new Error(String(error)); }
-          const cleanup = await this.#box.runCommand(`rm -f -- ${shellQuote(staged)}`);
+          let cleanupError: unknown;
+          try {
+            const cleanup = await this.#box.runCommand(`rm -rf -- ${shellQuote(directory)}`);
+            if (cleanup.exitCode !== 0) throw new Error(cleanup.stderr || `temporary file cleanup failed with exit ${cleanup.exitCode}`);
+          } catch (error) { cleanupError = error; }
           if (readError) throw readError;
-          if (cleanup.exitCode !== 0) throw new Error(cleanup.stderr || `temporary file cleanup failed with exit ${cleanup.exitCode}`);
+          if (cleanupError) throw cleanupError;
           if (!content) throw new Error("Arker file read returned no data");
           return format === "bytes" ? content : new TextDecoder().decode(content);
         }
@@ -250,23 +256,27 @@ export class Sandbox {
         if (typeof content !== "string" && !(content instanceof ArrayBuffer)) {
           throw new ArkerError("unsupported_operation", "Arker files.write supports string/ArrayBuffer data, not this input", 422);
         }
-        const staged = `/tmp/.computesdk-e2b-write-${randomUUID()}`;
+        const directory = `/tmp/.computesdk-e2b-write-${randomUUID()}`;
+        const staged = `${directory}/data`;
         const vm = (this.#box as unknown as { getInstance(): VM }).getInstance();
-        const parent = resolved.slice(0, resolved.lastIndexOf("/")) || "/";
-        const userCommand = `mkdir -p -- ${shellQuote(parent)} && cat -- ${shellQuote(staged)} > ${shellQuote(resolved)}`;
+        const userCommand = identityCommand(`python3 -c ${shellQuote(fileIO)} write ${shellQuote(resolved)}`, {
+          user: options?.user as string | undefined, cwd: "/",
+        }) + ` < ${shellQuote(staged)}`;
+        const created = await this.#box.runCommand(`mkdir -m 700 -- ${shellQuote(directory)}`);
+        if (created.exitCode !== 0) throw new Error(created.stderr || "private staging directory creation failed");
         let writeError: Error | undefined;
         try {
+          const reserved = await this.#box.runCommand(`umask 077; set -C; : > ${shellQuote(staged)}`);
+          if (reserved.exitCode !== 0) throw new Error(reserved.stderr || "private staging file creation failed");
           await vm.sync(staged, typeof content === "string" ? new TextEncoder().encode(content) : new Uint8Array(content));
-          const written = await this.#box.runCommand(identityCommand(userCommand, {
-            user: options?.user as string | undefined, cwd: "/",
-          }));
+          const written = await this.#box.runCommand(userCommand);
           if (written.exitCode !== 0) writeError = new Error(written.stderr || `write failed with exit ${written.exitCode}`);
         } catch (error) {
           writeError = error instanceof Error ? error : new Error(String(error));
         }
         let cleanupError: Error | undefined;
         try {
-          const cleanup = await this.#box.runCommand(`rm -f -- ${shellQuote(staged)}`);
+          const cleanup = await this.#box.runCommand(`rm -rf -- ${shellQuote(directory)}`);
           if (cleanup.exitCode !== 0) cleanupError = new Error(cleanup.stderr || `temporary file cleanup failed with exit ${cleanup.exitCode}`);
         } catch (error) {
           cleanupError = error instanceof Error ? error : new Error(String(error));

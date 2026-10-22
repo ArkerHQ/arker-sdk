@@ -171,10 +171,10 @@ def test_arker_writes_and_metadata_match_e2b_default_user(monkeypatch):
     files = shim.Sandbox(vm=vm).files
     files.write("/tmp/file", "data")
     info = files.get_info("/tmp/file")
-    assert commands[0].startswith("setpriv --reuid=user --regid=user --init-groups -- sh -c ")
-    assert "cat -- /tmp/.computesdk-e2b-write-" in commands[0]
-    assert "> /tmp/file" in commands[0]
-    assert commands[1].startswith("rm -f -- /tmp/.computesdk-e2b-write-")
+    assert commands[2].startswith("setpriv --reuid=user --regid=user --init-groups -- sh -c ")
+    assert "write /tmp/file" in commands[2]
+    assert " < /tmp/.computesdk-e2b-write-" in commands[2]
+    assert commands[3].startswith("rm -rf -- /tmp/.computesdk-e2b-write-")
     assert staged[0][0].startswith("/tmp/.computesdk-e2b-write-")
     assert info.permissions == "-rw-r--r--"
     assert (info.owner, info.group) == ("user", "user")
@@ -194,8 +194,8 @@ def test_arker_write_preserves_user_permission_failure_and_cleans_staging(monkey
     monkeypatch.setattr(shim, "run_command", run)
     with pytest.raises(RuntimeError, match="Permission denied"):
         shim.Sandbox(vm=vm).files.write("/root/owned", "data")
-    assert commands[0].startswith("setpriv --reuid=user --regid=user --init-groups -- ")
-    assert commands[1].startswith("rm -f -- /tmp/.computesdk-e2b-write-")
+    assert commands[2].startswith("setpriv --reuid=user --regid=user --init-groups -- ")
+    assert commands[3].startswith("rm -rf -- /tmp/.computesdk-e2b-write-")
 
 
 @pytest.mark.parametrize("alias", ["timeout_ms", "timeoutMs"])
@@ -238,8 +238,8 @@ def test_arker_write_cleans_partial_staging_after_sync_failure(monkeypatch):
     )
     with pytest.raises(OSError, match="upload interrupted"):
         shim.Sandbox(vm=types.SimpleNamespace(id="arker", sync=fail_sync)).files.write("/tmp/file", "data")
-    assert len(commands) == 1
-    assert commands[0].startswith("rm -f -- /tmp/.computesdk-e2b-write-")
+    assert len(commands) == 3
+    assert commands[2].startswith("rm -rf -- /tmp/.computesdk-e2b-write-")
 
 
 @pytest.mark.parametrize("deleted", [True, False])

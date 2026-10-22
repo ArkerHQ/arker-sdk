@@ -7,6 +7,7 @@ import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from importlib.resources import files
 from typing import Any, Literal, overload
 
 from ._compat import (
@@ -31,6 +32,8 @@ from ._compat import (
 from ._compat_e2b_async import AsyncSandbox as AsyncSandbox
 from ._compat_process import GuestProcessError, GuestProcesses
 from .computer import VM, ArkerError
+
+_FILE_IO = files("arker").joinpath("_guest_e2b_file.py").read_text()
 
 _E2B_USER = "user"
 _E2B_HOME = "/home/user"
@@ -310,15 +313,29 @@ class Files(UnsupportedMixin):
                 "Arker files.write cannot represent option(s): " + ", ".join(unsupported)
             )
         resolved = resolve_compat_path(path, "/home/user")
-        staged = f"/tmp/.computesdk-e2b-write-{uuid.uuid4().hex}"
-        parent = posixpath.dirname(resolved) or "/"
-        user_command = f"mkdir -p -- {shlex.quote(parent)} && cat -- {shlex.quote(staged)} > {shlex.quote(resolved)}"
+        directory = f"/tmp/.computesdk-e2b-write-{uuid.uuid4().hex}"
+        staged = directory + "/data"
+        # Validate identity before allocating anything. The shell opens stdin as
+        # root; the destination is opened only after dropping privileges.
+        user_command = (
+            _identity_command(
+                "python3 -c " + shlex.quote(_FILE_IO) + " write " + shlex.quote(resolved), user=user, cwd="/"
+            )
+            + " < "
+            + shlex.quote(staged)
+        )
+        created = run_command(self._vm, "mkdir -m 700 -- " + shlex.quote(directory))
+        if created.exit_code != 0:
+            raise RuntimeError(created.stderr or "private staging directory creation failed")
         write_error: BaseException | None = None
         try:
+            reserved = run_command(self._vm, "umask 077; set -C; : > " + shlex.quote(staged))
+            if reserved.exit_code != 0:
+                raise RuntimeError(reserved.stderr or "private staging file creation failed")
             self._vm.sync(staged, content)
             written = run_command(
                 self._vm,
-                _identity_command(user_command, user=user, cwd="/"),
+                user_command,
             )
             if written.exit_code != 0:
                 raise RuntimeError(written.stderr or f"write failed with exit {written.exit_code}")
@@ -326,7 +343,7 @@ class Files(UnsupportedMixin):
             write_error = error
         cleanup_error: BaseException | None = None
         try:
-            cleanup = run_command(self._vm, "rm -f -- " + shlex.quote(staged))
+            cleanup = run_command(self._vm, "rm -rf -- " + shlex.quote(directory))
             if cleanup.exit_code != 0:
                 cleanup_error = RuntimeError(
                     cleanup.stderr or f"temporary file cleanup failed with exit {cleanup.exit_code}"
