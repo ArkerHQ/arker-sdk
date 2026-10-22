@@ -1,5 +1,36 @@
 # Recorded coverage baseline
 
+## Completed filesystem cohort — strict parity remains red
+
+Runtime/scenario source8abf31c completed 91 selections: Python47/51 and
+TypeScript35/40 pass, including all nine Modal filesystem routes and all new
+E2B filesystem routes. Nine failures reproduce production private-port404
+(five Blaxel cases) and guard-schema400 (four Modal cases). No backend deployment
+was performed. The owned digest-pinned E2B baseline was deleted after the cohort.
+
+All four strict gates exit1. Core coverage is **130/1123 Python and78/982
+TypeScript**; expanded coverage is130/1146 and78/1052. Apps/Functions alone are
+excluded from core scope; images, secrets, mounts and drives remain included.
+Evidence: `evidence/production-filesystem-20261022-{python,node}.jsonl`.
+Python fingerprint: `194071ff15effba60589324371a0fb50970a88f96e9a5bfe79c2b3c92d4d8bc8`.
+TypeScript fingerprint: `ce102f0d7c262db51832daa64549b929f2d7ea00d78f15d1c913fad01de21096`.
+Subsequent fingerprint-changing edits require fresh evidence; these records are
+source-bound observations, not general API-equivalence certification.
+
+The E2B-compatible private baseline uses an exact amd64 manifest with explicit
+icelake placement. Shared commands preserve UID/GID1000, HOME and process PID;
+filesystem default read/write identity follows measured native behavior.
+Incompatible existing sources fail closed: no customer accounts are renamed or
+rewritten. Default-source seamless migration therefore remains incomplete.
+
+Creation lifetime policies delete busy children server-side, but exact expiry
+parity fails: native10-second controls disappeared at10.22–10.36 seconds;
+Arker observations were24.4/58.4 seconds and one child remained at40 seconds.
+That failed child was explicitly deleted. Watches, arbitrary-image/Python-free
+execution, opaque resources and unverified lifecycle/options remain gaps.
+
+The sections below preserve historical checkpoints, not current-source claims.
+
 ## New filesystem differential scenarios — validation pending
 
 Source cd7e0eb adds sync/async Python and TypeScript E2B filesystem differential
