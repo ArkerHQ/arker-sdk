@@ -16,10 +16,17 @@ test("Arker Blaxel process converts execution timeout seconds to internal millis
     return {} as Awaited<ReturnType<typeof original>>;
   };
   try {
-    const box = { provider: "arker", sandboxId: "vm-test", getInstance: () => ({}) };
+    const box = {
+      provider: "arker",
+      sandboxId: "vm-test",
+      getInstance: () => ({}),
+    };
     const sandbox = Reflect.construct(Shim, [box]) as Shim;
     for (const timeout of [1, 0, undefined]) {
-      await sandbox.process.exec({ command: "true", ...(timeout === undefined ? {} : { timeout }) });
+      await sandbox.process.exec({
+        command: "true",
+        ...(timeout === undefined ? {} : { timeout }),
+      });
     }
     assert.deepEqual(captured, [1000, 0, undefined]);
   } finally {
@@ -29,18 +36,29 @@ test("Arker Blaxel process converts execution timeout seconds to internal millis
 
 test("native Blaxel adapter converts ComputeSDK command milliseconds to seconds", async () => {
   const captured: unknown[] = [];
-  const instance = { metadata: { name: "timeout-test" }, process: { exec: async (request: { timeout?: number }) => {
-    captured.push(request.timeout);
-    return { stdout: "", stderr: "", exitCode: 0 };
-  } } } as unknown as Native;
-  const provider = createNativeBlaxelProvider({ apiKey: "bl_test", workspace: "test" });
+  const instance = {
+    metadata: { name: "timeout-test" },
+    process: {
+      exec: async (request: { timeout?: number }) => {
+        captured.push(request.timeout);
+        return { stdout: "", stderr: "", exitCode: 0 };
+      },
+    },
+  } as unknown as Native;
+  const provider = createNativeBlaxelProvider({
+    apiKey: "bl_test",
+    workspace: "test",
+  });
   const original = Native.get;
   Native.get = async () => instance;
   try {
     const sandbox = await provider.instances.getById("timeout-test");
     assert(sandbox);
     for (const timeout of [1000, 0, undefined]) {
-      await sandbox.runCommand("true", timeout === undefined ? {} : { timeout });
+      await sandbox.runCommand(
+        "true",
+        timeout === undefined ? {} : { timeout },
+      );
     }
     assert.deepEqual(captured, [1, 0, undefined]);
   } finally {
@@ -61,7 +79,11 @@ test("Arker Blaxel fetch preserves regionless and creation-time transport select
   const address = server.address();
   assert(address && typeof address !== "string");
   const vm = { connectPort: async () => connect(address.port, "127.0.0.1") };
-  const box = { provider: "arker", sandboxId: "vm-test", getInstance: () => vm };
+  const box = {
+    provider: "arker",
+    sandboxId: "vm-test",
+    getInstance: () => vm,
+  };
   try {
     for (const [region, initiallyDisabled, finallyDisabled, hasBody] of [
       [undefined, false, false, false],
@@ -70,11 +92,18 @@ test("Arker Blaxel fetch preserves regionless and creation-time transport select
       ["us-pdx-1", true, false, false],
     ] as const) {
       settings.config.disableH2 = initiallyDisabled;
-      const sandbox = Reflect.construct(Shim, [box, undefined, { region, disableH2: initiallyDisabled }]) as Shim;
+      const sandbox = Reflect.construct(Shim, [
+        box,
+        undefined,
+        { region, disableH2: initiallyDisabled },
+      ]) as Shim;
       settings.config.disableH2 = finallyDisabled;
       const response = await sandbox.fetch(8080, "/head", { method: "HEAD" });
-      assert.equal(response.body !== null, hasBody,
-        `region=${region}, initial H2 disabled=${initiallyDisabled}, current=${finallyDisabled}`);
+      assert.equal(
+        response.body !== null,
+        hasBody,
+        `region=${region}, initial H2 disabled=${initiallyDisabled}, current=${finallyDisabled}`,
+      );
       assert.equal((await response.arrayBuffer()).byteLength, 0);
     }
   } finally {
@@ -82,7 +111,9 @@ test("Arker Blaxel fetch preserves regionless and creation-time transport select
     if (previousEnvironment === undefined) delete process.env.BL_REGION;
     else process.env.BL_REGION = previousEnvironment;
     server.closeAllConnections();
-    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
   }
 });
 
@@ -209,6 +240,209 @@ test("native async actions re-enter their originating workspace epoch", async ()
     Native.create = previous;
   }
 });
+
+test("native synchronous watchers own request and content-read credential epochs without pinning other workspaces", async () => {
+  const previous = Native.create;
+  const observations: string[] = [];
+  let completeRequest!: () => void;
+  const requestPending = new Promise<void>((resolve) => {
+    completeRequest = resolve;
+  });
+  let requestStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    requestStarted = resolve;
+  });
+  let contentRead!: () => void;
+  const content = new Promise<void>((resolve) => {
+    contentRead = resolve;
+  });
+  let closed = false;
+  Native.create = async () =>
+    ({
+      metadata: { name: "sandbox" },
+      fs: {
+        get url() {
+          return settings.workspace;
+        },
+        withClient(options: object) {
+          return {
+            ...options,
+            client: {
+              async get() {
+                requestStarted();
+                await requestPending;
+                observations.push(`request:${settings.workspace}`);
+              },
+            },
+          };
+        },
+        async read() {
+          observations.push(`read:${settings.workspace}`);
+          contentRead();
+        },
+        watch(_path: string, callback: () => void) {
+          observations.push(`watch:${this.url}`);
+          const options = this.withClient({});
+          void options.client.get().then(async () => {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            if (!closed) {
+              await this.read();
+              callback();
+            }
+          });
+          return {
+            close() {
+              closed = true;
+            },
+          };
+        },
+      },
+    }) as unknown as Native;
+  try {
+    const first = await createNativeBlaxelProvider({
+      apiKey: "bl_test",
+      workspace: "first",
+    }).instances.create();
+    await createNativeBlaxelProvider({
+      apiKey: "bl_test",
+      workspace: "second",
+    }).instances.create();
+    const watcher = first.getInstance().fs.watch("/blaxel", () => {});
+    await started;
+    const second = createNativeBlaxelProvider({
+      apiKey: "bl_test",
+      workspace: "second",
+    }).instances.create();
+    completeRequest();
+    await second;
+    await content;
+    watcher.close();
+    assert.deepEqual(observations, [
+      "watch:first",
+      "request:first",
+      "read:first",
+    ]);
+    assert.equal(closed, true);
+  } finally {
+    Native.create = previous;
+  }
+});
+
+test("closing an owned watcher immediately prevents its queued request", async () => {
+  const previous = Native.create;
+  let starts = 0;
+  Native.create = async () =>
+    ({
+      metadata: { name: "sandbox" },
+      fs: {
+        watch() {
+          starts++;
+          return { close() {} };
+        },
+      },
+    }) as unknown as Native;
+  try {
+    const sandbox = await createNativeBlaxelProvider({
+      apiKey: "bl_test",
+      workspace: "first",
+    }).instances.create();
+    sandbox
+      .getInstance()
+      .fs.watch("/blaxel", () => {})
+      .close();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(starts, 0);
+  } finally {
+    Native.create = previous;
+  }
+});
+
+test(
+  "real native watch HTTP headers and withContent reads stay in their owning workspace",
+  { timeout: 10_000 },
+  async () => {
+    const previous = {
+      create: Native.create,
+      disableH2: settings.config.disableH2,
+    };
+    const observations: string[] = [];
+    let stream!: import("node:http").ServerResponse;
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let received!: (event: unknown) => void;
+    const event = new Promise<unknown>((resolve) => {
+      received = resolve;
+    });
+    const server = createServer((request, response) => {
+      assert(!request.url?.includes("Promise"));
+      assert(request.url?.includes("blaxel"));
+      observations.push(
+        `${request.url?.startsWith("/watch/") ? "watch" : "read"}:${request.headers["x-blaxel-workspace"]}`,
+      );
+      if (request.url?.startsWith("/watch/")) {
+        stream = response;
+        response.writeHead(200, { "content-type": "application/x-ndjson" });
+        response.flushHeaders();
+        started();
+      } else {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ content: "owned-content" }));
+      }
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert(address && typeof address !== "string");
+    settings.config.disableH2 = true;
+    Native.create = async () =>
+      new Native({
+        metadata: { name: "sandbox", url: `http://127.0.0.1:${address.port}` },
+        spec: { runtime: { image: "test", memory: 512 } },
+      });
+    let watcher: { close(): void } | undefined;
+    try {
+      const first = await createNativeBlaxelProvider({
+        apiKey: "bl_test",
+        workspace: "first",
+      }).instances.create();
+      await createNativeBlaxelProvider({
+        apiKey: "bl_test",
+        workspace: "second",
+      }).instances.create();
+      watcher = first.getInstance().fs.watch("/blaxel", received, {
+        withContent: true,
+        onError(error) {
+          throw error;
+        },
+      });
+      await ready;
+      await createNativeBlaxelProvider({
+        apiKey: "bl_test",
+        workspace: "second",
+      }).instances.create();
+      stream.write(
+        `${JSON.stringify({ op: "WRITE", path: "/blaxel", name: "file" })}\n`,
+      );
+      assert.deepEqual(await event, {
+        op: "WRITE",
+        path: "/blaxel",
+        name: "file",
+        content: "owned-content",
+      });
+      assert.deepEqual(observations, ["watch:first", "read:first"]);
+    } finally {
+      watcher?.close();
+      Native.create = previous.create;
+      settings.config.disableH2 = previous.disableH2;
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  },
+);
 
 test("credential epochs preserve the application's disabled-H2 transport setting", async () => {
   const previous = {

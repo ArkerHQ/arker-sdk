@@ -1,5 +1,25 @@
 # Recorded coverage baseline
 
+## Native Blaxel watcher workspace isolation
+
+The TypeScript native adapter now gives synchronous filesystem watchers their
+own credential epochs for request construction, stream-header acquisition and
+subsequent `withContent` reads. It does not hold the global epoch while waiting
+for watch events, so another workspace can make progress while a stream stays
+open. Closing a watcher before its queued start prevents the request.
+
+A deterministic regression first reproduced all three operations incorrectly
+using the second workspace. The corrected regression and a real native SDK
+HTTP-stream test verify workspace headers and delayed content reads. TypeScript
+typecheck and the full test/build/isolated-consumer suite pass. Fresh checks on
+2026-10-22 also pass the unchanged Blaxel TypeScript program through all three
+routes (native, shim-native and shim-Arker), using the supplied production key
+against the existing us-west-2 API. Owned fixtures were deleted. The first run
+omitted the required Arker endpoint and failed before any Arker VM creation;
+the corrected explicit-endpoint run passes. This does not certify unpublished
+backend changes, Arker watcher support or full API parity. Strict inventories
+remain red; the preceding source fingerprints are historical.
+
 ## Blaxel absolute filesystem paths
 
 Fresh native-versus-Arker observations reproduced incorrect root names,

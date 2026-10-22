@@ -54,6 +54,70 @@ function missing(error: unknown): boolean {
   );
 }
 
+function ownedWatch(
+  filesystem: object,
+  watch: (...args: unknown[]) => { close(): void },
+  config: Config,
+  args: unknown[],
+): { close(): void } {
+  let closed = false;
+  let handle: { close(): void } | undefined;
+  const context = new Proxy(filesystem, {
+    get(object, property) {
+      const value = Reflect.get(object, property, object);
+      if (property === "withClient" && typeof value === "function") {
+        return (...options: unknown[]) => {
+          const request = Reflect.apply(value, object, options) as {
+            client: object;
+          };
+          const client = new Proxy(request.client, {
+            get(client, method) {
+              const action = Reflect.get(client, method, client);
+              return typeof action === "function"
+                ? (...parameters: unknown[]) =>
+                    configured(config, async () =>
+                      Reflect.apply(action, client, parameters),
+                    )
+                : action;
+            },
+          });
+          Object.defineProperty(request, "client", {
+            value: client,
+            configurable: true,
+          });
+          return request;
+        };
+      }
+      if (typeof value === "function") {
+        if (value.constructor.name === "AsyncFunction") {
+          return (...parameters: unknown[]) =>
+            configured(config, async () =>
+              Reflect.apply(value, object, parameters),
+            );
+        }
+        return value.bind(object);
+      }
+      return value;
+    },
+  });
+  // The native watcher starts a request synchronously, then consumes its stream
+  // asynchronously. Own each request epoch, not the lifetime of that stream.
+  void configured(config, async () => {
+    if (!closed) handle = Reflect.apply(watch, context, args);
+  }).catch((error: unknown) => {
+    const options = args[2] as { onError?: (error: Error) => void } | undefined;
+    options?.onError?.(
+      error instanceof Error ? error : new Error(String(error)),
+    );
+  });
+  return {
+    close() {
+      closed = true;
+      handle?.close();
+    },
+  };
+}
+
 function owned(native: SandboxInstance, config: Config): SandboxInstance {
   const actions = new Set([
     "fs",
@@ -75,6 +139,15 @@ function owned(native: SandboxInstance, config: Config): SandboxInstance {
       get(object, property) {
         const value = Reflect.get(object, property, object);
         if (typeof value === "function") {
+          if (property === "watch") {
+            return (...args: unknown[]) =>
+              ownedWatch(
+                object,
+                value as (...args: unknown[]) => { close(): void },
+                config,
+                args,
+              );
+          }
           if (value.constructor.name === "AsyncFunction") {
             return (...args: unknown[]) =>
               configured(config, () => Reflect.apply(value, object, args));
