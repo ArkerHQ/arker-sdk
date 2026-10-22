@@ -1598,6 +1598,7 @@ export class VM {
   private async syncWriteChunks(
     path: string, size: number, read: (start: number, length: number) => Promise<Uint8Array>, options: SyncOptions = {},
   ): Promise<void> {
+    const isSecret = options.isSecret ?? false;
     const uploadId = ulid();
     let result: SyncWriteResult | undefined;
     for (let start = 0; start < Math.max(size, 1); start += CHUNK_SIZE) {
@@ -1605,7 +1606,7 @@ export class VM {
       const data = await read(start, end - start);
       result = await this.sendOneWrite({
         path, size, upload_id: uploadId, content: bytesToBase64(data),
-        start, end, is_secret: options.isSecret ?? false,
+        start, end, is_secret: isSecret,
       });
     }
     assertWriteComplete(result!, "inline write");

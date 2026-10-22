@@ -1130,6 +1130,27 @@ async function testSecretSyncMarksEveryChunkIncludingEmptyFiles(): Promise<void>
 
 await testSecretSyncMarksEveryChunkIncludingEmptyFiles();
 
+async function testSyncSnapshotsSecretClassificationAcrossChunks(): Promise<void> {
+  for (const initial of [true, false]) {
+    const options = { isSecret: initial };
+    const fetch = new FakeFetch();
+    const match = (method: string, url: string) => method === "POST" && url.endsWith("/sync");
+    fetch.addJson(match, 200, { results: [{ complete: false, written: false }] });
+    fetch.addJson(match, 200, { results: [{ complete: true, written: true }] });
+    const originalFetch = fetch.fetch;
+    fetch.fetch = async (...args) => {
+      const result = await originalFetch(...args);
+      options.isSecret = !initial;
+      return result;
+    };
+    await client(fetch).vm("vm_1").sync("/run/credential", new Uint8Array(4 * 1024 * 1024 + 1), options);
+    assert.equal(fetch.calls.length, 2);
+    for (const call of fetch.calls) assert.equal(JSON.parse(call.body!).writes[0].is_secret, initial);
+  }
+}
+
+await testSyncSnapshotsSecretClassificationAcrossChunks();
+
 async function testGetAndSetPolicies(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(
