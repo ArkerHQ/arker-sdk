@@ -673,35 +673,46 @@ func sha256Hex(s string) string {
 
 // ── Regressions ─────────────────────────────────────────────────────────
 
-func TestListLogsSendsTheFilterAsFlatParameters(t *testing.T) {
+func TestListEventsSendsTheFilterAsFlatParameters(t *testing.T) {
 	var got string
 	c := twoPlane(t, reject(t, "regional"), func(w http.ResponseWriter, r *http.Request) {
 		got = r.URL.Path + "?" + r.URL.RawQuery
-		fmt.Fprint(w, `{"logs":[],"next_cursor":null}`)
+		fmt.Fprint(w, `{"events":[{"id":"ev_1","action":"run","state":"completed","vm_id":"vm_1",`+
+			`"requested_at":"2026-10-20T00:00:00Z","started_at":null,"ended_at":"2026-10-20T00:00:01Z",`+
+			`"duration_ms":1000,"actor":{"via":"arker"},"region":null,"request_id":null,"error_code":null,`+
+			`"attributes":{}}],"next_cursor":null}`)
 	})
 	exit, under := 1, int64(5000)
-	page, err := c.ListLogs(context.Background(), arker.ListLogsOptions{
-		Filter: arker.LogFilter{
-			Actions:     []string{"run", "fork"},
-			VMIDs:       []string{"vm_1"},
-			ExitCode:    &exit,
-			CompletedAt: arker.TimeRange{GTE: "2026-10-20T00:00:00Z"},
-			DurationMS:  arker.DurationRange{LT: &under},
+	page, err := c.ListEvents(context.Background(), arker.ListEventsOptions{
+		Filter: arker.EventFilter{
+			Actions:    []string{"run", "fork"},
+			States:     []string{"completed"},
+			VMIDs:      []string{"vm_1"},
+			Actors:     []string{"me"},
+			Via:        []string{"api", "ssh"},
+			ExitCode:   &exit,
+			EndedAt:    arker.TimeRange{GTE: "2026-10-20T00:00:00Z"},
+			DurationMS: arker.DurationRange{LT: &under},
 		},
-		OrderBy: "duration_ms",
+		OrderBy: "ended_at",
 		Order:   "asc",
 		Limit:   10,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "/v1/logs?actions=run&actions=fork&completed_at_gte=2026-10-20T00%3A00%3A00Z" +
-		"&duration_ms_lt=5000&exit_code=1&limit=10&order=asc&order_by=duration_ms&vm_ids=vm_1"
+	want := "/v1/events?actions=run&actions=fork&actors=me&duration_ms_lt=5000" +
+		"&ended_at_gte=2026-10-20T00%3A00%3A00Z&exit_code=1&limit=10&order=asc&order_by=ended_at" +
+		"&states=completed&via=api&via=ssh&vm_ids=vm_1"
 	if got != want {
 		t.Fatalf("control plane saw %q, want %q", got, want)
 	}
-	if len(page.Logs) != 0 || page.NextCursor != nil {
+	if len(page.Events) != 1 || page.NextCursor != nil {
 		t.Fatalf("page = %+v", page)
+	}
+	if e := page.Events[0]; e.State != "completed" || e.EndedAt == nil || e.Actor == nil ||
+		e.Actor.Via != "arker" || e.Actor.ID != nil {
+		t.Fatalf("event = %+v", e)
 	}
 }
 

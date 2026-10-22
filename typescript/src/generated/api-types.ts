@@ -114,7 +114,7 @@ export interface paths {
         /**
          * List organization runs
          * @deprecated
-         * @description Deprecated: use `GET /v1/logs`, which lists every action across regions. Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
+         * @description Deprecated: use `GET /v1/events`, which lists every action across regions. Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
          */
         get: operations["listOrgRuns"];
         put?: never;
@@ -125,7 +125,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/logs": {
+    "/v1/events": {
         parameters: {
             query?: never;
             header?: never;
@@ -133,10 +133,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List logs
-         * @description Lists the organization's activity, one entry per action: API requests, runs, network and SSH traffic, automatic actions and account changes, across every region, within the retained history window. Filters combine with AND; the values of one filter with OR. Newly recorded actions appear within seconds.
+         * List events
+         * @description Lists the organization's activity, one event per action: API requests, runs, network and SSH traffic, automatic actions and account changes, across every region, within the retained history window. Filters combine with AND; the values of one filter with OR. Newly recorded actions appear within seconds.
          */
-        get: operations["listLogs"];
+        get: operations["listEvents"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1849,7 +1849,7 @@ export interface components {
          * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
          * @enum {string}
          */
-        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "listLogs" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey";
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "listEvents" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey";
         /** @enum {string} */
         HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
         /**
@@ -3495,19 +3495,19 @@ export interface components {
             api_keys: components["schemas"]["ApiKey"][];
         };
         /**
-         * @description What a log entry records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection; `sign_in` a member's session entering the organization, by signing in or switching to it. An action whose `actor` is null and whose `attributes.by` is `arker` was made by Arker.
+         * @description What an event records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection; `sign_in` a member's session entering the organization, by signing in or switching to it.
          * @enum {string}
          */
-        LogAction: "run" | "fork" | "sync" | "delete" | "signal" | "vm_update" | "vm_suspend" | "policies_update" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "inbound_request" | "outbound_request" | "ssh_session" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_update" | "member_remove" | "org_rename" | "member_add" | "member_invite" | "member_invite_revoke" | "org_create" | "org_delete" | "sign_in" | "sign_out" | "terms_accept" | "billing_checkout" | "payment_method_update" | "billing_block" | "billing_unblock" | "credit_grant" | "org_access_update" | "billing_class_update" | "quota_update";
+        EventAction: "run" | "fork" | "sync" | "delete" | "signal" | "vm_update" | "vm_suspend" | "policies_update" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "inbound_request" | "outbound_request" | "ssh_session" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_update" | "member_remove" | "org_rename" | "member_add" | "member_invite" | "member_invite_revoke" | "org_create" | "org_delete" | "sign_in" | "sign_out" | "terms_accept" | "billing_checkout" | "payment_method_update" | "billing_block" | "billing_unblock" | "credit_grant" | "org_access_update" | "billing_class_update" | "quota_update";
         /** @enum {string} */
-        LogOutcome: "in_progress" | "succeeded" | "failed" | "cancelled";
+        EventState: "running" | "completed" | "failed" | "cancelled";
         /** @enum {string} */
-        LogOrderBy: "requested_at" | "started_at" | "completed_at" | "duration_ms";
-        LogEntry: {
-            /** @description The action's id, the same while it is in progress and once it ends. */
+        EventOrderBy: "requested_at" | "started_at" | "ended_at" | "duration_ms";
+        Event: {
+            /** @description The action's id, the same while it is running and once it ends. */
             id: string;
-            action: components["schemas"]["LogAction"];
-            outcome: components["schemas"]["LogOutcome"];
+            action: components["schemas"]["EventAction"];
+            state: components["schemas"]["EventState"];
             /** @description The VM the action used; a fork's new VM. Null for an action on no VM. */
             vm_id: string | null;
             /**
@@ -3522,13 +3522,13 @@ export interface components {
             started_at: string | null;
             /**
              * Format: date-time
-             * @description When the action ended; null while it is in progress.
+             * @description When the action ended; null while it is running.
              */
-            completed_at: string | null;
-            /** @description From `started_at`, or `requested_at` when there is none, to `completed_at`; null while in progress. */
+            ended_at: string | null;
+            /** @description From `started_at`, or `requested_at` when there is none, to `ended_at`; null while running. */
             duration_ms: number | null;
-            /** @description Who initiated the action: a member by email, or an API key by id. Null for an automatic action, or when Arker does not know who acted. */
-            actor: components["schemas"]["LogActor"] | null;
+            /** @description Who initiated the action, and how. Null for an automatic action, or when Arker does not know who acted. */
+            actor: components["schemas"]["EventActor"] | null;
             /** @description The region that served the action; null for one the console served, such as an API key's. */
             region: string | null;
             /** @description The `x-request-id` of the request that made the action. */
@@ -3540,18 +3540,19 @@ export interface components {
                 [key: string]: string | number | boolean | null;
             };
         };
-        LogActor: {
-            /**
-             * @description A member, or an API key.
-             * @enum {string}
-             */
-            type: "member" | "key";
-            /** @description A member's email, or an API key's `api_key_id`. */
-            id: string;
+        EventActor: {
+            via: components["schemas"]["EventVia"];
+            /** @description Who: a member's email in the console; an API key's `api_key_id`; an SSH key's id, or its fingerprint when it is no account key. None when Arker acted. */
+            id?: string;
         };
-        ListLogsResponse: {
-            /** @description Entries, in the requested order. */
-            logs: components["schemas"]["LogEntry"][];
+        /**
+         * @description How an action was initiated: by a member in the console, with an API key, over SSH with an SSH key, or by Arker.
+         * @enum {string}
+         */
+        EventVia: "console" | "api" | "ssh" | "arker";
+        ListEventsResponse: {
+            /** @description Events, in the requested order. */
+            events: components["schemas"]["Event"][];
             /** @description Cursor for the next page, or null when there is none. */
             next_cursor: string | null;
         };
@@ -4219,48 +4220,48 @@ export interface operations {
             503: components["responses"]["UnavailableError"];
         };
     };
-    listLogs: {
+    listEvents: {
         parameters: {
             query?: {
                 /** @description Only these actions. Repeat the parameter for more than one. */
-                actions?: components["schemas"]["LogAction"][];
-                /** @description Only these outcomes. */
-                outcomes?: components["schemas"]["LogOutcome"][];
+                actions?: components["schemas"]["EventAction"][];
+                /** @description Only events in these states. */
+                states?: components["schemas"]["EventState"][];
                 /** @description Only actions these regions served. */
                 regions?: string[];
                 /** @description Only actions on these VMs. */
                 vm_ids?: string[];
-                /** @description Only actions these members initiated, by email, or `me` for the member calling. With `keys`, an action either initiated matches. */
-                members?: string[];
-                /** @description Only actions these API keys initiated, by `api_key_id`. With `members`, an action either initiated matches. */
-                keys?: string[];
+                /** @description Only actions these actors initiated: members by email, or `me` for the member calling, and API keys and SSH keys by id. */
+                actors?: string[];
+                /** @description Only actions initiated this way. */
+                via?: components["schemas"]["EventVia"][];
                 /** @description Only actions these requests made. */
                 request_ids?: string[];
                 /** @description Only actions that failed with these codes. */
                 error_codes?: components["schemas"]["ErrorCode"][];
                 /** @description Only runs that exited with this code. */
                 exit_code?: number;
-                /** @description Only entries whose `requested_at` is at or after this time. Entries without one do not match. */
+                /** @description Only events whose `requested_at` is at or after this time. Events without one do not match. */
                 requested_at_gte?: string;
-                /** @description Only entries whose `requested_at` is before this time. Entries without one do not match. */
+                /** @description Only events whose `requested_at` is before this time. Events without one do not match. */
                 requested_at_lt?: string;
-                /** @description Only entries whose `started_at` is at or after this time. Entries without one do not match. */
+                /** @description Only events whose `started_at` is at or after this time. Events without one do not match. */
                 started_at_gte?: string;
-                /** @description Only entries whose `started_at` is before this time. Entries without one do not match. */
+                /** @description Only events whose `started_at` is before this time. Events without one do not match. */
                 started_at_lt?: string;
-                /** @description Only entries whose `completed_at` is at or after this time. Entries without one do not match. */
-                completed_at_gte?: string;
-                /** @description Only entries whose `completed_at` is before this time. Entries without one do not match. */
-                completed_at_lt?: string;
-                /** @description Only entries whose `duration_ms` is at or after this many milliseconds. Entries without one do not match. */
+                /** @description Only events whose `ended_at` is at or after this time. Events without one do not match. */
+                ended_at_gte?: string;
+                /** @description Only events whose `ended_at` is before this time. Events without one do not match. */
+                ended_at_lt?: string;
+                /** @description Only events whose `duration_ms` is at or after this many milliseconds. Events without one do not match. */
                 duration_ms_gte?: number;
-                /** @description Only entries whose `duration_ms` is before this many milliseconds. Entries without one do not match. */
+                /** @description Only events whose `duration_ms` is before this many milliseconds. Events without one do not match. */
                 duration_ms_lt?: number;
-                /** @description What entries are ordered by; entries without it come last, and `id` breaks ties. */
-                order_by?: components["schemas"]["LogOrderBy"];
+                /** @description What events are ordered by; events without it come last, and `id` breaks ties. */
+                order_by?: components["schemas"]["EventOrderBy"];
                 /** @description The direction of `order_by`. */
                 order?: "asc" | "desc";
-                /** @description Entries per page. */
+                /** @description Events per page. */
                 limit?: number;
                 /** @description The previous page's `next_cursor`. It keeps that query's filters and order, so only `limit` may accompany it. */
                 cursor?: string;
@@ -4271,13 +4272,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description One page of entries. */
+            /** @description One page of events. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ListLogsResponse"];
+                    "application/json": components["schemas"]["ListEventsResponse"];
                 };
             };
             400: components["responses"]["BadRequestError"];

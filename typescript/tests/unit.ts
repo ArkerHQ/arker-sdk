@@ -793,12 +793,12 @@ function testExplicitVmHandleUsesPlacementEndpoint(): void {
   assert.equal(vm.baseUrl, "https://provider-two-region-two.arker.ai/api");
 }
 
-async function testListLogsSendsTheFilterAsFlatParameters(): Promise<void> {
+async function testListEventsSendsTheFilterAsFlatParameters(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(
-    (method, url) => method === "GET" && url === "https://control.invalid/api/v1/logs?actions=run&actions=fork&vm_ids=vm_1&exit_code=1&completed_at_gte=2026-10-20T00%3A00%3A00Z&duration_ms_lt=5000&order_by=duration_ms&order=asc&limit=10",
+    (method, url) => method === "GET" && url === "https://control.invalid/api/v1/events?actions=run&actions=fork&states=completed&vm_ids=vm_1&actors=me&via=api&via=ssh&exit_code=1&ended_at_gte=2026-10-20T00%3A00%3A00Z&duration_ms_lt=5000&order_by=ended_at&order=asc&limit=10",
     200,
-    { logs: [], next_cursor: null },
+    { events: [], next_cursor: null },
   );
   const arker = new Arker({
     apiKey: "ark_live_test",
@@ -807,19 +807,22 @@ async function testListLogsSendsTheFilterAsFlatParameters(): Promise<void> {
     fetch: fetch.fetch,
     retry: false,
   });
-  const page = await arker.listLogs({
+  const page = await arker.listEvents({
     filter: {
       actions: ["run", "fork"],
+      states: ["completed"],
       vmIds: ["vm_1"],
+      actors: ["me"],
+      via: ["api", "ssh"],
       exitCode: 1,
-      completedAt: { gte: "2026-10-20T00:00:00Z" },
+      endedAt: { gte: "2026-10-20T00:00:00Z" },
       durationMs: { lt: 5000 },
     },
-    orderBy: "duration_ms",
+    orderBy: "ended_at",
     order: "asc",
     limit: 10,
   });
-  assert.deepEqual(page, { logs: [], next_cursor: null });
+  assert.deepEqual(page, { events: [], next_cursor: null });
 }
 
 async function testListRunsUsesControlPlaneAndFilters(): Promise<void> {
@@ -1342,7 +1345,7 @@ await testDiscoverRegionsRequiresNoConfiguredClient();
 await testListedVmUsesItsPlacementEndpoint();
 testExplicitVmHandleUsesPlacementEndpoint();
 await testListRunsUsesControlPlaneAndFilters();
-await testListLogsSendsTheFilterAsFlatParameters();
+await testListEventsSendsTheFilterAsFlatParameters();
 await testListVmsPreservesForkLimitFields();
 await testForkSendsDurableFlag();
 await testRunSendsIdempotencyKeyHeader();

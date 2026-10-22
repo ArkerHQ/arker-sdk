@@ -747,16 +747,35 @@ def test_listed_vm_uses_its_placement_endpoint() -> None:
         result.vms[0].run("printf ok")
 
 
-def test_list_logs_sends_the_filter_as_flat_parameters() -> None:
+def test_list_events_sends_the_filter_as_flat_parameters() -> None:
     t = FakeTransport()
     t.add_json(
         lambda method, url: (
             method == "GET"
             and url
-            == "https://control.invalid/api/v1/logs?actions=run&actions=fork&vm_ids=vm_1&exit_code=1&completed_at_gte=2026-10-20T00%3A00%3A00Z&duration_ms_lt=5000&order_by=duration_ms&order=asc&limit=10"
+            == "https://control.invalid/api/v1/events?actions=run&actions=fork&states=completed&vm_ids=vm_1&actors=me&via=api&via=ssh&exit_code=1&ended_at_gte=2026-10-20T00%3A00%3A00Z&duration_ms_lt=5000&order_by=ended_at&order=asc&limit=10"
         ),
         200,
-        {"logs": [], "next_cursor": None},
+        {
+            "events": [
+                {
+                    "id": "ev_1",
+                    "action": "run",
+                    "state": "completed",
+                    "vm_id": "vm_1",
+                    "requested_at": "2026-10-20T00:00:00Z",
+                    "started_at": None,
+                    "ended_at": "2026-10-20T00:00:01Z",
+                    "duration_ms": 1000,
+                    "actor": {"via": "arker"},
+                    "region": None,
+                    "request_id": None,
+                    "error_code": None,
+                    "attributes": {},
+                }
+            ],
+            "next_cursor": None,
+        },
     )
     arker = sdk.Arker(
         api_key="ark_live_test",
@@ -765,19 +784,25 @@ def test_list_logs_sends_the_filter_as_flat_parameters() -> None:
         retry=False,
     )
     with use_transport(t):
-        page = arker.list_logs(
+        page = arker.list_events(
             filter={
                 "actions": ["run", "fork"],
+                "states": ["completed"],
                 "vm_ids": ["vm_1"],
+                "actors": ["me"],
+                "via": ["api", "ssh"],
                 "exit_code": 1,
-                "completed_at": {"gte": "2026-10-20T00:00:00Z"},
+                "ended_at": {"gte": "2026-10-20T00:00:00Z"},
                 "duration_ms": {"lt": 5000},
             },
-            order_by="duration_ms",
+            order_by="ended_at",
             order="asc",
             limit=10,
         )
-    assert page.logs == [] and page.next_cursor is None
+    assert page.next_cursor is None
+    [event] = page.events
+    assert event.state == "completed" and event.ended_at == "2026-10-20T00:00:01Z"
+    assert event.actor is not None and event.actor.via == "arker" and event.actor.id is None
 
 
 def test_list_runs_uses_control_plane_and_filters() -> None:

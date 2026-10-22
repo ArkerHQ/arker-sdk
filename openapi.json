@@ -58,7 +58,7 @@
       "description": "Create, list and revoke API keys, optionally limited to one VM or pool and one action."
     },
     {
-      "name": "Logs",
+      "name": "Events",
       "description": "Your organization's activity history."
     }
   ],
@@ -574,7 +574,7 @@
             "$ref": "#/components/responses/UnavailableError"
           }
         },
-        "description": "Deprecated: use `GET /v1/logs`, which lists every action across regions. Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.",
+        "description": "Deprecated: use `GET /v1/events`, which lists every action across regions. Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.",
         "servers": [
           {
             "url": "https://{regionalHost}/api",
@@ -589,14 +589,14 @@
         ]
       }
     },
-    "/v1/logs": {
+    "/v1/events": {
       "get": {
-        "operationId": "listLogs",
+        "operationId": "listEvents",
         "tags": [
-          "Logs"
+          "Events"
         ],
-        "summary": "List logs",
-        "description": "Lists the organization's activity, one entry per action: API requests, runs, network and SSH traffic, automatic actions and account changes, across every region, within the retained history window. Filters combine with AND; the values of one filter with OR. Newly recorded actions appear within seconds.",
+        "summary": "List events",
+        "description": "Lists the organization's activity, one event per action: API requests, runs, network and SSH traffic, automatic actions and account changes, across every region, within the retained history window. Filters combine with AND; the values of one filter with OR. Newly recorded actions appear within seconds.",
         "parameters": [
           {
             "name": "actions",
@@ -606,19 +606,19 @@
             "schema": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/LogAction"
+                "$ref": "#/components/schemas/EventAction"
               }
             }
           },
           {
-            "name": "outcomes",
+            "name": "states",
             "in": "query",
             "required": false,
-            "description": "Only these outcomes.",
+            "description": "Only events in these states.",
             "schema": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/LogOutcome"
+                "$ref": "#/components/schemas/EventState"
               }
             }
           },
@@ -647,10 +647,10 @@
             }
           },
           {
-            "name": "members",
+            "name": "actors",
             "in": "query",
             "required": false,
-            "description": "Only actions these members initiated, by email, or `me` for the member calling. With `keys`, an action either initiated matches.",
+            "description": "Only actions these actors initiated: members by email, or `me` for the member calling, and API keys and SSH keys by id.",
             "schema": {
               "type": "array",
               "items": {
@@ -659,14 +659,14 @@
             }
           },
           {
-            "name": "keys",
+            "name": "via",
             "in": "query",
             "required": false,
-            "description": "Only actions these API keys initiated, by `api_key_id`. With `members`, an action either initiated matches.",
+            "description": "Only actions initiated this way.",
             "schema": {
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/components/schemas/EventVia"
               }
             }
           },
@@ -707,7 +707,7 @@
             "name": "requested_at_gte",
             "in": "query",
             "required": false,
-            "description": "Only entries whose `requested_at` is at or after this time. Entries without one do not match.",
+            "description": "Only events whose `requested_at` is at or after this time. Events without one do not match.",
             "schema": {
               "type": "string",
               "format": "date-time"
@@ -717,7 +717,7 @@
             "name": "requested_at_lt",
             "in": "query",
             "required": false,
-            "description": "Only entries whose `requested_at` is before this time. Entries without one do not match.",
+            "description": "Only events whose `requested_at` is before this time. Events without one do not match.",
             "schema": {
               "type": "string",
               "format": "date-time"
@@ -727,7 +727,7 @@
             "name": "started_at_gte",
             "in": "query",
             "required": false,
-            "description": "Only entries whose `started_at` is at or after this time. Entries without one do not match.",
+            "description": "Only events whose `started_at` is at or after this time. Events without one do not match.",
             "schema": {
               "type": "string",
               "format": "date-time"
@@ -737,27 +737,27 @@
             "name": "started_at_lt",
             "in": "query",
             "required": false,
-            "description": "Only entries whose `started_at` is before this time. Entries without one do not match.",
+            "description": "Only events whose `started_at` is before this time. Events without one do not match.",
             "schema": {
               "type": "string",
               "format": "date-time"
             }
           },
           {
-            "name": "completed_at_gte",
+            "name": "ended_at_gte",
             "in": "query",
             "required": false,
-            "description": "Only entries whose `completed_at` is at or after this time. Entries without one do not match.",
+            "description": "Only events whose `ended_at` is at or after this time. Events without one do not match.",
             "schema": {
               "type": "string",
               "format": "date-time"
             }
           },
           {
-            "name": "completed_at_lt",
+            "name": "ended_at_lt",
             "in": "query",
             "required": false,
-            "description": "Only entries whose `completed_at` is before this time. Entries without one do not match.",
+            "description": "Only events whose `ended_at` is before this time. Events without one do not match.",
             "schema": {
               "type": "string",
               "format": "date-time"
@@ -767,7 +767,7 @@
             "name": "duration_ms_gte",
             "in": "query",
             "required": false,
-            "description": "Only entries whose `duration_ms` is at or after this many milliseconds. Entries without one do not match.",
+            "description": "Only events whose `duration_ms` is at or after this many milliseconds. Events without one do not match.",
             "schema": {
               "type": "integer",
               "minimum": 0
@@ -777,7 +777,7 @@
             "name": "duration_ms_lt",
             "in": "query",
             "required": false,
-            "description": "Only entries whose `duration_ms` is before this many milliseconds. Entries without one do not match.",
+            "description": "Only events whose `duration_ms` is before this many milliseconds. Events without one do not match.",
             "schema": {
               "type": "integer",
               "minimum": 0
@@ -787,9 +787,9 @@
             "name": "order_by",
             "in": "query",
             "required": false,
-            "description": "What entries are ordered by; entries without it come last, and `id` breaks ties.",
+            "description": "What events are ordered by; events without it come last, and `id` breaks ties.",
             "schema": {
-              "$ref": "#/components/schemas/LogOrderBy",
+              "$ref": "#/components/schemas/EventOrderBy",
               "default": "requested_at"
             }
           },
@@ -811,7 +811,7 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Entries per page.",
+            "description": "Events per page.",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -831,11 +831,11 @@
         ],
         "responses": {
           "200": {
-            "description": "One page of entries.",
+            "description": "One page of events.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ListLogsResponse"
+                  "$ref": "#/components/schemas/ListEventsResponse"
                 }
               }
             }
@@ -8011,7 +8011,7 @@
           "fork",
           "listVms",
           "listOrgRuns",
-          "listLogs",
+          "listEvents",
           "getVm",
           "deleteVm",
           "patchVm",
@@ -12717,7 +12717,7 @@
           }
         }
       },
-      "LogAction": {
+      "EventAction": {
         "type": "string",
         "enum": [
           "run",
@@ -12765,36 +12765,36 @@
           "billing_class_update",
           "quota_update"
         ],
-        "description": "What a log entry records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection; `sign_in` a member's session entering the organization, by signing in or switching to it. An action whose `actor` is null and whose `attributes.by` is `arker` was made by Arker."
+        "description": "What an event records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection; `sign_in` a member's session entering the organization, by signing in or switching to it."
       },
-      "LogOutcome": {
+      "EventState": {
         "type": "string",
         "enum": [
-          "in_progress",
-          "succeeded",
+          "running",
+          "completed",
           "failed",
           "cancelled"
         ]
       },
-      "LogOrderBy": {
+      "EventOrderBy": {
         "type": "string",
         "enum": [
           "requested_at",
           "started_at",
-          "completed_at",
+          "ended_at",
           "duration_ms"
         ]
       },
-      "LogEntry": {
+      "Event": {
         "type": "object",
         "required": [
           "id",
           "action",
-          "outcome",
+          "state",
           "vm_id",
           "requested_at",
           "started_at",
-          "completed_at",
+          "ended_at",
           "duration_ms",
           "actor",
           "region",
@@ -12806,13 +12806,13 @@
         "properties": {
           "id": {
             "type": "string",
-            "description": "The action's id, the same while it is in progress and once it ends."
+            "description": "The action's id, the same while it is running and once it ends."
           },
           "action": {
-            "$ref": "#/components/schemas/LogAction"
+            "$ref": "#/components/schemas/EventAction"
           },
-          "outcome": {
-            "$ref": "#/components/schemas/LogOutcome"
+          "state": {
+            "$ref": "#/components/schemas/EventState"
           },
           "vm_id": {
             "type": [
@@ -12834,13 +12834,13 @@
             "format": "date-time",
             "description": "When the action began executing; null before it does and for an action with no separate start."
           },
-          "completed_at": {
+          "ended_at": {
             "type": [
               "string",
               "null"
             ],
             "format": "date-time",
-            "description": "When the action ended; null while it is in progress."
+            "description": "When the action ended; null while it is running."
           },
           "duration_ms": {
             "type": [
@@ -12848,13 +12848,13 @@
               "null"
             ],
             "minimum": 0,
-            "description": "From `started_at`, or `requested_at` when there is none, to `completed_at`; null while in progress."
+            "description": "From `started_at`, or `requested_at` when there is none, to `ended_at`; null while running."
           },
           "actor": {
-            "description": "Who initiated the action: a member by email, or an API key by id. Null for an automatic action, or when Arker does not know who acted.",
+            "description": "Who initiated the action, and how. Null for an automatic action, or when Arker does not know who acted.",
             "oneOf": [
               {
-                "$ref": "#/components/schemas/LogActor"
+                "$ref": "#/components/schemas/EventActor"
               },
               {
                 "type": "null"
@@ -12900,42 +12900,46 @@
           }
         }
       },
-      "LogActor": {
+      "EventActor": {
         "type": "object",
         "required": [
-          "type",
-          "id"
+          "via"
         ],
         "additionalProperties": false,
         "properties": {
-          "type": {
-            "description": "A member, or an API key.",
-            "type": "string",
-            "enum": [
-              "member",
-              "key"
-            ]
+          "via": {
+            "$ref": "#/components/schemas/EventVia"
           },
           "id": {
             "type": "string",
-            "description": "A member's email, or an API key's `api_key_id`."
+            "description": "Who: a member's email in the console; an API key's `api_key_id`; an SSH key's id, or its fingerprint when it is no account key. None when Arker acted."
           }
         }
       },
-      "ListLogsResponse": {
+      "EventVia": {
+        "type": "string",
+        "enum": [
+          "console",
+          "api",
+          "ssh",
+          "arker"
+        ],
+        "description": "How an action was initiated: by a member in the console, with an API key, over SSH with an SSH key, or by Arker."
+      },
+      "ListEventsResponse": {
         "type": "object",
         "required": [
-          "logs",
+          "events",
           "next_cursor"
         ],
         "additionalProperties": false,
         "properties": {
-          "logs": {
+          "events": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/LogEntry"
+              "$ref": "#/components/schemas/Event"
             },
-            "description": "Entries, in the requested order."
+            "description": "Events, in the requested order."
           },
           "next_cursor": {
             "description": "Cursor for the next page, or null when there is none.",

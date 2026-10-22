@@ -427,33 +427,33 @@ export type ListOrgRunsResponse = ApiSchema<"ListOrgRunsResponse">;
 export type RunListRow = OrgRunListRow;
 export type CancelRunResponse = ApiSchema<"CancelRunResponse">;
 
-// ── Logs ───────────────────────────────────────────────────────────
-export type LogEntry = ApiSchema<"LogEntry">;
-export type ListLogsResponse = ApiSchema<"ListLogsResponse">;
+// ── Events ─────────────────────────────────────────────────────────
+export type Event = ApiSchema<"Event">;
+export type EventActor = ApiSchema<"EventActor">;
+export type ListEventsResponse = ApiSchema<"ListEventsResponse">;
 /** A `[gte, lt)` bound; either end may be left open. */
-export type LogRange<T> = { gte?: T; lt?: T };
-/** Which entries a page lists. Values of one filter match any of them;
- *  filters combine, except `members` and `keys`, either of which matches. */
-export type LogFilter = {
-  actions?: ApiSchema<"LogAction">[];
-  outcomes?: ApiSchema<"LogOutcome">[];
+export type EventRange<T> = { gte?: T; lt?: T };
+/** Which events a page lists. Values of one filter match any of them;
+ *  filters combine. */
+export type EventFilter = {
+  actions?: ApiSchema<"EventAction">[];
+  states?: ApiSchema<"EventState">[];
   regions?: string[];
   vmIds?: string[];
-  /** Member emails, or `me`. */
-  members?: string[];
-  /** API key ids. */
-  keys?: string[];
+  /** Member emails or `me`, API key ids, SSH key ids. */
+  actors?: string[];
+  via?: ApiSchema<"EventVia">[];
   requestIds?: string[];
   errorCodes?: ApiSchema<"ErrorCode">[];
   exitCode?: number;
-  requestedAt?: LogRange<string>;
-  startedAt?: LogRange<string>;
-  completedAt?: LogRange<string>;
-  durationMs?: LogRange<number>;
+  requestedAt?: EventRange<string>;
+  startedAt?: EventRange<string>;
+  endedAt?: EventRange<string>;
+  durationMs?: EventRange<number>;
 };
-export type ListLogsOptions = {
-  filter?: LogFilter;
-  orderBy?: ApiSchema<"LogOrderBy">;
+export type ListEventsOptions = {
+  filter?: EventFilter;
+  orderBy?: ApiSchema<"EventOrderBy">;
   order?: "asc" | "desc";
   limit?: number;
   /** A previous page's `next_cursor`; it carries that page's filter and order. */
@@ -469,7 +469,7 @@ export type PtyTicketResponse = ApiSchema<"PtyTicketResponse">;
 // ── Operation query parameters ─────────────────────────────────────
 export type ListVmsParameters = ApiQuery<"listVms">;
 export type ListOrgRunsParameters = ApiQuery<"listOrgRuns">;
-export type ListLogsParameters = ApiQuery<"listLogs">;
+export type ListEventsParameters = ApiQuery<"listEvents">;
 export type ListFilesystemsParameters = ApiQuery<"listFilesystems">;
 export type ListPoolsParameters = ApiQuery<"listPools">;
 export type ListMountsParameters = ApiQuery<"listMounts">;
@@ -871,16 +871,16 @@ export class Arker {
     return this._request("GET", buildQuery("/v1/runs", query), undefined, this.controlBaseUrl);
   }
 
-  /** List the organization's activity across regions, one entry per action. */
-  async listLogs(opts: ListLogsOptions = {}): Promise<ListLogsResponse> {
+  /** List the organization's activity across regions, one event per action. */
+  async listEvents(opts: ListEventsOptions = {}): Promise<ListEventsResponse> {
     const filter = opts.filter ?? {};
-    const query: ListLogsParameters = {
+    const query: ListEventsParameters = {
       actions: filter.actions,
-      outcomes: filter.outcomes,
+      states: filter.states,
       regions: filter.regions,
       vm_ids: filter.vmIds,
-      members: filter.members,
-      keys: filter.keys,
+      actors: filter.actors,
+      via: filter.via,
       request_ids: filter.requestIds,
       error_codes: filter.errorCodes,
       exit_code: filter.exitCode,
@@ -888,8 +888,8 @@ export class Arker {
       requested_at_lt: filter.requestedAt?.lt,
       started_at_gte: filter.startedAt?.gte,
       started_at_lt: filter.startedAt?.lt,
-      completed_at_gte: filter.completedAt?.gte,
-      completed_at_lt: filter.completedAt?.lt,
+      ended_at_gte: filter.endedAt?.gte,
+      ended_at_lt: filter.endedAt?.lt,
       duration_ms_gte: filter.durationMs?.gte,
       duration_ms_lt: filter.durationMs?.lt,
       order_by: opts.orderBy,
@@ -897,7 +897,7 @@ export class Arker {
       limit: opts.limit,
       cursor: opts.cursor,
     };
-    return this._request("GET", buildQuery("/v1/logs", query), undefined, this.controlBaseUrl);
+    return this._request("GET", buildQuery("/v1/events", query), undefined, this.controlBaseUrl);
   }
 
   /** Fetch a VM from its regional endpoint. */
