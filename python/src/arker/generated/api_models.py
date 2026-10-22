@@ -1675,6 +1675,22 @@ LogAction: TypeAlias = Literal[
     'member_update',
     'member_remove',
     'org_rename',
+    'member_add',
+    'member_invite',
+    'member_invite_revoke',
+    'org_create',
+    'org_delete',
+    'sign_in',
+    'sign_out',
+    'terms_accept',
+    'billing_checkout',
+    'payment_method_update',
+    'billing_block',
+    'billing_unblock',
+    'credit_grant',
+    'org_access_update',
+    'billing_class_update',
+    'quota_update',
 ]
 
 

@@ -374,6 +374,7 @@
           "Runs"
         ],
         "summary": "List organization runs",
+        "deprecated": true,
         "parameters": [
           {
             "in": "query",
@@ -573,7 +574,7 @@
             "$ref": "#/components/responses/UnavailableError"
           }
         },
-        "description": "Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.",
+        "description": "Deprecated: use `GET /v1/logs`, which lists every action across regions. Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.",
         "servers": [
           {
             "url": "https://{regionalHost}/api",
@@ -12746,9 +12747,25 @@
           "api_key_revoke",
           "member_update",
           "member_remove",
-          "org_rename"
+          "org_rename",
+          "member_add",
+          "member_invite",
+          "member_invite_revoke",
+          "org_create",
+          "org_delete",
+          "sign_in",
+          "sign_out",
+          "terms_accept",
+          "billing_checkout",
+          "payment_method_update",
+          "billing_block",
+          "billing_unblock",
+          "credit_grant",
+          "org_access_update",
+          "billing_class_update",
+          "quota_update"
         ],
-        "description": "What a log entry records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection."
+        "description": "What a log entry records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection; `sign_in` a member's session entering the organization, by signing in or switching to it. An action whose `actor` is null and whose `attributes.by` is `arker` was made by Arker."
       },
       "LogOutcome": {
         "type": "string",

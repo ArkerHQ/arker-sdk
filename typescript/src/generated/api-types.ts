@@ -113,7 +113,8 @@ export interface paths {
         };
         /**
          * List organization runs
-         * @description Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
+         * @deprecated
+         * @description Deprecated: use `GET /v1/logs`, which lists every action across regions. Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
          */
         get: operations["listOrgRuns"];
         put?: never;
@@ -3494,10 +3495,10 @@ export interface components {
             api_keys: components["schemas"]["ApiKey"][];
         };
         /**
-         * @description What a log entry records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection.
+         * @description What a log entry records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection; `sign_in` a member's session entering the organization, by signing in or switching to it. An action whose `actor` is null and whose `attributes.by` is `arker` was made by Arker.
          * @enum {string}
          */
-        LogAction: "run" | "fork" | "sync" | "delete" | "signal" | "vm_update" | "vm_suspend" | "policies_update" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "inbound_request" | "outbound_request" | "ssh_session" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_update" | "member_remove" | "org_rename";
+        LogAction: "run" | "fork" | "sync" | "delete" | "signal" | "vm_update" | "vm_suspend" | "policies_update" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "inbound_request" | "outbound_request" | "ssh_session" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_update" | "member_remove" | "org_rename" | "member_add" | "member_invite" | "member_invite_revoke" | "org_create" | "org_delete" | "sign_in" | "sign_out" | "terms_accept" | "billing_checkout" | "payment_method_update" | "billing_block" | "billing_unblock" | "credit_grant" | "org_access_update" | "billing_class_update" | "quota_update";
         /** @enum {string} */
         LogOutcome: "in_progress" | "succeeded" | "failed" | "cancelled";
         /** @enum {string} */
