@@ -523,8 +523,8 @@ def test_e2b_arker_git_runs_official_workflow_against_local_repository(tmp_path)
     checkout = tmp_path / "checkout"
     sandbox = E2BSandbox(vm=LocalVM())
 
-    sandbox.git.init(str(remote), bare=True, initial_branch="main")
-    sandbox.git.clone(str(remote), str(checkout))
+    sandbox.git.init(str(remote), bare=True, initial_branch="main", cwd=str(tmp_path))
+    sandbox.git.clone(str(remote), str(checkout), cwd=str(tmp_path))
     sandbox.git.configure_user("Arker Test", "test@arker.invalid", scope="local", path=str(checkout))
     (checkout / "hello.txt").write_text("hello\n")
     sandbox.git.add(str(checkout), files=["hello.txt"])
