@@ -979,14 +979,14 @@ async function testPoliciesGetAndSet(): Promise<void> {
     assert.deepEqual(JSON.parse(stdoutText(got)), doc);
   });
 
-  // `set` reads the document from stdin and PUTs it verbatim.
+  // Derived response fields are not accepted in policy updates.
   await withCapturedServer((_request, res) => jsonResponse(res, { ok: true }), async (baseUrl, requests) => {
     const set = await runCli(baseUrl, ["policies", "set", "vm_1"], { stdin: JSON.stringify(doc) });
     assert.equal(set.code, 0);
     const put = requests.find((r) => r.method === "PUT");
     assert.ok(put, "expected a PUT to the policies endpoint");
     assert.ok(put!.url!.includes("/policies"), `unexpected url: ${put!.url}`);
-    assert.deepEqual(put!.body, doc);
+    assert.deepEqual(put!.body, { policies: doc.policies });
   });
 }
 
@@ -1006,7 +1006,7 @@ async function testPoliciesSetFileReadsPipesAndRejectsDirectories(): Promise<voi
       await writing.catch(() => {});
       if (release !== undefined) closeSync(release);
       assert.equal(piped.code, 0, piped.stderr);
-      assert.deepEqual(requests.find((r) => r.method === "PUT")?.body, doc);
+      assert.deepEqual(requests.find((r) => r.method === "PUT")?.body, { policies: [] });
 
       requests.length = 0;
       const directory = await runCli(baseUrl, ["policies", "set", "vm_1", "--file", dir]);
