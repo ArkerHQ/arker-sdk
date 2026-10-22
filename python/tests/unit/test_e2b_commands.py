@@ -1,3 +1,6 @@
+import os
+import signal
+import subprocess
 import types
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
@@ -6,6 +9,24 @@ import pytest
 
 import arker.e2b as shim
 from arker._compat import CommandResult
+
+
+def test_identity_command_exec_preserves_pid_and_signal_target():
+    command = shim._identity_command(
+        'printf \'%s %s\\n\' "$$" "$(id -u)"; exec sleep 30',
+        user="root",
+    )
+    process = subprocess.Popen(
+        ["bash", "-c", "exec " + command],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert process.stdout is not None
+    pid, actual_uid = process.stdout.readline().split()
+    assert (int(pid), int(actual_uid)) == (process.pid, 0)
+    os.kill(process.pid, signal.SIGTERM)
+    assert process.wait(timeout=2) == -signal.SIGTERM
 
 
 def test_native_creation_does_not_override_an_omitted_internet_policy(monkeypatch):
@@ -45,7 +66,7 @@ def test_arker_command_accepts_vendor_environment_and_raises_vendor_exit(monkeyp
     assert raised.value.stderr == "failure"
     assert raised.value.error == "exit status 17"
     assert len(calls) == 1
-    assert calls[0].startswith("runuser -u user -- sh -c ")
+    assert calls[0].startswith("setpriv --reuid=user --regid=user --init-groups -- sh -c ")
     assert "export HOME=/home/user" in calls[0]
     assert "export VALUE=kept" in calls[0]
     assert "cd /home/user" in calls[0]

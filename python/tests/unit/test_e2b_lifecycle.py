@@ -171,7 +171,7 @@ def test_arker_writes_and_metadata_match_e2b_default_user(monkeypatch):
     files = shim.Sandbox(vm=vm).files
     files.write("/tmp/file", "data")
     info = files.get_info("/tmp/file")
-    assert commands[0].startswith("runuser -u user -- sh -c ")
+    assert commands[0].startswith("setpriv --reuid=user --regid=user --init-groups -- sh -c ")
     assert "cat -- /tmp/.computesdk-e2b-write-" in commands[0]
     assert "> /tmp/file" in commands[0]
     assert commands[1].startswith("rm -f -- /tmp/.computesdk-e2b-write-")
@@ -186,7 +186,7 @@ def test_arker_write_preserves_user_permission_failure_and_cleans_staging(monkey
 
     def run(vm, command, **kwargs):
         commands.append(command)
-        denied = command.startswith("runuser ")
+        denied = command.startswith("setpriv ")
         return shim._CommonCommandResult(
             stdout="", stderr="Permission denied" if denied else "", exit_code=1 if denied else 0
         )
@@ -194,7 +194,7 @@ def test_arker_write_preserves_user_permission_failure_and_cleans_staging(monkey
     monkeypatch.setattr(shim, "run_command", run)
     with pytest.raises(RuntimeError, match="Permission denied"):
         shim.Sandbox(vm=vm).files.write("/root/owned", "data")
-    assert commands[0].startswith("runuser -u user -- ")
+    assert commands[0].startswith("setpriv --reuid=user --regid=user --init-groups -- ")
     assert commands[1].startswith("rm -f -- /tmp/.computesdk-e2b-write-")
 
 

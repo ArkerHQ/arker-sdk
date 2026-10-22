@@ -55,7 +55,7 @@ def create_e2b_baseline(
             raise RuntimeError("E2B baseline ownership marker mismatch")
         _run_checked(
             vm,
-            'set -eu; test "$(uname -m)" = x86_64; '
+            'set -eu; test "$(uname -m)" = x86_64; command -v setpriv >/dev/null; '
             "! getent passwd 1000 >/dev/null; ! getent group 1000 >/dev/null; "
             "test \"$(stat -c '%u:%g:%a' /home/user)\" = 0:0:755; "
             'test -z "$(find /home/user -mindepth 1 -print -quit)"',

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { test } from "node:test";
@@ -10,6 +11,29 @@ import {
 } from "e2b";
 import { Sandbox } from "../src/e2b.js";
 import { createNativeE2BProvider } from "../src/compat/e2b-provider.js";
+
+test("Arker identity execution preserves the process PID while dropping privileges", async () => {
+  let processId = 0;
+  const sandbox = Reflect.construct(Sandbox, [{
+    provider: "arker", sandboxId: "arker",
+    runCommand: async (command: string) => {
+      const child = spawn("bash", ["-c", `exec ${command}`], { stdio: ["ignore", "pipe", "pipe"] });
+      processId = child.pid!;
+      let stdout = "";
+      let stderr = "";
+      child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
+      child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+      const exitCode = await new Promise<number>((resolve) => child.on("close", (code, signal) => resolve(code ?? (signal === "SIGTERM" ? 143 : 1))));
+      return { stdout, stderr, exitCode };
+    },
+  }]) as Sandbox;
+  const identity = await sandbox.commands.run(`printf '%s %s' "$$" "$(id -u)"`, { user: "root" });
+  assert.equal(identity.stdout, `${processId} 0`);
+  await assert.rejects(
+    sandbox.commands.run("kill -TERM $$", { user: "root" }),
+    (error: unknown) => error instanceof CommandExitError && error.exitCode === 143,
+  );
+});
 
 test("native filesystem handles preserve binary options and write metadata", async () => {
   const marker = { path: "/binary", name: "binary" };
@@ -101,7 +125,7 @@ test("Arker writes and metadata match the E2B default user", async () => {
   }]) as Sandbox;
   await sandbox.files.write("/tmp/file", "data");
   const info = await sandbox.files.getInfo("/tmp/file");
-  assert.match(commands[0]!, /^runuser -u user -- sh -c /);
+  assert.match(commands[0]!, /^setpriv --reuid=user --regid=user --init-groups -- sh -c /);
   assert.match(commands[0]!, /cat -- \/tmp\/.computesdk-e2b-write-/);
   assert.match(commands[0]!, /> \/tmp\/file/);
   assert.match(commands[1]!, /^rm -f -- \/tmp\/.computesdk-e2b-write-/);
@@ -116,11 +140,11 @@ test("Arker writes preserve user permission failures and clean staging", async (
     getInstance: () => ({ sync: async () => undefined }),
     runCommand: async (command: string) => {
       commands.push(command);
-      return { stdout: "", stderr: command.startsWith("runuser ") ? "Permission denied" : "", exitCode: command.startsWith("runuser ") ? 1 : 0 };
+      return { stdout: "", stderr: command.startsWith("setpriv ") ? "Permission denied" : "", exitCode: command.startsWith("setpriv ") ? 1 : 0 };
     },
   }]) as Sandbox;
   await assert.rejects(sandbox.files.write("/root/owned", "data"), /Permission denied/);
-  assert.match(commands[0]!, /^runuser -u user -- /);
+  assert.match(commands[0]!, /^setpriv --reuid=user --regid=user --init-groups -- /);
   assert.match(commands[1]!, /^rm -f -- \/tmp\/.computesdk-e2b-write-/);
 });
 

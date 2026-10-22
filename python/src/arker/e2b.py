@@ -58,13 +58,14 @@ def _identity_command(
             raise ValueError(f"Invalid environment variable name: {key}")
         assignments.append(f"export {key}={shlex.quote(value)};")
     shell = f"cd {shlex.quote(working_directory)} && {' '.join(assignments)} exec /bin/bash -c {shlex.quote(command)}"
-    return f"runuser -u {selected} -- sh -c {shlex.quote(shell)}"
+    return f"setpriv --reuid={selected} --regid={selected} --init-groups -- sh -c {shlex.quote(shell)}"
 
 
 def _validate_e2b_identity(vm: VM) -> None:
     check = run_command(
         vm,
-        "test \"$(getent passwd user)\" = 'user:x:1000:1000::/home/user:/bin/bash' "
+        "command -v setpriv >/dev/null "
+        "&& test \"$(getent passwd user)\" = 'user:x:1000:1000::/home/user:/bin/bash' "
         "&& test \"$(getent group user)\" = 'user:x:1000:' "
         "&& test \"$(stat -c '%u:%g:%a' /home/user)\" = '1000:1000:755'",
     )

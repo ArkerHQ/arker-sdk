@@ -70,7 +70,7 @@ function identityCommand(command: string, options?: { user?: string; cwd?: strin
     return `export ${key}=${shellQuote(value)};`;
   }).join(" ");
   const shell = `cd ${shellQuote(options?.cwd ?? E2B_HOME)} && ${exports} exec /bin/bash -c ${shellQuote(command)}`;
-  return `runuser -u ${user} -- sh -c ${shellQuote(shell)}`;
+  return `setpriv --reuid=${user} --regid=${user} --init-groups -- sh -c ${shellQuote(shell)}`;
 }
 
 function filesystemCommand(command: string, user: unknown): string {
@@ -79,7 +79,8 @@ function filesystemCommand(command: string, user: unknown): string {
 
 async function validateE2BIdentity(box: UniversalSandbox): Promise<void> {
   const result = await box.runCommand(
-    "test \"$(getent passwd user)\" = 'user:x:1000:1000::/home/user:/bin/bash' "
+    "command -v setpriv >/dev/null "
+      + "&& test \"$(getent passwd user)\" = 'user:x:1000:1000::/home/user:/bin/bash' "
       + "&& test \"$(getent group user)\" = 'user:x:1000:' "
       + "&& test \"$(stat -c '%u:%g:%a' /home/user)\" = '1000:1000:755'",
   );

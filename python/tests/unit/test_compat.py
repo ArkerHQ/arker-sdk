@@ -500,7 +500,7 @@ def test_e2b_official_surface(monkeypatch) -> None:
         sandbox.kill()
 
     run = json.loads(t.calls[1]["body"])
-    assert run["command"].startswith("(\nrunuser -u user -- sh -c ")
+    assert run["command"].startswith("(\nsetpriv --reuid=user --regid=user --init-groups -- sh -c ")
     assert "cd /workspace" in run["command"]
     assert "export HOME=/home/user" in run["command"]
     assert "export FOO=bar" in run["command"]
@@ -523,9 +523,8 @@ def test_e2b_nested_native_surface_delegates_provider_extensions() -> None:
     assert sandbox.get_host(3000) == "native-3000.example"
 
 
-def test_e2b_arker_git_runs_official_workflow_against_local_repository(tmp_path) -> None:
-    for directory in (tmp_path.parent.parent, tmp_path.parent, tmp_path):
-        directory.chmod(0o777)
+def test_e2b_arker_git_runs_official_workflow_against_local_repository(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(e2b_shim, "_identity_command", lambda command, **_options: command)
 
     class LocalVM:
         id = "local-git"
@@ -578,7 +577,7 @@ def test_e2b_arker_files_write_batch_metadata_and_rename(tmp_path) -> None:
             return None
 
         def run(self, command, **_options):
-            command = command.replace("runuser -u user -- ", "")
+            command = command.replace("setpriv --reuid=user --regid=user --init-groups -- ", "")
             completed = subprocess.run(command, shell=True, text=True, capture_output=True, check=False)
             return sdk.CompletedRunResult(
                 stdout=completed.stdout,

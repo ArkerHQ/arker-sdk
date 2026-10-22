@@ -30,6 +30,7 @@ class FakeSandbox implements SandboxInterface {
   readonly sandboxId: string;
   readonly provider: string;
   readonly runCalls: Array<{ command: string; options?: RunCommandOptions }> = [];
+  runResult?: CommandResult;
   readonly createOptions: unknown[] = [];
   destroyed = false;
 
@@ -46,8 +47,14 @@ class FakeSandbox implements SandboxInterface {
   }
 
   async runCommand(command: string, options?: RunCommandOptions): Promise<CommandResult> {
+    if (command.startsWith("command -v setpriv >/dev/null ")) {
+      return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
+    }
     this.runCalls.push({ command, options });
-    if (command.startsWith("runuser -u user -- ") || command.startsWith("rm -f -- ")) return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
+    if (this.runResult) return this.runResult;
+    if (command.includes(".computesdk-e2b-write-") || command.startsWith("rm -f -- ")) {
+      return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
+    }
     return {
       stdout: `stdout:${command}`,
       stderr: `stderr:${command}`,
@@ -267,18 +274,23 @@ async function testE2BSurface(): Promise<void> {
 
     await assert.rejects(() => sandbox.commands.run("printf e2b", { cwd: "/tmp", envs: { A: "b" }, timeoutMs: 200 }), (error: unknown) => {
       assert.ok(error instanceof CommandExitError);
-      assert.equal(error.stdout, "stdout:printf e2b");
-      assert.equal(error.stderr, "stderr:printf e2b");
+      assert.equal(error.stdout, `stdout:${box.runCalls[0]!.command}`);
+      assert.equal(error.stderr, `stderr:${box.runCalls[0]!.command}`);
       assert.equal(error.exitCode, 7);
       assert.equal(error.error, "exit status 7");
       return true;
     });
-    assert.deepEqual(box.runCalls[0]!.options, { cwd: "/tmp", env: { A: "b" }, timeout: 200 });
+    assert.match(box.runCalls[0]!.command, /^setpriv --reuid=user --regid=user --init-groups -- /);
+    assert.match(box.runCalls[0]!.command, /cd \/tmp/);
+    assert.match(box.runCalls[0]!.command, /export A=b/);
+    assert.deepEqual(box.runCalls[0]!.options, { timeout: 200 });
+
+    box.runResult = { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
 
     assert.equal(await sandbox.files.read("/tmp/a"), "read:/tmp/a");
     await sandbox.files.write("/tmp/a", "content");
     await sandbox.files.makeDir("/tmp/dir");
-    assert.deepEqual(await sandbox.files.list("/tmp"), [{ name: "/tmp", type: "file", size: 1 }]);
+    assert.deepEqual(await sandbox.files.list("/tmp"), []);
     assert.equal(await sandbox.files.exists("/tmp/a"), true);
     await sandbox.files.remove("/tmp/a");
     assert.equal(await sandbox.kill(), true);
@@ -333,7 +345,7 @@ async function testE2BArkerGitRunsOfficialWorkflowAgainstLocalRepository(): Prom
   const box = new FakeSandbox("git-vm");
   box.runCommand = async (command, options) => {
     box.runCalls.push({ command, options });
-    command = command.replace("runuser -u user -- ", "");
+    command = command.replace("setpriv --reuid=user --regid=user --init-groups -- ", "");
     try {
       return {
         stdout: execFileSync("/bin/bash", ["-lc", command], { encoding: "utf8" }),
@@ -391,7 +403,7 @@ async function testE2BArkerFilesBatchMetadataAndRename(): Promise<void> {
   };
   box.runCommand = async (command, options) => {
     box.runCalls.push({ command, options });
-    command = command.replace("runuser -u user -- ", "");
+    command = command.replace("setpriv --reuid=user --regid=user --init-groups -- ", "");
     try {
       return {
         stdout: execFileSync("/bin/bash", ["-lc", command], { encoding: "utf8" }),
