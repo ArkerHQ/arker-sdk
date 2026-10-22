@@ -267,21 +267,16 @@ func TestPoolSelectionReachesRegionalServer(t *testing.T) {
 	for _, tc := range []struct {
 		field, value string
 		fork         arker.ForkRequest
-		update       arker.UpdateRequest
 	}{
-		{"pool_name", "main", arker.ForkRequest{PoolName: "main"}, arker.UpdateRequest{PoolName: arker.Ptr("main")}},
-		{"pool_id", "22222222-2222-4222-8222-222222222222", arker.ForkRequest{PoolID: "22222222-2222-4222-8222-222222222222"}, arker.UpdateRequest{PoolID: arker.Ptr("22222222-2222-4222-8222-222222222222")}},
+		{"pool_name", "main", arker.ForkRequest{PoolName: "main"}},
+		{"pool_id", poolID, arker.ForkRequest{PoolID: poolID}},
 	} {
 		t.Run(tc.field, func(t *testing.T) {
 			c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
-				want := map[string]any{tc.field: tc.value}
-				switch r.Method + " " + r.URL.Path {
-				case "POST /v1/fork":
-					want["source_vm_name"] = "ubuntu"
-				case "PATCH /v1/vms/vm_1":
-				default:
+				if r.Method+" "+r.URL.Path != "POST /v1/fork" {
 					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 				}
+				want := map[string]any{tc.field: tc.value, "source_vm_name": "ubuntu"}
 				var body map[string]any
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 					t.Error(err)
@@ -298,13 +293,6 @@ func TestPoolSelectionReachesRegionalServer(t *testing.T) {
 			}
 			if vm.Info.PoolID == nil || *vm.Info.PoolID != poolID {
 				t.Fatalf("fork pool_id = %v, want %s", vm.Info.PoolID, poolID)
-			}
-			info, err := vm.Update(context.Background(), tc.update)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if info.PoolID == nil || *info.PoolID != poolID {
-				t.Fatalf("update pool_id = %v, want %s", info.PoolID, poolID)
 			}
 		})
 	}

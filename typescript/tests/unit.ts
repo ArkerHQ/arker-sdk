@@ -343,15 +343,12 @@ async function testRemovedRunNetworkInputsFailBeforeRequests(): Promise<void> {
   assert.equal(fetch.calls.length, 0);
 }
 
-async function testUpdatePreservesPoolSelector(): Promise<void> {
-  for (const selector of [{ pool_name: "main" }, { pool_id: "22222222-2222-4222-8222-222222222222" }]) {
-    for (const resources of [false, true]) {
-      const fetch = new FakeFetch();
-      fetch.addJson((method, url) => method === "PATCH" && url.endsWith("/v1/vms/vm_1"), 200, { vm_id: "vm_1" });
-      await client(fetch).vm("vm_1").update({ ...selector, ...(resources ? { vcpu: 2 } : {}) });
-      assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { ...selector, ...(resources ? { resources: { vcpu: 2 } } : {}) });
-    }
-  }
+async function testUpdateSendsNoPool(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson((method, url) => method === "PATCH" && url.endsWith("/v1/vms/vm_1"), 200, { vm_id: "vm_1" });
+  // @ts-expect-error A VM's pool is set when it is forked and never changes.
+  await client(fetch).vm("vm_1").update({ pool_id: "22222222-2222-4222-8222-222222222222", vcpu: 2 });
+  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { resources: { vcpu: 2 } });
 }
 
 async function testUpdateSendsTopLevelSshPublicKeys(): Promise<void> {
@@ -1310,7 +1307,7 @@ await testForkFromDockerfileBuildsFromItsBaseImage();
 await testForkOmitsSourceOrgWhenNotExplicit();
 await testForkOmitsUnconfiguredCapabilities();
 await testRemovedRunNetworkInputsFailBeforeRequests();
-await testUpdatePreservesPoolSelector();
+await testUpdateSendsNoPool();
 await testUpdateSendsTopLevelSshPublicKeys();
 await testUpdateSendsPolicies();
 await testNestedErrorWithoutOkStillParses();
