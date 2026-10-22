@@ -1,18 +1,7 @@
 name: Publish TypeScript SDK
 
-# Releasing is a version bump: edit `version` in typescript/package.json, merge
-# to main, and this publishes and then tags `typescript-v<version>`. The tag is
-# the record that the version shipped, which is also what makes a re-run of an
-# already-released version a no-op.
-#
-# Pushing a `typescript-v*` tag by hand still works as an escape hatch and
-# always publishes.
-#
-# The tag is created AFTER publishing, by the same job, using GITHUB_TOKEN. A
-# tag pushed with GITHUB_TOKEN deliberately does not start another workflow run
-# — which is exactly what we want here, since publishing already happened.
-#
-# Publishes to the npm registry with npm trusted publishing.
+# Version bumps on main publish through npm trusted publishing and then create
+# `typescript-v<version>`.
 
 on:
   push:
@@ -30,9 +19,15 @@ defaults:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write   # the card's AWS role
     outputs:
       version: ${{ steps.decide.outputs.version }}
       publish: ${{ steps.decide.outputs.publish }}
+      card_ts: ${{ steps.card.outputs.ts }}
+      card_channel: ${{ steps.card.outputs.channel }}
     steps:
       - uses: actions/checkout@v4
 
@@ -47,16 +42,33 @@ jobs:
             echo "Tag push: publishing $version"
           elif git ls-remote --exit-code --tags origin "refs/tags/typescript-v$version" >/dev/null 2>&1; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "typescript-v$version is already tagged — nothing to release"
+            echo "typescript-v$version is already tagged - nothing to release"
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
-            echo "New version $version — releasing"
+            echo "New version $version - releasing"
           fi
+
+      # The card lives in check and card, not build-and-publish: that job runs in
+      # the npm environment, so its OIDC sub is environment:npm, and the AWS
+      # role trusts only refs/heads/main.
+      - id: card
+        if: steps.decide.outputs.publish == 'true'
+        continue-on-error: true
+        uses: ./.github/actions/release-card
+        with:
+          role-arn: ${{ vars.RELEASE_CARD_ROLE_ARN }}
+          token-parameter: ${{ vars.RELEASE_CARD_TOKEN_PARAMETER }}
+          post-channel: ${{ vars.RELEASE_CARD_CHANNEL }}
+          state: publishing
+          package: typescript
+          version: ${{ steps.decide.outputs.version }}
+          registry-url: https://www.npmjs.com/package/@arker-ai/sdk/v/${{ steps.decide.outputs.version }}
 
   build-and-publish:
     needs: check
     if: needs.check.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment:
       name: npm
       url: https://www.npmjs.com/package/@arker-ai/sdk
@@ -111,9 +123,7 @@ jobs:
       - name: Publish to npm
         run: npm publish --access public
 
-      # Last, so the tag means "this version is on npm". If this step fails
-      # after a successful publish, tag by hand — do not re-run, npm rejects a
-      # duplicate version.
+      # Tag only after a successful publish.
       - name: Tag the release
         if: github.ref_type != 'tag'
         run: |
@@ -122,3 +132,27 @@ jobs:
           git tag "$tag"
           git push origin "$tag"
           echo "Tagged $tag"
+
+  card:
+    needs: [check, build-and-publish]
+    if: always() && needs.check.outputs.publish == 'true' && needs.check.outputs.card_ts != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write   # the card's AWS role
+    steps:
+      - uses: actions/checkout@v4
+
+      - continue-on-error: true
+        uses: ./.github/actions/release-card
+        with:
+          role-arn: ${{ vars.RELEASE_CARD_ROLE_ARN }}
+          token-parameter: ${{ vars.RELEASE_CARD_TOKEN_PARAMETER }}
+          post-channel: ${{ vars.RELEASE_CARD_CHANNEL }}
+          state: ${{ needs.build-and-publish.result == 'success' && 'published' || needs.build-and-publish.result == 'cancelled' && 'cancelled' || 'failed' }}
+          package: typescript
+          version: ${{ needs.check.outputs.version }}
+          registry-url: https://www.npmjs.com/package/@arker-ai/sdk/v/${{ needs.check.outputs.version }}
+          ts: ${{ needs.check.outputs.card_ts }}
+          channel: ${{ needs.check.outputs.card_channel }}

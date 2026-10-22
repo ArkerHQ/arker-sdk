@@ -1,26 +1,5 @@
 #!/usr/bin/env node
-/**
- * Arker CLI — a small wrapper over `@arker-ai/sdk`.
- *
- * Conventions
- * -----------
- * Every resource follows the same shape:
- *     arker <resource> <ls|rm|get|create|...> [args]
- *
- * Top-level shortcuts collapse the most-common operations:
- *     arker ls                 → arker vms ls
- *     arker rm <vm>            → arker vms rm <vm>
- *     arker fork <source>      → arker vms fork --image|--vm-id <source>
- *     arker run  <vm> <cmd>    → arker vms run <vm> <cmd>
- *     arker sync <vm> ...      → read or write files on <vm>
- *     arker shell [vm]         → native PTY shell over WebSocket
- *
- * Resources: vms, runs, sessions, mounts, filesystems (alias `fs`), pools.
- * Each supports `ls`, `get`, `rm`, and the resource-specific verbs.
- *
- * Auth: reads `ARKER_API_KEY` from the environment (or `~/.arker/config`).
- * Placement: `ARKER_PROVIDER` + `ARKER_REGION`, or the matching flags.
- */
+/** Command-line interface for `@arker-ai/sdk`. */
 
 import { randomUUID } from "node:crypto";
 import { readFileSync, existsSync, fstatSync, statSync, mkdirSync, writeFileSync, renameSync, rmSync, realpathSync } from "node:fs";
@@ -35,6 +14,7 @@ import {
 } from "@arker-ai/sdk";
 import { bridgePty } from "./cli-pty.js";
 import type {
+  ApiKeyScope,
   PolicyDoc,
   CreatePoolRequest,
   UpdatePoolRequest,
@@ -49,16 +29,13 @@ import type {
   ListVmsParameters,
 } from "@arker-ai/sdk";
 
-/** A command that finishes within this window costs one request, as before;
- *  a longer one is backgrounded and its output is polled while it runs. */
+/** Commands exceeding this window continue in the background and are polled. */
 const RUN_STREAM_AFTER_SECS = 1;
 
 /** Signals the service accepts, per RunRequest.signal in the OpenAPI contract. */
 const RUN_SIGNALS = ["SIGINT", "SIGTERM", "SIGKILL", "SIGHUP"] as const;
 
-// Version string for `--version` and the help header. Read from the
-// published package.json (dist/cli.js → ../package.json) so it never
-// drifts from the release. Falls back to "unknown" if unreadable.
+// Read the published package version; fall back to "unknown".
 const VERSION: string = (() => {
   try {
     return (createRequire(import.meta.url)("../package.json") as { version: string })
@@ -212,18 +189,27 @@ const POOL_OPTIONS: Record<string, OptionSpecs> = {
   "add-commitment": { ...GLOBAL_OPTIONS, "starts-at": { type: "string" }, "ends-at": { type: "string" } },
 };
 
+const API_KEY_CREATE_OPTIONS: OptionSpecs = {
+  ...GLOBAL_OPTIONS,
+  name: { type: "string" },
+  "pool-id": { type: "string" },
+  "vm-id": { type: "string", repeatable: true },
+};
+
 const UPDATE_OPTIONS: OptionSpecs = {
   pool: { type: "string" },
   "pool-id": { type: "string" },
   ...GLOBAL_OPTIONS,
   ...FORK_RESOURCE_OPTIONS,
   description: { type: "string", allowEmpty: true },
+  immutable: { type: "boolean" },
   "policies-file": { type: "string" },
   "ssh-public-key": { type: "string", repeatable: true },
   "ssh-public-keys-file": { type: "string" },
 };
 
 const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
+  "api-keys": API_KEY_CREATE_OPTIONS,
   config: { help: { type: "boolean" }, json: { type: "boolean" } },
   delete: GLOBAL_OPTIONS,
   filesystems: {
@@ -304,6 +290,7 @@ const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
     ...RUN_OPTIONS,
     ...VM_LIST_OPTIONS,
     ...PAGINATION_OPTIONS,
+    immutable: { type: "boolean" },
   },
 };
 
@@ -420,6 +407,9 @@ function invocationOptions(command: string, positional: string[]): { options: Op
     context = `pools ${subcommand ?? "ls"}`;
     const key = subcommand === undefined || subcommand === "list" ? "ls" : subcommand;
     allowed = POOL_OPTIONS[key] ?? GLOBAL_OPTIONS;
+  } else if (command === "api-keys") {
+    context = `api-keys ${subcommand ?? "ls"}`;
+    allowed = subcommand === "create" ? API_KEY_CREATE_OPTIONS : GLOBAL_OPTIONS;
   } else if (command === "policies") {
     context = `policies ${subcommand ?? "get"}`;
     allowed = subcommand === "set" ? COMMAND_OPTIONS.policies! : GLOBAL_OPTIONS;
@@ -429,6 +419,7 @@ function invocationOptions(command: string, positional: string[]): { options: Op
 }
 
 const POSITIONAL_LIMITS: Record<string, number | Record<string, number>> = {
+  "api-keys": { ls: 0, list: 0, create: 0, rm: 1, delete: 1 },
   config: { set: 2, get: 1, list: 0, unset: 1 },
   delete: 1,
   filesystems: { ls: 0, list: 0, create: 1, get: 1, rm: 1, delete: 1 },
@@ -701,7 +692,7 @@ function commandRequiresComputePlacement(
   args: ParsedArgs,
 ): boolean {
   if (command === "pools") return ![undefined, "ls", "list"].includes(args.positional[0]);
-  if (command === "ls" || command === "list" || command === "whoami") return false;
+  if (command === "ls" || command === "list" || command === "whoami" || command === "api-keys") return false;
   if (command === "runs") {
     const [subcommand, vm] = args.positional;
     if ((subcommand === "ls" || subcommand === "list") && vm === undefined) return false;
@@ -755,7 +746,7 @@ function printMutationResult(
 function fmtVm(vm: VM | Vm): string {
   const provider = vm.provider ?? "?";
   const region = vm.region ?? "?";
-  const name = vm.name ?? "—";
+  const name = vm.name ?? "-";
   const state = vm.state ?? "?";
   const id = vm.vm_id ?? (vm as VM).id;
   return `${id}\t${provider}-${region}\t${state}\t${name}`;
@@ -863,18 +854,14 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
   if (dockerfile) requirePathKind(dockerfile, "Dockerfile", "file");
   if (context) requirePathKind(context, "build context", "directory");
 
-  // Hard platform pin: `--platform icelake` (or graviton2/x86_64/...) forces
-  // the fork onto a worker of that compute platform and fails closed if none
-  // is available — it never silently falls back to another arch. Comma-
-  // separate to allow any of several platforms (e.g. `graviton2,icelake`).
-  // Omit to inherit the source VM's platform set.
+  // Platform filters are strict; omit the flag to inherit the source platforms.
   const platformFlag = args.flags.platform as string | undefined;
   const platforms = platformFlag
     ?.split(",")
     .map((token) => token.trim())
     .filter((token) => token.length > 0);
 
-  // Resource overrides — same flag names as `arker update` for consistency.
+  // Resource overrides - same flag names as `arker update` for consistency.
   // Folded into the contract's single `resources` object.
   const vcpu = numFlag(args, "vcpu");
   const memoryMib = numFlag(args, "memory-mib");
@@ -1110,7 +1097,7 @@ function printStoredRun(run: RunRecord, json: boolean): void {
     type: "completed",
     runId: run.run_id,
     state: run.state,
-    // Exact bytes — the CLI pipes them through unchanged.
+    // Exact bytes - the CLI pipes them through unchanged.
     stdout: run.stdoutBytes,
     stderr: run.stderrBytes,
     exitCode: run.exit_code ?? (run.state === "completed" ? 0 : 1),
@@ -1473,7 +1460,7 @@ async function cmdSync(args: ParsedArgs, client: Arker): Promise<void> {
 
 async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
   const vm = args.positional[0];
-  if (!vm) die("usage: arker update <vm_id> [--description TEXT] [resource, SSH key, or policy flags]");
+  if (!vm) die("usage: arker update <vm_id> [--description TEXT] [--immutable] [resource, SSH key, or policy flags]");
   const memoryMib = numFlag(args, "memory-mib");
   const vcpu = numFlag(args, "vcpu");
   const diskMib = numFlag(args, "disk-mib");
@@ -1485,11 +1472,13 @@ async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
   const policies = policiesFile === undefined
     ? undefined
     : readJsonObject(policiesFile, "policy document") as PolicyDoc;
+  const immutable = boolFlag(args, "immutable");
   if (
     memoryMib === undefined && vcpu === undefined && diskMib === undefined && vgpu === undefined &&
-    description === undefined && !sshPublicKeys.provided && policies === undefined && pool === undefined
+    description === undefined && !sshPublicKeys.provided && policies === undefined && pool === undefined &&
+    immutable === undefined
   ) {
-    die("update: pass at least one description, resource, pool, SSH key, or policy flag");
+    die("update: pass at least one description, resource, pool, SSH key, policy, or --immutable flag");
   }
   const updated = await withSecretRedaction(
     policySecretValues(policies),
@@ -1503,6 +1492,7 @@ async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
         : {}),
       ...(sshPublicKeys.provided ? { ssh_public_keys: sshPublicKeys.values } : {}),
       ...(policies !== undefined ? { policies } : {}),
+      ...(immutable ? { immutable } : {}),
     }),
   );
   if (args.flags.json) return out(updated);
@@ -1551,6 +1541,44 @@ async function cmdFilesystems(args: ParsedArgs, client: Arker): Promise<void> {
   }
 }
 
+// ── API keys ───────────────────────────────────────────────────────
+
+async function cmdApiKeys(args: ParsedArgs, client: Arker): Promise<void> {
+  const [sub, id] = args.positional;
+  switch (sub) {
+    case undefined:
+    case "ls":
+    case "list": {
+      const res = await client.listApiKeys();
+      if (args.flags.json) return out(res);
+      for (const key of res.api_keys) out(`${key.api_key_id}\t${fmtApiKeyScopes(key.scopes)}\t${key.created_at}`);
+      return;
+    }
+    case "create": {
+      const poolId = args.flags["pool-id"] as string | undefined;
+      const vmIds = (args.flags["vm-id"] as string[] | undefined) ?? [];
+      if (poolId !== undefined && vmIds.length > 0) die("--pool-id and --vm-id are mutually exclusive");
+      const scopes: ApiKeyScope[] = poolId !== undefined ? [{ pool_id: poolId }] : vmIds.map((vm_id) => ({ vm_id }));
+      return out(await client.createApiKey({
+        name: args.flags.name as string | undefined,
+        ...(scopes.length > 0 ? { scopes } : {}),
+      }));
+    }
+    case "rm":
+    case "delete": {
+      const apiKeyId = id ?? die(`usage: arker api-keys ${sub} <api_key_id>`);
+      await client.revokeApiKey(apiKeyId);
+      return out(`revoked ${apiKeyId}`);
+    }
+    default: die("usage: arker api-keys <ls|create|rm> ...");
+  }
+}
+
+function fmtApiKeyScopes(scopes: ApiKeyScope[]): string {
+  if (scopes.length === 0) return "organization";
+  return scopes.map((scope) => "pool_id" in scope ? `pool:${scope.pool_id}` : `vm:${scope.vm_id}`).join(",");
+}
+
 // ── Pools ──────────────────────────────────────────────────────────
 
 async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
@@ -1562,7 +1590,7 @@ async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
     case "list": {
       const res = await client.listPools({ cursor: args.flags.cursor as string | undefined, limit: numFlag(args, "limit") });
       if (args.flags.json) return out(res);
-      for (const p of res.pools) out(`${p.pool_id}\t${p.name ?? "—"}\t${p.type}\t${p.region}\t${p.platform}\t${p.state}`);
+      for (const p of res.pools) out(`${p.pool_id}\t${p.name ?? "-"}\t${p.type}\t${p.region}\t${p.platform}\t${p.state}`);
       if (res.next_cursor) out(`# next_cursor=${res.next_cursor}`);
       return;
     }
@@ -1687,7 +1715,7 @@ async function cmdShell(args: ParsedArgs, client: Arker): Promise<void> {
   const cols = colsFlag ?? output.columns ?? 80;
   const rows = rowsFlag ?? output.rows ?? 24;
   // Optional auto-cancel: the server destroys the shell after this many seconds
-  // with no terminal I/O — `arker shell <vm> --cancel-ttl 600`.
+  // with no terminal I/O - `arker shell <vm> --cancel-ttl 600`.
   const cancelTtlSecs = numFlag(args, "cancel-ttl");
   const pty = await computer.connectPty({
     sessionId,
@@ -1770,13 +1798,7 @@ async function readAllStdin(): Promise<Uint8Array> {
   return new Uint8Array(Buffer.concat(chunks));
 }
 
-/** How stdin is attached. This is the only thing that can disambiguate a bare
- *  `arker sync <vm> <path>`: read the file back, or write what is piped in.
- *
- *  The distinction that matters is whether draining is guaranteed to finish.
- *  A `< file` redirect ends at EOF. A pipe or socket does not: a script that
- *  inherits stdin from a parent nobody ever closes hands us a descriptor that
- *  stays open forever, and draining it blocks with no output and no error. */
+/** Classify stdin so sync can distinguish reads from piped writes. */
 function stdinKind(): "tty" | "file" | "stream" | "none" {
   if (input.isTTY) return "tty";
   try {
@@ -1794,11 +1816,7 @@ function stdinHasDataSource(): boolean {
   return kind === "file" || kind === "stream";
 }
 
-/** Drain stdin, giving up if the FIRST byte never arrives. Returns null when
- *  nothing had been read by the deadline — the descriptor is idle and the
- *  caller cannot tell read from write. Once any data arrives the remainder is
- *  read unbounded: a slow producer is legitimate, a silent one is not
- *  actionable. */
+/** Stop waiting for a silent stream; after the first byte, read through EOF. */
 async function readAllStdinWithFirstByteDeadline(ms: number): Promise<Uint8Array | null> {
   const chunks: Buffer[] = [];
   const drained = (async () => {
@@ -1859,6 +1877,7 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   type: { placeholder: "<managed|byoc|self_hosted>", desc: "pool type" },
   clear: { desc: "remove the pool's name" },
   yes: { desc: "buy without asking for confirmation" },
+  immutable: { desc: "make the VM immutable for good: forkable but never changed or started again; send it alone" },
   json: { desc: "emit JSON instead of tabular output" },
   limit: { placeholder: "<n>", desc: "maximum rows to return; the command-specific service cap applies" },
   layers: { placeholder: "<disk[,memory]>", desc: "state layers to inherit from a source VM" },
@@ -1927,6 +1946,19 @@ interface CommandHelp {
 }
 
 const COMMAND_HELP: Record<string, CommandHelp> = {
+  "api-keys": {
+    synopsis: [
+      "arker api-keys ls",
+      "arker api-keys create [--name <name>] [--pool-id <pool_id> | --vm-id <vm_id> ...]",
+      "arker api-keys rm <api_key_id>",
+    ],
+    summary: "Create, list and revoke API keys.",
+    subs: { ls: "list unrevoked keys, newest first", create: "create a key and print it once", rm: "revoke a key" },
+    notes: [
+      "A key has your role; --vm-id or --pool-id limits it to VMs or to one pool.",
+      "--vm-id is repeatable (1 to 16 VMs); --pool-id limits the key to one pool, and only admins create one.",
+    ],
+  },
   config: {
     synopsis: ["arker config set <provider|region> <value>", "arker config get <provider|region>", "arker config list", "arker config unset <provider|region>"],
     summary: "Manage stored provider and region defaults in ~/.arker/config.json.",
@@ -2052,7 +2084,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   update: {
     synopsis: ["arker update <vm> [flags]"],
-    summary: "Update a VM's description, resources, SSH keys, or network policy.",
+    summary: "Update a VM's description, resources, SSH keys, or network policy, or make it immutable.",
   },
   vms: {
     synopsis: ["arker vms <ls|get|rm|fork|run|update> [args] [flags]"],
@@ -2169,6 +2201,7 @@ function usage(command?: string, positional: string[] = []): void {
       "  arker filesystems <ls|create|get|rm> ...   (alias: fs)",
       "  arker pools <ls|get|create|update|rename|rm|workers|add-commitment> ...",
       "                                              buy and manage prepaid capacity",
+      "  arker api-keys <ls|create|rm> ...          create, list and revoke API keys",
       "  arker sync <vm_id> <path> [data|-]          read a file, or write data/stdin",
       "  arker sync <vm_id> <path> --read            read a file, ignoring stdin",
       "  arker sync-dir <vm_id> <local> <remote>     sync a directory into the VM",
@@ -2307,6 +2340,8 @@ async function main(): Promise<void> {
         return await cmdFilesystems(args, client);
       case "pools":
         return await cmdPools(args, client);
+      case "api-keys":
+        return await cmdApiKeys(args, client);
       default:
         die(`unknown command: ${cmd}. Run 'arker --help'.`);
     }

@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-// Error is an arkerd API failure. The envelope is flat, and `retryable` is
+// Error is an Arker API failure. The envelope is flat, and `retryable` is
 // often absent -- absent means unspecified, not false. Branch on Code, never
 // on Message.
 type Error struct {
@@ -32,7 +32,9 @@ func statusIs(err error, status int) bool {
 // indistinguishable from one that never existed.
 func IsNotFound(err error) bool { return statusIs(err, http.StatusNotFound) }
 
-// IsConflict reports a 409 -- for a fork, a key reused for a different request.
+// IsConflict reports a 409. Code says which: "invalid_state" (Details names
+// the requirement, such as "running"), "resource_busy", or for a fork,
+// "idempotency_conflict" -- a key reused for a different request.
 func IsConflict(err error) bool { return statusIs(err, http.StatusConflict) }
 
 // UnknownOutcomeError means a MUTATION failed at the transport layer, so

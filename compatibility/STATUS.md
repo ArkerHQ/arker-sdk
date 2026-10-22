@@ -20,6 +20,21 @@ the corrected explicit-endpoint run passes. This does not certify unpublished
 backend changes, Arker watcher support or full API parity. Strict inventories
 remain red; the preceding source fingerprints are historical.
 
+The complete production selection at source `8361b4a` finished with **32/36
+Python cases passing**. Two private-fetch cases fail because production lacks
+the authenticated private-port route (typed HTTP 404); two empty-Modal-allowlist
+cases fail because production rejects the unpublished `outbound_guard` schema
+(HTTP 400). Node executes 24 cases: **22 pass / two fail** for the same missing
+backend primitives. Its private-fetch and empty-allowlist programs stop at their
+first failing case, so seven later configurations were not executed; they are
+not passes. Both expanded strict gates were actually invoked and fail exit 1.
+Expanded scenario coverage is **94/1,138 Python and 51/1,048 Node**; full API
+equivalence remains false. The credential-free 39 records, including failures,
+are retained as `evidence/production-20261022-*.jsonl`. These source-bound
+observations precede the subsequent merge of SDK main and must not be presented
+as certification of that merge. No policy weakening, public-ingress fallback,
+deployment or IAM changes were performed.
+
 ## Blaxel absolute filesystem paths
 
 Fresh native-versus-Arker observations reproduced incorrect root names,

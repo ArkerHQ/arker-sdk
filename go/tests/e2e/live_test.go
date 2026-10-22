@@ -2,9 +2,7 @@
 //
 //	ARKER_API_KEY=ark_... ARKER_BASE_URL=https://<env>/api go test -v ./tests/e2e/
 //
-// Deliberately NO default base URL. These tests create and delete real VMs, and
-// defaulting to production means anyone with ARKER_API_KEY exported for some
-// other reason silently runs them against prod.
+// A base URL is required because these tests create and delete real VMs.
 package e2e
 
 import (
@@ -137,15 +135,7 @@ func TestOrgSurface(t *testing.T) {
 	if activity.Limit != 5 {
 		t.Fatalf("the server echoed limit %d, want the 5 that was asked for", activity.Limit)
 	}
-	// A canary has to be a field the platform fills on EVERY row, or this suite
-	// fails on a platform gap rather than on an SDK decode bug. Measured against
-	// prod over a 100-row page: `request_id` is empty on 100/100 despite being
-	// required by openapi.json, and `run_id`/`session_id`/`vm_id` are blank on
-	// fork rows, which are not runs. `t_ms` and `path` are the two that survive
-	// both endpoints, and a wrong envelope field would leave both zero.
-	// Without this the loop below is skipped on an empty page and the test
-	// passes having checked nothing -- which is the very failure the envelope
-	// canary exists to catch.
+	// Require populated fields so an envelope decoding failure cannot pass.
 	if len(activity.Rows) == 0 {
 		t.Fatal("activity decoded zero rows, so the canary below never ran")
 	}
@@ -363,16 +353,8 @@ func TestBackgroundRunAndCancel(t *testing.T) {
 		t.Fatal("background ack carried no run_id, so the run is unreachable")
 	}
 
-	// PLATFORM RACE, not an SDK behaviour: the API acks a backgrounded run with
-	// 202 and state "running" BEFORE the guest has spawned the process, and a
-	// cancel inside that window fails 404 "signal_exec: no running process"
-	// while the run carries on running. Measured against prod over raw HTTP at
-	// delays 0/1/3/10s: only 0s fails, and after it the run is still "running".
-	// So the caller is told the cancel did not happen AND the work continues.
-	//
-	// Retried here so this test covers the SDK's cancel plumbing rather than the
-	// platform's spawn timing. Only the 404 is retried: any other error is a
-	// real cancel failure and must not be spent down to a green pass.
+	// A newly acknowledged run may not be cancellable immediately. Retry only
+	// not-found responses until the process is ready.
 	var cancelled bool
 	cancelDeadline := time.Now().Add(30 * time.Second)
 	for {

@@ -1,30 +1,10 @@
-/**
- * `.dockerignore` matching for the build context.
- *
- * `COPY . /app` without this ships `.git` and `.env` into the VM. A repo's
- * `.git/config` carries push credentials — `actions/checkout` writes a
- * `GITHUB_TOKEN` there by default — so the file is a disclosure concern, not a
- * performance tweak.
- *
- * ## Semantics
- *
- * Docker's, which are NOT gitignore's:
- *
+/** `.dockerignore` matching for the build context.
  * - One pattern per line; blank lines and `#` comments ignored.
  * - Paths are matched relative to the context root, with `/` separators.
  * - `*` and `?` match within one path segment; `**` matches across segments.
- * - Leading and trailing `/` are stripped — every pattern is context-relative.
- * - A pattern matching a DIRECTORY excludes everything under it, which is what
- *   makes a bare `node_modules` do what everyone expects.
- * - `!` negates, and the LAST matching pattern wins. That ordering is why
- *   `*` followed by `!keep.txt` works.
- *
- * The difference from gitignore that matters: gitignore implicitly prepends a
- * double-star directory prefix to unanchored patterns, so a bare `abc` matches
- * at any depth. Docker
- * anchors to the context root, so `abc` matches `./abc` and NOT
- * `./somedir/abc`. Using a gitignore matcher here would silently over-exclude.
- */
+ * - Leading and trailing `/` are stripped; directory matches include descendants.
+ * - `!` negates, and the last matching pattern wins.
+ * - Bare names are anchored to the context root. */
 
 import fs from "node:fs";
 import nodePath from "node:path";

@@ -1,21 +1,6 @@
 name: Publish Go
 
-# Go has no registry upload. `proxy.golang.org` fetches modules straight from
-# this repo, and the only thing that makes a version exist is a TAG — so
-# publishing is exactly one push.
-#
-# The tag MUST be `go/vX.Y.Z`. That prefix is not a convention: Go requires
-# `<subdir>/vX.Y.Z` for a module in a subdirectory, so the hyphenated form the
-# other SDKs use (`python-v1.2.7`) would be invisible to the toolchain.
-#
-# Releasing is a version bump: edit `version` in go/VERSION, merge to main, and
-# this tags `go/v<version>`. The tag is the record that the version shipped,
-# which is also what makes a re-run of an already released version a no-op.
-
-# MANUAL ONLY, deliberately. A Go tag is immutable the moment the module proxy
-# fetches it -- there is no yanking a Go release, only superseding it -- so
-# publishing must not be a side effect of merging. Run this from the Actions
-# tab when the SERVICE is deployed and the version is actually meant to ship.
+# Run manually to create the required `go/vX.Y.Z` module tag.
 on:
   workflow_dispatch:
     inputs:
@@ -29,10 +14,12 @@ concurrency:
 
 permissions:
   contents: write
+  id-token: write   # the card's AWS role
 
 jobs:
   tag:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,6 +47,19 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - id: card
+        if: steps.decide.outputs.publish == 'true'
+        continue-on-error: true
+        uses: ./.github/actions/release-card
+        with:
+          role-arn: ${{ vars.RELEASE_CARD_ROLE_ARN }}
+          token-parameter: ${{ vars.RELEASE_CARD_TOKEN_PARAMETER }}
+          post-channel: ${{ vars.RELEASE_CARD_CHANNEL }}
+          state: publishing
+          package: go
+          version: ${{ steps.decide.outputs.version }}
+          registry-url: https://pkg.go.dev/github.com/ArkerHQ/arker-sdk/go@v${{ steps.decide.outputs.version }}
+
       # A tag is IMMUTABLE once the proxy has seen it, so the gate runs before
       # it is created rather than after.
       - if: steps.decide.outputs.publish == 'true'
@@ -78,3 +78,17 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "go/v$VERSION" -m "go/v$VERSION"
           git push origin "go/v$VERSION"
+
+      - if: always() && steps.decide.outputs.publish == 'true' && steps.card.outputs.ts != ''
+        continue-on-error: true
+        uses: ./.github/actions/release-card
+        with:
+          role-arn: ${{ vars.RELEASE_CARD_ROLE_ARN }}
+          token-parameter: ${{ vars.RELEASE_CARD_TOKEN_PARAMETER }}
+          post-channel: ${{ vars.RELEASE_CARD_CHANNEL }}
+          state: ${{ job.status == 'success' && 'published' || job.status == 'cancelled' && 'cancelled' || 'failed' }}
+          package: go
+          version: ${{ steps.decide.outputs.version }}
+          registry-url: https://pkg.go.dev/github.com/ArkerHQ/arker-sdk/go@v${{ steps.decide.outputs.version }}
+          ts: ${{ steps.card.outputs.ts }}
+          channel: ${{ steps.card.outputs.channel }}

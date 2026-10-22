@@ -115,7 +115,7 @@ type ForkRequest struct {
 	Durable         *bool         `json:"durable,omitempty"`
 	NestedVirt      *bool         `json:"nestedvirt,omitempty"`
 	QueueingTimeout *int          `json:"queueing_timeout,omitempty"`
-	Policies        *PolicyDoc    `json:"policies,omitempty"`
+	Policies        *PolicyUpdate `json:"policies,omitempty"`
 	RegistryAuth    *RegistryAuth `json:"registry_auth,omitempty"`
 
 	// Dockerfile is rejected by the API by design -- the SDKs build it
@@ -149,6 +149,7 @@ type VMInfo struct {
 	CreatedAt           string               `json:"created_at,omitempty"`
 	LastActiveAt        string               `json:"last_active_at,omitempty"`
 	Public              bool                 `json:"public,omitempty"`
+	Immutable           bool                 `json:"immutable,omitempty"`
 	Region              string               `json:"region,omitempty"`
 	Provider            string               `json:"provider,omitempty"`
 	Platform            string               `json:"platform,omitempty"`
@@ -162,12 +163,14 @@ type VMInfo struct {
 	MinMemoryMiB        *int                 `json:"min_memory_mib,omitempty"`
 	MaxDiskMiB          *int                 `json:"max_disk_mib,omitempty"`
 	MinDiskMiB          *int                 `json:"min_disk_mib,omitempty"`
-	// State is exactly {"idle","running"} and means "is a command in flight",
-	// not "is the VM awake": a suspended VM also reports "idle".
+	// State is "running" while something uses the VM -- a run, an SSH
+	// connection, a terminal, an inbound request, a sync or a resize -- and
+	// "idle" otherwise, including while it is suspended.
 	State     string       `json:"state,omitempty"`
 	Network   *VMNetwork   `json:"network,omitempty"`
 	Resources *VMResources `json:"resources,omitempty"`
 	Sessions  []Session    `json:"sessions,omitempty"`
+	Policies  *PolicyDoc   `json:"policies,omitempty"`
 }
 
 // VM is a handle to one machine. Info is nil on a bare handle from Client.VM
@@ -199,7 +202,7 @@ func (c *Client) VM(vmID string) *VM {
 // It deliberately does not derive an endpoint from the VM's provider/region.
 // Fork and GetVM already went to the endpoint the caller configured, and that
 // endpoint is what serves the machine; recomputing a public URL from the
-// response would send every later per-VM call for a feature env or a private
+// response would send every later per-VM call for a test or private
 // deployment to production instead. Only ListVMs, which aggregates across
 // regions through the control plane, needs a per-VM endpoint -- and it derives
 // one itself.
@@ -337,16 +340,22 @@ func (v *VM) Fork(ctx context.Context, req ForkRequest) (*VM, error) {
 // against a live deployment: PATCH {"description":null} left the value intact
 // while {"description":""} cleared it.
 type UpdateRequest struct {
-	PoolID        *string    `json:"pool_id,omitempty"`
-	PoolName      *string    `json:"pool_name,omitempty"`
-	Description   *string    `json:"description,omitempty"`
-	Resources     *Resources `json:"resources,omitempty"`
-	SSHPublicKeys *[]string  `json:"ssh_public_keys,omitempty"`
-	Policies      *PolicyDoc `json:"policies,omitempty"`
+	PoolID        *string       `json:"pool_id,omitempty"`
+	PoolName      *string       `json:"pool_name,omitempty"`
+	Description   *string       `json:"description,omitempty"`
+	Resources     *Resources    `json:"resources,omitempty"`
+	SSHPublicKeys *[]string     `json:"ssh_public_keys,omitempty"`
+	Policies      *PolicyUpdate `json:"policies,omitempty"`
+
+	// Immutable freezes the VM for good: it can still be viewed, listed,
+	// forked and deleted, but anything that changes or starts it is refused,
+	// and its forks are mutable. Only true is accepted, so false is simply
+	// left out. Send it alone; a running VM fails with resource_busy.
+	Immutable bool `json:"immutable,omitempty"`
 }
 
 // Update changes this VM's description, resources, authorized SSH keys and/or
-// network policy, and returns the updated record.
+// network policy, or makes it immutable, and returns the updated record.
 func (v *VM) Update(ctx context.Context, req UpdateRequest) (*VMInfo, error) {
 	var info VMInfo
 	if _, err := v.do(ctx, http.MethodPatch, v.path(""), req, &info); err != nil {

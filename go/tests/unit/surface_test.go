@@ -209,6 +209,40 @@ func TestUpdateClearsDescriptionWithAnEmptyString(t *testing.T) {
 	}
 }
 
+func TestUpdateMakesAVMImmutableWithNothingElse(t *testing.T) {
+	var body map[string]any
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, `{"vm_id":"vm_1","immutable":true}`)
+	}, reject(t, "control"))
+
+	info, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{Immutable: true})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if want := map[string]any{"immutable": true}; !reflect.DeepEqual(body, want) {
+		t.Fatalf("body = %v, want %v", body, want)
+	}
+	if !info.Immutable {
+		t.Fatal("the updated VM is not reported immutable")
+	}
+}
+
+func TestUpdateLeavesImmutableOffTheWireByDefault(t *testing.T) {
+	var body map[string]any
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, forkVM)
+	}, reject(t, "control"))
+
+	if _, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{Description: arker.Ptr("CI runner")}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if _, present := body["immutable"]; present {
+		t.Fatal("a description-only update sent immutable")
+	}
+}
+
 func TestUpdateLeavesDescriptionAloneByDefault(t *testing.T) {
 	var body map[string]any
 	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
@@ -356,16 +390,8 @@ func TestBase64OutputIsDecoded(t *testing.T) {
 	}
 }
 
-// RunRequest must not offer `Acquire`/`Release`. openapi.json dropped both
-// (#166) and the service rejects an unknown field outright rather than ignoring
-// it, so a caller who set either would get a 400 from a field the SDK invited
-// them to use.
-//
-// This asserts on the TYPE, not on a request. A wire-level check cannot catch
-// the regression: the fields serialised with `omitempty`, so a request that
-// leaves them unset omits them either way, and a request that sets them stops
-// compiling the moment the fields are gone. Reflection is the only form that
-// fails against the old struct and compiles against both.
+// Reflection verifies the public type. A wire test cannot detect omitted
+// fields that use `omitempty`.
 func TestRunRequestOffersNoResourceControls(t *testing.T) {
 	rt := reflect.TypeOf(arker.RunRequest{})
 	// Control: a misspelt type or an empty struct would make every lookup below
@@ -828,8 +854,7 @@ func TestDiscoverRegionsSendsNoAuthorization(t *testing.T) {
 }
 
 func TestExhaustedTransportRetriesDoNotSleepPastTheLastAttempt(t *testing.T) {
-	// The final failure used to sleep a full backoff before giving up, adding
-	// up to MaxDelay of dead latency to every read that exhausts its budget.
+	// Only waits between attempts count toward the retry delay.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hj, _ := w.(http.Hijacker)
 		conn, _, _ := hj.Hijack()
@@ -848,10 +873,7 @@ func TestExhaustedTransportRetriesDoNotSleepPastTheLastAttempt(t *testing.T) {
 }
 
 func TestForkedVMStaysOnTheConfiguredEndpoint(t *testing.T) {
-	// A fork response carries provider and region. Turning those back into a
-	// public URL would silently redirect every later per-VM call away from the
-	// endpoint the caller configured -- for a feature env or a private
-	// deployment, straight to production.
+	// The configured endpoint remains authoritative after a fork response.
 	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"vm_id":"vm_1","owner_org_id":"org","state":"idle","provider":"aws","region":"us-west-2"}`)
 	}, reject(t, "control"))

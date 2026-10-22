@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arker"
-version = "1.2.8"
+version = "1.3.0"
 description = "Python client for the Arker virtual computer platform."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -51,6 +51,9 @@ packages = ["src/arker"]
 
 [tool.hatch.build]
 exclude = ["src/arker/_openapi.json"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/arker", "hatch_build.py", "README.md"]
 
 [tool.hatch.build.hooks.custom]
 

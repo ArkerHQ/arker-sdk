@@ -79,8 +79,8 @@ type Mount struct {
 	FilesystemID string `json:"filesystem_id"`
 	Path         string `json:"path"`
 	Region       string `json:"region,omitempty"`
-	Status       string `json:"status,omitempty"`
-	StatusDetail string `json:"status_detail,omitempty"`
+	State        string `json:"state,omitempty"`
+	StateDetail  string `json:"state_detail,omitempty"`
 }
 
 // MountList is one page of a VM's filesystem bindings.

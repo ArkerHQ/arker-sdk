@@ -1,0 +1,56 @@
+name: Release card
+description: Post or edit the SDK release's one Slack card. Never fail a release over it; callers set continue-on-error.
+
+inputs:
+  state:
+    description: publishing, published, failed or cancelled
+    required: true
+  package:
+    description: typescript, cli, python or go
+    required: true
+  version:
+    required: true
+  registry-url:
+    required: true
+  ts:
+    description: Message ts to edit. Empty posts a new card.
+    default: ""
+  channel:
+    description: Channel ID the post returned. Empty when opening.
+    default: ""
+  role-arn:
+    description: AWS role that can read the Slack token parameter.
+    required: true
+  token-parameter:
+    description: SSM parameter holding the Slack bot token.
+    required: true
+  post-channel:
+    description: Slack channel name to post new cards to.
+    required: true
+
+outputs:
+  ts:
+    value: ${{ steps.card.outputs.ts }}
+  channel:
+    value: ${{ steps.card.outputs.channel }}
+
+runs:
+  using: composite
+  steps:
+    - uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.role-arn }}
+        aws-region: us-west-2
+
+    - id: card
+      shell: bash
+      env:
+        STATE: ${{ inputs.state }}
+        PACKAGE: ${{ inputs.package }}
+        VERSION: ${{ inputs.version }}
+        REGISTRY_URL: ${{ inputs.registry-url }}
+        TS: ${{ inputs.ts }}
+        CHANNEL: ${{ inputs.channel }}
+        TOKEN_PARAMETER: ${{ inputs.token-parameter }}
+        POST_CHANNEL: ${{ inputs.post-channel }}
+      run: ${{ github.action_path }}/card.sh

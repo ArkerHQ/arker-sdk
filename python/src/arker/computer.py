@@ -1,7 +1,7 @@
 """Arker Python SDK.
 
 A small wrapper around the VM API. Configure a region for the standard Arker
-endpoints, or pass base_url directly for internal/dev targets.
+endpoints, or pass base_url directly for a custom endpoint.
 """
 
 from __future__ import annotations
@@ -23,13 +23,14 @@ import threading
 import time
 import types
 import urllib.parse
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from importlib.resources import files as package_files
 from typing import (
     Any,
     Literal,
     TypeVar,
+    Union,
     get_args,
     get_origin,
     get_type_hints,
@@ -42,9 +43,11 @@ from pydantic import TypeAdapter, ValidationError
 
 from ._port import PortStream
 from .generated.api_models import (
+    ApiKeyScope,
     BackgroundRunResponse,
     CancelRunResponse,
     CompletedRunResponse,
+    CreatedApiKey,
     CreatePoolRequest,
     CreateSessionRequest,
     DeleteFilesystemResponse,
@@ -54,6 +57,7 @@ from .generated.api_models import (
     ErrorBody,
     Filesystem,
     FilesystemCreateRequest,
+    ListApiKeysResponse,
     ListFilesystemsParameters,
     ListFilesystemsResponse,
     ListMountsParameters,
@@ -75,6 +79,7 @@ from .generated.api_models import (
     PatchSessionResponse,
     PatchVmRequest,
     PolicyDoc,
+    PolicyUpdate,
     Pool,
     PoolCommitment,
     PtyTicketResponse,
@@ -121,7 +126,7 @@ CHUNK_SIZE = 4 * 1024 * 1024
 # Below this a compressibility sample is not worth taking; above it sync_dir
 # samples before choosing tar vs tar.gz.
 COMPRESSION_SAMPLE_MIN_BYTES = 256 * 1024
-# Ratio below which gzip beats its ~3.4x guest-side extraction cost.
+# Compress only when the sample shrinks enough to offset processing overhead.
 COMPRESSION_WORTH_IT_RATIO = 0.9
 
 # Files hashed concurrently in sync_dir. hashlib releases the GIL, so this is
@@ -140,7 +145,7 @@ DEFAULT_RETRY_JITTER_S = 0.05
 # the API hands back a background ack carrying a run_id. For a synchronous
 # caller (one that did not ask to background) run() then polls get_run()
 # under the hood until the run reaches a terminal state and returns the
-# completed run — so the caller transparently gets the final result.
+# completed run - so the caller transparently gets the final result.
 RUN_POLL_INITIAL_S = 0.5
 RUN_POLL_MAX_S = 3.0
 RUN_POLL_BACKOFF = 1.5
@@ -155,7 +160,7 @@ RUN_POLL_MAX_CONSECUTIVE_FAILURES = 10
 
 
 def run_poll_budget_s(timeout: int | None) -> float | None:
-    """How long run()'s poll may wait for a backgrounded run, in seconds —
+    """How long run()'s poll may wait for a backgrounded run, in seconds -
     ``None`` for no limit.
 
     An unset or ``0`` timeout is unbounded server-side, so the poll is
@@ -167,7 +172,7 @@ def run_poll_budget_s(timeout: int | None) -> float | None:
     return timeout + RUN_POLL_MARGIN_S
 
 
-# Terminal run states — RunState ("pending" | "running" | "completed" |
+# Terminal run states - RunState ("pending" | "running" | "completed" |
 # "failed" | "cancelled") minus the two NON-terminal states, "pending" and
 # "running". A run is "pending" while it waits behind an earlier run on the
 # same session; a poller must keep polling through it. Anything not in this
@@ -231,7 +236,7 @@ class RunRecord(Run):
     """A fetched run. Output is available as text and as exact bytes.
 
     ``stdout``/``stderr`` are decoded text, ready to print or match on.
-    ``stdout_bytes``/``stderr_bytes`` are exactly what the command wrote — use
+    ``stdout_bytes``/``stderr_bytes`` are exactly what the command wrote - use
     those when the output is not text (an image, an archive, anything binary),
     because decoding to text replaces undecodable bytes and cannot be undone.
 
@@ -275,7 +280,7 @@ class BackgroundRunResult:
 
 
 # Result of VM.run(). A synchronous call (``time_to_background`` not zero) always
-# returns a CompletedRunResult — if the run outlives its sync window run()
+# returns a CompletedRunResult - if the run outlives its sync window run()
 # polls it to completion under the hood. Only explicit ``time_to_background=0``
 # yields a BackgroundRunResult (the running ack, returned immediately for the
 # caller to poll via VM.get_run()).
@@ -474,7 +479,7 @@ class Arker:
         public: bool | None = None,
         state: str | None = None,
     ) -> VmList:
-        """Admin call — goes through the control plane so it can
+        """Admin call - goes through the control plane so it can
         aggregate across providers and regions.
         """
         parameters = ListVmsParameters(
@@ -564,10 +569,7 @@ class Arker:
     ) -> ListFilesystemsResponse:
         parameters = ListFilesystemsParameters(cursor=cursor, limit=limit, name_prefix=name_prefix)
         path = _build_query("/v1/filesystems", parameters)
-        # Filesystems are region-scoped. Route to
-        # the regional endpoint (base_url) rather than the control plane: the
-        # control-plane path (arker.ai → api_proxy_bash) does not route
-        # /v1/filesystems, while the regional endpoint serves it.
+        # Filesystem operations are region-scoped.
         payload = self._request("GET", path, base_url=self.base_url)
         return _decode_model(ListFilesystemsResponse, payload)
 
@@ -640,6 +642,29 @@ class Arker:
             ),
         )
 
+    # ── API keys (org-scoped, control-plane) ────────────────────────────
+    def create_api_key(
+        self,
+        *,
+        name: str | None = None,
+        scopes: Sequence[ApiKeyScope | dict[str, str]] | None = None,
+    ) -> CreatedApiKey:
+        """Create a key with your role. ``scopes`` limits it to 1 to 16 ``{"vm_id"}``
+        or to one ``{"pool_id"}``. The returned ``key`` is shown only once."""
+        request = {"name": name, "scopes": None if scopes is None else list(scopes)}
+        payload = self._request("POST", "/v1/api-keys", request, base_url=self._control_base_url)
+        return _decode_model(CreatedApiKey, payload)
+
+    def list_api_keys(self) -> ListApiKeysResponse:
+        """List the organization's unrevoked keys, newest first. A key limited to a
+        pool sees that pool's keys only."""
+        payload = self._request("GET", "/v1/api-keys", base_url=self._control_base_url)
+        return _decode_model(ListApiKeysResponse, payload)
+
+    def revoke_api_key(self, api_key_id: str) -> None:
+        """Revoke a key; requests with it are refused from then on."""
+        self._request("DELETE", f"/v1/api-keys/{_segment(api_key_id)}", base_url=self._control_base_url)
+
     def _request(
         self,
         method: str,
@@ -670,7 +695,7 @@ class Arker:
 
 
 class VM:
-    # Data fields — populated from fork/get/list/refresh; ``None`` on a bare
+    # Data fields - populated from fork/get/list/refresh; ``None`` on a bare
     # handle from ``arker.vm(id)`` until you call ``refresh()``. Names mirror
     # the contract ``Vm``.
     vm_id: str | None
@@ -738,6 +763,7 @@ class VM:
         time_to_background: int | None = None,
         queueing_timeout: int | None = None,
         end_symbol: str | None = None,
+        end_after_all_subprocesses: bool | None = None,
         policies: PolicyDoc | dict[str, Any] | None = None,
         signal: str | None = None,
         idempotency_key: str | None = None,
@@ -748,11 +774,11 @@ class VM:
         (``time_to_background``) the API returns a background ack with a
         ``run_id``; run() then transparently polls :meth:`get_run` until the run
         reaches a terminal state and returns the completed
-        :class:`CompletedRunResult` — so a synchronous caller always receives
+        :class:`CompletedRunResult` - so a synchronous caller always receives
         the final result. Polling is bounded by ``timeout`` (the run's kill
         bound) plus a margin; if that budget is exceeded run() raises an
         :class:`ArkerError` with code ``"timeout"`` (the run keeps executing
-        server-side — poll :meth:`get_run` to retrieve it). With no ``timeout``
+        server-side - poll :meth:`get_run` to retrieve it). With no ``timeout``
         the run is unbounded server-side and the poll is unbounded with it.
 
         Pass ``time_to_background=0`` to skip the wait entirely: run() returns
@@ -764,7 +790,7 @@ class VM:
         long task can be followed live instead of read only at the end.
 
         Arker's run interface works like a terminal. Sessions are tabs: each
-        keeps its own state — working directory, environment, shell history —
+        keeps its own state - working directory, environment, shell history -
         and each handles one run at a time. Create one with
         :meth:`create_session`, which also sets its starting ``cwd`` and
         ``env``, then pass its id::
@@ -772,7 +798,7 @@ class VM:
             server = vm.create_session()
             vm.run("nginx -g 'daemon off;'", time_to_background=0,
                    session_id=server.session_id)
-            vm.run("echo hello")   # the default session — the server is untouched
+            vm.run("echo hello")   # the default session - the server is untouched
 
         Run sequential commands in one session; for a long-running task, start
         it with ``time_to_background=0`` in a session of its own so later work does
@@ -789,12 +815,23 @@ class VM:
         blocks inline before backgrounding the run and returning a pollable
         ``run_id``. ``None`` (default) = 300, matching the server's
         ``DEFAULT_TIME_TO_BACKGROUND``. It does not bound command
-        runtime — that is ``timeout``.
+        runtime - that is ``timeout``.
 
         ``exit_code`` is ``None`` when a prompt ends the run before a command
         completion marker is received. This is expected for ``end_symbol`` and
         REPL commands. If it is unexpected, inspect ``stdout``, exit the active
         interpreter, pass ``end_symbol="none"``, or use another session.
+
+        ``end_after_all_subprocesses=True`` ends the run only after every
+        process ``command`` started has exited, including backgrounded and
+        detached ones (``cmd &``, ``nohup``, ``setsid``); processes an earlier
+        run left on the session are not waited on. ``exit_code`` stays the
+        foreground command's, and ``timeout`` still applies. The server refuses
+        it with ``signal`` or an ``end_symbol``, on guests that cannot track
+        the run's processes, and on a session that already has background
+        processes: a synchronous call raises :class:`ArkerError` with code
+        ``"unsupported_operation"``; a backgrounded run ends ``failed`` with
+        the reason in ``fail_reason``.
 
         ``stdout``/``stderr`` are decoded text; ``stdout_bytes``/``stderr_bytes``
         carry the raw bytes for output that is not valid UTF-8 (the service
@@ -816,6 +853,7 @@ class VM:
             time_to_background=time_to_background,
             queueing_timeout=queueing_timeout,
             end_symbol=end_symbol,
+            end_after_all_subprocesses=end_after_all_subprocesses,
             signal=signal,
             policies=policies,
         )
@@ -833,7 +871,7 @@ class VM:
         # The server backgrounds a run that outlived its sync window. When the
         # caller did NOT request background, poll get_run() to a terminal state
         # and hand back the completed run so the synchronous call is
-        # transparent. Explicit zero is a pure pass-through — return the ack.
+        # transparent. Explicit zero is a pure pass-through - return the ack.
         if isinstance(result, BackgroundRunResult) and time_to_background != 0:
             return self._await_run(result.run_id, timeout)
         return result
@@ -846,7 +884,7 @@ class VM:
 
         Bounded by ``timeout`` (the run's kill bound) plus a margin, so the
         poll outlives the server-side kill and reports its outcome. An unset or
-        ``0`` timeout is unbounded server-side, so the poll is unbounded too —
+        ``0`` timeout is unbounded server-side, so the poll is unbounded too -
         giving up at a client-side deadline the caller never asked for would
         abandon a run that is still going."""
         budget_s = run_poll_budget_s(timeout)
@@ -864,7 +902,7 @@ class VM:
                         "unavailable",
                         f"run {run_id}: {consecutive_failures} consecutive poll "
                         f"failures (last: {e.code}); the run may still be going "
-                        f'server-side — poll get_run("{run_id}") to retrieve it',
+                        f'server-side - poll get_run("{run_id}") to retrieve it',
                         0,
                     ) from e
                 delay = min(RUN_POLL_MAX_S, delay * RUN_POLL_BACKOFF)
@@ -876,7 +914,7 @@ class VM:
                 raise ArkerError(
                     "timeout",
                     f"run {run_id} did not reach a terminal state within "
-                    f"{int(budget_s)}s; it continues server-side — poll "
+                    f"{int(budget_s)}s; it continues server-side - poll "
                     f'get_run("{run_id}") to retrieve it',
                     0,
                 )
@@ -894,20 +932,34 @@ class VM:
         pool_id: str | None = None,
         pool_name: str | None = None,
         ssh_public_keys: list[str] | None = None,
-        policies: PolicyDoc | dict[str, Any] | None = None,
+        policies: PolicyUpdate | PolicyDoc | dict[str, Any] | None = None,
+        immutable: bool | None = None,
     ) -> Vm:
         """Update this VM's description, resources, pool, SSH keys, or network
-        policy via ``PATCH /v1/vms/{id}``.
+        policy, or make it immutable, via ``PATCH /v1/vms/{id}``.
 
         Pass an empty ``ssh_public_keys`` list to remove all authorized keys.
 
         Pass ``None`` or an empty description to clear it. Omit
         ``description`` to leave it unchanged.
 
-        ``policies`` is a complete replacement for the VM's network policy:
-        the same document :meth:`set_policies` accepts. An empty doc (``{}``
-        or ``{"policies": []}``) clears it to allow-all. Omit it to leave the
-        current policy unchanged.
+        ``policies`` changes the VM's network policy: ``rules`` writes each
+        rule by id (``None`` removes one) and keeps the rules it does not
+        name; ``secrets`` works the same way. An ordered ``policies`` list
+        instead replaces the whole policy, and ``{"policies": []}`` clears it
+        to allow-all. Omit it to leave the current policy unchanged::
+
+            vm.update(policies={"rules": {
+                "nap": {"type": "schedule", "after_last_running_start": 600,
+                        "action": "suspend"},
+                "old": None,
+            }})
+
+        ``immutable=True`` freezes the VM for good: it can still be viewed,
+        listed, forked, and deleted, but anything that changes or starts it is
+        refused, and its forks are mutable. Send it alone, as the only
+        argument. A running VM raises ``resource_busy``; retry once it is
+        idle.
 
         Returns the updated :class:`Vm`."""
         if vcpu is not None and vcpu_count is not None:
@@ -928,7 +980,8 @@ class VM:
                 pool_id=pool_id,
                 pool_name=pool_name,
                 ssh_public_keys=ssh_public_keys,
-                policies=policies,
+                policies=_policy_update(policies),
+                immutable=immutable,
             )
         else:
             body = {
@@ -937,7 +990,8 @@ class VM:
                 "pool_id": pool_id,
                 "pool_name": pool_name,
                 "ssh_public_keys": ssh_public_keys,
-                "policies": policies,
+                "policies": _policy_update(policies),
+                "immutable": immutable,
             }
         payload = self._client._request("PATCH", _vm_path(self.id), body, base_url=self.base_url)
         return _vm_info(payload)
@@ -1032,7 +1086,7 @@ class VM:
 
     def _send_writes(self, entries: list[SyncWriteEntry]) -> list[SyncWriteResult]:
         # Chunk entries share one upload_id, so a retry resends the same byte
-        # ranges idempotently — the server's chunk ledger merges them.
+        # ranges idempotently - the server's chunk ledger merges them.
         last_error: ArkerError | None = None
         for attempt in range(self._client._retry.attempts):
             request = SyncWriteOperationRequest(op="write", writes=entries)
@@ -1064,17 +1118,14 @@ class VM:
         ignore: Callable[[str], bool] | None = None,
     ) -> SyncDirResult:
         """Recursively sync a local directory INTO this VM at ``remote_dir``,
-        rsync-style: fetch the VM's file *manifest* (per-file sha256) in ONE
-        request via the host-first ``op="manifest"`` (no FC boot; works on a
-        never-run VM), diff it against the local tree, and upload ONLY the files
-        that are new or changed — packed into a single tarball the guest extracts
-        with ``tar -x`` (so the guest does the writes, always consistent with its
-        own filesystem).
+        rsync-style: compare the local tree with the VM's current contents and
+        upload only files that are new or changed. Works on a VM that has never
+        run.
 
         The remote manifest is authoritative. ``cache`` (an optional dict you own
         and reuse across calls) is a pure accelerator: it skips re-hashing local
         files whose (size, mtime) are unchanged. It never decides remote state,
-        so it can never cause a stale or missing upload — worst case it hashes a
+        so it can never cause a stale or missing upload - worst case it hashes a
         file it didn't need to.
 
         ``ignore`` is called with each file's context-relative, ``/``-separated
@@ -1090,7 +1141,7 @@ class VM:
         #    doesn't exist yet (or an empty VM) yields {} -> everything is sent.
         remote, manifest_truncated = self._remote_manifest(remote_root)
 
-        # 2. Enumerate local regular files (skip symlinks — the manifest lists
+        # 2. Enumerate local regular files (skip symlinks - the manifest lists
         #    regular files only, so a symlink would always look "missing").
         local_files: dict[str, tuple[str, int, int]] = {}
         for root, _dirs, files in os.walk(local_root):
@@ -1108,8 +1159,8 @@ class VM:
         result = SyncDirResult(manifest_truncated=manifest_truncated)
         changed: list[tuple[str, str]] = []  # (rel, abs_path)
         entries = sorted(local_files.items())
-        # Hash in a thread pool. Unlike Node — where JS is single-threaded and
-        # hash.update() blocks — CPython's hashlib RELEASES THE GIL while
+        # Hash in a thread pool. Unlike Node - where JS is single-threaded and
+        # hash.update() blocks - CPython's hashlib RELEASES THE GIL while
         # digesting, so this genuinely spreads SHA-256 across cores rather than
         # only overlapping I/O. Hashing dominates sync_dir on a large tree.
         if len(entries) > 1:
@@ -1135,21 +1186,15 @@ class VM:
             result.sent += 1
             result.bytes_sent += size
 
-        # 4. Ship the changed files as ONE tarball and extract it in the guest.
-        #    The GUEST does the file writes (via `tar -x`), so they are always
-        #    consistent with its own filesystem — and one stream + one extract is
-        #    far faster than one write per file. The extract's exit code is
-        #    checked, so a failure surfaces (never a silent partial); the manifest
-        #    also fails safe: any omitted file is re-sent next call.
+        # 4. Upload the changed files in one batch. A failed operation is
+        #    surfaced, and any omitted file is sent again on the next call.
         if changed:
             self._upload_and_extract_tarball(changed, remote_root)
         return result
 
     def _remote_manifest(self, path: str) -> tuple[dict[str, str], bool]:
         """Fetch the VM's file manifest under ``path`` → ({rel_path: sha256},
-        truncated), via the host-first ``op="manifest"`` op (no FC boot; works
-        on a never-run VM). A path that doesn't exist yet yields an empty
-        manifest.
+        truncated). A path that doesn't exist yet yields an empty manifest.
 
         The server caps the walk (50,000 entries) and reports ``truncated``.
         Past the cap every omitted file looks absent, so the diff marks it
@@ -1198,10 +1243,7 @@ class VM:
         into ONE tar, upload it in a single write, and extract it in the guest
         with `tar -x` (which preserves mode/exec bits and creates missing parent
         dirs). The extract's exit is checked so any failure surfaces."""
-        # gzip when it pays: source trees compress ~4:1, but the guest pays
-        # ~3.4x a plain untar to gunzip, so compressing an already-compressed
-        # tree loses at both ends. Sample first. `tar -xf` sniffs compression,
-        # so either choice extracts correctly.
+        # Sample first to avoid recompressing data that is already compact.
         compress = self._should_compress(changed)
         mode = "tar.gz" if compress else "tar"
         with tempfile.NamedTemporaryFile(suffix=f".{mode}", delete=False) as tf:
@@ -1361,7 +1403,7 @@ class VM:
     ) -> PatchSessionResponse:
         """Update a session via ``PATCH /v1/vms/{id}/sessions/{sid}``: resize its
         PTY (``cols``/``rows``) and/or set the idle ``timeout_secs``. Works whether
-        or not a PTY is currently attached — the REST equivalent of
+        or not a PTY is currently attached - the REST equivalent of
         :meth:`Pty.resize` (which sends an in-band control frame on the live
         WebSocket).
         """
@@ -1453,12 +1495,12 @@ class VM:
         ``persist=True`` (the default backend behavior) to reattach to a
         running shell (scrollback is replayed).
 
-        Requires the ``websocket-client`` package — ``pip install 'arker[pty]'``.
+        Requires the ``websocket-client`` package - ``pip install 'arker[pty]'``.
         """
         if getattr(self, "pool_id", None):
             raise ValueError("Pool VMs do not support interactive shells; use run instead.")
         # Plain-text by default. A PTY inherits its session's environment, so
-        # this is set when the session is created — no per-command prefixing and
+        # this is set when the session is created - no per-command prefixing and
         # no server-side change. An explicit `env` wins over the plain defaults,
         # so a caller can override just `TERM` and keep the rest.
         session_env: dict[str, str] = {}
@@ -1783,7 +1825,7 @@ def _retry_delay(retry: RetryOptions, attempt: int, error: ArkerError | None = N
     """Wait before the next attempt.
 
     The server's hint beats backoff, bounded by an explicitly configured
-    max_delay_s — the caller's latency budget outranks the server. The default
+    max_delay_s - the caller's latency budget outranks the server. The default
     max only shapes backoff; applying it here would neuter real capacity waits.
     """
     jitter_range = max(1, int(retry.jitter_s * 1000) + 1)
@@ -1900,13 +1942,13 @@ def _clamp_pty_dimension(value: int) -> int:
 #:
 #: Applied by default (see ``VM.connect_pty(plain=...)``). The overwhelmingly
 #: common consumer of a PTY here is a program, not a person: escape sequences
-#: are noise it has to strip, and stripping them is lossy — `\x1b[2K` plus `\r`
+#: are noise it has to strip, and stripping them is lossy - `\x1b[2K` plus `\r`
 #: means "rewrite this line", so discarding the codes leaves every intermediate
 #: frame of a progress bar concatenated. Far better to ask the program not to
 #: emit them.
 #:
 #: ``TERM=dumb`` also suppresses cursor addressing, so a full-screen TUI (vim,
-#: an interactive Claude Code session) will refuse or degrade — pass
+#: an interactive Claude Code session) will refuse or degrade - pass
 #: ``plain=False`` when a human is actually watching.
 PLAIN_PTY_ENV: dict[str, str] = {
     "TERM": "dumb",
@@ -1935,6 +1977,27 @@ def _build_pty_ws_url(base_url: str, vm_id: str, session_id: str, params: dict[s
         pairs.append((key, str(value)))
     query = urllib.parse.urlencode(pairs)
     return urllib.parse.urlunsplit((scheme, parsed.netloc, parsed.path, query, ""))
+
+
+# What a policy read reports but an update refuses, so a policy read back can
+# be sent as an update.
+_READ_ONLY_POLICY_FIELDS = frozenset({"hostname", "mitm_domains", "warnings"})
+
+
+def _policy_update(policies: Any) -> Any:
+    """A ``None`` rule or secret in a policy update removes it, so it must reach
+    the wire as ``null`` rather than be pruned like an unset field."""
+    if dataclasses.is_dataclass(policies) and not isinstance(policies, type):
+        policies = {field.name: getattr(policies, field.name) for field in dataclasses.fields(policies)}
+    if not isinstance(policies, dict):
+        return policies
+    return {
+        key: {name: _EXPLICIT_NULL if item is None else item for name, item in value.items()}
+        if key in ("rules", "secrets") and isinstance(value, dict)
+        else value
+        for key, value in policies.items()
+        if key not in _READ_ONLY_POLICY_FIELDS
+    }
 
 
 def _drop_none(value: Any) -> Any:
@@ -1974,7 +2037,9 @@ def _decode_value(annotation: Any, value: Any) -> Any:
     if origin is dict:
         _, value_type = get_args(annotation)
         return {key: _decode_value(value_type, item) for key, item in value.items()}
-    if origin is types.UnionType:
+    # A union with a Literal member (PolicyAction: a verb or an object) is a
+    # typing.Union, not a types.UnionType.
+    if origin in (types.UnionType, Union):
         args = get_args(annotation)
         model_types = [member for member in args if isinstance(member, type) and dataclasses.is_dataclass(member)]
         if isinstance(value, dict):
@@ -2003,7 +2068,7 @@ def _decode_value(annotation: Any, value: Any) -> Any:
         # Optional[list[Dataclass]] / Optional[dict[str, Dataclass]]: the
         # single non-null member is itself a parameterized container, not a
         # bare dataclass type (that case is handled above), so it never
-        # matched `model_types` and fell through to a raw passthrough —
+        # matched `model_types` and fell through to a raw passthrough -
         # e.g. PolicyDoc.policies: list[PolicyEntry] | None decoded as
         # plain dicts instead of PolicyEntry instances. Recurse into the
         # single non-null member so its own list/dict branch above can
@@ -2119,7 +2184,7 @@ class SyncDirResult:
     manifest_truncated: bool = False
     """True when the VM's manifest hit the server's 50,000-entry cap and was
     truncated. Everything beyond the cap is invisible to the diff, so it is
-    treated as changed and re-uploaded — the sync stays CORRECT but stops being
+    treated as changed and re-uploaded - the sync stays CORRECT but stops being
     a delta. If you see this, split the sync into subdirectories."""
 
 
@@ -2165,8 +2230,8 @@ def _vm_info(payload: dict[str, Any]) -> Vm:
 def _terminal_state(state: str | None, exit_code: int | None) -> str:
     """Terminal state for a finished run.
 
-    A negative ``exit_code`` means no process status was obtained — the run was
-    killed or the compute was lost — which is ``"failed"``. Keeps the
+    A negative ``exit_code`` means no process status was obtained - the run was
+    killed or the compute was lost - which is ``"failed"``. Keeps the
     synchronous run result and :meth:`VM.get_run` reporting the same state for
     the same run.
     """
@@ -2205,8 +2270,8 @@ def _run_to_completed_result(run: RunRecord) -> CompletedRunResult:
     :class:`CompletedRunResult` a synchronous :meth:`VM.run` resolves to. The
     stored run carries no memory-override fields, so those stay ``None``.
 
-    ``run.stdout``/``run.stderr`` are already bytes — :func:`_run_status_response`
-    decodes at the wire boundary — so they pass through untouched here. Decoding
+    ``run.stdout``/``run.stderr`` are already bytes - :func:`_run_status_response`
+    decodes at the wire boundary - so they pass through untouched here. Decoding
     again would corrupt base64 payloads."""
     exit_code = run.exit_code
     if exit_code is None:

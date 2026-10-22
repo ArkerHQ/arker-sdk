@@ -1,15 +1,13 @@
 /**
- * Adversarial conformance test for VM.syncDir (ARK-268 / manifest-freeze).
+ * Adversarial conformance test for VM.syncDir consistency.
  *
  * Drives the real SDK syncDir with BIG and SMALL payloads while the VM runs a
  * concurrent network+compute+write workload, and asserts the running-VM
  * manifest-freeze contract end-to-end: NEITHER the sync NOR the run breaks.
  *   * SMALL + BIG full sync push every file (BIG > CHUNK_SIZE → presigned tarball).
- *   * The immediate DELTA re-sync sends NOTHING (sent=0) — the fix: op:manifest
- *     FIFREEZE-quiesces the eager-paused guest so the host sees the tar-x writes.
+ *   * The immediate delta re-sync sends nothing (sent=0).
  *   * Byte-exact readback of a nested small file and the >4 MB big file.
- *   * The concurrent workload completes cleanly (exit 0) — the FIFREEZE stalls
- *     it briefly but must not break it.
+ *   * The concurrent workload completes cleanly (exit 0).
  *
  * Unlike sync-dir.ts (quiescent VM), this fires syncDir against a VM that is
  * actively busy, which is the real-world case that regressed the delta path.
@@ -104,8 +102,7 @@ async function main(): Promise<void> {
     assert(bytesEqual(await vm.sync(`${smallRemote}/nest/b.txt`), nestedBytes), "nested small readback mismatch");
     assert(bytesEqual(await vm.sync(`${bigRemote}/blob0.bin`), bigBytes), "6 MB big readback mismatch (presigned)");
 
-    // The concurrent workload must have completed cleanly — the FIFREEZEs
-    // stalled it but must not have broken it.
+    // The concurrent workload must complete without corruption or interruption.
     let run = await vm.getRun(bg.runId);
     for (let i = 0; i < 90 && run.state !== "completed" && run.state !== "failed"; i++) {
       await new Promise((r) => setTimeout(r, 1000));
@@ -114,7 +111,7 @@ async function main(): Promise<void> {
     const out = (run.stdout ?? "").trim();
     console.log(`  workload: state=${run.state} exit=${run.exit_code} tail=[${out.slice(-60)}]`);
     assert(run.state === "completed" && run.exit_code === 0, `workload did not complete cleanly: state=${run.state} exit=${run.exit_code}`);
-    assert(/WL_DONE/.test(out), "workload did not reach WL_DONE (writes+compute broke under concurrent FIFREEZE)");
+    assert(/WL_DONE/.test(out), "workload did not reach WL_DONE during concurrent sync");
 
     console.log("PASS sync-dir-adversarial");
   } finally {

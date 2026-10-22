@@ -1,6 +1,6 @@
 """What runs INSIDE the VMs: the outbound policy, the install, the agent task.
 
-Content only — no SDK calls. launch.py is the flow that feeds these to
+Content only - no SDK calls. launch.py is the flow that feeds these to
 `vm.run()`; helpers.py is the plumbing around it.
 
 The guest never holds a usable key:
@@ -23,7 +23,7 @@ PREFIX = os.environ.get("FLEET_PREFIX", "vllm-agent")
 
 # Valid-looking but worthless. Must LOOK like a key: a blank one fails as
 # "no API key", which would mask the failure this detects (rewrite not applied).
-DUMMY_KEY = "sk-ant-api03-arker-dummy-never-valid-0000000000000000000000000000AA"
+DUMMY_KEY = "invalid-test-key"
 
 # Referenced as ${secret:NAME} in the rewrite.
 SECRET_NAME = "ANTHROPIC_API_KEY"
@@ -72,7 +72,7 @@ def policy_doc(real_key, workspace_id=""):
 
 
 # ── base image build ────────────────────────────────────────────────────────
-# Runs detached and is polled via a marker file — vLLM pulls several GB, far
+# Runs detached and is polled via a marker file - vLLM pulls several GB, far
 # longer than a foreground run's window. ubuntu-gpu already ships Claude Code,
 # build-essential and pip, so this adds only what it lacks.
 INSTALL = r"""
@@ -88,7 +88,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-dev \
   && echo PYDEV_OK || echo PYDEV_FAILED
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
-# Claude Code ships with the golden — checked, not installed, so a golden that
+# Claude Code ships with the golden - checked, not installed, so a golden that
 # drops it fails here rather than at the first agent task.
 export PATH="$PATH:/usr/local/bin:/root/.local/bin"
 command -v claude && claude --version || echo CLAUDE_MISSING
@@ -169,7 +169,7 @@ MARKER = "ARKER_TESTS_DONE"
 # Distinct from MARKER so a task's output can't be mistaken for the build gate.
 VLLM_OK_MARKER = "VLLM_ENGINE_OK"
 
-# Proves the base can STAND UP vLLM on the slice, not merely import it — the JIT
+# Proves the base can STAND UP vLLM on the slice, not merely import it - the JIT
 # gaps only surface on a real engine init.
 VLLM_SMOKE = (
     ". {AGENT}/env.sh\n"
@@ -222,19 +222,19 @@ def feature_test_task(features, vram_mib, per_test_budget):
     n = len(features)
     return (
         f"You are validating a local vLLM install on an NVIDIA GPU slice of "
-        f"{vram_mib} MiB. The model is ALREADY on disk at {MODEL_DIR} — load it "
+        f"{vram_mib} MiB. The model is ALREADY on disk at {MODEL_DIR} - load it "
         f"from that path with vLLM's offline LLM API and never download anything.\n\n"
         f"Write and run {n} independent tests, one per critical vLLM feature below, "
         f"in order:\n{numbered}\n\n"
         f"For EACH test:\n"
-        f"- Write it to its OWN new .py FILE under {WORK} (a real __main__ file — "
+        f"- Write it to its OWN new .py FILE under {WORK} (a real __main__ file - "
         f"NOT `python3 -c` or a heredoc: vLLM spawns a subprocess that needs a real "
         f"file on disk).\n"
         f"- It MUST load the model onto the GPU via vLLM's offline `LLM` API and "
         f"actually exercise that feature; a test that never loads the model on the "
         f"GPU is a failure of the test, not a pass.\n"
         f"- Run it with python3, capture the output, and decide PASS or FAIL with a "
-        f"one-line reason. A real vLLM error/crash is a legitimate FAIL — report it "
+        f"one-line reason. A real vLLM error/crash is a legitimate FAIL - report it "
         f"honestly, do not design the test to avoid it.\n"
         f"- Read device VRAM with `nvidia-smi --query-gpu=memory.used "
         f"--format=csv` (the engine runs in a CHILD process, so "
@@ -276,7 +276,7 @@ def detach(script, tag):
 
 
 def poll_cmd(tag):
-    """Cheap marker check — small enough to return well inside the run window."""
+    """Cheap marker check - small enough to return well inside the run window."""
     return f"cat {AGENT}/{tag}.done 2>/dev/null || echo RUNNING"
 
 

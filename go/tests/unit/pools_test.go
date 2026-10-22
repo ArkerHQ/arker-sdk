@@ -27,7 +27,7 @@ func TestPoolsV2(t *testing.T) {
 		case "/v1/pools/p/workers":
 			fmt.Fprint(w, `{"workers":[]}`)
 		default:
-			fmt.Fprint(w, `{"pool_id":"p","type":"managed","provider":"aws","platform":"icelake","state":"active","reason":null,"resources_reserved":{"vcpu":8,"memory_mib":0,"disk_mib":0},"resources_provisioned":{"vcpu":0,"memory_mib":0,"disk_mib":0},"commitments":[{"starts_at":"2026-01-01T00:00:00Z","ends_at":"2026-01-02T00:00:00Z"}]}`)
+			fmt.Fprint(w, `{"pool_id":"p","type":"managed","provider":"aws","platform":"icelake","state":"running","reason":null,"resources_reserved":{"vcpu":8,"memory_mib":0,"disk_mib":0},"resources_provisioned":{"vcpu":0,"memory_mib":0,"disk_mib":0},"commitments":[{"starts_at":"2026-01-01T00:00:00Z","ends_at":"2026-01-02T00:00:00Z"}]}`)
 		}
 	}))
 	defer srv.Close()

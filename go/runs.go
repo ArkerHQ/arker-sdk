@@ -17,9 +17,10 @@ const (
 	runPollMaxFailures = 10
 )
 
-// RunRequest executes a command in a VM.
+// RunRequest executes a command in a VM. A request that names nothing --
+// RunRequest{} -- runs no command and resumes any pending runs.
 type RunRequest struct {
-	Command string `json:"command"`
+	Command string `json:"command,omitempty"`
 
 	// SessionIdx is FIND-OR-CREATE, and omitting it means index 0 -- where a
 	// plain run also lands. A run entering a session that holds a live
@@ -40,9 +41,16 @@ type RunRequest struct {
 	// QueueingTimeout queues instead of failing fast when capacity is short.
 	QueueingTimeout *int `json:"queueing_timeout,omitempty"`
 
-	EndSymbol string     `json:"end_symbol,omitempty"`
-	Signal    string     `json:"signal,omitempty"`
-	Policies  *PolicyDoc `json:"policies,omitempty"`
+	EndSymbol string        `json:"end_symbol,omitempty"`
+	Signal    string        `json:"signal,omitempty"`
+	Policies  *PolicyUpdate `json:"policies,omitempty"`
+
+	// EndAfterAllSubprocesses ends the run only after every process Command
+	// started has exited, backgrounded and detached ones included. The server
+	// refuses it with Signal or EndSymbol, and on a session that already has
+	// background processes: a synchronous call fails with code
+	// "unsupported_operation", a backgrounded run ends failed with FailReason.
+	EndAfterAllSubprocesses *bool `json:"end_after_all_subprocesses,omitempty"`
 
 	// IdempotencyKey asks the server to deduplicate the command. Unlike Fork it
 	// is not auto-generated: a run is usually cheap to repeat and only the
@@ -153,8 +161,7 @@ type RunRecord struct {
 	VMID        string `json:"vm_id,omitempty"`
 }
 
-// Run executes a command in this VM, restoring it first if it is suspended --
-// there is no wake endpoint and none is needed, a no-op run IS a wake.
+// Run executes a command in this VM.
 //
 // Synchronous by default. If the run outlives the server's sync window the API
 // returns a background ack, and Run then polls GetRun until the run is terminal

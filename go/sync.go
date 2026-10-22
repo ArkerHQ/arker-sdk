@@ -170,10 +170,7 @@ type localFile struct {
 	hash     string
 }
 
-// SyncDir recursively syncs localDir INTO this VM at remoteDir, rsync-style:
-// fetch the VM's per-file sha256 manifest in ONE request (host-first, so it
-// works on a never-run VM), diff it against the local tree, and upload only the
-// new or changed files packed into a single tarball the guest extracts.
+// SyncDir compares localDir with remoteDir and uploads new or changed files.
 //
 // The remote manifest is authoritative, so a failure fails safe: any file the
 // manifest omits is simply re-sent next call.
@@ -302,9 +299,7 @@ func (v *VM) remoteManifest(ctx context.Context, path string) (map[string]string
 	return manifest, out.Truncated, nil
 }
 
-// uploadTarball packs the changed files into ONE tar and has the GUEST extract
-// it, so the writes are always consistent with its own filesystem -- and one
-// stream plus one extract beats one write per file.
+// uploadTarball applies changed files in one archive.
 func (v *VM) uploadTarball(ctx context.Context, changed []*localFile, remoteRoot string) error {
 	compress := worthCompressing(changed)
 	mode := "tar"
@@ -387,10 +382,7 @@ func writeTar(out io.Writer, changed []*localFile, compress bool) error {
 	return nil
 }
 
-// worthCompressing samples the head of a handful of files rather than
-// compressing everything twice. Source trees compress ~4:1, but the guest pays
-// ~3.4x a plain untar to gunzip, so compressing an already-compressed tree
-// loses at both ends.
+// worthCompressing samples file prefixes instead of compressing the full input twice.
 func worthCompressing(changed []*localFile) bool {
 	var raw, packed int64
 	for _, f := range changed[:min(8, len(changed))] {

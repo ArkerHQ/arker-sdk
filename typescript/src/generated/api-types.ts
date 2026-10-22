@@ -113,7 +113,7 @@ export interface paths {
         };
         /**
          * List organization runs
-         * @description Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Reads host-local runs and ClickHouse history. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
+         * @description Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
          */
         get: operations["listOrgRuns"];
         put?: never;
@@ -295,7 +295,7 @@ export interface paths {
         head?: never;
         /**
          * Update a session (resize PTY / set timeout)
-         * @description Resize the session's PTY (cols/rows) and/or update its idle timeout. A resize applies at once to the session's open terminal, attached or detached, and is the size the next attach opens at. REST equivalent of the WebSocket {"type":"resize"} control frame — usable from any client, attached or not.
+         * @description Resize the session's PTY (cols/rows) and/or update its idle timeout. A resize applies at once to the session's open terminal, attached or detached, and is the size the next attach opens at. REST equivalent of the WebSocket {"type":"resize"} control frame - usable from any client, attached or not.
          */
         patch: operations["patchSession"];
         trace?: never;
@@ -559,7 +559,7 @@ export interface paths {
         put?: never;
         /**
          * Create a pool
-         * @description Create a pool in the region of the endpoint you call. A `managed` pool starts `active`; a `byoc` or `self_hosted` pool starts `creating`. Requires an API key not limited to a VM or pool; viewers cannot create pools. Returns 404 when pools are not enabled for the organization. `self_hosted` pools may be unavailable, and creating one then returns 422 `unsupported_operation`. Returns 429 `quota_exceeded` when the organization already has as many pools in the region as its `pools` quota allows, or when a `managed` pool would take the organization's `managed` pools in the region past its `vcpus`, `ram_mib` or `disk_mib` quota.
+         * @description Create a pool accessible through the regional endpoint used to invoke this operation. A `managed` pool starts `running`; a `byoc` or `self_hosted` pool starts `creating`. Requires an admin API key not limited to a VM or pool. Returns 404 when pools are not enabled for the organization. `self_hosted` pools may be unavailable, and creating one then returns 422 `unsupported_operation`. Returns 429 `quota_exceeded` when the organization already has as many pools in the region as its `pools` quota allows, or when a `managed` pool would take the organization's `managed` pools in the region past its `vcpus`, `ram_mib` or `disk_mib` quota.
          */
         post: operations["createPool"];
         delete?: never;
@@ -587,14 +587,14 @@ export interface paths {
         post?: never;
         /**
          * Delete a pool
-         * @description Do NOT invoke this unless you're sure you want to completely delete the pool. Resize to zero in most cases, e.g. to end Arker billing (once no commitment is active). The pool turns `deleting`, its workers are told to leave, every VM in it is deleted, and its API keys are revoked once it is gone. Refused while a commitment is active. Deleting a pool that is already deleting answers the same way. Requires an API key with access to the pool; viewers cannot change pools. Returns 404 when pools are not enabled for the organization.
+         * @description Do NOT invoke this unless you're sure you want to completely delete the pool. Resize to zero in most cases, e.g. to end Arker billing. The pool turns `deleting`, its workers are told to leave, every VM in it is deleted, and its API keys are revoked once it is gone. Refused during a commitment. Deleting a pool that is already deleting answers the same way. Requires an admin API key with access to the pool. Returns 404 when pools are not enabled for the organization.
          */
         delete: operations["deletePool"];
         options?: never;
         head?: never;
         /**
          * Update a pool
-         * @description Rename a pool, resize it, or change its commitments. Requires an API key with access to the pool; viewers cannot change pools. Returns 404 when pools are not enabled for the organization. Growing a `managed` pool returns 429 `quota_exceeded` when the organization's `managed` pools in the region would reserve more than its `vcpus`, `ram_mib` or `disk_mib` quota.
+         * @description Rename or resize a pool; commitments may be unavailable. Requires an admin API key with access to the pool. Returns 404 when pools are not enabled for the organization. Growing a `managed` pool returns 429 `quota_exceeded` when the organization's `managed` pools in the region would reserve more than its `vcpus`, `ram_mib` or `disk_mib` quota.
          */
         patch: operations["updatePool"];
         trace?: never;
@@ -661,7 +661,7 @@ export interface paths {
         };
         /**
          * Open the worker tunnel
-         * @description Upgrade to a WebSocket with subprotocol `worker-tunnel.v1`. It carries yamux, and Arker opens one stream per HTTP/1.1 connection to the worker's API; a fork names the VM id to use in header `x-vm-id`. Requires the worker to have joined. Authenticate with an API key limited to this pool.
+         * @description Opens the authenticated worker tunnel. Requires the worker to have joined. Authenticate with an API key limited to this pool.
          */
         get: operations["openWorkerTunnel"];
         put?: never;
@@ -747,7 +747,7 @@ export interface paths {
         put?: never;
         /**
          * Create an API key
-         * @description Create an API key, limited by `scopes` to the whole organization (the default), to VMs, or to one pool. The key is returned only once. A key limited to a pool manages that pool's keys only; a key limited to VMs manages none.
+         * @description Create an API key, optionally limited to VMs or one pool. The key has its creator's role and is returned only once. A key limited to a pool manages that pool's keys only; a key limited to VMs manages none.
          */
         post: operations["createApiKey"];
         delete?: never;
@@ -771,7 +771,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke an API key
-         * @description Revoke an API key; requests with it are refused from then on. Viewers cannot revoke keys. A key limited to a pool manages that pool's keys only; a key limited to VMs manages none.
+         * @description Revoke an API key; requests with it are refused from then on. A key limited to a pool manages that pool's keys only; a key limited to VMs manages none.
          */
         delete: operations["revokeApiKey"];
         options?: never;
@@ -827,7 +827,7 @@ export interface components {
             error: components["schemas"]["ErrorBody"];
         };
         /**
-         * @description `running` while the VM is billed for compute. `idle` while it is not.
+         * @description `running` while something uses the VM: a run, an SSH connection, a terminal, an inbound request, a sync or a resize. `idle` otherwise. A Windows VM is `running` from its start until it is suspended.
          * @enum {string}
          */
         VmState: "idle" | "running";
@@ -845,9 +845,9 @@ export interface components {
         Provider: string;
         /** @description A complete replacement for a VM's network policy. Rules are evaluated in order, and the first matching rule determines the result. An empty rule list allows all outbound traffic and permits authenticated inbound access to any guest port. */
         PolicyWriteRequest: {
-            /** @description Ordered network policy rules. An empty list allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. In a non-empty document, unmatched outbound traffic is denied. If no inbound rules are present, inbound access keeps the authenticated default; explicit inbound allow rules restrict exposure to their listed ports. */
+            /** @description Ordered network policy rules. An empty list allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With an outbound `allow` rule, unmatched outbound traffic is denied. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable. */
             policies?: components["schemas"]["PolicyEntry"][];
-            /** @description Named secret values referenced by `${secret:NAME}` in rewrite actions. Values are encrypted at rest and masked in subsequent policy responses. */
+            /** @description Named secret values referenced by `${secret:NAME}` in rewrite actions, match values and `auth.token`. Values are encrypted at rest and masked in subsequent policy responses. */
             secrets?: {
                 [key: string]: string;
             };
@@ -860,9 +860,9 @@ export interface components {
         };
         /** @description A VM's current network policy and its derived inbound exposure metadata. */
         PolicyDoc: {
-            /** @description Ordered network policy rules. An empty list allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. In a non-empty document, unmatched outbound traffic is denied. If no inbound rules are present, inbound access keeps the authenticated default; explicit inbound allow rules restrict exposure to their listed ports. */
+            /** @description Ordered network policy rules. An empty list allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With an outbound `allow` rule, unmatched outbound traffic is denied. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable. */
             policies?: components["schemas"]["PolicyEntry"][];
-            /** @description Named secrets referenced by `${secret:NAME}` in rewrite actions. Stored values are represented as `***`; supply the original value when replacing a policy that uses it. */
+            /** @description Named secrets referenced by `${secret:NAME}` in rewrite actions, match values and `auth.token`. Stored values are represented as `***`; supply the original value when replacing a policy that uses it. */
             secrets?: {
                 [key: string]: string;
             };
@@ -883,14 +883,14 @@ export interface components {
             match?: components["schemas"]["PolicyMatch"];
             action: components["schemas"]["PolicyAction"];
             /**
-             * @description Authentication for an inbound rule that exposes a port — `allow`, or a `suspend` or `scaling`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. All port-exposing inbound rules in one document must use the same authentication mode. Inbound port matches must use individual ports rather than ranges.
+             * @description Authentication for an inbound rule that exposes a port - `allow`, or a `suspend` or `scaling`-only action. `open` exposes the port publicly; `arker` requires `Authorization: Bearer $ARKER_API_KEY` from the VM owner's organization before forwarding to the guest. The default is `arker`. This field is invalid on deny and outbound rules. Inbound port matches must use individual ports rather than ranges.
              * @enum {string}
              */
             auth?: "open" | "arker";
         };
         /** @description Match criteria: present fields are combined with AND; list items are combined with OR. `ips` and `hosts` are mutually exclusive, and inbound rules cannot use `hosts`. Port, IP, and host rules operate at the connection layer. Method, path, header, query parameter, and body rules operate at the request layer. */
         PolicyMatch: {
-            /** @description Single ports and/or inclusive [start, end] ranges, e.g. [80, 443, [1000, 2000]]. Absent = any port; an empty list is refused. Inbound allow rules require one or more individual ports and reject ranges. */
+            /** @description Single ports and/or inclusive [start, end] ranges, e.g. [80, 443, [1000, 2000]]. Absent = any port; an empty list is refused. Inbound rules other than `deny` require one or more individual ports, and inbound rules reject ranges. */
             ports?: (number | number[])[];
             /** @description IPs or CIDRs. Outbound rules match destination IPs; inbound rules match the caller source IP. */
             ips?: string[];
@@ -915,6 +915,12 @@ export interface components {
              * @enum {string}
              */
             vm_state?: "idle" | "running";
+            /** @description `inbound` only. How the request reaches the VM: `port` to a guest port at its `.arker.app` hostname, `ssh` over SSH, `pty` by attaching a terminal (`GET /v1/vms/{id}/sessions/{sid}/pty`). Defaults to `["port"]`. A way no rule names works as it does without rules; once a rule names it, the rules decide, and a request no rule matches is refused. A rule naming `ssh` or `pty` matches only on `ips`, `vm_state`, `connection_state` and, for `ssh` alone, `ssh_keys`, and is `allow` or `deny`. A region that does not yet pass an SSH caller's address on refuses `ips` on a rule naming `ssh`. */
+            via?: ("port" | "ssh" | "pty")[];
+            /** @description `inbound` only, on a rule whose `via` is `["ssh"]`. SSH public keys in `authorized_keys` format (`ssh-ed25519 AAAA... comment`). The rule matches an SSH login with one of these keys, compared by key, not by comment. An `allow` lets the key log in; a `deny` refuses it. Without `ssh_keys`, a `deny` naming `ssh` matches every key, and an `allow` the keys the VM knows: its own unexpired `ssh_public_keys` and the keys any `allow` lists. Once a rule names `ssh`, organization SSH keys no longer log in to the VM. A `deny` of the key that also lists `open` in `connection_state` closes its open SSH connections. Certificates, `authorized_keys` options such as `from=` or `command=`, and `ssh-dss` keys are refused. The rule opens no port. */
+            ssh_keys?: string[];
+            /** @description `inbound` only. The requests the rule applies to: `new` ones as they arrive, and `open` ones already in progress on the VM, such as a WebSocket, a response still streaming, an SSH connection or an attached terminal, matched on the request that opened them. A request in progress meets only the rules listing `open`, by priority, each time the VM's policies are written: an `allow` keeps it, a `deny` closes it, and one no such rule matches stays open. Only an `allow` or a `deny` may list `open`. An idle keep-alive connection holds nothing, so its next request is `new`. Defaults to `["new"]`. */
+            connection_state?: ("new" | "open")[];
         };
         /** @description allow / deny, `delete` (schedule rules), `suspend` (schedule and outbound rules: suspends the VM; on outbound, allows the request and suspends the VM until its response arrives), or an object with any combination of `rewrite`, `gate`, and `suspend` (at least one). */
         PolicyAction: ("allow" | "deny" | "delete" | "suspend") | {
@@ -931,7 +937,7 @@ export interface components {
         /** @description Scales the VM when the rule matches or fires. On an `outbound` rule `suspend` brackets the time the VM is blocked awaiting an upstream response; on an `inbound` rule it suspends the VM once a matched request has been answered. Outbound rules may be narrowed by request fields (`methods`/`paths`/`headers`/`body_contains`), for example to suspend only on `POST /v1/messages`, and compose with `rewrite` / `gate` siblings. For outbound, prefer a `match.hosts` scope: a host-less rule matches every flow it can see, which breaks certificate-pinning clients. */
         ScaleAction: {
             /**
-             * @description Suspend the VM (snapshot and free CPU/RAM). On an `outbound` rule: while a matched upstream request is blocked, resuming when the response arrives. On an `inbound` rule (deprecated): once a matched request's response has been fully delivered and nothing else is in flight, so the next matched request starts it again. On an `outbound` rule, matched responses are delivered only once the upstream response is COMPLETE: a suspended VM has no running guest to receive bytes, so the proxy holds the whole body and hands it over at the end. Total latency is unchanged, but a response whose fragments are individually usable — an SSE token stream, for example — stops arriving incrementally, so a client rendering tokens as they arrive will see nothing until the response finishes. Enabling this is a deliberate trade of incremental delivery for the memory saving.
+             * @description Suspend the VM (snapshot and free CPU/RAM). On an `outbound` rule: while a matched upstream request is blocked, resuming when the response arrives. On an `inbound` rule (deprecated): once a matched request's response has been fully delivered and nothing else is in flight, so the next matched request starts it again. On an `outbound` rule, matched responses are delivered only once the upstream response is COMPLETE: a suspended VM has no running guest to receive bytes, so the proxy holds the whole body and hands it over at the end. Total latency is unchanged, but a response whose fragments are individually usable - an SSE token stream, for example - stops arriving incrementally, so a client rendering tokens as they arrive will see nothing until the response finishes. Enabling this is a deliberate trade of incremental delivery for the memory saving.
              * @default false
              */
             suspend?: boolean;
@@ -941,7 +947,7 @@ export interface components {
              */
             wake?: boolean;
         };
-        /** @description Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${…}`-braced), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged. */
+        /** @description Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${…}`-braced), `${header:NAME}` (the request's header NAME, on inbound rules), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged. */
         Rewrite: {
             /** @description Replacement request host. */
             host?: string;
@@ -993,7 +999,7 @@ export interface components {
             source_vm_id?: string | null;
             /** @description VM name within the caller organization or `ArkerHQ`. Omit the organization scope to search the caller first and then `ArkerHQ`. */
             source_vm_name?: string | null;
-            /** @description OCI image reference to fork from — for example `ubuntu:24.04`, `ghcr.io/org/image:v1`, or `image@sha256:...`. An unqualified name resolves against Docker Hub. Give a bare reference, not a URI. The new VM boots a rootfs converted from that image rather than from an existing VM, so neither `source_vm_id` nor `source_vm_name` is given. */
+            /** @description OCI image reference to fork from - for example `ubuntu:24.04`, `ghcr.io/org/image:v1`, or `image@sha256:...`. An unqualified name resolves against Docker Hub. Give a bare reference, not a URI. The new VM boots a rootfs converted from that image rather than from an existing VM, so neither `source_vm_id` nor `source_vm_name` is given. */
             image?: string | null;
             /** @description Dockerfile source. Accepted by the schema and ALWAYS REFUSED with a 400: the API does not build Dockerfiles, the SDKs do. Use arker.fork(dockerfile="./Dockerfile") from the Python or TypeScript SDK, or pass `image` to fork a prebuilt image here. COPY is why it works that way: it reads files on the caller's machine, and this field carries text while the caller waits for the fork response, so the server can never be handed those files. The field is kept rather than removed so this refusal can point at the SDK instead of answering with a bare `unknown field`. */
             dockerfile?: string | null;
@@ -1142,9 +1148,9 @@ export interface components {
             region?: string | null;
             /** @description Public provider containing the VM. */
             provider?: components["schemas"]["Provider"] | null;
-            /** @description RFC 3339 timestamp of the machine's most recent activity — a run, an SSH session, an open tunnel, a resume, or being used as the source of a fork. Recorded when a stretch of activity begins and refreshed at most once a minute while it continues, so it is a recent-activity marker rather than a precise heartbeat. Null if the machine has not been active since it was created. */
+            /** @description RFC 3339 timestamp of the machine's most recent activity - a run, an SSH session, an open tunnel, a resume, or being used as the source of a fork. Recorded when a stretch of activity begins and refreshed at most once a minute while it continues, so it is a recent-activity marker rather than a precise heartbeat. Null if the machine has not been active since it was created. */
             last_active_at?: string | null;
-            /** @description The VM's network object — SSH keys only. Inbound reachability and per-port exposure are derived from `policies`, not from this object. */
+            /** @description The VM's network object - SSH keys only. Inbound reachability and per-port exposure are derived from `policies`, not from this object. */
             network: components["schemas"]["VmNetwork"];
             /** @description The VM's network policy. Returned by `GET /v1/vms/{id}`, `PATCH /v1/vms/{id}`, and `POST /v1/fork`; omitted from list responses. */
             policies?: components["schemas"]["VmPolicies"] | null;
@@ -1156,7 +1162,7 @@ export interface components {
             max_memory_mib?: number | null;
             /** @description Non-hotpluggable base memory (MiB). */
             min_memory_mib?: number | null;
-            /** @description GPU sizing bounds for each GPU platform this VM can be forked onto; absent when it has no GPU platform. A base VM is GPU-agnostic and may be offered on several GPUs at once, so this is a list — clients pick the entry matching the platform they intend to request. */
+            /** @description GPU sizing bounds for each GPU platform this VM can be forked onto; absent when it has no GPU platform. A base VM is GPU-agnostic and may be offered on several GPUs at once, so this is a list - clients pick the entry matching the platform they intend to request. */
             gpu_platforms?: components["schemas"]["GpuPlatformLimits"][] | null;
             /** @description Smallest disk size (MiB) accepted for this VM. `0` means nodisk. */
             min_disk_mib?: number | null;
@@ -1211,7 +1217,7 @@ export interface components {
             session_id: string;
         };
         RunRequest: {
-            /** @description The session to run in. Arker's run interface works like a terminal: sessions are tabs, each keeps its own state — working directory, environment, shell history — and each handles one run at a time. Create a session with `POST /v1/vms/{id}/sessions`, which also sets its starting directory and environment, then pass its id here. Run sequential commands in one session; for a long-running task, use `time_to_background: 0` in a session of its own so later work does not interrupt it. Distinct sessions run concurrently. A session that no longer exists is a 404. Omitted, the run uses the VM's default session, which every caller that omits it shares. */
+            /** @description The session to run in. Arker's run interface works like a terminal: sessions are tabs, each keeps its own state - working directory, environment, shell history - and each handles one run at a time. Create a session with `POST /v1/vms/{id}/sessions`, which also sets its starting directory and environment, then pass its id here. Run sequential commands in one session; for a long-running task, use `time_to_background: 0` in a session of its own so later work does not interrupt it. Distinct sessions run concurrently. A session that no longer exists is a 404. Omitted, the run uses the VM's default session, which every caller that omits it shares. */
             session_id?: string | null;
             /**
              * Format: uint32
@@ -1220,7 +1226,7 @@ export interface components {
             session_idx?: number | null;
             /** @description Command submitted for execution. Omit it only for a signal request, or in a request naming nothing at all: a request with no `command` resumes any pending runs. */
             command?: string;
-            /** @description Maximum command runtime in seconds. Omitted means no limit; the run is killed only if you set a `timeout`. `0` is an explicit spelling of the same thing. This is separate from `time_to_background`, which controls how long the request waits for completion. A run is not complete until everything it spawned has exited, so this is also the bound on a run that leaves a daemon behind; when it fires, the run's processes are killed. */
+            /** @description Maximum command runtime in seconds. Omitted means no limit; the run is killed only if you set a `timeout`. `0` is an explicit spelling of the same thing. This is separate from `time_to_background`, which controls how long the request waits for completion. A run completes when its command exits; processes it leaves running in the background are not waited on, and this timeout does not apply to them once the run has completed. If it fires before the command exits, the command and every process it started are killed, including background ones. */
             timeout?: number | null;
             /**
              * Format: uint16
@@ -1229,7 +1235,7 @@ export interface components {
             time_to_background?: number | null;
             /**
              * @deprecated
-             * @description Alias for `time_to_background`. `true` is exactly `time_to_background: 0` (return a pollable run immediately); `false` leaves the default sync window. Send only one of the two — supplying both is rejected, because they can disagree. Prefer `time_to_background`, which can also bound the wait instead of only switching it off.
+             * @description Alias for `time_to_background`. `true` is exactly `time_to_background: 0` (return a pollable run immediately); `false` leaves the default sync window. Send only one of the two - supplying both is rejected, because they can disagree. Prefer `time_to_background`, which can also bound the wait instead of only switching it off.
              */
             background?: boolean | null;
             /** @description Maximum time in seconds this request may wait to start before failing with `unavailable`. Omit this field or pass `0` to fail immediately when the run cannot start. This is independent of `timeout` and `time_to_background`. */
@@ -1239,6 +1245,8 @@ export interface components {
              * @default auto
              */
             end_symbol?: string | null;
+            /** @description When false (default), the run ends when its foreground command or interactive turn completes; processes it deliberately leaves running remain owned by the session. When true, the run remains active after the foreground command exits and ends only after every process started by this run has exited. The foreground command's exit code remains the run's exit code. Timeout and cancellation continue to apply while waiting. This option is rejected when an interactive `end_symbol` is effective or when the selected runtime or guest cannot guarantee process attribution. A brush run creates no subprocesses, so the condition is already satisfied. */
+            end_after_all_subprocesses?: boolean;
             /**
              * @description Deliver a signal to the selected persistent session's foreground process group: the run holding the session or, with no run in flight, an interpreter waiting between turns or an attached terminal's foreground job. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. When nothing is running in the session, the request fails with 404 and nothing is signalled. A run made only of shell builtins starts no process of its own, so it may have nothing to signal; the request then fails with 404 as well. Use `session_id` or `session_idx` to select the session. A signal is not a run and is not queued; a VM that is not running answers `409 invalid_state`.
              * @enum {string|null}
@@ -1256,7 +1264,7 @@ export interface components {
             session_id?: string | null;
             /** @description The run's own id. Present for executed runs; absent for operation acks (signal) with no run record. */
             run_id?: string | null;
-            /** @description Lifecycle state — "completed" when the command finished, or "cancelled" when the run was cancelled before it finished. A cancelled run reports the output recorded before the cancellation and a null `exit_code`. Read this (not the variant) for completion, uniformly with the run-status (`Run`) shape. */
+            /** @description Lifecycle state - "completed" when the command finished, or "cancelled" when the run was cancelled before it finished. A cancelled run reports the output recorded before the cancellation and a null `exit_code`. Read this (not the variant) for completion, uniformly with the run-status (`Run`) shape. */
             state?: string;
             /** @description Standard output produced by the command. */
             stdout: string;
@@ -1274,7 +1282,7 @@ export interface components {
             session_id?: string | null;
             /** @description Unique run identifier. */
             run_id: string;
-            /** @description Lifecycle state — "running" for a backgrounded run. */
+            /** @description Lifecycle state - "running" for a backgrounded run. */
             state?: string;
         };
         Run: {
@@ -1291,7 +1299,7 @@ export interface components {
             completed_at?: string | null;
             /** @description Process exit code. Null when no process completed. */
             exit_code: number | null;
-            /** @description Client-safe platform failure explanation when `state` is `failed`. Distinct from `stderr`, which is the program's own error output. Null for runs that ran to completion. */
+            /** @description Client-safe explanation when `state` is `failed`: the platform became unavailable before the command finished, or the run was refused, such as `end_after_all_subprocesses` on a session that already has background processes. Distinct from `stderr`, which is the program's own error output. Null for runs that ran to completion. */
             fail_reason?: string | null;
             /** @description Standard output produced by the command. Available while the run is still going: poll this run and `stdout` grows as the command writes, so a long task can be followed live rather than only read at the end. */
             stdout: string;
@@ -1331,7 +1339,7 @@ export interface components {
             completed_at?: string | null;
             /** @description Process exit code. Null when no process completed. */
             exit_code: number | null;
-            /** @description System failure explanation when `state` is `failed` — see `Run.fail_reason`. Distinct from the program's `stderr`. */
+            /** @description System failure explanation when `state` is `failed` - see `Run.fail_reason`. Distinct from the program's `stderr`. */
             fail_reason?: string | null;
             /** @description Unique VM identifier. */
             vm_id?: string | null;
@@ -1470,11 +1478,11 @@ export interface components {
             /**
              * @description Mount state. Creating a mount returns `attaching`; poll this resource for the outcome.
              *
-             *     `attaching` — the mount is pending. A stopped VM remains in this state until it resumes.
+             *     `attaching` - the mount is pending. A stopped VM remains in this state until it resumes.
              *
-             *     `mounted` — the filesystem is available in the VM.
+             *     `mounted` - the filesystem is available in the VM.
              *
-             *     `failed` — the VM cannot mount the filesystem. `state_detail` explains the cause. Transient errors remain in `attaching` while the service retries them.
+             *     `failed` - the VM cannot mount the filesystem. `state_detail` explains the cause. Transient errors remain in `attaching` while the service retries them.
              * @enum {string|null}
              */
             state?: "attaching" | "mounted" | "failed" | null;
@@ -1748,7 +1756,7 @@ export interface components {
             gpu_count?: number | null;
         };
         /**
-         * @description How much GPU, measured in cards. Below one card: eighths of ONE card. At or above one: whole cards, and the VM holds that many devices — `gpu_sms` and `gpu_vram_mib` are per-GPU, so its total is `gpu_count` times those. 0 declines a GPU and yields a CPU-only VM. The enum is the ladder: there is no 1.5 of a card, and no 3-card worker to be given.
+         * @description How much GPU, measured in cards. Below one card: eighths of ONE card. At or above one: whole cards, and the VM holds that many devices - `gpu_sms` and `gpu_vram_mib` are per-GPU, so its total is `gpu_count` times those. 0 declines a GPU and yields a CPU-only VM. The enum is the ladder: there is no 1.5 of a card, and no 3-card worker to be given.
          * @enum {number}
          */
         Vgpu: 0 | 0.125 | 0.25 | 0.375 | 0.5 | 0.625 | 0.75 | 0.875 | 1 | 2 | 4 | 8;
@@ -1763,7 +1771,7 @@ export interface components {
             memory_mib?: number | null;
             /** @description Disk allocation in mebibytes. */
             disk_mib?: number | null;
-            /** @description Fraction of one physical GPU to allocate, in eighths of a card: 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, or 1. Resolved against the serving platform's GPU (`vgpu: 0.25` on `x86_64-l40s` is 35 SMs and 11517 MiB), so the same fraction is a different amount of silicon on a different card — see the per-platform table in the docs. Mutually exclusive with `gpu_sms` and `gpu_vram_mib`. Request-only: responses report the resolved `gpu_sms`/`gpu_vram_mib` and never this field. */
+            /** @description Fraction of one physical GPU to allocate, in eighths of a card: 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, or 1. Resolved against the serving platform's GPU (`vgpu: 0.25` on `x86_64-l40s` is 35 SMs and 11517 MiB), so the same fraction is a different amount of silicon on a different card - see the per-platform table in the docs. Mutually exclusive with `gpu_sms` and `gpu_vram_mib`. Request-only: responses report the resolved `gpu_sms`/`gpu_vram_mib` and never this field. */
             vgpu?: components["schemas"]["Vgpu"] | null;
         };
         SshPublicKeyInfo: {
@@ -1834,7 +1842,7 @@ export interface components {
         GpuResourceBand: {
             /** @description Smallest value accepted. */
             min: number;
-            /** @description Largest value accepted — the whole physical GPU. Requests above this return 400 rather than being clamped. */
+            /** @description Largest value accepted - the whole physical GPU. Requests above this return 400 rather than being clamped. */
             max: number;
             /** @description Value applied when the field is omitted on fork. */
             default: number;
@@ -1843,14 +1851,14 @@ export interface components {
         GpuPlatformLimits: {
             /** @description Platform label to request in `platforms` to land on this GPU, e.g. `x86_64-l40s`. */
             platform: string;
-            /** @description Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing — use the bands. */
+            /** @description Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing - use the bands. */
             gpu?: string | null;
             vram_mib: components["schemas"]["GpuResourceBand"];
             sms: components["schemas"]["GpuResourceBand"];
         };
         /** @description GPU sizing bands for one compatible platform, from the platform catalog. Present on a `CompatiblePlatform` entry only when that platform has a GPU; absent means the platform has none. Bands are per GPU. */
         PlatformGpuLimits: {
-            /** @description Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing — use the bands. */
+            /** @description Human-readable GPU model for display, e.g. `NVIDIA L40S`. Never parse this for sizing - use the bands. */
             name?: string | null;
             vram_mib: components["schemas"]["GpuResourceBand"];
             sms: components["schemas"]["GpuResourceBand"];
@@ -1858,7 +1866,7 @@ export interface components {
         /**
          * @description Credentials for pulling `image` from a private registry. Used only for this one pull and never stored. Redacted from logs and telemetry.
          *
-         *     For AWS ECR use username `AWS` with the output of `aws ecr get-login-password`; for Google Artifact Registry use `oauth2accesstoken` with an access token; for Docker Hub or GHCR use your username and a personal access token. Short-lived tokens are fine — the pull happens once, at fork time.
+         *     For AWS ECR use username `AWS` with the output of `aws ecr get-login-password`; for Google Artifact Registry use `oauth2accesstoken` with an access token; for Docker Hub or GHCR use your username and a personal access token. Short-lived tokens are fine - the pull happens once, at fork time.
          */
         RegistryAuth: {
             /** @description Registry username, e.g. `AWS` for ECR. */
@@ -2918,17 +2926,17 @@ export interface components {
             };
             /**
              * Format: date-time
-             * @description Inbound rules only. An RFC 3339 time in the future. After it, the rule's ports refuse every request, including requests with an API key.
+             * @description Inbound rules only. An RFC 3339 time in the future. After it, the rule no longer applies.
              */
             expires_at?: string;
         };
         /** @description A change to a VM's network policy: only the rules and secrets named are written or removed, and everything else is kept, so `{}` changes nothing. The deprecated `policies` list instead replaces the whole policy. */
         PolicyUpdate: {
-            /** @description Rules to write, keyed by rule id. A rule replaces any rule with the same id; `null` removes the rule with that id. Rules not named here are kept. The resulting policy must not give two rules the same priority. */
+            /** @description Rules to write, keyed by rule id. A rule replaces any rule with the same id; `null` removes the rule with that id. Rules not named here are kept. The resulting policy must not give two rules of one `type` the same priority. */
             rules?: {
                 [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["ScheduleRule"] | components["schemas"]["LifecycleRule"] | components["schemas"]["OutboundGuardRule"] | null;
             };
-            /** @description Secrets to write, referenced by `${secret:NAME}` in rewrite actions. A value replaces the secret with that name; `null` removes it. Secrets not named here are kept. Values are encrypted at rest and masked as `***` in responses; `***` is not accepted as a value. */
+            /** @description Secrets to write, referenced by `${secret:NAME}` in rewrite actions, match values and `auth.token`. A value replaces the secret with that name; `null` removes it. Secrets not named here are kept. Values are encrypted at rest and masked as `***` in responses; `***` is not accepted as a value. */
             secrets?: {
                 [key: string]: string | null;
             };
@@ -2940,9 +2948,9 @@ export interface components {
         };
         /** @description The VM's network policy. Change it with `policies` on `PATCH /v1/vms/{id}`. */
         VmPolicies: {
-            /** @description The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With rules, unmatched outbound traffic is denied. If no inbound rules are present, inbound access keeps the authenticated default; explicit inbound allow rules restrict exposure to their listed ports. */
+            /** @description The VM's network policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Rules are evaluated highest `priority` first, and the first matching rule decides. No rules allows all outbound traffic and permits inbound traffic to any guest port after Arker authentication. With an outbound `allow` rule, unmatched outbound traffic is denied. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable. */
             rules?: components["schemas"]["PolicyRules"];
-            /** @description Names of the secrets referenced by `${secret:NAME}` in rewrite actions. Values are masked as `***`. */
+            /** @description Names of the secrets referenced by `${secret:NAME}` in rewrite actions, match values and `auth.token`. Values are masked as `***`. */
             secrets?: {
                 [key: string]: string;
             };
@@ -2970,7 +2978,7 @@ export interface components {
             /** @description Alternative permitted scopes within this floor. An empty list denies all outbound traffic; every independent floor must admit a flow. */
             allow: components["schemas"]["OutboundGuardScope"][];
         };
-        /** @description The VM's policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Ranked network rules are evaluated highest priority first; the first match decides, and unmatched outbound traffic is denied. With no ranked network rules, the outbound base is open. Every outbound_guard independently constrains that base or ranked decision; no allow or rewrite bypasses a guard. Schedule rules do not change network permissions. With no inbound rules, inbound access keeps the authenticated default; explicit inbound allows restrict exposure to their listed ports. */
+        /** @description The VM's policy rules, keyed by rule id (1-64 characters: lowercase letters, digits, `.`, `_`, `-`; starting with a letter or digit). Ranked network rules are evaluated highest priority first; the first match decides, and unmatched outbound traffic is denied. With no ranked network rules, the outbound base is open. Every outbound_guard independently constrains that base or ranked decision; no allow or rewrite bypasses a guard. Schedule rules do not change network permissions. Until an inbound rule applies to requests through a port, inbound access keeps the authenticated default; after that, only the ports that inbound rules other than `deny` name are reachable. */
         PolicyRules: {
             [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["ScheduleRule"] | components["schemas"]["LifecycleRule"] | components["schemas"]["OutboundGuardRule"];
         };
@@ -2996,7 +3004,7 @@ export interface components {
             type: "schedule";
             /**
              * Format: date-time
-             * @description When the rule fires: an RFC 3339 time in the future.
+             * @description When the rule fires: an RFC 3339 time. On a `suspend` rule, a time that has already come fires it at once; on a `delete` rule, the time must be in the future.
              */
             at?: string;
             /**
@@ -3009,7 +3017,7 @@ export interface components {
              * @description Fires this many seconds, up to 2592000 (30 days), after the VM last became `running`, and again each time it starts running; a VM that never ran counts from its creation.
              */
             after_last_running_start?: number;
-            /** @description `delete` deletes the VM, as `DELETE /v1/vms/{id}` does, also while it is suspended. `suspend` suspends the VM if it is running when the rule fires, its runs `pending` until something starts it; a VM that is idle then is left alone. */
+            /** @description `delete` deletes the VM, as `DELETE /v1/vms/{id}` does, also while it is suspended. `suspend` suspends the VM once, if it is running when the rule fires, ending every use of it: its connections close, its terminals detach and its runs go `pending` until something next starts it, which the other rules still allow. A sync or resize in progress finishes first. A VM that is idle then is left alone. */
             action: components["schemas"]["PolicyAction"];
         };
         /**
@@ -3047,7 +3055,7 @@ export interface components {
             /** @description Disk in MiB. */
             disk_mib: number;
         };
-        /** @description A period the pool is committed to, from `starts_at` up to but not including `ends_at`, lasting at least 24 hours. Commitments do not overlap, a new one may not start in the past, and one that has started cannot change. While a commitment is active the pool cannot shrink or be deleted. */
+        /** @description A period the pool is committed to, from `starts_at` up to but not including `ends_at`, lasting at least 24 hours. Commitments do not overlap, a new one may not start in the past, and one that has started cannot change. During a commitment the pool cannot shrink or be deleted. */
         PoolCommitment: {
             /**
              * Format: date-time
@@ -3061,10 +3069,10 @@ export interface components {
             ends_at: string;
         };
         /**
-         * @description `creating` until `resources_reserved` first reaches `resources` (a `managed` pool starts `active`; a `self_hosted` pool without `resources` turns `active` once its first worker is live); `active` from then on, also when `resources_reserved` later drops below `resources`; `deleting` from the delete request until the pool is gone. `reason` says what needs attention.
+         * @description `creating` until the pool's first worker is running (a `managed` pool starts `running`); `running` from then on, also while workers come and go; `deleting` from the delete request until the pool is gone. `reason` says what needs attention.
          * @enum {string}
          */
-        PoolState: "creating" | "active" | "deleting";
+        PoolState: "creating" | "running" | "deleting";
         /**
          * @description What a `byoc` pool keeps in your cloud account instead of Arker's regional store. `vms`: VM snapshots, in a bucket of your account.
          * @enum {string}
@@ -3137,9 +3145,9 @@ export interface components {
             resources: components["schemas"]["PoolResources"];
             /** @description Resources set aside for the pool: `resources`. */
             resources_reserved: components["schemas"]["PoolResources"];
-            /** @description Resources of the pool's active VMs. */
+            /** @description What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers. */
             resources_provisioned: components["schemas"]["PoolResources"];
-            /** @description Commitments, each {starts_at, ends_at}. Managed only. A commitment reserves a pool for at least 24 hours, during which it can't be deleted or shrunk. Commitment duration nonlinearly scales a percentage discount. Otherwise pools are billed at on-demand rates on the total size reserved. Oldest first. */
+            /** @description Commitments, each {starts_at, ends_at}, oldest first. Commitments may be unavailable in a region; a pool's commitments, where it has any, discount its reserved size, otherwise billed at on-demand rates. */
             commitments: components["schemas"]["PoolCommitment"][];
         };
         /** @description A pool whose workers Arker launches in your cloud account (BYOC). */
@@ -3169,9 +3177,9 @@ export interface components {
             created_at: string;
             /** @description Resources requested. Arker launches workers until they cover it. */
             resources: components["schemas"]["PoolResources"];
-            /** @description What the pool's live workers contribute, at most `resources`. */
+            /** @description What the pool's `running` and `draining` workers contribute, at most `resources`. */
             resources_reserved: components["schemas"]["PoolResources"];
-            /** @description Resources of the pool's active VMs. */
+            /** @description What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers. */
             resources_provisioned: components["schemas"]["PoolResources"];
             /** @description What the pool keeps in your cloud account instead of Arker's regional store. */
             isolation: components["schemas"]["PoolIsolation"][];
@@ -3204,9 +3212,9 @@ export interface components {
             created_at: string;
             /** @description Resources requested: a cap on `resources_reserved`. Absent means no cap. */
             resources?: components["schemas"]["PoolResources"];
-            /** @description What the pool's live workers contribute, at most `resources` when present. */
+            /** @description What the pool's `running` and `draining` workers contribute, at most `resources` when present. */
             resources_reserved: components["schemas"]["PoolResources"];
-            /** @description Resources of the pool's active VMs. */
+            /** @description What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers. */
             resources_provisioned: components["schemas"]["PoolResources"];
         };
         /** @description A regional pool. Run on multi-cloud managed compute, BYOC in an arbitrary cloud account, or self-hosted using BLAST. If BYOC or self-hosted, a significant discount is applied against on-demand rates and organization limits are not applied. */
@@ -3228,7 +3236,7 @@ export interface components {
             platform: components["schemas"]["PoolPlatform"];
             /** @description Resources requested. */
             resources: components["schemas"]["PoolResources"];
-            /** @description Commitments, each {starts_at, ends_at}. Managed only. A commitment reserves a pool for at least 24 hours, during which it can't be deleted or shrunk. Commitment duration nonlinearly scales a percentage discount. Otherwise pools are billed at on-demand rates on the total size reserved. */
+            /** @description Commitments may be unavailable, and a request that then sets one is refused with 422 unsupported_operation; `[]` is always accepted. Each is {starts_at, ends_at}. */
             commitments?: components["schemas"]["PoolCommitment"][];
         };
         CreateByocPoolRequest: {
@@ -3265,7 +3273,7 @@ export interface components {
             name?: string | null;
             /** @description New requested resources. Growing is always allowed; shrinking, including to zero, only while no commitment is active. */
             resources?: components["schemas"]["PoolResources"];
-            /** @description The full list of commitments. A commitment that has started must be kept unchanged. Managed pools only. */
+            /** @description Commitments may be unavailable, and a request that then sets one is refused with 422 unsupported_operation; `[]` is always accepted. The full list of commitments; one that has started must be kept unchanged. Managed pools only. */
             commitments?: components["schemas"]["PoolCommitment"][];
         };
         /**
@@ -3279,10 +3287,10 @@ export interface components {
          */
         WorkerHeartbeatState: "bootstrapping" | "active" | "draining" | "left";
         /**
-         * @description `bootstrapping` is starting and takes no VMs yet; `running` takes new VMs; `draining` keeps its VMs but takes no new ones; `unreachable` has missed its heartbeats or lost its tunnel, and its VMs answer `unavailable` until it returns; `left` has left the pool for good.
+         * @description `creating` is starting and takes no VMs yet; `running` takes new VMs; `draining` keeps its VMs but takes no new ones; `unreachable` has missed its heartbeats or lost its tunnel, and its VMs answer `unavailable` until it returns; `left` has left the pool for good.
          * @enum {string}
          */
-        WorkerState: "bootstrapping" | "running" | "draining" | "unreachable" | "left";
+        WorkerState: "creating" | "running" | "draining" | "unreachable" | "left";
         WorkerResources: {
             /** @description vCPUs. */
             vcpu: number;
@@ -3297,9 +3305,9 @@ export interface components {
             /** @description Worker identifier. */
             worker_id: string;
             state: components["schemas"]["WorkerState"];
-            /** @description Resources of the worker's active VMs. */
+            /** @description What the worker's VMs use right now; nothing unless the worker is `running` or `draining`. */
             resources_provisioned: components["schemas"]["PoolResources"];
-            /** @description Resources the worker contributes to the pool. */
+            /** @description What the worker adds to the pool's `resources_reserved`; nothing unless it is `running` or `draining`. */
             resources_reserved: components["schemas"]["PoolResources"];
             /**
              * Format: date-time
@@ -3323,11 +3331,11 @@ export interface components {
             resources: components["schemas"]["WorkerResources"];
             /** @description Capacity the worker has free. */
             free: components["schemas"]["WorkerResources"];
-            /** @description For a `byoc` pool's arkerd worker: the golden and hypervisor selection it runs with, which decides the golden generations it serves. Arker upgrades a worker running with other values than the region's in place. */
+            /** @description Runtime configuration reported by a `byoc` worker. */
             golden_env?: {
                 [key: string]: string;
             };
-            /** @description For a `byoc` pool's arkerd worker: the goldens it cannot serve current. Absent while it serves each of its goldens from a generation baked for it. */
+            /** @description Images the worker cannot currently serve. Absent when all configured images are available. */
             goldens?: components["schemas"]["WorkerGoldens"];
             /** @description For a `byoc` pool's arkerd worker: its VMs forked often enough to prewarm on the pool's other workers, by VM id. Arker ignores a VM that is not in the worker's pool. */
             vm_activity?: {
@@ -3344,11 +3352,11 @@ export interface components {
              */
             forks: number;
         };
-        /** @description The goldens a worker cannot serve current, by name. */
+        /** @description Images a worker cannot currently serve, by name. */
         WorkerGoldens: {
-            /** @description Goldens it serves from a generation baked for another host fingerprint: a fork of one by name runs that older generation. */
+            /** @description Images for which the worker has an outdated version. */
             stale: string[];
-            /** @description Goldens it is to serve and serves no generation of: none is published for its platform, or none could be adopted. A fork of one by name fails. */
+            /** @description Images unavailable on this worker. A fork from one of these images fails. */
             missing: string[];
         };
         /** @description Short-lived AWS credentials for `prefix` of `bucket`; every heartbeat answer carries ones that are still fresh. */
@@ -3365,7 +3373,7 @@ export interface components {
              */
             expires_at: string;
         };
-        /** @description Where the worker keeps VM snapshots: the pool's own bucket for a `byoc` pool that isolates `vms`, else the pool's prefix of Arker's regional bucket. */
+        /** @description Storage configuration for VM snapshots. */
         WorkerStorage: {
             /** @description S3 bucket. */
             bucket: string;
@@ -3386,9 +3394,9 @@ export interface components {
             /** @description WebSocket URL the worker keeps open so Arker can reach it; a path is relative to the endpoint the heartbeat went to. */
             tunnel_url: string;
             storage: components["schemas"]["WorkerStorage"];
-            /** @description Present while Arker upgrades a `byoc` pool's arkerd worker in place: the release it is to run next. Its VMs keep running across the upgrade. */
+            /** @description Target release while a worker upgrade is pending. */
             upgrade_release_id?: string;
-            /** @description For a `byoc` pool's arkerd worker: the region's golden and hypervisor selection, which decides the golden generations it serves. A worker running with other values is upgraded onto these in place; its VMs keep running. */
+            /** @description Desired runtime configuration for a `byoc` worker. */
             golden_env?: {
                 [key: string]: string;
             };
@@ -3442,18 +3450,33 @@ export interface components {
             /** @description Standard error. */
             stderr: string | null;
         };
-        /**
-         * @description The organization role the key acts with. `viewer` keys cannot change anything.
-         * @enum {string}
-         */
-        ApiKeyRole: "admin" | "developer" | "member" | "viewer";
-        /** @description An API key. `scopes` says what it acts on. */
+        /** @description A VM or a pool an API key is limited to. */
+        ApiKeyScope: components["schemas"]["ApiKeyVmScope"] | components["schemas"]["ApiKeyPoolScope"];
+        /** @description A VM the key acts on. */
+        ApiKeyVmScope: {
+            /** @description The VM. */
+            vm_id: string;
+        };
+        /** @description The pool the key acts on. */
+        ApiKeyPoolScope: {
+            /**
+             * Format: uuid
+             * @description The pool. The key manages the pool, forks into it by default, and lists only its VMs and runs; the workers of a `self_hosted` pool call with it.
+             */
+            pool_id: string;
+        };
+        /** @description An API key. It acts with the role of the user or key that created it, limited by `scopes`. */
         ApiKey: {
             /** @description API key identifier; starts with the `name` given at creation. */
             api_key_id: string;
-            role: components["schemas"]["ApiKeyRole"];
-            /** @description What the key acts on. `["*"]` is the whole organization; `vmid:<vm_id>` entries, those VMs; one `pool:<pool_id>`, that pool: managing it, forking into it, listing only its VMs and runs, and serving as the key its workers join with. */
-            scopes: string[];
+            /**
+             * @deprecated
+             * @description Deprecated: the role the key acts with, its creator's: `admin` or `member`.
+             * @enum {string}
+             */
+            role: "admin" | "member";
+            /** @description What the key is limited to: VMs, or one pool. */
+            scopes: components["schemas"]["ApiKeyScope"][];
             /**
              * @deprecated
              * @description Deprecated: read `scopes`. The VM when the key is limited to exactly one, else null.
@@ -3480,9 +3503,14 @@ export interface components {
         CreatedApiKey: {
             /** @description API key identifier; starts with the `name` given at creation. */
             api_key_id: string;
-            role: components["schemas"]["ApiKeyRole"];
-            /** @description What the key acts on. `["*"]` is the whole organization; `vmid:<vm_id>` entries, those VMs; one `pool:<pool_id>`, that pool: managing it, forking into it, listing only its VMs and runs, and serving as the key its workers join with. */
-            scopes: string[];
+            /**
+             * @deprecated
+             * @description Deprecated: the role the key acts with, its creator's: `admin` or `member`.
+             * @enum {string}
+             */
+            role: "admin" | "member";
+            /** @description What the key is limited to: VMs, or one pool. */
+            scopes: components["schemas"]["ApiKeyScope"][];
             /**
              * @deprecated
              * @description Deprecated: read `scopes`. The VM when the key is limited to exactly one, else null.
@@ -3507,25 +3535,12 @@ export interface components {
             /** @description The key. Shown only in this response. */
             key: string;
         };
-        /** @description Give `scopes`, or at most one of the deprecated `vm_id` and `pool_id`. */
+        /** @description A new key has its creator's role. */
         CreateApiKeyRequest: {
             /** @description A label that starts `api_key_id`: lowercased, other characters than `a-z0-9_-` as `-`, cut to 13 characters. */
             name?: string;
-            /** @description Defaults to the caller's role, and cannot exceed it. */
-            role?: components["schemas"]["ApiKeyRole"];
-            /** @description What the key acts on, by default `["*"]`. Give `["*"]`, 1 to 16 `vmid:<vm_id>` entries of VMs of the organization, or one `pool:<pool_id>` of a pool of the organization. `["*"]` is the whole organization; `vmid:<vm_id>` entries, those VMs; one `pool:<pool_id>`, that pool: managing it, forking into it, listing only its VMs and runs, and serving as the key its workers join with. Only admins create a key limited to a pool. */
-            scopes?: string[];
-            /**
-             * @deprecated
-             * @description Deprecated: give `scopes: ["vmid:<vm_id>"]`.
-             */
-            vm_id?: string;
-            /**
-             * Format: uuid
-             * @deprecated
-             * @description Deprecated: give `scopes: ["pool:<pool_id>"]`.
-             */
-            pool_id?: string;
+            /** @description What the key is limited to: 1 to 16 VMs of the organization, or one of its pools. Only admins create a key limited to a pool. */
+            scopes?: components["schemas"]["ApiKeyScope"][];
         };
         ListApiKeysResponse: {
             /** @description Unrevoked API keys, newest first. */
@@ -3935,7 +3950,7 @@ export interface components {
         };
     };
     parameters: {
-        /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result — the same run, or the same VM for a fork — instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
+        /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
         IdempotencyKey: string;
         /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
         VmId: string;
@@ -4052,7 +4067,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result — the same run, or the same VM for a fork — instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
+                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -4417,7 +4432,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result — the same run, or the same VM for a fork — instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
+                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
@@ -4441,7 +4456,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunResponse"];
                 };
             };
-            /** @description Accepted — the run is still executing. The body carries `run_id` and `state: "running"`, not output; poll `GET /v1/vms/{id}/runs/{run_id}` for the result. Returned for `time_to_background: 0` and whenever the command outstays `time_to_background`. A 2xx here means the request was accepted, not that the work is done. */
+            /** @description Accepted - the run is still executing. The body carries `run_id` and `state: "running"`, not output; poll `GET /v1/vms/{id}/runs/{run_id}` for the result. Returned for `time_to_background: 0` and whenever the command outstays `time_to_background`. A 2xx here means the request was accepted, not that the work is done. */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -4811,7 +4826,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Switching Protocols — the WebSocket PTY stream is established. */
+            /** @description Switching Protocols - the WebSocket PTY stream is established. */
             101: {
                 headers: {
                     [name: string]: unknown;

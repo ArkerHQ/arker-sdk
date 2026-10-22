@@ -4,6 +4,22 @@ These are observations, not a claim of full compatibility. They contain API
 names, outcome, route, run ID, provider SDK version and implementation
 fingerprints; no credentials or returned file contents.
 
+`production-20261022-python.jsonl` and `production-20261022-node.jsonl` record
+source `8361b4a` against the existing us-west-2 production API using the supplied
+key, without a feature deployment. Python executes 36 cases: 32 pass and four
+fail. Node executes 24 cases: 22 pass and two fail; seven further configurations
+are not reached after their program's first failure. Failures expose missing
+production private-port routes and unsupported outbound-guard rules, not waived
+policy behavior. The two expanded strict gates fail exit 1; coverage is 94/1,138
+Python and 51/1,048 Node. The 39 records include failed observations. Fingerprints:
+
+- Python: `5842e1d8a6a1c145b92149c19219f421ab24608f67c74631da251da3235efa67`.
+- Node: `21a2a34e88eb9c94e9c4e1c958f98f1762a08ad768d09e6ceab337104424e78f`.
+
+These observations do not certify subsequent source changes or unpublished
+backend changes. They cannot be replayed for coverage credit after merging main
+without fresh matching-source live evidence.
+
 The newer `feature51-resources-python.jsonl` and
 `feature51-resources-node.jsonl` cohort runs at shim source `4951ec9`, against
 the same isolated backend `51c0ce8`. It includes Blaxel directory/entry path
