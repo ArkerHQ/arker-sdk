@@ -63,6 +63,11 @@ function filesystemPath(path: string): string {
   return posix.resolve(filesystemDisplayPath(path));
 }
 
+function filesystemFilePath(path: string): string {
+  if (path.startsWith("/") || !path.includes("/")) return filesystemPath(path);
+  return posix.resolve("/", path);
+}
+
 function parseTtl(ttl: string | number | undefined): number | undefined {
   if (ttl === undefined || typeof ttl === "number") return ttl;
   const match = /^(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)$/i.exec(ttl.trim());
@@ -164,29 +169,29 @@ export class SandboxInstance {
       closeStdin: guest.closeStdin.bind(guest),
     }) as BlaxelCompatProcess;
     this.fs = (native?.fs ?? {
-      read: (path) => box.filesystem.readFile(this.provider === "arker" ? filesystemPath(path) : path),
+      read: (path) => box.filesystem.readFile(this.provider === "arker" ? filesystemFilePath(path) : path),
       write: (path, content) => {
         if (typeof content !== "string") throw new TypeError("fs.write requires text; use fs.writeBinary for binary content");
-        const resolved = filesystemPath(path);
+        const resolved = filesystemFilePath(path);
         return box.filesystem.writeFile(resolved, content).then(() => ({ message: "File created/updated successfully", path: filesystemDisplayPath(path) }));
       },
       writeBinary: async (path, content) => {
         const bytes = typeof content === "string" ? await readFile(content)
           : content instanceof Uint8Array ? content
           : new Uint8Array(await content.arrayBuffer());
-        const resolved = filesystemPath(path);
+        const resolved = filesystemFilePath(path);
         const vm = (box as unknown as { getInstance(): VM }).getInstance();
         await vm.sync(resolved, bytes);
         return { message: "Binary file uploaded successfully", path: filesystemDisplayPath(path) };
       },
       readBinary: async (path) => {
         const vm = (box as unknown as { getInstance(): VM }).getInstance();
-        const bytes = await vm.sync(filesystemPath(path));
+        const bytes = await vm.sync(filesystemFilePath(path));
         return new Blob([new Uint8Array(bytes)]);
       },
       download: async (src, destinationPath, { mode = 0o644 } = {}) => {
         const vm = (box as unknown as { getInstance(): VM }).getInstance();
-        const bytes = await vm.sync(filesystemPath(src));
+        const bytes = await vm.sync(filesystemFilePath(src));
         await writeFile(destinationPath, bytes);
         await chmod(destinationPath, mode);
       },
@@ -220,6 +225,82 @@ export class SandboxInstance {
         );
         if (result.exitCode !== 0) throw new Error(result.stderr || `remove failed with exit ${result.exitCode}`);
         return { message: `${result.stdout === "directory" ? "Directory" : "File"} deleted successfully`, path: filesystemDisplayPath(path) };
+      },
+      cp: async (source, destination, { maxWait = 180_000 } = {}) => {
+        if (!Number.isFinite(maxWait) || maxWait <= 0) throw new RangeError("maxWait must be positive and finite");
+        const result = await box.runCommand(
+          `cp -r -- ${shellQuote(filesystemFilePath(source))} ${shellQuote(filesystemFilePath(destination))}`,
+          { timeout: Math.ceil(maxWait / 1000) * 1000 },
+        );
+        if (result.exitCode !== 0) throw new Error(result.stderr || `Could not copy ${source} to ${destination}`);
+        return { message: "Files copied", source, destination };
+      },
+      writeTree: async (files, destinationPath = null) => {
+        const destination = destinationPath ?? "";
+        for (const file of files) {
+          if (typeof file.path !== "string" || typeof file.content !== "string") {
+            throw new TypeError("writeTree files require string path and content");
+          }
+          await box.filesystem.writeFile(filesystemFilePath(posix.join(destination, file.path)), file.content);
+        }
+        return (this.fs as BlaxelCompatFileSystem).ls(destination || "/blaxel");
+      },
+      find: async (path, options = {}) => {
+        const { type, patterns, maxResults, excludeDirs, excludeHidden } = options;
+        if (type !== undefined && type !== "file" && type !== "directory") {
+          throw new TypeError("find type must be 'file' or 'directory'");
+        }
+        if (maxResults !== undefined && (!Number.isInteger(maxResults) || maxResults < 0)) {
+          throw new RangeError("maxResults must be a nonnegative integer");
+        }
+        const predicates: string[] = [];
+        if (type) predicates.push("-type", type === "file" ? "f" : "d");
+        if (patterns?.length) predicates.push(`\\( ${patterns.map((pattern) => `-name ${shellQuote(pattern)}`).join(" -o ")} \\)`);
+        for (const directory of excludeDirs ?? []) predicates.push(`! -path ${shellQuote(`*/${directory}/*`)}`);
+        if (excludeHidden) predicates.push("! -path '*/.*'");
+        const result = await box.runCommand(
+          `find ${shellQuote(filesystemPath(path))} -mindepth 1 ${predicates.join(" ")} -printf '%y\\0%p\\0'`,
+        );
+        if (result.exitCode !== 0) throw new Error(result.stderr || `find failed with exit ${result.exitCode}`);
+        const fields = result.stdout.split("\0");
+        if (fields.at(-1) !== "" || (fields.length - 1) % 2 !== 0) throw new Error("Incomplete find response");
+        const matches = [];
+        for (let index = 0; index < fields.length - 1; index += 2) {
+          matches.push({ path: fields[index + 1]!, type: fields[index] === "d" ? "directory" : "file" });
+        }
+        const limited = maxResults === undefined ? matches : matches.slice(0, maxResults);
+        return { matches: limited, total: limited.length };
+      },
+      grep: async (query, path = "/", options = {}) => {
+        const { caseSensitive, contextLines, maxResults, filePattern, excludeDirs } = options;
+        if (contextLines !== undefined && contextLines !== 0) {
+          throw new Error("Arker fs.grep contextLines are not supported");
+        }
+        const flags = ["-R", "-n", "--null", "-F"];
+        if (caseSensitive === false) flags.push("-i");
+        if (filePattern) flags.push("--include", filePattern);
+        for (const directory of excludeDirs ?? []) flags.push("--exclude-dir", directory);
+        const result = await box.runCommand(
+          ["grep", ...flags.map(shellQuote), "--", shellQuote(query), shellQuote(filesystemPath(path))].join(" "),
+        );
+        if (result.exitCode !== 0 && result.exitCode !== 1) {
+          throw new Error(result.stderr || `grep failed with exit ${result.exitCode}`);
+        }
+        const matches = result.stdout.split("\n").filter(Boolean).map((record) => {
+          const separator = record.indexOf("\0");
+          const colon = record.indexOf(":", separator + 1);
+          const line = Number(record.slice(separator + 1, colon));
+          if (separator < 0 || colon < 0 || !Number.isInteger(line)) throw new Error("Incomplete grep response");
+          const text = record.slice(colon + 1);
+          const needle = caseSensitive === false ? query.toLowerCase() : query;
+          const haystack = caseSensitive === false ? text.toLowerCase() : text;
+          return { path: record.slice(0, separator), line, column: Math.max(haystack.indexOf(needle), 0) + 1, text };
+        });
+        const limited = maxResults === undefined ? matches : matches.slice(0, maxResults);
+        return { matches: limited, query, total: limited.length };
+      },
+      watch: () => {
+        throw new Error("Arker fs.watch requires an ordered filesystem event stream and is not supported");
       },
     }) as BlaxelCompatFileSystem;
     return guardUnsupported(this, "blaxel", native);

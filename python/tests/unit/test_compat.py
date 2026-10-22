@@ -737,6 +737,97 @@ def test_blaxel_binary_files_preserve_every_byte_and_local_path_semantics(tmp_pa
     assert fs.read_binary("empty") == b""
 
 
+def test_blaxel_relative_file_paths_match_native_operation_encoding() -> None:
+    from arker.blaxel import FileSystem
+
+    calls = []
+    vm = types.SimpleNamespace(sync=lambda path, content=None: calls.append((path, content)) or b"read")
+    filesystem = FileSystem(vm=vm)
+
+    filesystem.write("bare", "one")
+    filesystem.write("nested/file", "two")
+    assert filesystem.read("nested/file") == "read"
+    assert calls == [
+        ("/blaxel/bare", "one"),
+        ("/nested/file", "two"),
+        ("/nested/file", None),
+    ]
+
+
+def test_blaxel_find_grep_copy_and_tree_have_native_shaped_results(monkeypatch) -> None:
+    from arker._compat import CommandResult
+    from arker.blaxel import FileSystem
+
+    commands = []
+
+    def run(_vm, command, **options):
+        commands.append((command, options))
+        if command.startswith("find "):
+            return CommandResult(stdout="f\0/work/a.txt\0d\0/work/sub\0", stderr="", exit_code=0)
+        if command.startswith("grep "):
+            return CommandResult(stdout="\0".join(["/work/a.txt", "2:hello world\n"]), stderr="", exit_code=0)
+        return CommandResult(stdout="", stderr="", exit_code=0)
+
+    writes = []
+    vm = types.SimpleNamespace(sync=lambda path, content=None: writes.append((path, content)) or b"")
+    monkeypatch.setattr("arker.blaxel.run_command", run)
+    filesystem = FileSystem(vm=vm)
+
+    found = filesystem.find("/work", type="file", patterns=["*.txt"], max_results=1)
+    assert [(match.path, match.type_) for match in found.matches] == [("/work/a.txt", "file")]
+    searched = filesystem.grep("hello", "/work", max_results=1)
+    assert [(match.path, match.line, match.column, match.text) for match in searched.matches] == [
+        ("/work/a.txt", 2, 1, "hello world")
+    ]
+    copied = filesystem.cp("nested/source file", "nested/destination", max_wait=2500)
+    assert (copied.message, copied.source, copied.destination) == (
+        "Files copied",
+        "nested/source file",
+        "nested/destination",
+    )
+    monkeypatch.setattr(filesystem, "ls", lambda path: path)
+    assert filesystem.write_tree([{"path": "a.txt", "content": "a"}], "/tree") == "/tree"
+    assert writes == [("/tree/a.txt", "a")]
+    assert "'/nested/source file'" in commands[2][0]
+    assert commands[2][1] == {"timeout": 3}
+
+
+def test_blaxel_grep_refuses_unrepresented_context_before_io(monkeypatch) -> None:
+    from arker._compat import UnsupportedCompatibilityOption
+    from arker.blaxel import FileSystem
+
+    monkeypatch.setattr("arker.blaxel.run_command", lambda *_args, **_kwargs: pytest.fail("unexpected I/O"))
+    with pytest.raises(UnsupportedCompatibilityOption, match="context_lines"):
+        FileSystem(vm=object()).grep("needle", context_lines=2)
+
+
+def test_blaxel_arker_watcher_fails_explicitly_before_io() -> None:
+    from arker._compat import UnsupportedCompatibilityOption
+    from arker.blaxel import FileSystem
+
+    with pytest.raises(UnsupportedCompatibilityOption, match="ordered filesystem event stream"):
+        FileSystem(vm=object()).watch("/work", lambda _event: None)
+
+
+def test_blaxel_listing_preserves_native_file_metadata(monkeypatch) -> None:
+    from arker._compat import CommandResult
+    from arker.blaxel import FileSystem
+
+    stdout = "\0".join(
+        ["f", "probe", "7", "644", "runner", "runner", "2026-10-22T01:02:03.000000000+0000", "complete", ""]
+    )
+    monkeypatch.setattr("arker.blaxel.run_command", lambda *_args, **_kwargs: CommandResult(stdout, "", 0))
+
+    entry = FileSystem(vm=object()).ls("/work").files[0]
+    assert (entry.size, entry.permissions, entry.owner, entry.group, entry.last_modified) == (
+        7,
+        "644",
+        "runner",
+        "runner",
+        "2026-10-22T01:02:03.000000000+0000",
+    )
+
+
 def test_blaxel_mkdir_returns_native_success_on_both_routes(monkeypatch) -> None:
     from arker._compat import CommandResult
     from arker.blaxel import FileSystem

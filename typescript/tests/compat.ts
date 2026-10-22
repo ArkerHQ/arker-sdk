@@ -842,6 +842,62 @@ async function testBlaxelBinaryFiles(): Promise<void> {
   } finally { fake.cleanup(); }
 }
 
+async function testBlaxelFilesystemOperationsAndRelativePaths(): Promise<void> {
+  const files = new Map<string, string>();
+  const vm = {
+    sync: async (path: string, content?: Uint8Array) => {
+      if (content === undefined) return new TextEncoder().encode(files.get(path) ?? "");
+      files.set(path, new TextDecoder().decode(content));
+    },
+  };
+  const box = new FakeSandbox("filesystem-vm", "arker", vm);
+  box.filesystem.writeFile = async (path, content) => {
+    files.set(path, content);
+  };
+  box.filesystem.readFile = async (path) => files.get(path) ?? "";
+  box.filesystem.readdir = async () => [];
+  box.runCommand = async (command, options) => {
+    box.runCalls.push({ command, options });
+    if (command.startsWith("find ")) {
+      return { stdout: "f\0/work/a.txt\0d\0/work/sub\0", stderr: "", exitCode: 0, durationMs: 0 };
+    }
+    if (command.startsWith("grep ")) {
+      return { stdout: "/work/a.txt\0" + "2:hello world\n", stderr: "", exitCode: 0, durationMs: 0 };
+    }
+    return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
+  };
+  const fake = installFakeCompute(box);
+  try {
+    const sandbox = await BlaxelSandbox.create();
+    await sandbox.fs.write("bare", "one");
+    await sandbox.fs.write("nested/file", "two");
+    assert.equal(files.get("/blaxel/bare"), "one");
+    assert.equal(files.get("/nested/file"), "two");
+
+    const found = await sandbox.fs.find("/work", { type: "file", patterns: ["*.txt"], maxResults: 1 });
+    assert.deepEqual(found, { matches: [{ path: "/work/a.txt", type: "file" }], total: 1 });
+    const searched = await sandbox.fs.grep("hello", "/work", { maxResults: 1 });
+    assert.deepEqual(searched, {
+      matches: [{ path: "/work/a.txt", line: 2, column: 1, text: "hello world" }],
+      query: "hello",
+      total: 1,
+    });
+    assert.deepEqual(await sandbox.fs.cp("nested/source file", "nested/destination", { maxWait: 2500 }), {
+      message: "Files copied",
+      source: "nested/source file",
+      destination: "nested/destination",
+    });
+    await sandbox.fs.writeTree([{ path: "a.txt", content: "tree" }], "/tree");
+    assert.equal(files.get("/tree/a.txt"), "tree");
+    assert.match(box.runCalls[2]!.command, /'\/nested\/source file'/);
+    assert.deepEqual(box.runCalls[2]!.options, { timeout: 3000 });
+    await assert.rejects(() => sandbox.fs.grep("hello", "/work", { contextLines: 2 }), /contextLines/);
+    assert.throws(() => sandbox.fs.watch("/work", () => undefined), /ordered filesystem event stream/);
+  } finally {
+    fake.cleanup();
+  }
+}
+
 async function testBlaxelNonrecursiveRemoval(): Promise<void> {
   const box = new FakeSandbox();
   const fake = installFakeCompute(box);
@@ -981,6 +1037,7 @@ await testInternalArkerProviderRequiresSource();
 await testBlaxelCreateIfNotExistsAndTtl();
 await testBlaxelInitializationFailureDeletesCreatedVm();
 await testBlaxelBinaryFiles();
+await testBlaxelFilesystemOperationsAndRelativePaths();
 await testBlaxelNonrecursiveRemoval();
 await testBlaxelDirectoryPaths();
 await testBlaxelAbsoluteDirectoryDisplayPaths();

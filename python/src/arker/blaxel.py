@@ -44,6 +44,11 @@ def __getattr__(name: str) -> Any:
 class DirectoryEntry:
     name: str
     path: str
+    size: int | None = None
+    permissions: str | None = None
+    owner: str | None = None
+    group: str | None = None
+    last_modified: str | None = None
 
 
 @dataclass(frozen=True)
@@ -59,12 +64,52 @@ class SandboxMetadata:
     name: str
 
 
+@dataclass(frozen=True)
+class FindMatch:
+    path: str
+    type_: str
+
+
+@dataclass(frozen=True)
+class FindResponse:
+    matches: list[FindMatch]
+    total: int
+
+
+@dataclass(frozen=True)
+class ContentSearchMatch:
+    column: int
+    line: int
+    path: str
+    text: str
+
+
+@dataclass(frozen=True)
+class ContentSearchResponse:
+    matches: list[ContentSearchMatch]
+    query: str
+    total: int
+
+
+@dataclass(frozen=True)
+class CopyResponse:
+    message: str
+    source: str
+    destination: str
+
+
 def _filesystem_display_path(path: str) -> str:
     return re.sub(r"/+", "/", resolve_compat_path(path, "/blaxel"))
 
 
 def _filesystem_path(path: str) -> str:
     return posixpath.normpath(_filesystem_display_path(path))
+
+
+def _filesystem_file_path(path: str) -> str:
+    if path.startswith("/") or "/" not in path:
+        return _filesystem_path(path)
+    return posixpath.normpath("/" + path)
 
 
 def _request_values(request: Any) -> dict[str, Any]:
@@ -158,12 +203,12 @@ class FileSystem:
     def read(self, path: str) -> str:
         if self._vm is None:
             return self._native.read(path)
-        return self._vm.sync(_filesystem_path(path)).decode("utf-8", "replace")
+        return self._vm.sync(_filesystem_file_path(path)).decode("utf-8", "replace")
 
     def write(self, path: str, content: str | bytes) -> Any:
         if self._vm is None:
             return self._native.write(path, content)
-        resolved = _filesystem_path(path)
+        resolved = _filesystem_file_path(path)
         self._vm.sync(resolved, content)
         return success({"message": "File created/updated successfully", "path": _filesystem_display_path(path)})
 
@@ -171,14 +216,14 @@ class FileSystem:
         if self._vm is None:
             return self._native.write_binary(path, content)
         raw = Path(content).read_bytes() if isinstance(content, str) else bytes(content)
-        resolved = _filesystem_path(path)
+        resolved = _filesystem_file_path(path)
         self._vm.sync(resolved, raw)
         return success({"message": "Binary file uploaded successfully", "path": _filesystem_display_path(path)})
 
     def read_binary(self, path: str) -> bytes:
         if self._vm is None:
             return self._native.read_binary(path)
-        return self._vm.sync(_filesystem_path(path))
+        return self._vm.sync(_filesystem_file_path(path))
 
     def download(self, src: str, destination_path: str, mode: int = 0o644) -> None:
         if self._vm is None:
@@ -208,7 +253,8 @@ class FileSystem:
             self._vm,
             # find sanitizes control characters on a terminal. The success
             # marker preserves producer failure detection through the pipe.
-            f"(find {shlex.quote(resolved)} -mindepth 1 -maxdepth 1 -printf '%y\\0%f\\0' "
+            f"(find {shlex.quote(resolved)} -mindepth 1 -maxdepth 1 "
+            "-printf '%y\\0%f\\0%s\\0%m\\0%u\\0%g\\0%TY-%Tm-%TdT%TH:%TM:%TS%Tz\\0' "
             "&& printf 'complete\\0') | cat",
         )
         if result.exit_code != 0:
@@ -216,12 +262,31 @@ class FileSystem:
         files: list[DirectoryEntry] = []
         subdirectories: list[DirectoryEntry] = []
         fields = result.stdout.split("\0")
-        if fields[-2:] != ["complete", ""] or len(fields[:-2]) % 2:
+        if fields[-2:] != ["complete", ""]:
             raise RuntimeError(result.stderr or "Incomplete directory listing response")
         records = fields[:-2]
-        entries = zip(records[::2], records[1::2], strict=True)
-        for kind, name in sorted(entries, key=lambda entry: entry[1]):
-            entry = DirectoryEntry(name=name, path=posixpath.normpath(posixpath.join(display, name)))
+        width = 7 if len(records) % 7 == 0 else 2 if len(records) % 2 == 0 else 0
+        if width == 0:
+            raise RuntimeError(result.stderr or "Incomplete directory listing response")
+        entries = [records[index : index + width] for index in range(0, len(records), width)]
+        for values in sorted(entries, key=lambda entry: entry[1]):
+            kind, name = values[:2]
+            metadata = (
+                {
+                    "size": int(values[2]),
+                    "permissions": values[3],
+                    "owner": values[4],
+                    "group": values[5],
+                    "last_modified": values[6],
+                }
+                if width == 7 and kind != "d"
+                else {}
+            )
+            entry = DirectoryEntry(
+                name=name,
+                path=posixpath.normpath(posixpath.join(display, name)),
+                **metadata,
+            )
             (subdirectories if kind == "d" else files).append(entry)
         return Directory(
             name=posixpath.basename(display.rstrip("/")) or "/",
@@ -246,6 +311,153 @@ class FileSystem:
             raise RuntimeError(result.stderr or f"remove failed with exit {result.exit_code}")
         kind = "Directory" if result.stdout == "directory" else "File"
         return success({"message": f"{kind} deleted successfully", "path": _filesystem_display_path(path)})
+
+    def cp(self, source: str, destination: str, max_wait: int = 180000) -> Any:
+        if self._vm is None:
+            return self._native.cp(source, destination, max_wait=max_wait)
+        if max_wait <= 0:
+            raise ValueError("max_wait must be positive")
+        resolved_source = _filesystem_file_path(source)
+        resolved_destination = _filesystem_file_path(destination)
+        result = run_command(
+            self._vm,
+            f"cp -r -- {shlex.quote(resolved_source)} {shlex.quote(resolved_destination)}",
+            timeout=(max_wait + 999) // 1000,
+        )
+        if result.exit_code != 0:
+            raise RuntimeError(result.stderr or f"Could not copy {source} to {destination}")
+        return CopyResponse(message="Files copied", source=source, destination=destination)
+
+    def write_tree(self, files: list[Any], destination_path: str | None = None) -> Any:
+        if self._vm is None:
+            return self._native.write_tree(files, destination_path)
+        destination = destination_path or ""
+        for file in files:
+            values = file if isinstance(file, dict) else vars(file)
+            path = values.get("path")
+            content = values.get("content")
+            if not isinstance(path, str) or not isinstance(content, (str, bytes)):
+                raise TypeError("write_tree files require string path and string/bytes content")
+            self.write(posixpath.join(destination, path), content)
+        return self.ls(destination or "/blaxel")
+
+    def find(
+        self,
+        path: str,
+        type: str | None = None,
+        patterns: list[str] | None = None,
+        max_results: int | None = None,
+        exclude_dirs: list[str] | None = None,
+        exclude_hidden: bool | None = None,
+    ) -> FindResponse | Any:
+        if self._vm is None:
+            return self._native.find(
+                path,
+                type=type,
+                patterns=patterns,
+                max_results=max_results,
+                exclude_dirs=exclude_dirs,
+                exclude_hidden=exclude_hidden,
+            )
+        if type not in {None, "file", "directory"}:
+            raise ValueError("find type must be 'file' or 'directory'")
+        if max_results is not None and max_results < 0:
+            raise ValueError("max_results must be nonnegative")
+        root = _filesystem_path(path)
+        predicates: list[str] = []
+        if type is not None:
+            predicates.extend(["-type", "f" if type == "file" else "d"])
+        if patterns:
+            names = " -o ".join(f"-name {shlex.quote(pattern)}" for pattern in patterns)
+            predicates.append(f"\\( {names} \\)")
+        for directory in exclude_dirs or []:
+            predicates.append(f"! -path {shlex.quote(f'*/{directory}/*')}")
+        if exclude_hidden:
+            predicates.append("! -path '*/.*'")
+        command = f"find {shlex.quote(root)} -mindepth 1 {' '.join(predicates)} -printf '%y\\0%p\\0'"
+        result = run_command(self._vm, command)
+        if result.exit_code != 0:
+            raise RuntimeError(result.stderr or f"find failed with exit {result.exit_code}")
+        fields = result.stdout.split("\0")
+        if fields[-1:] != [""] or len(fields[:-1]) % 2:
+            raise RuntimeError("Incomplete find response")
+        matches = [
+            FindMatch(path=name, type_="directory" if kind == "d" else "file")
+            for kind, name in zip(fields[:-1:2], fields[1:-1:2], strict=True)
+        ]
+        if max_results is not None:
+            matches = matches[:max_results]
+        return FindResponse(matches=matches, total=len(matches))
+
+    def grep(
+        self,
+        query: str,
+        path: str = "/",
+        case_sensitive: bool | None = None,
+        context_lines: int | None = None,
+        max_results: int | None = None,
+        file_pattern: str | None = None,
+        exclude_dirs: list[str] | None = None,
+    ) -> ContentSearchResponse | Any:
+        if self._vm is None:
+            return self._native.grep(
+                query,
+                path,
+                case_sensitive=case_sensitive,
+                context_lines=context_lines,
+                max_results=max_results,
+                file_pattern=file_pattern,
+                exclude_dirs=exclude_dirs,
+            )
+        if context_lines not in {None, 0}:
+            raise UnsupportedCompatibilityOption("Arker fs.grep context_lines are not supported")
+        if max_results is not None and max_results < 0:
+            raise ValueError("max_results must be nonnegative")
+        flags = ["-R", "-n", "--null", "-F"]
+        if case_sensitive is False:
+            flags.append("-i")
+        if file_pattern:
+            flags.extend(["--include", file_pattern])
+        for directory in exclude_dirs or []:
+            flags.extend(["--exclude-dir", directory])
+        command = " ".join(
+            [
+                "grep",
+                *(shlex.quote(flag) for flag in flags),
+                "--",
+                shlex.quote(query),
+                shlex.quote(_filesystem_path(path)),
+            ]
+        )
+        result = run_command(self._vm, command)
+        if result.exit_code not in {0, 1}:
+            raise RuntimeError(result.stderr or f"grep failed with exit {result.exit_code}")
+        matches: list[ContentSearchMatch] = []
+        for record in result.stdout.splitlines():
+            filename, separator, remainder = record.partition("\0")
+            line_text, colon, text = remainder.partition(":")
+            if not separator or not colon or not line_text.isdigit():
+                raise RuntimeError("Incomplete grep response")
+            needle = query if case_sensitive is not False else query.lower()
+            haystack = text if case_sensitive is not False else text.lower()
+            matches.append(
+                ContentSearchMatch(
+                    column=max(haystack.find(needle), 0) + 1,
+                    line=int(line_text),
+                    path=filename,
+                    text=text,
+                )
+            )
+        if max_results is not None:
+            matches = matches[:max_results]
+        return ContentSearchResponse(matches=matches, query=query, total=len(matches))
+
+    def watch(self, path: str, callback: Any, options: dict[str, Any] | None = None) -> Any:
+        if self._vm is None:
+            return self._native.watch(path, callback, options)
+        raise UnsupportedCompatibilityOption(
+            "Arker fs.watch requires an ordered filesystem event stream and is not supported"
+        )
 
     def __getattr__(self, name: str) -> Any:
         if self._native is not None:
