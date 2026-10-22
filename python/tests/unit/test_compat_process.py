@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import concurrent.futures
+import hashlib
 import subprocess
 import types
 import uuid
@@ -386,3 +388,57 @@ def test_replayed_transport_request_recovers_same_process(processes):
     assert first["pid"] == second["pid"]
     with pytest.raises(RuntimeError, match="already exists"):
         manager._call("exec", **{**request, "_requestId": "different-intent"})
+
+
+def test_concurrent_replayed_request_starts_exactly_one_process(processes):
+    manager, directory = processes
+    request = {
+        "command": "sleep 30",
+        "name": "concurrent-replay",
+        "workingDir": str(directory),
+        "_requestId": "same-transport-request",
+    }
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: manager._call("exec", **request), range(2)))
+    assert results[0]["pid"] == results[1]["pid"]
+    assert len([item for item in manager.list() if item.name == "concurrent-replay"]) == 1
+
+
+def test_replay_recovers_process_state_created_by_older_agent(processes):
+    manager, directory = processes
+    request = {
+        "command": "sleep 30",
+        "name": "legacy-replay",
+        "workingDir": str(directory),
+        "_requestId": "legacy-transport-request",
+    }
+    first = manager._call("exec", **request)
+    process_directory = directory / "processes" / hashlib.sha256(b"legacy-replay").hexdigest()
+    (process_directory / "request").unlink()
+    assert manager._call("exec", **request)["pid"] == first["pid"]
+
+
+def test_concurrent_processes_isolate_working_directory_and_environment(processes):
+    manager, directory = processes
+    first, second = directory / "first", directory / "second"
+    first.mkdir()
+    second.mkdir()
+
+    def launch(name, cwd, value):
+        return manager.exec(
+            {
+                "command": "printf '%s|' \"$PROCESS_VALUE\"; pwd; sleep 0.1",
+                "name": name,
+                "workingDir": str(cwd),
+                "env": {"PROCESS_VALUE": value},
+                "waitForCompletion": True,
+            }
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(launch, "isolated-first", first, "one"),
+            executor.submit(launch, "isolated-second", second, "two"),
+        ]
+        outputs = [future.result().stdout for future in futures]
+    assert outputs == [f"one|{first}\n", f"two|{second}\n"]

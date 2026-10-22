@@ -212,41 +212,60 @@ def dispatch(request):
         if not isinstance(request["name"], str) or not request["name"]:
             raise ValueError("Process name must be a nonempty string")
         directory = ROOT / hashlib.sha256(request["name"].encode()).hexdigest()
-        try:
-            directory.mkdir(mode=0o700)
-        except FileExistsError:
-            state = json.loads((directory / "state").read_text())
-            if request.get("_requestId") and state.get("_request_id") == request["_requestId"]:
-                return snapshot(directory)
-            raise ValueError(f"Process {request['name']!r} already exists") from None
-        request["_directory"] = str(directory)
-        for name in ("stdout", "stderr", "input", "lock"):
-            (directory / name).touch(mode=0o600)
-        read_fd, write_fd = os.pipe()
-        try:
-            subprocess.Popen(
-                [
-                    sys.executable,
-                    __file__,
-                    "worker",
-                    base64.b64encode(json.dumps(request).encode()).decode(),
-                    str(write_fd),
-                ],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-                pass_fds=(write_fd,),
-            )
-        finally:
-            os.close(write_fd)
-        try:
-            os.read(read_fd, 1)
-        finally:
-            os.close(read_fd)
-        if (directory / "error").exists():
-            raise RuntimeError(json.loads((directory / "error").read_text())["error"])
-        return snapshot(directory)
+        with (ROOT / ".exec-lock").open("a+") as root_lock:
+            fcntl.flock(root_lock, fcntl.LOCK_EX)
+            created = False
+            try:
+                directory.mkdir(mode=0o700)
+                created = True
+                request["_directory"] = str(directory)
+                for name in ("stdout", "stderr", "input", "lock"):
+                    (directory / name).touch(mode=0o600)
+                write_json(directory / "request", request)
+            except FileExistsError:
+                pass
+            process_lock = (directory / "lock").open("r+")
+            fcntl.flock(process_lock, fcntl.LOCK_EX)
+        with process_lock:
+            if not created:
+                try:
+                    original = json.loads((directory / "request").read_text())
+                except (FileNotFoundError, ValueError):
+                    try:
+                        original = json.loads((directory / "state").read_text())
+                    except (FileNotFoundError, ValueError):
+                        original = {}
+                original_request_id = original.get("_requestId", original.get("_request_id"))
+                if request.get("_requestId") and original_request_id == request["_requestId"]:
+                    if (directory / "error").exists():
+                        raise RuntimeError(json.loads((directory / "error").read_text())["error"])
+                    return snapshot(directory)
+                raise ValueError(f"Process {request['name']!r} already exists") from None
+            read_fd, write_fd = os.pipe()
+            try:
+                subprocess.Popen(
+                    [
+                        sys.executable,
+                        __file__,
+                        "worker",
+                        base64.b64encode(json.dumps(request).encode()).decode(),
+                        str(write_fd),
+                    ],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                    pass_fds=(write_fd,),
+                )
+            finally:
+                os.close(write_fd)
+            try:
+                os.read(read_fd, 1)
+            finally:
+                os.close(read_fd)
+            if (directory / "error").exists():
+                raise RuntimeError(json.loads((directory / "error").read_text())["error"])
+            return snapshot(directory)
     if action == "list":
         return [snapshot(path) for path in ROOT.glob("*") if (path / "state").exists()]
     directory = locate(request["identifier"])
