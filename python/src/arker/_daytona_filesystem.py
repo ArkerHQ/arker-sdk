@@ -1,0 +1,253 @@
+"""Daytona's buffered filesystem API over identity-bound guest operations."""
+
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import stat
+import uuid
+from importlib.resources import files
+
+from ._compat import UnsupportedCompatibilityOption, UnsupportedMixin, run_command
+
+_SOURCE = files("arker").joinpath("_guest_daytona_filesystem.py").read_text()
+
+
+def guest_command(request):
+    return (
+        'setpriv --reuid=daytona --regid="$(id -g daytona)" --init-groups -- python3 -I -c '
+        + shlex.quote(_SOURCE)
+        + " "
+        + shlex.quote(json.dumps(request))
+    )
+
+
+def check_timeout(value, default=None):
+    if value != default:
+        raise UnsupportedCompatibilityOption("Custom Daytona filesystem timeouts are not supported on Arker")
+
+
+def local_file(path, data=None):
+    from daytona.common.errors import DaytonaError
+
+    writing = data is not None
+    try:
+        flags = os.O_NONBLOCK | (os.O_WRONLY | os.O_CREAT if writing else os.O_RDONLY)
+        fd = os.open(path, flags, 0o666)
+        with os.fdopen(fd, "wb" if writing else "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError("local transfers require a regular file")
+            if writing:
+                stream.truncate(0)
+                stream.write(data)
+                return None
+            return stream.read()
+    except (OSError, ValueError) as error:
+        raise DaytonaError(str(error)) from error
+
+
+class FileSystem(UnsupportedMixin):
+    _compat_name = "daytona filesystem"
+
+    def __init__(self, vm, *, asynchronous=False):
+        self._vm = vm
+        self._asynchronous = asynchronous
+
+    def _run(self, command):
+        from daytona.common.errors import DaytonaError, create_daytona_error
+
+        result = run_command(self._vm, command)
+        if result.exit_code:
+            try:
+                error = json.loads(result.stderr)
+            except ValueError:
+                raise DaytonaError(result.stderr or "Daytona filesystem command failed") from None
+            raise create_daytona_error(error["message"], status_code=error["status"])
+        return result.stdout
+
+    def _command(self, operation, path, **options):
+        if not isinstance(path, str) or not path or "\0" in path:
+            from daytona.common.errors import DaytonaBadRequestError
+
+            raise DaytonaBadRequestError("path must be a nonempty string without NUL", status_code=400)
+        return guest_command(dict(operation=operation, path=path, **options))
+
+    def _call(self, operation, path, request_timeout=None, **options):
+        check_timeout(request_timeout)
+        return json.loads(self._run(self._command(operation, path, **options)))
+
+    def _transfer(self, operation, path, data=None):
+        command = self._command(operation, path)
+        directory = "/tmp/.arker-daytona-fs-" + uuid.uuid4().hex
+        staged = directory + "/data"
+        self._run("mkdir -m 700 -- " + shlex.quote(directory))
+        primary = None
+        try:
+            if operation == "upload":
+                self._run("umask 077; set -C; : > " + shlex.quote(staged))
+                self._vm.sync(staged, data)
+                self._run(command + " < " + shlex.quote(staged))
+                return None
+            self._run("umask 077; set -C; " + command + " > " + shlex.quote(staged))
+            return self._vm.sync(staged)
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            try:
+                self._run("rm -rf -- " + shlex.quote(directory))
+            except Exception:
+                if primary is None:
+                    raise
+
+    def create_folder(self, path: str, mode: str, request_timeout: float | None = None) -> None:
+        self._call("mkdir", path, request_timeout, mode=mode)
+
+    def delete_file(self, path: str, recursive: bool = False, request_timeout: float | None = None) -> None:
+        self._call("remove", path, request_timeout, recursive=recursive)
+
+    def get_file_info(self, path: str, request_timeout: float | None = None):
+        return self._info(self._call("info", path, request_timeout))
+
+    def _info(self, value):
+        if self._asynchronous:
+            from daytona_toolbox_api_client_async import FileInfo
+        else:
+            from daytona_toolbox_api_client import FileInfo
+        return FileInfo.from_dict(value)
+
+    def list_files(self, path: str, depth: int | None = None, request_timeout: float | None = None):
+        if depth is not None and (type(depth) is not int or depth < 1):
+            from daytona.common.errors import DaytonaError
+
+            raise DaytonaError("depth must be at least 1")
+        return [self._info(value) for value in self._call("list", path, request_timeout, depth=depth)]
+
+    def move_files(self, source: str, destination: str, request_timeout: float | None = None) -> None:
+        self._call("move", source, request_timeout, destination=destination)
+
+    def set_file_permissions(
+        self,
+        path: str,
+        mode: str | None = None,
+        owner: str | None = None,
+        group: str | None = None,
+        request_timeout: float | None = None,
+    ) -> None:
+        self._call("permissions", path, request_timeout, mode=mode, owner=owner, group=group)
+
+    def upload_file(self, src: str | bytes, dst: str, timeout: int = 1800) -> None:
+        check_timeout(timeout, 1800)
+        if not isinstance(src, (str, bytes, bytearray)):
+            raise TypeError("source must be bytes or a local path")
+        data = local_file(src) if isinstance(src, str) else bytes(src)
+        self._transfer("upload", dst, data)
+
+    def upload_files(self, files, timeout: int = 1800) -> None:
+        check_timeout(timeout, 1800)
+        for item in files:
+            self.upload_file(item.source, item.destination, timeout)
+
+    def download_file(self, *args: str) -> bytes | None:
+        if not 1 <= len(args) <= 3:
+            raise TypeError("download_file expects a remote path, optional local path and timeout")
+        local = args[1] if len(args) > 1 and isinstance(args[1], str) else None
+        timeout = args[2] if len(args) == 3 else args[1] if len(args) == 2 and local is None else 1800
+        check_timeout(timeout, 1800)
+        data = self._transfer("download", args[0])
+        if local is None:
+            return data
+        local_file(local, data)
+        return None
+
+    def download_files(self, files, timeout: int = 1800):
+        from daytona.common.errors import DaytonaError
+        from daytona.common.filesystem import FileDownloadErrorDetails, FileDownloadResponse
+
+        check_timeout(timeout, 1800)
+        results = []
+        for item in files:
+            try:
+                result = (
+                    self.download_file(item.source, item.destination, timeout)
+                    if item.destination
+                    else self.download_file(item.source, timeout)
+                )
+                results.append(FileDownloadResponse(source=item.source, result=item.destination or result))
+            except DaytonaError as error:
+                results.append(
+                    FileDownloadResponse(
+                        source=item.source,
+                        error=str(error),
+                        error_details=FileDownloadErrorDetails(
+                            message=str(error),
+                            status_code=error.status_code,
+                            code=error.code,
+                            source=error.source,
+                        ),
+                    )
+                )
+        return results
+
+
+class AsyncFileSystem:
+    def __init__(self, vm):
+        self._sync = FileSystem(vm, asynchronous=True)
+
+    async def create_folder(self, path: str, mode: str, request_timeout: float | None = None) -> None:
+        from ._compat_async import call
+
+        return await call(self._sync.create_folder, path, mode, request_timeout)
+
+    async def delete_file(self, path: str, recursive: bool = False, request_timeout: float | None = None) -> None:
+        from ._compat_async import call
+
+        return await call(self._sync.delete_file, path, recursive, request_timeout)
+
+    async def get_file_info(self, path: str, request_timeout: float | None = None):
+        from ._compat_async import call
+
+        return await call(self._sync.get_file_info, path, request_timeout)
+
+    async def list_files(self, path: str, depth: int | None = None, request_timeout: float | None = None):
+        from ._compat_async import call
+
+        return await call(self._sync.list_files, path, depth, request_timeout)
+
+    async def move_files(self, source: str, destination: str, request_timeout: float | None = None) -> None:
+        from ._compat_async import call
+
+        return await call(self._sync.move_files, source, destination, request_timeout)
+
+    async def set_file_permissions(
+        self,
+        path: str,
+        mode: str | None = None,
+        owner: str | None = None,
+        group: str | None = None,
+        request_timeout: float | None = None,
+    ) -> None:
+        from ._compat_async import call
+
+        return await call(self._sync.set_file_permissions, path, mode, owner, group, request_timeout)
+
+    async def upload_file(self, src: str | bytes, dst: str, timeout: int = 1800) -> None:
+        from ._compat_async import call
+
+        return await call(self._sync.upload_file, src, dst, timeout)
+
+    async def upload_files(self, files, timeout: int = 1800) -> None:
+        from ._compat_async import call
+
+        return await call(self._sync.upload_files, files, timeout)
+
+    async def download_file(self, *args: str) -> bytes | None:
+        from ._compat_async import call
+
+        return await call(self._sync.download_file, *args)
+
+    async def download_files(self, files, timeout: int = 1800):
+        from ._compat_async import call
+
+        return await call(self._sync.download_files, files, timeout)

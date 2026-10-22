@@ -54,15 +54,16 @@ function missing(error: unknown): boolean {
   );
 }
 
-function ownedWatch(
-  filesystem: object,
-  watch: (...args: unknown[]) => { close(): void },
+function ownedStream(
+  target: object,
+  start: (...args: unknown[]) => { close(): void; wait?(): Promise<void> },
   config: Config,
   args: unknown[],
-): { close(): void } {
+  onStartError?: (error: Error) => void,
+): { close(): void; wait(): Promise<void> } {
   let closed = false;
-  let handle: { close(): void } | undefined;
-  const context = new Proxy(filesystem, {
+  let handle: { close(): void; wait?(): Promise<void> } | undefined;
+  const context = new Proxy(target, {
     get(object, property) {
       const value = Reflect.get(object, property, object);
       if (property === "withClient" && typeof value === "function") {
@@ -100,21 +101,21 @@ function ownedWatch(
       return value;
     },
   });
-  // The native watcher starts a request synchronously, then consumes its stream
-  // asynchronously. Own each request epoch, not the lifetime of that stream.
-  void configured(config, async () => {
-    if (!closed) handle = Reflect.apply(watch, context, args);
-  }).catch((error: unknown) => {
-    const options = args[2] as { onError?: (error: Error) => void } | undefined;
-    options?.onError?.(
-      error instanceof Error ? error : new Error(String(error)),
-    );
+  // Own request setup, not the lifetime of an open response stream.
+  const started = configured(config, async () => {
+    if (!closed) handle = Reflect.apply(start, context, args);
   });
+  const done = started.catch((error: unknown) => {
+    onStartError?.(error instanceof Error ? error : new Error(String(error)));
+    throw error;
+  }).then(() => handle?.wait?.());
+  void done.catch(() => {});
   return {
     close() {
       closed = true;
       handle?.close();
     },
+    wait: () => done,
   };
 }
 
@@ -139,13 +140,14 @@ function owned(native: SandboxInstance, config: Config): SandboxInstance {
       get(object, property) {
         const value = Reflect.get(object, property, object);
         if (typeof value === "function") {
-          if (property === "watch") {
+          if (property === "watch" || property === "streamLogs") {
             return (...args: unknown[]) =>
-              ownedWatch(
+              ownedStream(
                 object,
-                value as (...args: unknown[]) => { close(): void },
+                value as (...args: unknown[]) => { close(): void; wait?(): Promise<void> },
                 config,
                 args,
+                (args[property === "watch" ? 2 : 1] as { onError?: (error: Error) => void } | undefined)?.onError,
               );
           }
           if (value.constructor.name === "AsyncFunction") {

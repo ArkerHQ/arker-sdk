@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import shlex
 import subprocess
 import sys
 import types
@@ -375,10 +376,26 @@ def test_daytona_official_surface(monkeypatch) -> None:
 
     assert json.loads(t.calls[0]["body"])["source_vm_name"] == "catalog-template"
     first_run = json.loads(t.calls[1]["body"])
-    assert first_run["command"] == "(\nexport FOO=bar; cd /workspace && echo 'Hello, World!'\n)"
+    assert first_run["command"].startswith(
+        '(\nsetpriv --reuid=daytona --regid="$(id -g daytona)" --init-groups -- python3 -I '
+    )
+    assert json.loads(shlex.split(first_run["command"])[-2]) == {
+        "operation": "exec",
+        "command": "echo 'Hello, World!'",
+        "cwd": "/workspace",
+        "env": {"FOO": "bar"},
+    }
     assert first_run["timeout"] == 7
     alias_run = json.loads(t.calls[2]["body"])
-    assert alias_run["command"] == "(\nexport ALIAS=yes; cd /workspace && echo 'Hello, World!'\n)"
+    assert alias_run["command"].startswith(
+        '(\nsetpriv --reuid=daytona --regid="$(id -g daytona)" --init-groups -- python3 -I '
+    )
+    assert json.loads(shlex.split(alias_run["command"])[-2]) == {
+        "operation": "exec",
+        "command": "echo 'Hello, World!'",
+        "cwd": "/workspace",
+        "env": {"ALIAS": "yes"},
+    }
     assert alias_run["timeout"] == 9
 
 
@@ -857,7 +874,7 @@ def test_blaxel_find_grep_copy_and_tree_have_native_shaped_results(monkeypatch) 
         commands.append((command, options))
         if command.startswith("find "):
             return CommandResult(stdout="f\0/work/a.txt\0d\0/work/sub\0", stderr="", exit_code=0)
-        if command.startswith("grep "):
+        if "grep " in command:
             return CommandResult(stdout="\0".join(["/work/a.txt", "2:hello world\n"]), stderr="", exit_code=0)
         return CommandResult(stdout="", stderr="", exit_code=0)
 
@@ -870,7 +887,7 @@ def test_blaxel_find_grep_copy_and_tree_have_native_shaped_results(monkeypatch) 
     assert [(match.path, match.type_) for match in found.matches] == [("/work/a.txt", "file")]
     searched = filesystem.grep("hello", "/work", max_results=1)
     assert [(match.path, match.line, match.column, match.text) for match in searched.matches] == [
-        ("/work/a.txt", 2, 1, "hello world")
+        ("a.txt", 2, 1, "hello world")
     ]
     copied = filesystem.cp("nested/source file", "nested/destination", max_wait=2500)
     assert (copied.message, copied.source, copied.destination) == (
@@ -883,15 +900,6 @@ def test_blaxel_find_grep_copy_and_tree_have_native_shaped_results(monkeypatch) 
     assert writes == [("/tree/a.txt", "a")]
     assert "'/nested/source file'" in commands[2][0]
     assert commands[2][1] == {"timeout": 3}
-
-
-def test_blaxel_grep_refuses_unrepresented_context_before_io(monkeypatch) -> None:
-    from arker._compat import UnsupportedCompatibilityOption
-    from arker.blaxel import FileSystem
-
-    monkeypatch.setattr("arker.blaxel.run_command", lambda *_args, **_kwargs: pytest.fail("unexpected I/O"))
-    with pytest.raises(UnsupportedCompatibilityOption, match="context_lines"):
-        FileSystem(vm=object()).grep("needle", context_lines=2)
 
 
 def test_blaxel_arker_watcher_fails_explicitly_before_io() -> None:

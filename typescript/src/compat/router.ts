@@ -99,13 +99,12 @@ export function parseRouterConfig(value: unknown, providers: Iterable<string>): 
   } else if (createValue.strategy === "weighted") {
     rejectUnknown(createValue, ["strategy", "weights", "fallback"], "router create");
     const values = record(createValue.weights, "router create.weights");
-    const weights: Record<string, number> = {};
-    for (const [provider, weight] of Object.entries(values)) {
+    const weights = Object.fromEntries(Object.entries(values).map(([provider, weight]) => {
       if (typeof weight !== "number" || !Number.isFinite(weight) || weight <= 0) {
         throw new Error(`router weight for ${provider} must be a positive finite number`);
       }
-      weights[provider] = weight;
-    }
+      return [provider, weight];
+    }));
     if (Object.keys(weights).length === 0) throw new Error("router create.weights must not be empty");
     create = {
       strategy: "weighted",
@@ -205,7 +204,7 @@ export class JsonRouteCache implements RouteCache {
   private async read(): Promise<CachePayload> {
     try {
       const payload = JSON.parse(await readFile(this.path, "utf8")) as CachePayload;
-      if (payload.version !== 1 || !payload.entries || typeof payload.entries !== "object") throw new Error();
+      if (payload.version !== 1 || !payload.entries || typeof payload.entries !== "object" || Array.isArray(payload.entries)) throw new Error();
       payload.entries = Object.fromEntries(Object.entries(payload.entries).filter(([id, entry]) => (
         !!id && !!entry && typeof entry.provider === "string"
         && typeof entry.accessedAt === "number" && Number.isFinite(entry.accessedAt)
@@ -248,6 +247,10 @@ export class JsonRouteCache implements RouteCache {
       const payload = await this.read();
       const result = operation(payload);
       this.trim(payload);
+      if (Buffer.byteLength(JSON.stringify(payload)) > this.maxBytes) {
+        await unlink(this.path).catch((error) => { if (error.code !== "ENOENT") throw error; });
+        return result;
+      }
       const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
       await writeFile(temporary, JSON.stringify(payload), { mode: 0o600 });
       await rename(temporary, this.path);
@@ -260,14 +263,16 @@ export class JsonRouteCache implements RouteCache {
 
   async get(id: string) {
     return this.locked((payload) => {
-      const entry = payload.entries[id];
+      const entry = Object.hasOwn(payload.entries, id) ? payload.entries[id] : undefined;
       if (!entry) return null;
       entry.accessedAt = this.nextAccess(payload);
       return entry.provider;
     });
   }
   async set(id: string, provider: string) {
-    await this.locked((payload) => { payload.entries[id] = { provider, accessedAt: this.nextAccess(payload) }; });
+    await this.locked((payload) => { Object.defineProperty(payload.entries, id, {
+      value: { provider, accessedAt: this.nextAccess(payload) }, enumerable: true, configurable: true, writable: true,
+    }); });
   }
   private nextAccess(payload: CachePayload): number {
     let latest = this.now();

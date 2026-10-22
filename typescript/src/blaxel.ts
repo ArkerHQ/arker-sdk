@@ -357,13 +357,7 @@ export class SandboxInstance {
     options: BlaxelCreateOptions = {},
     callOptions: Omit<BlaxelCreateCallOptions, "createIfNotExist"> = {},
   ): Promise<SandboxInstance> {
-    if (!options.name) throw new Error("createIfNotExists requires a Blaxel sandbox name");
-    try {
-      return await SandboxInstance.get(options.name, callOptions);
-    } catch (error) {
-      if (!(error instanceof CompatibilityNotFoundError)) throw error;
-      return SandboxInstance.create(options, { ...callOptions, createIfNotExist: true });
-    }
+    return SandboxInstance.create(options, { ...callOptions, createIfNotExist: true });
   }
 
   static async get(id: string, config: BlaxelCompatConfig = {}): Promise<SandboxInstance> {

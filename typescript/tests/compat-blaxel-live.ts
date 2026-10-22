@@ -26,6 +26,20 @@ const sandbox = await SandboxInstance.createIfNotExists(
 try {
   assert.equal(sandbox.provider, "blaxel");
   assert.equal(sandbox.metadata.name, name);
+  const existing = await SandboxInstance.createIfNotExists({ name }, { routerConfigPath });
+  assert.equal(existing.metadata.name, name);
+  const logged = await existing.process.exec({
+    command: "printf 'stream-out\\n'; printf 'stream-err\\n' >&2",
+    waitForCompletion: true,
+  });
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  await existing.process.streamLogs(logged.pid, {
+    onStdout: value => stdout.push(value),
+    onStderr: value => stderr.push(value),
+  }).wait();
+  assert.deepEqual(stdout, ["stream-out"]);
+  assert.deepEqual(stderr, ["stream-err"]);
 
   const result = await sandbox.process.exec({
     command: "pwd && printf '%s' \"$ARKER_BLAXEL_TEST\"",
@@ -84,7 +98,7 @@ await assert.rejects(
     { name: `invalid-${crypto.randomUUID().slice(0, 12)}`, region: "us-pdx-1" },
     { apiKey: "bl_invalid_key", workspace: process.env.BL_WORKSPACE, routerConfigPath },
   ),
-  /auth|unauthorized|forbidden|api key|rejected|not found/i,
+  (error: any) => error?.code === "UNAUTHORIZED" && error?.status_code === 403,
   "invalid Blaxel credentials must fail instead of being routed elsewhere",
 );
 

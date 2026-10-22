@@ -1,4 +1,4 @@
-import { ModalClient as NativeModalClient, type ModalClientParams, type Sandbox as NativeSandbox, type SandboxExecParams, type ContainerProcess, type SandboxTerminateParams } from "modal";
+import { InvalidError, ModalClient as NativeModalClient, type ModalClientParams, type Sandbox as NativeSandbox, type SandboxExecParams, type ContainerProcess, type SandboxTerminateParams } from "modal";
 import type { RunCommandOptions } from "computesdk";
 
 import {
@@ -65,6 +65,17 @@ function toRunCommandOptions(opts: unknown): RunCommandOptions | undefined {
     modalOpts.mode === undefined || modalOpts.mode === "text" || modalOpts.mode === "binary",
     "Sandbox.exec supports mode: 'text' or 'binary' in the Arker compatibility layer for modal.",
   );
+
+  if (modalOpts.timeoutMs !== undefined && modalOpts.timeoutMs <= 0)
+    throw new Error(`timeoutMs must be positive, got ${modalOpts.timeoutMs}`);
+  if (modalOpts.timeoutMs && modalOpts.timeoutMs % 1000 !== 0)
+    throw new Error(`timeoutMs must be a multiple of 1000ms, got ${modalOpts.timeoutMs}`);
+  if (modalOpts.workdir !== undefined && !modalOpts.workdir.startsWith("/"))
+    throw new InvalidError(`workdir must be an absolute path, got: ${modalOpts.workdir}`);
+  for (const key of Object.keys(modalOpts.env ?? {})) {
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key))
+      throw new InvalidError(`Secret key name ${JSON.stringify(key)} is invalid for environment variables. Only letters, numbers, and underscores are allowed, and the name may not start with a number.`);
+  }
 
   const runOptions: RunCommandOptions = {};
   if (modalOpts.workdir !== undefined) runOptions.cwd = modalOpts.workdir;
@@ -160,6 +171,12 @@ export class ModalClient {
   }
 
   readonly sandboxes = {
+    fromName: (...args: Parameters<NativeModalClient["sandboxes"]["fromName"]>) => this.#nativeClient().sandboxes.fromName(...args),
+    list: (...args: Parameters<NativeModalClient["sandboxes"]["list"]>) => this.#nativeClient().sandboxes.list(...args),
+    experimentalCreate: (...args: Parameters<NativeModalClient["sandboxes"]["experimentalCreate"]>) => this.#nativeClient().sandboxes.experimentalCreate(...args),
+    experimentalFromName: (...args: Parameters<NativeModalClient["sandboxes"]["experimentalFromName"]>) => this.#nativeClient().sandboxes.experimentalFromName(...args),
+    experimentalFromSnapshot: (...args: Parameters<NativeModalClient["sandboxes"]["experimentalFromSnapshot"]>) => this.#nativeClient().sandboxes.experimentalFromSnapshot(...args),
+    experimentalList: (...args: Parameters<NativeModalClient["sandboxes"]["experimentalList"]>) => this.#nativeClient().sandboxes.experimentalList(...args),
     create: async (...args: unknown[]): Promise<Sandbox> => {
       if (args.length > 3) throw new Error("ModalClient.sandboxes.create accepts at most app, image, and options");
       const options = (args.length >= 3 ? args[2] : args.length === 1 ? args[0] : undefined) as Record<string, unknown> | undefined;

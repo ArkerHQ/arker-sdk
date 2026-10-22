@@ -33,7 +33,8 @@ try:
     assert sandbox.files.read("/tmp/compat-e2b-root-only") == "secret"
     sandbox.commands.run("rm -f /tmp/compat-e2b-root-only", user="root")
     sandbox.commands.run("rm -rf " + root + " /home/user/" + relative)
-    sandbox.files.make_dir(root)
+    assert sandbox.files.make_dir(root) is True
+    assert sandbox.files.make_dir(root) is False
     text = sandbox.files.write(root + "/text.txt", "hello\n")
     binary = sandbox.files.write(root + "/binary.bin", b"\x00\xff\x10")
     relative_info = sandbox.files.write(relative + "/cwd.txt", "cwd")
@@ -65,6 +66,16 @@ try:
     assert set(entries) == {"batch-a.txt", "batch-b.bin", "binary.bin", "text.txt"}
     assert entries["binary.bin"].size == 3
     assert entries["binary.bin"].type == FileType.FILE
+    assert sandbox.files.make_dir(root + "/nested", user="root") is True
+    sandbox.files.write(root + "/nested/child", "nested", user="root")
+    unusual = "tab\tnewline\nseparator\x1f"
+    sandbox.files.write(root + "/" + unusual, "unusual")
+    assert unusual in {entry.name for entry in sandbox.files.list(root)}
+    for depth in (2,):
+        assert root + "/nested/child" in {
+            entry.path for entry in sandbox.files.list(root, depth=depth, user="root")
+        }
+    assert root + "/nested/child" not in {entry.path for entry in sandbox.files.list(root, depth=None)}
     renamed = sandbox.files.rename(root + "/text.txt", root + "/renamed.txt")
     assert renamed.path == root + "/renamed.txt"
     assert not sandbox.files.exists(root + "/text.txt")
@@ -105,7 +116,8 @@ async def main():
         assert await sandbox.files.read("/tmp/compat-e2b-root-only-async") == "secret"
         await sandbox.commands.run("rm -f /tmp/compat-e2b-root-only-async", user="root")
         await sandbox.commands.run("rm -rf " + root + " /home/user/" + relative)
-        await sandbox.files.make_dir(root)
+        assert await sandbox.files.make_dir(root) is True
+        assert await sandbox.files.make_dir(root) is False
         await sandbox.files.write(root + "/text.txt", "hello\n")
         await sandbox.files.write(root + "/binary.bin", b"\x00\xff\x10")
         relative_info = await sandbox.files.write(relative + "/cwd.txt", "cwd")
@@ -125,6 +137,16 @@ async def main():
         assert info.group == "user"
         entries = {entry.name: entry for entry in await sandbox.files.list(root)}
         assert entries["binary.bin"].size == 3
+        assert await sandbox.files.make_dir(root + "/nested", user="root") is True
+        await sandbox.files.write(root + "/nested/child", "nested", user="root")
+        unusual = "tab\tnewline\nseparator\x1f"
+        await sandbox.files.write(root + "/" + unusual, "unusual")
+        assert unusual in {entry.name for entry in await sandbox.files.list(root)}
+        for depth in (2,):
+            assert root + "/nested/child" in {
+                entry.path for entry in await sandbox.files.list(root, depth=depth, user="root")
+            }
+        assert root + "/nested/child" not in {entry.path for entry in await sandbox.files.list(root, depth=None)}
         renamed = await sandbox.files.rename(root + "/text.txt", root + "/renamed.txt")
         assert renamed.path == root + "/renamed.txt"
         assert not await sandbox.files.exists(root + "/text.txt")
@@ -153,7 +175,7 @@ APIS = [
 ]
 
 
-@pytest.mark.parametrize("style,program", [("sync", SYNC_PROGRAM), ("async", ASYNC_PROGRAM)])
+@pytest.mark.parametrize("style,program", [("sync", SYNC_PROGRAM), ("async", ASYNC_PROGRAM)], ids=["sync", "async"])
 @pytest.mark.parametrize("provider,shim", [("e2b", False), ("e2b", True), ("arker", True)])
 def test_filesystem_import_only(style, program, provider, shim, tmp_path, monkeypatch):
     pytest.importorskip("e2b")

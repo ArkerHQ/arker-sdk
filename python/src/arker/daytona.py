@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import shlex
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
@@ -22,6 +21,7 @@ from ._compat import (
 )
 from ._compat_daytona_async import AsyncDaytona as AsyncDaytona
 from ._compat_daytona_async import AsyncSandbox as AsyncSandbox
+from ._daytona_filesystem import FileSystem, guest_command
 from .computer import VM
 
 
@@ -48,24 +48,19 @@ class Process:
     def exec(
         self,
         command: str,
-        *,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         timeout: int | None = None,
     ) -> ExecuteResponse:
-        prefix = ""
         if env:
-            exports = []
-            for key, value in env.items():
+            for key in env:
                 if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) is None:
                     raise ValueError(f"Invalid environment variable name: {key}")
-                exports.append(f"export {key}={shlex.quote(value)};")
-            prefix += " ".join(exports) + " "
-        if cwd:
-            prefix += f"cd {shlex.quote(cwd)} && "
-        else:
-            prefix += "mkdir -p /home/daytona && cd /home/daytona && "
-        result = run_command(self._vm, prefix + command, timeout=timeout)
+        result = run_command(
+            self._vm,
+            guest_command({"operation": "exec", "command": command, "cwd": cwd, "env": env}),
+            timeout=timeout,
+        )
         native = import_optional("daytona.common.process")
         if native is not None:
             return native.ExecuteResponse(
@@ -103,8 +98,24 @@ class Sandbox(UnsupportedMixin):
         self.id = vm.id if vm is not None else getattr(native, "id", getattr(native, "sandbox_id", None))
         if vm is not None:
             self.process = Process(vm)
+            self._fs = FileSystem(vm)
         else:
             self.process = native.process
+            self._fs = getattr(native, "fs", None)
+
+    @property
+    def fs(self) -> FileSystem:
+        return self._fs
+
+    def get_user_home_dir(self) -> str:
+        if self._native is not None:
+            return self._native.get_user_home_dir()
+        from daytona.common.errors import DaytonaError
+
+        result = self.process.exec('printf "%s" "$HOME"')
+        if result.exit_code:
+            raise DaytonaError("Failed to get user home directory")
+        return result.result
 
     def delete(self) -> None:
         if self._vm is not None:

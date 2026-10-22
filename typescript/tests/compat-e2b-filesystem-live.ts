@@ -26,7 +26,8 @@ async function program(Sandbox: SandboxConstructor): Promise<void> {
     assert.equal(await sandbox.files.read("/tmp/compat-e2b-root-only"), "secret");
     await sandbox.commands.run("rm -f /tmp/compat-e2b-root-only", { user: "root" });
     await sandbox.commands.run(`rm -rf ${root} /home/user/${relative}`);
-    await sandbox.files.makeDir(root);
+    assert.equal(await sandbox.files.makeDir(root), true);
+    assert.equal(await sandbox.files.makeDir(root), false);
     const text = await sandbox.files.write(`${root}/text.txt`, "hello\n");
     const binary = await sandbox.files.write(
       `${root}/binary.bin`,
@@ -66,6 +67,24 @@ async function program(Sandbox: SandboxConstructor): Promise<void> {
     assert.equal(info.owner, "user");
     assert.equal(info.group, "user");
     assert.ok(info.modifiedTime instanceof Date);
+
+    const formats = `${root}/formats`;
+    const payload = Uint8Array.of(0, 255, 128, 10);
+    const blob = new Blob([payload]);
+    const uploaded = await sandbox.files.write([
+      { path: `${formats}/blob`, data: blob },
+      { path: `${formats}/stream`, data: blob.stream() },
+    ], { user: "user" });
+    assert.equal(uploaded.length, 2);
+    assert.deepEqual(await sandbox.files.write([]), []);
+    for (const entry of uploaded) {
+      const readBlob = await sandbox.files.read(entry.path, { format: "blob", user: "user" });
+      assert.deepEqual(new Uint8Array(await readBlob.arrayBuffer()), payload);
+      const stream = await sandbox.files.read(entry.path, { format: "stream", user: "user" });
+      assert.deepEqual(new Uint8Array(await new Response(stream).arrayBuffer()), payload);
+    }
+    assert.equal((await sandbox.files.list(root, { depth: 2 })).filter((entry) => entry.path.startsWith(`${formats}/`)).length, 2);
+    await sandbox.files.remove(formats);
 
     const entries = new Map(
       (await sandbox.files.list(root)).map((entry) => [entry.name, entry]),

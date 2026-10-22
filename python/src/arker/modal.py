@@ -158,7 +158,7 @@ class Sandbox(UnsupportedMixin):
         return cls(vm=result if provider == "arker" else None, native=result if provider == "modal" else None)
 
     @classmethod
-    def from_id(cls, sandbox_id: str, **kwargs: Any) -> Sandbox:
+    def from_id(cls, sandbox_id: str, client: Any | None = None, **kwargs: Any) -> Sandbox:
         arker_config = kwargs.pop("arker", None) or {}
         router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
         if router_path:
@@ -172,7 +172,9 @@ class Sandbox(UnsupportedMixin):
             for method_name in ("from_id", "fromId", "connect"):
                 if native is not None and hasattr(native, method_name):
                     method = getattr(native, method_name)
-                    return get_or_none(partial(method, sandbox_id))
+                    return get_or_none(
+                        partial(method, sandbox_id, **({"client": client} if client is not None else {}))
+                    )
             return None
 
         found = routed_get(
@@ -200,8 +202,10 @@ class Sandbox(UnsupportedMixin):
         native_streams = import_optional("modal.container_process") is not None
         stream_options = {}
         if native_streams:
+            from modal._utils.async_utils import synchronizer
             from modal.exception import InvalidError
             from modal.sandbox._common import _validate_exec_args
+            from modal.secret import _local_secret_env, _resolvable_secrets
             from modal.stream_type import StreamType
 
             _validate_exec_args(command)
@@ -213,6 +217,18 @@ class Sandbox(UnsupportedMixin):
                     raise ValueError(f"Unsupported StreamType for {key}")
             if stream_options.get("bufsize") == 1 and stream_options.get("text", True) is False:
                 raise ValueError("line-buffering is only supported when text=True")
+            secrets = [synchronizer._translate_in(secret) for secret in (kwargs.pop("secrets", None) or [])]
+            if _resolvable_secrets(secrets):
+                raise UnsupportedCompatibilityOption(
+                    "Sandbox.exec named or deployed secrets are not supported by Arker"
+                )
+            environment = {
+                **_local_secret_env(secrets),
+                **{k: v for k, v in (environment or {}).items() if v is not None},
+            }
+            for key, default in (("pty", False), ("pty_info", None), ("_pty_info", None)):
+                if key in kwargs and kwargs[key] == default:
+                    kwargs.pop(key)
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise TypeError(f"Sandbox.exec received unsupported option(s): {unsupported}")

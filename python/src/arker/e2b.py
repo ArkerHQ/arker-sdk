@@ -402,7 +402,7 @@ class Files(UnsupportedMixin):
         )
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"stat failed with exit {result.exit_code}")
-        values = result.stdout.split("\x1f")
+        values = result.stdout.rsplit("\x1f", 7)
         if len(values) != 8:
             raise RuntimeError("Incomplete file information response")
         name, size, mode, permissions, owner, group, modified, description = values
@@ -410,9 +410,9 @@ class Files(UnsupportedMixin):
             file_type = _file_type("SYMLINK")
             target_result = run_command(
                 self._vm,
-                _filesystem_command("readlink -- " + shlex.quote(resolved), user=user),
+                _filesystem_command("readlink -z -- " + shlex.quote(resolved), user=user),
             )
-            symlink_target = target_result.stdout.rstrip("\n") if target_result.exit_code == 0 else None
+            symlink_target = target_result.stdout.removesuffix("\0") if target_result.exit_code == 0 else None
         else:
             file_type = _file_type("DIR" if "directory" in description else "FILE")
             symlink_target = None
@@ -457,39 +457,54 @@ class Files(UnsupportedMixin):
             raise RuntimeError(result.stderr or f"rename failed with exit {result.exit_code}")
         return self.get_info(new_resolved)
 
-    def make_dir(self, path: str) -> None:
+    def make_dir(self, path: str, user: str | None = None, request_timeout: float | None = None) -> bool:
         if self._vm is None:
-            if hasattr(self._native, "make_dir"):
-                return self._native.make_dir(path)
-            return self._native.makeDir(path)
+            return self._native.make_dir(path, user=user, request_timeout=request_timeout)
+        if request_timeout is not None:
+            raise UnsupportedCompatibilityOption("Arker files.make_dir does not support request_timeout")
+        script = (
+            "import os, sys\n"
+            "try:\n"
+            "    os.makedirs(sys.argv[1])\n"
+            "except FileExistsError:\n"
+            "    print('false')\n"
+            "else:\n"
+            "    print('true')\n"
+        )
         result = run_command(
             self._vm,
-            _identity_command(f"mkdir -p {shlex.quote(resolve_compat_path(path, _E2B_HOME))}", cwd="/"),
+            _identity_command(
+                "python3 -c " + shlex.quote(script) + " " + shlex.quote(resolve_compat_path(path, _E2B_HOME)),
+                user=user,
+                cwd="/",
+            ),
         )
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"mkdir failed with exit {result.exit_code}")
-        return None
+        return result.stdout.strip() == "true"
 
-    def makeDir(self, path: str) -> None:
+    def makeDir(self, path: str) -> bool:
         return self.make_dir(path)
 
-    def list(self, path: str) -> list[Any]:
+    def list(
+        self, path: str, depth: int | None = 1, user: str | None = None, request_timeout: float | None = None
+    ) -> list[Any]:
         if self._vm is None:
-            return self._native.list(path)
-        quoted = shlex.quote(resolve_compat_path(path, "/home/user"))
-        script = (
-            f"cd {quoted} 2>/dev/null || exit 3; "
-            "for e in * .*; do "
-            '[ "$e" = "." ] && continue; [ "$e" = ".." ] && continue; [ -e "$e" ] || continue; '
-            'if [ -d "$e" ]; then t=dir; else t=file; fi; '
-            'printf \'%s\t%s\n\' "$t" "$e"; done'
+            return self._native.list(path, depth=depth, user=user, request_timeout=request_timeout)
+        if request_timeout is not None:
+            raise UnsupportedCompatibilityOption("Arker files.list does not support request_timeout")
+        if depth is not None and depth < 1:
+            module = import_optional("e2b")
+            raise getattr(module, "InvalidArgumentException", ValueError)("depth should be at least 1")
+        quoted = shlex.quote(resolve_compat_path(path, _E2B_HOME))
+        maximum = f" -maxdepth {1 if depth is None else int(depth)}"
+        result = run_command(
+            self._vm,
+            _filesystem_command(f"test -d {quoted} && find -H {quoted} -mindepth 1{maximum} -print0", user=user),
         )
-        result = run_command(self._vm, script)
         if result.exit_code != 0:
             raise RuntimeError(result.stderr or f"list failed with exit {result.exit_code}")
-        names = [line.split("\t", 1)[1] for line in result.stdout.splitlines() if "\t" in line]
-        base = resolve_compat_path(path, _E2B_HOME)
-        return [self.get_info(posixpath.join(base, name)) for name in names]
+        return [self.get_info(name, user=user) for name in result.stdout.split("\0") if name]
 
     def exists(self, path: str) -> bool:
         if self._vm is None:

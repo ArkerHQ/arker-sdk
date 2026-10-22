@@ -488,4 +488,59 @@ async function testOwnershipProbesDoNotConnectLosingSandboxes(): Promise<void> {
 }
 await testOwnershipProbesDoNotConnectLosingSandboxes();
 
+
+async function testCacheKeysAndByteBounds(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "arker-router-keys-"));
+  const path = join(directory, "cache.json");
+  for (const id of ["__proto__", "constructor", "toString", "é".repeat(10)]) {
+    const cache = new JsonRouteCache(path, 10, 100, () => 0);
+    assert.equal(await cache.get(id), null);
+    await cache.set(id, "arker");
+    assert.equal(await cache.get(id), "arker");
+    assert.ok((await readFile(path)).byteLength <= 100);
+    await cache.delete(id);
+    assert.equal(await cache.get(id), null);
+  }
+  const tiny = new JsonRouteCache(path, 10, 1);
+  await tiny.set("id", "arker");
+  assert.ok((await readFile(path).catch(() => Buffer.alloc(0))).byteLength <= 1);
+  assert.equal(await tiny.get("id"), null);
+  await writeFile(path, JSON.stringify({ version: 1, entries: [{ provider: "arker", accessedAt: 0 }] }));
+  assert.equal(await new JsonRouteCache(path).get("0"), null);
+
+  const toml = join(directory, "router.toml");
+  await writeFile(toml, 'version = 1\n[existing]\nstrategy = "priority"\norder = ["arker"]\n');
+  await assert.rejects(createRoutedProvider([provider("arker")], toml).instances!.create(), SyntaxError);
+
+  const weights = JSON.parse('{"__proto__":1}');
+  assert.deepEqual(parseRouterConfig({
+    version: 1, existing: { strategy: "priority", order: ["__proto__"] },
+    create: { strategy: "weighted", weights },
+  }, ["__proto__"]).create, { strategy: "weighted", weights, fallback: ["__proto__"] });
+}
+await testCacheKeysAndByteBounds();
+
+async function testCachedMissInvalidatesButErrorPreservesHint(): Promise<void> {
+  for (const strategy of ["priority", "race"]) {
+    const directory = await mkdtemp(join(tmpdir(), "arker-router-invalidation-"));
+    const cachePath = join(directory, "cache.json");
+    const cache = new JsonRouteCache(cachePath);
+    await cache.set("shared", "blaxel");
+    const path = await config(directory, {
+      version: 1, existing: { strategy, order: ["blaxel", "arker"] },
+      create: { strategy: "priority", order: ["blaxel"] }, cache: { path: cachePath },
+    });
+    const error = new Error("lookup unavailable");
+    const failed = createRoutedProvider([
+      provider("blaxel", { getById: async () => { throw error; } }),
+      provider("arker", { getById: async () => { assert.fail("cached lookup failure must not fall through"); } }),
+    ], path).instances!;
+    await assert.rejects(failed.getById("shared"), (caught) => caught === error);
+    assert.equal(await cache.get("shared"), "blaxel");
+    const missing = createRoutedProvider([provider("blaxel"), provider("arker")], path).instances!;
+    assert.equal(await missing.getById("shared"), null);
+    assert.equal(await cache.get("shared"), null);
+  }
+}
+await testCachedMissInvalidatesButErrorPreservesHint();
 console.log("PASS compat router");

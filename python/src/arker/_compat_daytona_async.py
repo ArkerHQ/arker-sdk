@@ -23,10 +23,21 @@ class AsyncSandbox:
     def __init__(self, sandbox):
         self._sandbox = sandbox
         self.id = sandbox.id
+        if sandbox._native is not None:
+            self.fs = getattr(sandbox._native, "fs", None)
+        else:
+            from ._daytona_filesystem import AsyncFileSystem
+
+            self.fs = AsyncFileSystem(sandbox._vm)
         self.process = sandbox._native.process if sandbox._native is not None else _AsyncProcess(sandbox.process)
 
     def __getattr__(self, name):
         return getattr(self._sandbox, name)
+
+    async def get_user_home_dir(self) -> str:
+        if self._sandbox._native is not None:
+            return await self._sandbox._native.get_user_home_dir()
+        return await call(self._sandbox.get_user_home_dir)
 
     async def delete(self, timeout=60, *, wait=False):
         if self._sandbox._native is not None:

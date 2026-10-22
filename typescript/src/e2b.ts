@@ -2,7 +2,7 @@ import type { RunCommandOptions } from "computesdk";
 import { randomUUID } from "node:crypto";
 import fileIO from "./compat/e2b-file-io.generated.js";
 import { ArkerError, type VM } from "./index.js";
-import { CommandExitError, FileType, Git, Sandbox as VendorSandbox, type CommandStartOpts, type CommandHandle,
+import { CommandExitError, FileType, Git, InvalidArgumentError, Sandbox as VendorSandbox, type CommandStartOpts, type CommandHandle,
   type Commands as VendorCommands, type CommandConnectOpts, type CommandRequestOpts } from "e2b";
 
 export { CommandExitError } from "e2b";
@@ -216,8 +216,13 @@ export class Sandbox {
       read: async (path: string, options?: Record<string, unknown>) => {
         assertSupportedObjectKeys(options, ["format", "user"], "e2b", "files.read");
         const format = options?.format ?? "text";
-        if (format !== "text" && format !== "bytes") {
-          throw new ArkerError("unsupported_operation", "Arker files.read supports buffered text/bytes formats, not this format", 422);
+        if (!["text", "bytes", "blob", "stream"].includes(format as string)) {
+          throw new ArkerError("unsupported_operation", "Unknown file read format", 422);
+        }
+        if (format === "blob" || format === "stream") {
+          const bytes = await this.files.read(path, { ...options, format: "bytes" });
+          const blob = new Blob([bytes as Uint8Array<ArrayBuffer>]);
+          return format === "blob" ? blob : blob.stream();
         }
         const resolved = resolveCompatPath(path, E2B_HOME);
         if (options?.user !== undefined) {
@@ -250,11 +255,18 @@ export class Sandbox {
         }
         return this.#box.filesystem.readFile(resolved);
       },
-      write: async (path: string, content: string | ArrayBuffer, options?: Record<string, unknown>) => {
+      write: async (
+        path: string | Array<{ path: string; data: string | ArrayBuffer | Blob | ReadableStream }>,
+        content?: string | ArrayBuffer | Blob | ReadableStream | Record<string, unknown>,
+        options?: Record<string, unknown>,
+      ) => {
+        if (Array.isArray(path)) return this.files.writeFiles(path, content as Record<string, unknown> | undefined);
         assertSupportedObjectKeys(options, ["user"], "e2b", "files.write");
         const resolved = resolveCompatPath(path, "/home/user");
+        if (content instanceof Blob) content = await content.arrayBuffer();
+        else if (content instanceof ReadableStream) content = await new Response(content).arrayBuffer();
         if (typeof content !== "string" && !(content instanceof ArrayBuffer)) {
-          throw new ArkerError("unsupported_operation", "Arker files.write supports string/ArrayBuffer data, not this input", 422);
+          throw new ArkerError("unsupported_operation", "files.write requires string, ArrayBuffer, Blob, or ReadableStream data", 422);
         }
         const directory = `/tmp/.computesdk-e2b-write-${randomUUID()}`;
         const staged = `${directory}/data`;
@@ -296,22 +308,29 @@ export class Sandbox {
       },
       makeDir: async (path: string, options?: Record<string, unknown>) => {
         assertSupportedObjectKeys(options, ["user"], "e2b", "files.makeDir");
+        const resolved = shellQuote(resolveCompatPath(path, E2B_HOME));
         const result = await this.#box.runCommand(identityCommand(
-          `mkdir -p -- ${shellQuote(resolveCompatPath(path, E2B_HOME))}`,
+          `if [ -d ${resolved} ]; then printf false; else mkdir -p -- ${resolved} && printf true; fi`,
           { user: options?.user as string | undefined, cwd: "/" },
         ));
         if (result.exitCode !== 0) throw new Error(result.stderr || `mkdir failed with exit ${result.exitCode}`);
+        return result.stdout === "true";
       },
       list: async (path: string, options?: Record<string, unknown>) => {
-        assertSupportedObjectKeys(options, ["user"], "e2b", "files.list");
+        assertSupportedObjectKeys(options, ["user", "depth"], "e2b", "files.list");
+        const depth = options?.depth ?? 1;
+        if (typeof depth !== "number" || !Number.isInteger(depth) || depth < 1) {
+          throw new InvalidArgumentError("depth should be a positive integer");
+        }
         const resolved = resolveCompatPath(path, E2B_HOME);
-        const script = `cd ${shellQuote(resolved)} 2>/dev/null || exit 3; for e in * .*; do `
-          + `[ "$e" = "." ] && continue; [ "$e" = ".." ] && continue; [ -e "$e" ] || continue; `
-          + `if [ -d "$e" ]; then t=dir; else t=file; fi; printf '%s\\t%s\\n' "$t" "$e"; done`;
+        const script = `cd ${shellQuote(resolved)} && find . -mindepth 1 -maxdepth ${depth} -print0`;
         const result = await this.#box.runCommand(filesystemCommand(script, options?.user));
         if (result.exitCode !== 0) throw new Error(result.stderr || `list failed with exit ${result.exitCode}`);
-        const names = result.stdout.split("\n").filter((line) => line.includes("\t")).map((line) => line.split("\t", 2)[1]!);
-        return Promise.all(names.map((name) => (this.files as any).getInfo(`${resolved.replace(/\/$/, "")}/${name}`, options)));
+        const names = result.stdout.split("\0").filter(Boolean);
+        return Promise.all(names.map((name) => this.files.getInfo(
+          `${resolved.replace(/\/$/, "")}/${name.slice(2)}`,
+          options?.user === undefined ? undefined : { user: options.user as string },
+        )));
       },
       exists: async (path: string, options?: Record<string, unknown>) => {
         assertSupportedObjectKeys(options, ["user"], "e2b", "files.exists");

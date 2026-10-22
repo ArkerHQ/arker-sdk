@@ -465,3 +465,83 @@ test("credential epochs preserve the application's disabled-H2 transport setting
     settings.config.disableH2 = previous.disableH2;
   }
 });
+
+test("createIfNotExists delegates reconciliation and options to create without a lookup", async () => {
+  const previous = { create: Shim.create, get: Shim.get };
+  const calls: unknown[] = [];
+  const sandbox = {} as Shim;
+  Shim.create = async (...args) => { calls.push(args); return sandbox; };
+  Shim.get = async () => { throw new Error("unexpected preliminary lookup"); };
+  try {
+    for (const options of [{ name: "existing" }, {}]) {
+      assert.equal(await Shim.createIfNotExists(options, { timeout: 17, safe: false }), sandbox);
+      assert.deepEqual(calls.at(-1), [options, { timeout: 17, safe: false, createIfNotExist: true }]);
+    }
+    const conflict = new Error("conflict");
+    Shim.create = async () => { throw conflict; };
+    await assert.rejects(Shim.createIfNotExists({ name: "existing" }), error => error === conflict);
+  } finally {
+    Shim.create = previous.create;
+    Shim.get = previous.get;
+  }
+});
+
+test("native log streams preserve workspace, callbacks, wait errors and cancellation without blocking other workspaces", { timeout: 10_000 }, async () => {
+  const previous = { create: Native.create, disableH2: settings.config.disableH2 };
+  const observations: string[] = [];
+  let response!: import("node:http").ServerResponse;
+  let started!: () => void;
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  const server = createServer((request, reply) => {
+    observations.push(String(request.headers["x-blaxel-workspace"]));
+    if (request.url?.includes("failure")) {
+      reply.writeHead(403, { "content-type": "application/json" });
+      reply.end(JSON.stringify({ error: "denied" }));
+      return;
+    }
+    response = reply;
+    reply.writeHead(200, { "content-type": "text/plain" });
+    reply.flushHeaders();
+    started();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address !== "string");
+  settings.config.disableH2 = true;
+  Native.create = async () => new Native({
+    metadata: { name: "sandbox", url: `http://127.0.0.1:${address.port}` },
+    spec: { runtime: { image: "test", memory: 512 } },
+  });
+  let stream: ReturnType<Native["process"]["streamLogs"]> | undefined;
+  try {
+    const first = await createNativeBlaxelProvider({ apiKey: "bl_test", workspace: "first" }).instances.create();
+    const second = createNativeBlaxelProvider({ apiKey: "bl_test", workspace: "second" });
+    await second.instances.create();
+    const stdout: string[] = [], stderr: string[] = [], logs: string[] = [];
+    stream = first.getInstance().process.streamLogs("process", {
+      onStdout: value => stdout.push(value), onStderr: value => stderr.push(value), onLog: value => logs.push(value),
+    });
+    await ready;
+    await second.instances.create();
+    response.write("stdout:hel");
+    response.end("lo\nstderr:problem\n[keepalive]\nstdout:tail");
+    await stream.wait();
+    assert.deepEqual(stdout, ["hello", "tail"]);
+    assert.deepEqual(stderr, ["problem"]);
+    assert.deepEqual(logs, ["hello", "problem", "tail"]);
+    const errors: Error[] = [];
+    await assert.rejects(first.getInstance().process.streamLogs("failure", { onError: error => errors.push(error) }).wait(), /403/);
+    assert.equal(errors.length, 1);
+    stream = first.getInstance().process.streamLogs("cancelled");
+    stream.close();
+    await stream.wait();
+    assert.deepEqual(observations, ["first", "first"]);
+  } finally {
+    stream?.close();
+    Native.create = previous.create;
+    settings.config.disableH2 = previous.disableH2;
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});

@@ -70,6 +70,10 @@ type Row = {
   kind: string;
   signatures: string[];
   declared_by_shim: boolean;
+  shim_signatures: string[];
+  tested_signatures: string[];
+  live_signatures: string[];
+  verified_scenarios: string[];
   status: string;
 };
 const rows = new Map<string, Row>();
@@ -92,6 +96,11 @@ function inventory(provider: string, prefix: string, type: ts.Type, shim: ts.Typ
       kind: signatures.length ? "method" : "property",
       signatures: signatures.map((signature) => checker.signatureToString(signature)),
       declared_by_shim: !!shimProperty,
+      shim_signatures: shimProperty ? checker.getSignaturesOfType(
+        checker.getTypeOfSymbolAtLocation(shimProperty, shimProperty.valueDeclaration ?? declaration),
+        ts.SignatureKind.Call,
+      ).map((signature) => checker.signatureToString(signature)) : [],
+      tested_signatures: [], live_signatures: [], verified_scenarios: [],
       status: "unverified",
     });
     if (!signatures.length && depth < 2 && value.getFlags() & ts.TypeFlags.Object) {
@@ -127,10 +136,29 @@ for (let index = 0; index < process.argv.length; index++) {
     evidence.push(...text.split("\n").filter(Boolean).map((line) => JSON.parse(line)));
   }
 }
+for (const item of evidence) {
+  if (item.signatures !== undefined && (!item.signatures || Array.isArray(item.signatures) ||
+    typeof item.signatures !== "object" || !Object.entries(item.signatures).every(([api, values]) =>
+      Array.isArray(item.apis) && item.apis.includes(api) && Array.isArray(values) &&
+      values.every((value) => typeof value === "string" && value.trim())))) {
+    throw new Error("Invalid compatibility signature evidence");
+  }
+}
+const rejectedEvidence = evidence.filter((item) => {
+  const module = roots.find(([provider]) => provider === item.provider)?.[1];
+  return item.implementation_fingerprint !== fingerprint || !module || item.vendor_version !== vendorVersions[module];
+}).length;
 for (const row of rows.values()) {
   const module = roots.find(([provider]) => provider === row.provider)![1];
-  row.status = verifiedScenarios(row.id, evidence.filter((item) => item.provider === row.provider), vendorVersions[module]!, fingerprint).length
-    ? "scenario_verified" : "unverified";
+  const providerEvidence = evidence.filter((item) => item.provider === row.provider);
+  row.verified_scenarios = verifiedScenarios(row.id, providerEvidence, vendorVersions[module]!, fingerprint);
+  row.status = row.verified_scenarios.length ? "scenario_verified" : "unverified";
+  row.tested_signatures = row.signatures.filter((signature) => providerEvidence.some((item) =>
+    item.implementation_fingerprint === fingerprint && item.vendor_version === vendorVersions[module] &&
+    item.outcome === "passed" && item.apis.includes(row.id) && item.signatures?.[row.id]?.includes(signature)));
+  row.live_signatures = row.signatures.filter((signature) => verifiedScenarios(row.id, providerEvidence.map((item) => ({
+    ...item, apis: item.signatures?.[row.id]?.includes(signature) ? item.apis : [],
+  })), vendorVersions[module]!, fingerprint).length > 0);
 }
 const counts: Record<string, number> = {};
 const scopeIndex = process.argv.indexOf("--scope");
@@ -161,6 +189,13 @@ const report = {
   missing_roots: missingRoots,
   diagnostics: diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")),
   counts,
+  rejected_evidence: rejectedEvidence,
+  signature_counts: {
+    vendor: selectedRows.reduce((total, row) => total + row.signatures.length, 0),
+    shim_declared: selectedRows.reduce((total, row) => total + row.shim_signatures.length, 0),
+    tested: selectedRows.reduce((total, row) => total + row.tested_signatures.length, 0),
+    live: selectedRows.reduce((total, row) => total + row.live_signatures.length, 0),
+  },
   full_api_equivalence: false,
   apis: selectedRows.sort((a, b) => a.id.localeCompare(b.id)),
 };
@@ -168,6 +203,7 @@ const output = JSON.stringify(report, null, 2) + "\n";
 const outputIndex = process.argv.indexOf("--output");
 if (outputIndex >= 0) await writeFile(process.argv[outputIndex + 1]!, output);
 else process.stdout.write(output);
-if (process.argv.includes("--fail-on-unverified") && (!report.complete_inventory || selectedRows.some((row) => row.status === "unverified"))) {
+if (process.argv.includes("--fail-on-unverified") && (!report.complete_inventory || rejectedEvidence > 0 || selectedRows.some((row) =>
+  row.status === "unverified" || row.signatures.length !== row.live_signatures.length))) {
   process.exitCode = 1;
 }

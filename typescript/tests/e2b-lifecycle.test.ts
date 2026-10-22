@@ -110,8 +110,9 @@ test("Arker binary reads preserve every byte and the native Uint8Array type", as
   assert.equal(calls, 1);
   await sandbox.files.write("/binary", payload.buffer);
   assert.equal(calls, 2);
-  await assert.rejects(sandbox.files.read("/binary", { format: "stream" }), /format/);
-  assert.equal(calls, 2);
+  const stream = await sandbox.files.read("/binary", { format: "stream" });
+  assert.deepEqual(new Uint8Array(await new Response(stream).arrayBuffer()), payload);
+  assert.equal(calls, 3);
 });
 
 test("Arker writes and metadata match the E2B default user", async () => {

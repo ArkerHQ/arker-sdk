@@ -718,3 +718,54 @@ def test_cache_cannot_override_configured_providers(tmp_path: Path) -> None:
         },
     )
     assert found == ("e2b", "native")
+
+
+@pytest.mark.parametrize("identifier", ["__proto__", "constructor", "toString", "é" * 10])
+def test_cache_keys_and_utf8_byte_bound(tmp_path, identifier):
+    path = tmp_path / "cache.json"
+    cache = JsonRouteCache(path, max_bytes=100, now=lambda: 0)
+    assert cache.get(identifier) is None
+    cache.set(identifier, "arker")
+    assert cache.get(identifier) == "arker"
+    assert path.stat().st_size <= 100
+    cache.delete(identifier)
+    assert cache.get(identifier) is None
+
+
+def test_cache_bound_smaller_than_empty_payload(tmp_path):
+    path = tmp_path / "cache.json"
+    cache = JsonRouteCache(path, max_bytes=1)
+    cache.set("id", "arker")
+    assert not path.exists() or path.stat().st_size <= 1
+    assert cache.get("id") is None
+
+
+def test_toml_router_config_is_rejected(tmp_path):
+    path = tmp_path / "router.toml"
+    path.write_text('version = 1\n[existing]\nstrategy = "priority"\norder = ["arker"]\n')
+    with pytest.raises(ValueError):
+        load_router_config(path)
+
+
+@pytest.mark.parametrize("strategy", ["priority", "race"])
+def test_cached_miss_invalidates_but_error_preserves_hint(router_file, strategy):
+    raw = json.loads(router_file.read_text())
+    raw["existing"]["strategy"] = strategy
+    router_file.write_text(json.dumps(raw))
+    cache = JsonRouteCache(raw["cache"]["path"])
+    cache.set("shared", "e2b")
+    error = RuntimeError("lookup unavailable")
+
+    def fail():
+        raise error
+
+    def unexpected():
+        pytest.fail("cached lookup failure must not fall through")
+
+    config = {"router_config_path": router_file}
+    with pytest.raises(RuntimeError) as caught:
+        routed_get("shared", "e2b", config, {"e2b": fail, "arker": unexpected})
+    assert caught.value is error
+    assert cache.get("shared") == "e2b"
+    assert routed_get("shared", "e2b", config, {"e2b": lambda: None, "arker": lambda: None}) is None
+    assert cache.get("shared") is None

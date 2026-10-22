@@ -1,5 +1,7 @@
+import { DaytonaError } from "@daytona/sdk";
 import type { DaytonaConfig as NativeDaytonaConfig, Sandbox as NativeSandbox } from "@daytona/sdk";
 import { createNativeDaytonaProvider } from "./compat/daytona-provider.js";
+import { DaytonaFileSystem, daytonaGuestCommand } from "./compat/daytona-filesystem.js";
 import { ArkerError } from "./index.js";
 
 import { assertSupportedObjectKeys, guardUnsupported, nativeInstance, type UniversalSandbox } from "./compat/common.js";
@@ -54,6 +56,7 @@ function arkerCreateOptions(options: Record<string, unknown>): Record<string, un
 export class Sandbox {
   readonly id: string;
   readonly provider: string;
+  readonly fs: Pick<NativeSandbox["fs"], "createFolder" | "deleteFile" | "getFileDetails" | "listFiles" | "moveFiles" | "setFilePermissions" | "uploadFile" | "uploadFiles" | "downloadFile" | "downloadFiles">;
   #box: UniversalSandbox;
 
   readonly process: {
@@ -70,12 +73,23 @@ export class Sandbox {
     this.#box = box;
     this.id = box.sandboxId;
     this.provider = box.provider;
+    const nativeFilesystem = (nativeInstance(box) as NativeSandbox | undefined)?.fs;
+    this.fs = nativeFilesystem ?? new DaytonaFileSystem(box);
     const run = async (command: string, options?: ExecuteCommandOptions): Promise<ExecuteResponse> => {
-      const result = await this.#box.runCommand(command, {
-        ...options,
-        ...(options?.timeout !== undefined ? { timeout: options.timeout * 1_000 } : {}),
-        ...(this.provider === "arker" && options?.cwd === undefined ? { cwd: "/home/daytona" } : {}),
-      });
+      if (options?.env) {
+        for (const key of Object.keys(options.env)) {
+          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new TypeError("Invalid environment variable name");
+        }
+      }
+      const { cwd, env, ...transport } = options ?? {};
+      const result = await this.#box.runCommand(
+        this.provider === "arker" ? daytonaGuestCommand({ operation: "exec", command, cwd, env }) : command,
+        {
+          ...transport,
+          ...(this.provider !== "arker" ? { cwd, env } : {}),
+          ...(options?.timeout !== undefined ? { timeout: options.timeout * 1_000 } : {}),
+        },
+      );
       return {
         exitCode: result.exitCode,
         result: result.stdout,
@@ -93,6 +107,14 @@ export class Sandbox {
           return { exitCode: result.exitCode, result: result.result, artifacts: { stdout: result.result } };
         },
     };
+  }
+
+  async getUserHomeDir(): Promise<string | undefined> {
+    const native = nativeInstance(this.#box) as NativeSandbox | undefined;
+    if (native) return native.getUserHomeDir();
+    const result = await this.process.executeCommand('printf "%s" "$HOME"');
+    if (result.exitCode !== 0) throw new DaytonaError("Failed to get user home directory");
+    return result.result;
   }
 
   async delete(): Promise<void> {

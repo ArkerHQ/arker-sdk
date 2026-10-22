@@ -29,6 +29,13 @@ ROOTS = {
         ("async", "Sandbox", "e2b:AsyncSandbox", "arker.e2b:AsyncSandbox"),
         ("async", "CommandHandle", "e2b:AsyncCommandHandle", "arker.e2b:AsyncCommandHandle"),
         ("async", "CommandInputHandle", "e2b:AsyncCommandInputHandle", "arker.e2b:AsyncCommandInputHandle"),
+        ("sync", "Sandbox.files", "e2b.sandbox_sync.filesystem.filesystem:Filesystem", "arker.e2b:Files"),
+        (
+            "async",
+            "Sandbox.files",
+            "e2b.sandbox_async.filesystem.filesystem:Filesystem",
+            "arker._compat_e2b_async:_AsyncFiles",
+        ),
         ("sync", "Template", "e2b:Template", "arker.e2b:Template"),
         ("sync", "Volume", "e2b:Volume", "arker.e2b:Volume"),
         ("sync", "Secret", "e2b:Secret", "arker.e2b:Secret"),
@@ -39,6 +46,13 @@ ROOTS = {
         ("async", "Daytona", "daytona:AsyncDaytona", "arker.daytona:AsyncDaytona"),
         ("async", "Sandbox", "daytona:AsyncSandbox", "arker.daytona:AsyncSandbox"),
         ("sync", "Image", "daytona:Image", "arker.daytona:Image"),
+        ("sync", "Sandbox.fs", "daytona._sync.filesystem:FileSystem", "arker._daytona_filesystem:FileSystem"),
+        (
+            "async",
+            "Sandbox.fs",
+            "daytona._async.filesystem:AsyncFileSystem",
+            "arker._daytona_filesystem:AsyncFileSystem",
+        ),
     ],
     "modal": [
         ("sync", "Sandbox", "modal:Sandbox", "arker.modal:Sandbox"),
@@ -157,7 +171,11 @@ def signature(member: Any) -> str | None:
         return None
 
 
-def verified_scenarios(api, evidence, version, fingerprint):
+def signatures(member):
+    return [value for method in (typing.get_overloads(member) or [member]) if (value := signature(method))]
+
+
+def verified_scenarios(api, evidence, version, fingerprint, required_signature=None):
     groups = {}
     failures = set()
     for item in evidence:
@@ -169,12 +187,21 @@ def verified_scenarios(api, evidence, version, fingerprint):
             or item.get("outcome") not in ("passed", "failed")
             or not isinstance(item.get("apis"), list)
             or not all(isinstance(api, str) and api.strip() for api in item["apis"])
+            or not isinstance(item.get("signatures", {}), dict)
+            or not all(
+                key in item["apis"]
+                and isinstance(values, list)
+                and all(isinstance(value, str) and value.strip() for value in values)
+                for key, values in item.get("signatures", {}).items()
+            )
         ):
             raise ValueError("Invalid compatibility evidence")
         group = (item["run"], item["scenario"])
         if item.get("outcome") != "passed":
             failures.add(group)
-        elif api in item.get("apis", []):
+        elif api in item.get("apis", []) and (
+            required_signature is None or required_signature in item.get("signatures", {}).get(api, [])
+        ):
             groups.setdefault(group, set()).add(item["route"])
     return sorted(
         f"{group[0]}:{group[1]}"
@@ -201,7 +228,10 @@ def surfaces(provider: str, style: str, prefix: str, native: type, shim: type | 
         module = getattr(member, "__module__", getattr(type(raw), "__module__", ""))
         if not module.startswith(("e2b", "daytona", "modal", "blaxel")):
             continue
-        implemented = shim is not None and inspect.getattr_static(shim, name, None) is not None
+        shim_member = inspect.getattr_static(shim, name, None) if shim is not None else None
+        implemented = shim_member is not None
+        if isinstance(shim_member, (property, classmethod, staticmethod)):
+            shim_member = shim_member.fget if isinstance(shim_member, property) else shim_member.__func__
         if provider == "modal" and style == "async":
             if not hasattr(member, "aio"):
                 continue
@@ -213,7 +243,9 @@ def surfaces(provider: str, style: str, prefix: str, native: type, shim: type | 
             "api": f"{prefix}.{name}",
             "kind": kind,
             "signature": signature(member),
+            "signatures": signatures(member) if kind == "method" else [],
             "declared_by_shim": implemented,
+            "shim_signatures": signatures(shim_member) if kind == "method" and implemented else [],
         }
         if kind == "property" and depth < 2:
             try:
@@ -279,12 +311,35 @@ def main() -> None:
         except importlib.metadata.PackageNotFoundError:
             missing.append({"provider": provider, "error": "vendor SDK is not installed"})
     rows = list({row["id"]: row for row in rows}.values())
+    rejected_evidence = sum(
+        item.get("implementation_fingerprint") != fingerprint
+        or item.get("vendor_version") != versions.get(item.get("provider"))
+        for item in evidence
+    )
     for row in rows:
         provider_evidence = [item for item in evidence if item.get("provider") == row["provider"]]
         row["verified_scenarios"] = verified_scenarios(
             row["id"], provider_evidence, versions[row["provider"]], fingerprint
         )
         row["status"] = "scenario_verified" if row["verified_scenarios"] else "unverified"
+        vendor_signatures = row["signatures"]
+        row["tested_signatures"] = [
+            sig
+            for sig in vendor_signatures
+            if any(
+                item.get("implementation_fingerprint") == fingerprint
+                and item.get("vendor_version") == versions[row["provider"]]
+                and item.get("outcome") == "passed"
+                and row["id"] in item["apis"]
+                and sig in item.get("signatures", {}).get(row["id"], [])
+                for item in provider_evidence
+            )
+        ]
+        row["live_signatures"] = [
+            sig
+            for sig in vendor_signatures
+            if verified_scenarios(row["id"], provider_evidence, versions[row["provider"]], fingerprint, sig)
+        ]
     rows, exclusions = select_scope(rows, args.scope)
     report = {
         "schema_version": 1,
@@ -301,6 +356,14 @@ def main() -> None:
         "complete_inventory": bool(rows) and not missing,
         "missing_roots": missing,
         "counts": dict(Counter(row["status"] for row in rows)),
+        "rejected_evidence": rejected_evidence,
+        "signature_counts": {
+            "vendor": sum(len(row["signatures"]) for row in rows),
+            "shim_declared": sum(len(row["shim_signatures"]) for row in rows),
+            "tested": sum(len(row["tested_signatures"]) for row in rows),
+            "live": sum(len(row["live_signatures"]) for row in rows),
+            "unknown": sum(row["kind"] == "method" and not row["signatures"] for row in rows),
+        },
         "full_api_equivalence": False,
         "apis": rows,
     }
@@ -310,7 +373,10 @@ def main() -> None:
     else:
         print(output, end="")
     if args.fail_on_unverified and (
-        not report["complete_inventory"] or any(row["status"] == "unverified" for row in rows)
+        not report["complete_inventory"]
+        or rejected_evidence
+        or report["signature_counts"]["unknown"]
+        or any(row["status"] == "unverified" or row["signatures"] != row["live_signatures"] for row in rows)
     ):
         raise SystemExit(1)
 

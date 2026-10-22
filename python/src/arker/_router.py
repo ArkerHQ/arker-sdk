@@ -206,7 +206,7 @@ class JsonRouteCache:
 
     def _read(self) -> dict[str, Any]:
         try:
-            payload = json.loads(self.path.read_text())
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
             if (
                 not isinstance(payload, dict)
                 or type(payload.get("version")) is not int
@@ -233,14 +233,17 @@ class JsonRouteCache:
         while len(ordered) > self.max_entries:
             identifier, _ = ordered.pop(0)
             payload["entries"].pop(identifier, None)
-        while ordered and len(json.dumps(payload, separators=(",", ":")).encode()) > self.max_bytes:
+        while ordered and len(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()) > self.max_bytes:
             identifier, _ = ordered.pop(0)
             payload["entries"].pop(identifier, None)
+        if len(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()) > self.max_bytes:
+            self.path.unlink(missing_ok=True)
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(prefix=f".{self.path.name}.", dir=self.path.parent)
         try:
-            with os.fdopen(fd, "w") as handle:
-                json.dump(payload, handle, separators=(",", ":"))
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, separators=(",", ":"), ensure_ascii=False)
             os.replace(temporary, self.path)
         finally:
             with suppress(FileNotFoundError):

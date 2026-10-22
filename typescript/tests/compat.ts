@@ -157,13 +157,16 @@ async function testDaytonaSurface(): Promise<void> {
 
     const result = await sandbox.process.exec("echo hi", { cwd: "/workspace", env: { A: "b" }, timeout: 100 });
     assert.equal(result.exitCode, 7);
-    assert.equal(result.result, "stdout:echo hi");
-    assert.equal(result.stdout, "stdout:echo hi");
-    assert.equal(result.stderr, "stderr:echo hi");
-    assert.deepEqual(box.runCalls[0]!.options, { cwd: "/workspace", env: { A: "b" }, timeout: 100_000 });
+    assert.equal(result.result, `stdout:${box.runCalls[0]!.command}`);
+    assert.equal(result.stdout, `stdout:${box.runCalls[0]!.command}`);
+    assert.equal(result.stderr, `stderr:${box.runCalls[0]!.command}`);
+    assert.match(box.runCalls[0]!.command, /setpriv --reuid=daytona/);
+    assert.match(box.runCalls[0]!.command, /"command":"echo hi","cwd":"\/workspace","env":\{"A":"b"\}/);
+    assert.deepEqual(box.runCalls[0]!.options, { timeout: 100_000 });
     const executeCommandResult = await sandbox.process.executeCommand("echo compat", "/official", { OFFICIAL: "yes" }, 12);
-    assert.equal(executeCommandResult.result, "stdout:echo compat");
-    assert.deepEqual(box.runCalls[1]!.options, { cwd: "/official", env: { OFFICIAL: "yes" }, timeout: 12_000 });
+    assert.equal(executeCommandResult.result, `stdout:${box.runCalls[1]!.command}`);
+    assert.match(box.runCalls[1]!.command, /"command":"echo compat","cwd":"\/official","env":\{"OFFICIAL":"yes"\}/);
+    assert.deepEqual(box.runCalls[1]!.options, { timeout: 12_000 });
 
     await daytona.create({ image: "ubuntu:24.04", resources: { cpu: 4, memory: 8, disk: 20 } });
     assert.deepEqual((fake.createCalls[1] as any).resources, { cpu: 4, memory: 8, disk: 20 });
@@ -498,13 +501,13 @@ async function testModalSurface(): Promise<void> {
     const proc = await sandbox.exec(["sh", "-c", "echo modal"], {
       workdir: "/workspace",
       env: { FOO: "bar" },
-      timeoutMs: 456,
+      timeoutMs: 1000,
     });
     assert.equal(await proc.stdout.readText(), "stdout:echo modal");
     assert.equal(await proc.stderr.readText(), "stderr:echo modal");
     assert.equal(await proc.wait(), 7);
     assert.deepEqual(requests[0], {
-      command: "sh -c 'echo modal'", argv: ["sh", "-c", "echo modal"], spawnFailureExitCode: 128, preserveDescendants: true, workingDir: "/workspace", env: { FOO: "bar" }, timeout: 456, stdin: true,
+      command: "sh -c 'echo modal'", argv: ["sh", "-c", "echo modal"], spawnFailureExitCode: 128, preserveDescendants: true, workingDir: "/workspace", env: { FOO: "bar" }, timeout: 1000, stdin: true,
     });
 
     await sandbox.exec(["node", "script with space.js", "arg"]);
@@ -523,10 +526,7 @@ async function testModalSurface(): Promise<void> {
       () => sandbox.exec("pwd", { pty: true } as any),
       /unsupported option\(s\) 'pty'/,
     );
-    assert.throws(
-      () => (client.sandboxes as any).list,
-      /not supported by the Arker compatibility layer for modal/,
-    );
+    assert.equal(typeof client.sandboxes.list, "function");
   } finally {
     Object.assign(GuestProcesses.prototype, original);
     client.close();

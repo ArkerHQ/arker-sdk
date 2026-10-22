@@ -82,6 +82,10 @@ class ContentSearchMatch:
     line: int
     path: str
     text: str
+    context: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {key: value for key, value in vars(self).items() if value is not None}
 
 
 @dataclass(frozen=True)
@@ -89,6 +93,9 @@ class ContentSearchResponse:
     matches: list[ContentSearchMatch]
     query: str
     total: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"matches": [match.to_dict() for match in self.matches], "query": self.query, "total": self.total}
 
 
 @dataclass(frozen=True)
@@ -410,12 +417,12 @@ class FileSystem:
                 file_pattern=file_pattern,
                 exclude_dirs=exclude_dirs,
             )
-        if context_lines not in {None, 0}:
-            raise UnsupportedCompatibilityOption("Arker fs.grep context_lines are not supported")
+        if context_lines is not None and context_lines < 0:
+            raise ValueError("context_lines must be nonnegative")
         if max_results is not None and max_results < 0:
             raise ValueError("max_results must be nonnegative")
-        flags = ["-R", "-n", "--null", "-F"]
-        if case_sensitive is False:
+        flags = ["-R", "-n", "-H", "--null", "-F", "-I"]
+        if case_sensitive is not True:
             flags.append("-i")
         if file_pattern:
             flags.extend(["--include", file_pattern])
@@ -430,28 +437,42 @@ class FileSystem:
                 shlex.quote(_filesystem_path(path)),
             ]
         )
-        result = run_command(self._vm, command)
+        result = run_command(self._vm, f"test -d {shlex.quote(_filesystem_path(path))} || exit 2; {command}")
         if result.exit_code not in {0, 1}:
             raise RuntimeError(result.stderr or f"grep failed with exit {result.exit_code}")
         matches: list[ContentSearchMatch] = []
-        for record in result.stdout.splitlines():
-            filename, separator, remainder = record.partition("\0")
-            line_text, colon, text = remainder.partition(":")
-            if not separator or not colon or not line_text.isdigit():
+        contents: dict[str, list[str]] = {}
+        limit = 100 if max_results is None else max_results
+        offset = 0
+        for record in re.finditer(r"([^\0]+)\0([0-9]+):([^\n]*)(?:\n|$)", result.stdout):
+            if record.start() != offset:
                 raise RuntimeError("Incomplete grep response")
-            needle = query if case_sensitive is not False else query.lower()
-            haystack = text if case_sensitive is not False else text.lower()
+            offset = record.end()
+            if len(matches) >= limit:
+                continue
+            filename, line_text, text = record.groups()
+            line = int(line_text)
+            needle = query if case_sensitive is True else query.lower()
+            haystack = text if case_sensitive is True else text.lower()
+            context = None
+            if context_lines:
+                if filename not in contents:
+                    contents[filename] = self.read(filename).split("\n")
+                context = "\n".join(contents[filename][max(0, line - context_lines - 1) : line + context_lines])
             matches.append(
                 ContentSearchMatch(
                     column=max(haystack.find(needle), 0) + 1,
-                    line=int(line_text),
-                    path=filename,
+                    line=line,
+                    path=posixpath.relpath(filename, _filesystem_path(path)),
                     text=text,
+                    context=context,
                 )
             )
-        if max_results is not None:
-            matches = matches[:max_results]
-        return ContentSearchResponse(matches=matches, query=query, total=len(matches))
+        if offset != len(result.stdout):
+            raise RuntimeError("Incomplete grep response")
+        response = ContentSearchResponse(matches=matches, query=query, total=len(matches))
+        models = import_optional("blaxel.core.sandbox.client.models")
+        return models.ContentSearchResponse.from_dict(response.to_dict()) if models is not None else response
 
     def watch(self, path: str, callback: Any, options: dict[str, Any] | None = None) -> Any:
         if self._vm is None:
