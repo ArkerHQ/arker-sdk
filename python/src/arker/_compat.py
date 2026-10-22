@@ -106,7 +106,7 @@ def arker_create(
         request["image"] = image
         if cfg.get("registry_auth") is not None:
             request["registry_auth"] = cfg["registry_auth"]
-    elif not template_id and (source_id := cfg.get("source_vm_id")):
+    elif not template_id and (source_id := cfg.get("source_vm_id") or os.environ.get("ARKER_SOURCE_VM_ID")):
         request["source_vm_id"] = source_id
     else:
         request["source_vm_name"] = template_id or arker_source(config)

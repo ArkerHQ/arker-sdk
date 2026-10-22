@@ -257,6 +257,21 @@ def test_shared_fork_preserves_legacy_named_source_environment(monkeypatch):
     assert json.loads(t.calls[0]["body"])["source_vm_name"] == "legacy-source-name"
 
 
+@pytest.mark.parametrize("configured_id", [None, "configured-parent-id"])
+def test_shared_fork_accepts_unambiguous_parent_id_environment(monkeypatch, configured_id):
+    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
+    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+    monkeypatch.setenv("ARKER_SOURCE_VM_ID", "environment-parent-id")
+    monkeypatch.setenv("ARKER_SOURCE_VM", "legacy-source-name")
+    transport = FakeTransport()
+    transport.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, vm_payload("vm_child"))
+    with use_transport(transport):
+        arker_create({"source_vm_id": configured_id} if configured_id else {})
+    request = json.loads(transport.calls[0]["body"])
+    assert request["source_vm_id"] == (configured_id or "environment-parent-id")
+    assert "source_vm_name" not in request
+
+
 @pytest.mark.parametrize("ordered", [False, True])
 def test_native_network_floor_preserves_configured_policy_controls(monkeypatch, ordered):
     monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")

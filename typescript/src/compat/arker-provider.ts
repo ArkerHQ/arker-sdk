@@ -352,7 +352,7 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
             422,
           );
         }
-        const sourceVmId = options?.snapshotId || config.sourceVmId || env("ARKER_SOURCE_VM");
+        const sourceVmId = options?.snapshotId || config.sourceVmId || env("ARKER_SOURCE_VM_ID") || env("ARKER_SOURCE_VM");
         const sourceVmName = options?.templateId || config.sourceVmName || config.source || env("ARKER_SOURCE");
         if (values.image !== undefined && (typeof values.image !== "string" || !values.image.trim())) {
           throw new ArkerError("unsupported_operation", "Arker image must be a published image reference, not a provider-specific image builder", 422);

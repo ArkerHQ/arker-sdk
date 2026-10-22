@@ -764,6 +764,27 @@ async function testSharedForkPolicySecretsAndRegistry(): Promise<void> {
   assert.ok(policies.rules.inherited, "network translation must not mutate caller policy config");
 }
 
+async function testSharedForkParentIdEnvironment(): Promise<void> {
+  const previous = process.env.ARKER_SOURCE_VM_ID;
+  process.env.ARKER_SOURCE_VM_ID = "environment-parent-id";
+  try {
+    for (const configuredId of [undefined, "configured-parent-id"]) {
+      const fetch = new FakeFetch();
+      fetch.addJson((method, url) => method === "POST" && url.endsWith("/v1/fork"), 200,
+        { vm_id: "vm_child", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] });
+      const provider = createArkerComputeProvider({ apiKey: "test", sourceVmId: configuredId,
+        baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false });
+      await provider.sandbox.create();
+      const request = JSON.parse(fetch.calls[0]!.body!);
+      assert.equal(request.source_vm_id, configuredId ?? "environment-parent-id");
+      assert.equal(request.source_vm_name, undefined);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.ARKER_SOURCE_VM_ID;
+    else process.env.ARKER_SOURCE_VM_ID = previous;
+  }
+}
+
 async function testDaytonaResourceUnits(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson((method, url) => method === "POST" && url.endsWith("/v1/fork"), 200,
@@ -1104,6 +1125,7 @@ await testInvalidNetworkAllowlistsNeverMeanUnrestricted();
 await testInternalArkerDirectoryNames();
 await testInternalArkerProviderSourceProvenance();
 await testSharedForkPolicySecretsAndRegistry();
+await testSharedForkParentIdEnvironment();
 await testDaytonaResourceUnits();
 await testInternalArkerProviderPolicyReplacement();
 await testOrderedPolicyControlsSurviveNativeNetworkRestrictions();

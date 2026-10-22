@@ -18,7 +18,11 @@ over the configured parent. Python's explicit `template_id` takes precedence
 over a configured parent ID. Otherwise a parent ID takes precedence over a
 source name.
 Python retains its legacy named-source `ARKER_SOURCE_VM` interpretation; use
-the explicit `source_vm_id` setting for a parent ID.
+the explicit `source_vm_id` setting for a parent ID. Both languages also accept
+`ARKER_SOURCE_VM_ID` as an unambiguous parent ID; an explicit configured parent
+ID takes precedence over that environment variable. The older `ARKER_SOURCE_VM`
+remains a name in Python and an ID in TypeScript for compatibility; new shared
+configuration should use `ARKER_SOURCE_VM_ID`, not the ambiguous legacy variable.
 
 Both adapters accept an Arker `policies` configuration passed to the fork API.
 Named policy secrets are host-side values, not guest environment variables.
