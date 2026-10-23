@@ -1645,10 +1645,10 @@ class ApiKeyPoolScope:
     pool_id: str
 
 
-VmMetadata: TypeAlias = dict[str, str]
+VmAttributes: TypeAlias = dict[str, str]
 
 
-VmMetadataUpdate: TypeAlias = dict[str, str | None]
+VmAttributesUpdate: TypeAlias = dict[str, str | None]
 
 
 @dataclass(frozen=True)
@@ -1664,7 +1664,7 @@ class ListVmsParameters:
     created_after: str | None = None
     created_before: str | None = None
     pool_id: str | None = None
-    metadata: VmMetadata | None = None
+    attributes: VmAttributes | None = None
 
 
 @dataclass(frozen=True)
@@ -2182,7 +2182,7 @@ class ForkRequest1:
     source_org_name: None = None
     name: str | None = None
     description: str | None = None
-    metadata: VmMetadataUpdate | None = None
+    attributes: VmAttributesUpdate | None = None
     public: bool | None = None
     ssh_public_keys: SshKeysUpdate | list[str] | None = None
     disk: bool | None = None
@@ -2209,7 +2209,7 @@ class ForkRequest2:
     source_org_name: None = None
     name: str | None = None
     description: str | None = None
-    metadata: VmMetadataUpdate | None = None
+    attributes: VmAttributesUpdate | None = None
     public: bool | None = None
     ssh_public_keys: SshKeysUpdate | list[str] | None = None
     disk: bool | None = None
@@ -2236,7 +2236,7 @@ class ForkRequest3:
     source_org_name: None = None
     name: str | None = None
     description: str | None = None
-    metadata: VmMetadataUpdate | None = None
+    attributes: VmAttributesUpdate | None = None
     public: bool | None = None
     ssh_public_keys: SshKeysUpdate | list[str] | None = None
     disk: bool | None = None
@@ -2263,7 +2263,7 @@ class ForkRequest4:
     source_org_id: None = None
     name: str | None = None
     description: str | None = None
-    metadata: VmMetadataUpdate | None = None
+    attributes: VmAttributesUpdate | None = None
     public: bool | None = None
     ssh_public_keys: SshKeysUpdate | list[str] | None = None
     disk: bool | None = None
@@ -2290,7 +2290,7 @@ class ForkRequest5:
     source_org_name: None = None
     name: str | None = None
     description: str | None = None
-    metadata: VmMetadataUpdate | None = None
+    attributes: VmAttributesUpdate | None = None
     public: bool | None = None
     ssh_public_keys: SshKeysUpdate | list[str] | None = None
     disk: bool | None = None
@@ -2317,7 +2317,7 @@ class ForkRequest6:
     source_org_name: None = None
     name: str | None = None
     description: str | None = None
-    metadata: VmMetadataUpdate | None = None
+    attributes: VmAttributesUpdate | None = None
     public: bool | None = None
     ssh_public_keys: SshKeysUpdate | list[str] | None = None
     disk: bool | None = None
@@ -2366,7 +2366,7 @@ SyncWriteResult: TypeAlias = (
 @dataclass(frozen=True)
 class PatchVmRequest:
     description: str | None = None
-    metadata: VmMetadataUpdate | None = None
+    attributes: VmAttributesUpdate | None = None
     immutable: bool | None = None
     resources: ResourcesInput | None = None
     ssh_public_keys: SshKeysUpdate | list[str] | None = None
@@ -2393,7 +2393,7 @@ class Vm:
     sessions: list[Session]
     resources: VmResources
     name: str | None = None
-    metadata: VmMetadata | None = None
+    attributes: VmAttributes | None = None
     hostname: str | None = None
     immutable: bool | None = None
     root_source_vm_id: str | None = None

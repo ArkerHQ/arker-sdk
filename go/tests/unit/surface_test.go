@@ -243,29 +243,29 @@ func TestUpdateLeavesImmutableOffTheWireByDefault(t *testing.T) {
 	}
 }
 
-func TestUpdateChangesMetadataByKeyAndSendsNullToRemove(t *testing.T) {
+func TestUpdateChangesAttributesByKeyAndSendsNullToRemove(t *testing.T) {
 	var body map[string]any
 	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		fmt.Fprint(w, `{"vm_id":"vm_1","metadata":{"team":"infra"}}`)
+		fmt.Fprint(w, `{"vm_id":"vm_1","attributes":{"team":"infra"}}`)
 	}, reject(t, "control"))
 
 	info, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{
-		Metadata: map[string]*string{"team": arker.Ptr("infra"), "stale": nil},
+		Attributes: map[string]*string{"team": arker.Ptr("infra"), "stale": nil},
 	})
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	want := map[string]any{"metadata": map[string]any{"team": "infra", "stale": nil}}
+	want := map[string]any{"attributes": map[string]any{"team": "infra", "stale": nil}}
 	if !reflect.DeepEqual(body, want) {
 		t.Fatalf("body = %v, want %v", body, want)
 	}
-	if want := map[string]string{"team": "infra"}; !reflect.DeepEqual(info.Metadata, want) {
-		t.Fatalf("metadata = %v, want %v", info.Metadata, want)
+	if want := map[string]string{"team": "infra"}; !reflect.DeepEqual(info.Attributes, want) {
+		t.Fatalf("attributes = %v, want %v", info.Attributes, want)
 	}
 }
 
-func TestUpdateLeavesMetadataOffTheWireByDefault(t *testing.T) {
+func TestUpdateLeavesAttributesOffTheWireByDefault(t *testing.T) {
 	var body map[string]any
 	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -276,37 +276,37 @@ func TestUpdateLeavesMetadataOffTheWireByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if _, present := body["metadata"]; present {
-		t.Fatal("a description-only update sent metadata")
+	if _, present := body["attributes"]; present {
+		t.Fatal("a description-only update sent attributes")
 	}
-	if len(info.Metadata) != 0 {
-		t.Fatalf("a VM without metadata read as %v", info.Metadata)
+	if len(info.Attributes) != 0 {
+		t.Fatalf("a VM without attributes read as %v", info.Attributes)
 	}
 }
 
-func TestForkSendsMetadataChangesThroughUnchanged(t *testing.T) {
+func TestForkSendsAttributesChangesThroughUnchanged(t *testing.T) {
 	var body map[string]any
 	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		fmt.Fprint(w, `{"vm_id":"vm_child","metadata":{"team":"infra","env":"ci"}}`)
+		fmt.Fprint(w, `{"vm_id":"vm_child","attributes":{"team":"infra","env":"ci"}}`)
 	}, reject(t, "control"))
 
 	child, err := c.VM("vm_source").Fork(context.Background(), arker.ForkRequest{
-		Metadata: map[string]*string{"env": arker.Ptr("ci"), "stale": nil},
+		Attributes: map[string]*string{"env": arker.Ptr("ci"), "stale": nil},
 	})
 	if err != nil {
 		t.Fatalf("fork: %v", err)
 	}
-	want := map[string]any{"source_vm_id": "vm_source", "metadata": map[string]any{"env": "ci", "stale": nil}}
+	want := map[string]any{"source_vm_id": "vm_source", "attributes": map[string]any{"env": "ci", "stale": nil}}
 	if !reflect.DeepEqual(body, want) {
 		t.Fatalf("body = %v, want %v", body, want)
 	}
-	if want := map[string]string{"team": "infra", "env": "ci"}; !reflect.DeepEqual(child.Info.Metadata, want) {
-		t.Fatalf("metadata = %v, want %v", child.Info.Metadata, want)
+	if want := map[string]string{"team": "infra", "env": "ci"}; !reflect.DeepEqual(child.Info.Attributes, want) {
+		t.Fatalf("attributes = %v, want %v", child.Info.Attributes, want)
 	}
 }
 
-func TestListVMsFiltersByMetadataAsDeepObjectPairs(t *testing.T) {
+func TestListVMsFiltersByAttributesAsDeepObjectPairs(t *testing.T) {
 	var query string
 	c := twoPlane(t, reject(t, "regional"), func(w http.ResponseWriter, r *http.Request) {
 		query = r.URL.RawQuery
@@ -314,16 +314,16 @@ func TestListVMsFiltersByMetadataAsDeepObjectPairs(t *testing.T) {
 	})
 
 	list, err := c.ListVMs(context.Background(), arker.ListVMsOptions{
-		Metadata: map[string]string{"team": "infra", "env": "a&b"},
+		Attributes: map[string]string{"team": "infra", "env": "a&b"},
 	})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if want := "metadata%5Benv%5D=a%26b&metadata%5Bteam%5D=infra"; query != want {
+	if want := "attributes%5Benv%5D=a%26b&attributes%5Bteam%5D=infra"; query != want {
 		t.Fatalf("query = %q, want %q", query, want)
 	}
-	if len(list.VMs[0].Info.Metadata) != 0 {
-		t.Fatalf("a VM without metadata read as %v", list.VMs[0].Info.Metadata)
+	if len(list.VMs[0].Info.Attributes) != 0 {
+		t.Fatalf("a VM without attributes read as %v", list.VMs[0].Info.Attributes)
 	}
 }
 

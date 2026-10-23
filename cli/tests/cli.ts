@@ -1345,12 +1345,10 @@ async function testFalseMutationResultsExitNonzero(): Promise<void> {
   }
 }
 
-async function testMetadataFlagsFailBeforeRequest(): Promise<void> {
+async function testAttributesFlagsFailBeforeRequest(): Promise<void> {
   for (const { args, message } of [
-    { args: ["update", "vm_1", "--metadata", "team"], message: /must use KEY=VALUE/ },
-    { args: ["ls", "--metadata", "=infra"], message: /must use KEY=VALUE/ },
-    { args: ["fork", "ubuntu", "--metadata", "team=infra", "--remove-metadata", "team"], message: /both set and removed/ },
-    { args: ["ls", "--remove-metadata", "team"], message: /unknown parameter "remove-metadata"/ },
+    { args: ["update", "vm_1", "--attribute", "team"], message: /must use KEY=VALUE/ },
+    { args: ["ls", "--attribute", "=infra"], message: /must use KEY=VALUE/ },
   ]) {
     await withCapturedServer((_request, res) => jsonResponse(res, { vm_id: "vm_1" }), async (baseUrl, requests) => {
       const result = await runCli(baseUrl, args);
@@ -1361,15 +1359,15 @@ async function testMetadataFlagsFailBeforeRequest(): Promise<void> {
   }
 }
 
-async function testVmsGetShowsMetadata(): Promise<void> {
+async function testVmsGetShowsAttributes(): Promise<void> {
   await withCapturedServer(
     (_request, res) => jsonResponse(res, { vm_id: "vm_1", description: "CI runner", state: "idle" }),
     async (baseUrl) => {
       const result = await runCli(baseUrl, ["vms", "get", "vm_1"]);
       assert.equal(result.code, 0, result.stderr);
-      const shown = JSON.parse(stdoutText(result)) as { description: string; metadata: unknown };
+      const shown = JSON.parse(stdoutText(result)) as { description: string; attributes: unknown };
       assert.equal(shown.description, "CI runner");
-      assert.deepEqual(shown.metadata, {});
+      assert.deepEqual(shown.attributes, {});
     },
   );
 }
@@ -1453,33 +1451,33 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
       body: { immutable: true },
     },
     {
-      name: "vms update --metadata",
+      name: "vms update --attribute",
       args: [
         "vms", "update",
-        "--metadata", "team=infra",
-        "--metadata", "query=a=b",
-        "--remove-metadata", "stale",
+        "--attribute", "team=infra",
+        "--attribute", "query=a=b",
+        "--attribute", "stale=null",
         "vm_1",
       ],
-      response: { vm_id: "vm_1", state: "idle", metadata: { team: "infra", query: "a=b" } },
+      response: { vm_id: "vm_1", state: "idle", attributes: { team: "infra", query: "a=b" } },
       method: "PATCH",
       url: "/api/v1/vms/vm_1",
-      body: { metadata: { team: "infra", query: "a=b", stale: null } },
+      body: { attributes: { team: "infra", query: "a=b", stale: null } },
     },
     {
-      name: "vms fork --metadata",
-      args: ["vms", "fork", "ubuntu", "--metadata", "env=ci", "--remove-metadata", "stale"],
+      name: "vms fork --attribute",
+      args: ["vms", "fork", "ubuntu", "--attribute", "env=ci", "--attribute", "stale=null"],
       response: { vm_id: "vm_child" },
       method: "POST",
       url: "/api/v1/fork",
-      body: { source_vm_name: "ubuntu", metadata: { env: "ci", stale: null } },
+      body: { source_vm_name: "ubuntu", attributes: { env: "ci", stale: null } },
     },
     {
-      name: "vms ls --metadata",
-      args: ["vms", "ls", "--metadata", "team=infra", "--metadata", "env=a&b"],
+      name: "vms ls --attribute",
+      args: ["vms", "ls", "--attribute", "team=infra", "--attribute", "env=a&b"],
       response: { vms: [] },
       method: "GET",
-      url: "/api/v1/vms?metadata%5Bteam%5D=infra&metadata%5Benv%5D=a%26b",
+      url: "/api/v1/vms?attributes%5Bteam%5D=infra&attributes%5Benv%5D=a%26b",
     },
     {
       name: "runs ls",
@@ -1596,8 +1594,8 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
 }
 
 await testForkSelectsPoolsAndUpdateRefusesThem();
-await testMetadataFlagsFailBeforeRequest();
-await testVmsGetShowsMetadata();
+await testAttributesFlagsFailBeforeRequest();
+await testVmsGetShowsAttributes();
 await testConfigCommandsAreLocalAndPreserveExistingSettings();
 await testSyncAndMutationJsonResults();
 await testRunJsonKeepsRunIdAcrossStates();

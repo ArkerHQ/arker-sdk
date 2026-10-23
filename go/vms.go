@@ -104,10 +104,10 @@ type ForkRequest struct {
 
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
-	// Metadata is a change applied over the metadata the new VM copies from
+	// Attributes is a change applied over the attributes the new VM copies from
 	// its source VM: a value sets its key, a nil value removes it, and keys
-	// not named are kept. A fork from an image starts with no metadata.
-	Metadata      map[string]*string `json:"metadata,omitempty"`
+	// not named are kept. A fork from an image starts with no attributes.
+	Attributes    map[string]*string `json:"attributes,omitempty"`
 	Public        *bool              `json:"public,omitempty"`
 	SSHPublicKeys []string           `json:"ssh_public_keys,omitempty"`
 	Resources     *Resources         `json:"resources,omitempty"`
@@ -148,7 +148,7 @@ type VMInfo struct {
 	PoolID              *string              `json:"pool_id,omitempty"`
 	Name                string               `json:"name,omitempty"`
 	Description         string               `json:"description,omitempty"`
-	Metadata            map[string]string    `json:"metadata,omitempty"`
+	Attributes          map[string]string    `json:"attributes,omitempty"`
 	OwnerOrgID          string               `json:"owner_org_id,omitempty"`
 	Hostname            string               `json:"hostname,omitempty"`
 	CreatedAt           string               `json:"created_at,omitempty"`
@@ -275,9 +275,9 @@ type ListVMsOptions struct {
 	OrgID    string
 	State    string
 	Public   *bool
-	// Metadata lists only VMs whose metadata holds every given key with
+	// Attributes lists only VMs whose attributes hold every given key with
 	// exactly that value.
-	Metadata map[string]string
+	Attributes map[string]string
 }
 
 // VMList is one page of VMs.
@@ -297,7 +297,7 @@ func (c *Client) ListVMs(ctx context.Context, opts ListVMsOptions) (*VMList, err
 	q.str("org_id", opts.OrgID)
 	q.str("state", opts.State)
 	q.boolPtr("public", opts.Public)
-	q.deepObject("metadata", opts.Metadata)
+	q.deepObject("attributes", opts.Attributes)
 	var out struct {
 		VMs        []VMInfo `json:"vms"`
 		NextCursor string   `json:"next_cursor"`
@@ -354,11 +354,11 @@ type UpdateRequest struct {
 	SSHPublicKeys *[]string     `json:"ssh_public_keys,omitempty"`
 	Policies      *PolicyUpdate `json:"policies,omitempty"`
 
-	// Metadata changes the VM's metadata by key: a value sets its key, a nil
+	// Attributes changes the VM's attributes by key: a value sets its key, a nil
 	// value removes it, and keys not named are kept.
 	//
-	//	Metadata: map[string]*string{"team": arker.Ptr("infra"), "stale": nil}
-	Metadata map[string]*string `json:"metadata,omitempty"`
+	//	Attributes: map[string]*string{"team": arker.Ptr("infra"), "stale": nil}
+	Attributes map[string]*string `json:"attributes,omitempty"`
 
 	// Immutable freezes the VM for good: it can still be viewed, listed,
 	// forked and deleted, but anything that changes or starts it is refused,
@@ -368,7 +368,7 @@ type UpdateRequest struct {
 }
 
 // Update changes this VM's description, resources, authorized SSH keys,
-// network policy and/or metadata, or makes it immutable, and returns the
+// network policy and/or attributes, or makes it immutable, and returns the
 // updated record.
 func (v *VM) Update(ctx context.Context, req UpdateRequest) (*VMInfo, error) {
 	var info VMInfo

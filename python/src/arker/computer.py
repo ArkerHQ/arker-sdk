@@ -101,8 +101,8 @@ from .generated.api_models import (
     SyncWriteResult,
     UpdatePoolRequest,
     Vm,
-    VmMetadata,
-    VmMetadataUpdate,
+    VmAttributes,
+    VmAttributesUpdate,
     VmNetwork,
     VmResources,
     WhoamiResponse,
@@ -388,10 +388,10 @@ class Arker:
         different request is a 409, and reusing it once that VM is deleted is a
         404, never a second machine. Maximum 64 characters.
 
-        ``metadata`` is a change applied over the metadata the new VM copies
+        ``attributes`` is a change applied over the attributes the new VM copies
         from its source VM: a string sets its key, ``None`` removes it, and
         keys not named are kept. A fork from an image or a Dockerfile starts
-        with no metadata.
+        with no attributes.
         """
         has_context = "context" in options
         context = options.pop("context", None)
@@ -483,12 +483,12 @@ class Arker:
         org_id: str | None = None,
         public: bool | None = None,
         state: str | None = None,
-        metadata: VmMetadata | None = None,
+        attributes: VmAttributes | None = None,
     ) -> VmList:
         """Admin call - goes through the control plane so it can
         aggregate across providers and regions.
 
-        ``metadata`` lists only VMs whose metadata holds every given key with
+        ``attributes`` lists only VMs whose attributes hold every given key with
         exactly that value.
         """
         parameters = ListVmsParameters(
@@ -499,7 +499,7 @@ class Arker:
             org_id=org_id,
             public=public,
             state=state,
-            metadata=metadata,
+            attributes=attributes,
         )
         path = _build_query("/v1/vms", parameters)
         payload = self._request("GET", path, base_url=self._control_base_url)
@@ -712,7 +712,7 @@ class VM:
     pool_id: str | None
     name: str | None
     description: str | None
-    metadata: VmMetadata | None
+    attributes: VmAttributes | None
     state: str | None
     owner_org_id: str | None
     created_at: str | None
@@ -751,7 +751,7 @@ class VM:
     def fork(self, **options: Any) -> VM:
         """Fork this VM and return its child.
 
-        The child copies this VM's metadata; ``metadata`` changes that copy,
+        The child copies this VM's attributes; ``attributes`` changes that copy,
         where a string sets its key and ``None`` removes it."""
         return self._client._fork(
             {**options, "source_vm_id": self.id},
@@ -935,11 +935,11 @@ class VM:
         description: str | _UnsetType | None = _UNSET,
         ssh_public_keys: list[str] | None = None,
         policies: PolicyUpdate | PolicyDoc | dict[str, Any] | None = None,
-        metadata: VmMetadataUpdate | None = None,
+        attributes: VmAttributesUpdate | None = None,
         immutable: bool | None = None,
     ) -> Vm:
         """Update this VM's description, resources, SSH keys, network policy,
-        or metadata, or make it immutable, via ``PATCH /v1/vms/{id}``. A VM's
+        or attributes, or make it immutable, via ``PATCH /v1/vms/{id}``. A VM's
         pool is set when it is forked and never changes.
 
         Pass an empty ``ssh_public_keys`` list to remove all authorized keys.
@@ -959,10 +959,10 @@ class VM:
                 "old": None,
             }})
 
-        ``metadata`` changes the VM's metadata by key: a string sets its key,
+        ``attributes`` changes the VM's attributes by key: a string sets its key,
         ``None`` removes it, and keys not named are kept::
 
-            vm.update(metadata={"team": "infra", "stale": None})
+            vm.update(attributes={"team": "infra", "stale": None})
 
         ``immutable=True`` freezes the VM for good: it can still be viewed,
         listed, forked, and deleted, but anything that changes or starts it is
@@ -985,7 +985,7 @@ class VM:
                 resources=resources,
                 ssh_public_keys=ssh_public_keys,
                 policies=_policy_update(policies),
-                metadata=_explicit_nulls(metadata),
+                attributes=_explicit_nulls(attributes),
                 immutable=immutable,
             )
         else:
@@ -994,7 +994,7 @@ class VM:
                 "resources": resources,
                 "ssh_public_keys": ssh_public_keys,
                 "policies": _policy_update(policies),
-                "metadata": _explicit_nulls(metadata),
+                "attributes": _explicit_nulls(attributes),
                 "immutable": immutable,
             }
         payload = self._client._request("PATCH", _vm_path(self.id), body, base_url=self.base_url)
@@ -2192,8 +2192,8 @@ def _mount(payload: dict[str, Any]) -> Mount:
 
 
 def _vm_info(payload: dict[str, Any]) -> Vm:
-    # A VM with no metadata reads as `{}`, never None.
-    return _decode_model(Vm, {**payload, "metadata": payload.get("metadata") or {}})
+    # A VM with no attributes reads as `{}`, never None.
+    return _decode_model(Vm, {**payload, "attributes": payload.get("attributes") or {}})
 
 
 def _terminal_state(state: str | None, exit_code: int | None) -> str:
