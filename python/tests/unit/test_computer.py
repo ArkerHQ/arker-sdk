@@ -439,6 +439,24 @@ def test_vm_fork_uses_its_id_and_attached_endpoint() -> None:
     }
 
 
+def test_fork_sends_attributes_changes_through_unchanged() -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "POST" and url.endswith("/v1/fork"),
+        200,
+        {**_fork_response("vm_child"), "attributes": {"team": "infra", "env": "ci"}},
+    )
+
+    with use_transport(t):
+        child = sdk.VM(client(), "vm_source").fork(attributes={"env": "ci", "stale": None})
+
+    assert json.loads(t.calls[0]["body"]) == {
+        "attributes": {"env": "ci", "stale": None},
+        "source_vm_id": "vm_source",
+    }
+    assert child.attributes == {"team": "infra", "env": "ci"}
+
+
 def test_fork_omits_source_org_when_not_explicit() -> None:
     t = FakeTransport()
     t.add_json(
@@ -695,6 +713,24 @@ def test_list_uses_configured_base_url() -> None:
     assert result.vms[0].network is not None
     assert result.vms[0].network.ssh_public_keys is None
     assert result.vms[0].resources == sdk.VmResources(vcpu=2, memory_mib=1024, disk_mib=4096)
+
+
+def test_list_vms_filters_by_attributes_as_deep_object_pairs() -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: (
+            method == "GET"
+            and url == "https://arker.ai/api/v1/vms?attributes%5Bteam%5D=infra&attributes%5Benv%5D=a%26b"
+        ),
+        200,
+        {"vms": [_fork_response("vm_1")]},
+    )
+
+    with use_transport(t):
+        result = client().list_vms(attributes={"team": "infra", "env": "a&b"})
+
+    assert len(t.calls) == 1
+    assert result.vms[0].attributes == {}
 
 
 def test_listed_vm_uses_its_placement_endpoint() -> None:
@@ -1139,6 +1175,37 @@ def test_update_leaves_immutable_off_the_wire_by_default() -> None:
         client().vm("vm_1").update(description="CI runner")
 
     assert "immutable" not in json.loads(t.calls[0]["body"])
+
+
+@pytest.mark.parametrize("description", [{}, {"description": "CI runner"}])
+def test_update_changes_attributes_by_key_and_sends_null_to_remove(description: dict[str, Any]) -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"),
+        200,
+        {**_fork_response("vm_1"), "attributes": {"team": "infra"}},
+    )
+
+    with use_transport(t):
+        result = client().vm("vm_1").update(**description, attributes={"team": "infra", "stale": None})
+
+    assert json.loads(t.calls[0]["body"]) == {**description, "attributes": {"team": "infra", "stale": None}}
+    assert result.attributes == {"team": "infra"}
+
+
+def test_update_leaves_attributes_off_the_wire_by_default() -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"),
+        200,
+        _fork_response("vm_1"),
+    )
+
+    with use_transport(t):
+        result = client().vm("vm_1").update(description="CI runner")
+
+    assert "attributes" not in json.loads(t.calls[0]["body"])
+    assert result.attributes == {}
 
 
 def test_update_can_clear_vm_description_with_null() -> None:

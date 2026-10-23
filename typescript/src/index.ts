@@ -308,6 +308,11 @@ export type ResourcesInput = ApiSchema<"ResourcesInput">;
 export type VmNetwork = ApiSchema<"VmNetwork">;
 export type Session = ApiSchema<"Session">;
 export type Vm = ApiSchema<"Vm">;
+/** A VM's attributes: string values by key. */
+export type VmAttributes = ApiSchema<"VmAttributes">;
+/** A change to a VM's attributes: a string sets its key, `null` removes it, and
+ * keys not named are kept. */
+export type VmAttributesUpdate = ApiSchema<"VmAttributesUpdate">;
 export type ListVmsResponse = ApiSchema<"ListVmsResponse">;
 export type ListSessionsResponse = ApiSchema<"ListSessionsResponse">;
 export type DeleteVmResponse = ApiSchema<"DeleteVmResponse">;
@@ -698,6 +703,10 @@ export class Arker {
    *     fork({ image: "ubuntu:24.04" })
    *     fork({ dockerfile: "FROM ubuntu:24.04\nRUN echo ready" })
    *
+   * `attributes` is a change applied over the attributes the new VM copies from
+   * its source VM: a string sets its key, `null` removes it, and keys not
+   * named are kept. A fork from an image or a Dockerfile starts with none.
+   *
    * Use {@link VM.fork} when the source is already a VM handle.
    */
   async fork(options: ForkOptions): Promise<VM> {
@@ -1027,6 +1036,8 @@ export class VM {
   readonly vm_id?: Vm["vm_id"];
   readonly pool_id?: Vm["pool_id"];
   readonly name?: Vm["name"];
+  /** `{}` when the VM has none. */
+  readonly attributes?: Vm["attributes"];
   readonly state?: Vm["state"];
   readonly owner_org_id?: Vm["owner_org_id"];
   readonly created_at?: Vm["created_at"];
@@ -1049,7 +1060,7 @@ export class VM {
     this._client = client;
     this.id = vmId;
     this.baseUrl = baseUrl;
-    if (data) Object.assign(this, data);
+    if (data) Object.assign(this, withAttributes(data));
     // Keep the client reference off enumeration so `JSON.stringify(vm)` /
     // `console.log(vm)` show just the VM's data, not the whole SDK.
     Object.defineProperty(this, "_client", { enumerable: false });
@@ -1061,7 +1072,8 @@ export class VM {
     return new VM(this._client, this.id, this.baseUrl, data);
   }
 
-  /** Fork this VM and return its child. */
+  /** Fork this VM and return its child. The child copies this VM's attributes;
+   * `attributes` changes that copy, where `null` removes a key. */
   async fork(options: Partial<ForkRequest> & ForkIdempotency = {}): Promise<VM> {
     return this._client._fork(
       { ...options, source_vm_id: this.id } as ForkRequest,
@@ -1628,9 +1640,9 @@ export class VM {
   }
 
   /**
-   * Update this VM's description, resources, SSH keys, or network policy,
-   * or make it immutable, via `PATCH /v1/vms/{id}`. Returns the updated
-   * `Vm`. A VM's pool is set when it is forked and never changes.
+   * Update this VM's description, resources, SSH keys, network policy, or
+   * attributes, or make it immutable, via `PATCH /v1/vms/{id}`. Returns the
+   * updated `Vm`. A VM's pool is set when it is forked and never changes.
    *
    * Accepts either a `PatchVmRequest` or flat resource fields
    * (`{ vcpu, memory_mib, disk_mib, vgpu }`), which are folded into
@@ -1641,6 +1653,10 @@ export class VM {
    * whole policy, and `{ policies: [] }` clears it to allow-all. Omit it to
    * leave the current policy unchanged.
    *
+   * `attributes` changes the VM's attributes by key: a string sets its key, `null`
+   * removes it, and keys not named are kept, as in
+   * `{ attributes: { team: "infra", stale: null } }`.
+   *
    * `{ immutable: true }` freezes the VM for good: it can still be viewed,
    * listed, forked, and deleted, but anything that changes or starts it is
    * refused, and its forks are mutable. Send it alone. A running VM fails with
@@ -1650,7 +1666,7 @@ export class VM {
     request:
       | PatchVmRequest
       | (ResourcesInput &
-          Pick<PatchVmRequest, "description" | "ssh_public_keys" | "policies" | "immutable">),
+          Pick<PatchVmRequest, "description" | "ssh_public_keys" | "policies" | "attributes" | "immutable">),
   ): Promise<Vm> {
     const r = request as PatchVmRequest &
       ResourcesInput & { resources?: ResourcesInput | null };
@@ -1664,9 +1680,10 @@ export class VM {
       resources,
       ssh_public_keys: r.ssh_public_keys,
       policies: r.policies && withoutReadOnlyPolicyFields(r.policies),
+      attributes: r.attributes,
       immutable: r.immutable,
     };
-    return this._client._request("PATCH", vmPath(this.id), body, this.baseUrl);
+    return withAttributes(await this._client._request<Vm>("PATCH", vmPath(this.id), body, this.baseUrl));
   }
 
   async delete(): Promise<DeleteVmResponse> {
@@ -1832,6 +1849,11 @@ function buildQuery(path: string, params: Record<string, unknown>): string {
   const usp = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null) continue;
+    if (isObject(value)) {
+      // A deepObject parameter: one `key[name]=value` pair per entry.
+      for (const [name, item] of Object.entries(value)) usp.append(`${key}[${name}]`, String(item));
+      continue;
+    }
     usp.append(key, String(value));
   }
   const qs = usp.toString();
@@ -2094,6 +2116,11 @@ function vmPath(vmId: string): string {
 
 function pathSegment(value: string): string {
   return encodeURIComponent(value);
+}
+
+/** A VM with no attributes reads as `{}`. */
+function withAttributes(vm: Vm): Vm {
+  return { ...vm, attributes: vm.attributes ?? {} };
 }
 
 function withoutUndefined(value: unknown): unknown {

@@ -445,6 +445,38 @@ async function testUpdateSendsPolicies(): Promise<void> {
   assert.equal("immutable" in JSON.parse(fetch.calls[5]!.body!), false);
 }
 
+async function testAttributesIsSentByKeyAndReadAsAnObject(): Promise<void> {
+  const vm = { vm_id: "vm_1", owner_org_id: "owner", created_at: "now", public: false, state: "idle", sessions: [] };
+  const fetch = new FakeFetch();
+
+  // update() sends the change as given: `null` removes a key.
+  fetch.addJson((method, url) => method === "PATCH" && url.endsWith("/v1/vms/vm_1"), 200, { ...vm, attributes: { team: "infra" } });
+  const updated = await client(fetch).vm("vm_1").update({ attributes: { team: "infra", stale: null } });
+  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { attributes: { team: "infra", stale: null } });
+  assert.deepEqual(updated.attributes, { team: "infra" });
+
+  // fork() sends it too, over the attributes the child copies from its source.
+  fetch.addJson((method, url) => method === "POST" && url.endsWith("/v1/fork"), 200, { ...vm, vm_id: "vm_child", attributes: { team: "infra", env: "ci" } });
+  const child = await client(fetch).vm("vm_1").fork({ attributes: { env: "ci", stale: null } });
+  assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), { attributes: { env: "ci", stale: null }, source_vm_id: "vm_1" });
+  assert.deepEqual(child.attributes, { team: "infra", env: "ci" });
+
+  // listVms() filters as deepObject pairs, and a VM without attributes reads `{}`.
+  fetch.addJson(
+    (method, url) => method === "GET" && url === "https://arker.ai/api/v1/vms?attributes%5Bteam%5D=infra&attributes%5Benv%5D=a%26b",
+    200,
+    { vms: [vm] },
+  );
+  const { vms } = await client(fetch).listVms({ attributes: { team: "infra", env: "a&b" } });
+  assert.deepEqual(vms[0]!.attributes, {});
+
+  // An update that names no attributes leaves it off the wire.
+  fetch.addJson((method, url) => method === "PATCH" && url.endsWith("/v1/vms/vm_1"), 200, vm);
+  const described = await client(fetch).vm("vm_1").update({ description: "CI runner" });
+  assert.equal("attributes" in JSON.parse(fetch.calls[3]!.body!), false);
+  assert.deepEqual(described.attributes, {});
+}
+
 async function testNestedErrorWithoutOkStillParses(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(
@@ -1310,6 +1342,7 @@ await testRemovedRunNetworkInputsFailBeforeRequests();
 await testUpdateSendsNoPool();
 await testUpdateSendsTopLevelSshPublicKeys();
 await testUpdateSendsPolicies();
+await testAttributesIsSentByKeyAndReadAsAnObject();
 await testNestedErrorWithoutOkStillParses();
 await testCompletedRunDecodesOutput();
 await testSyncRunPollsBackgroundedRunToCompletion();

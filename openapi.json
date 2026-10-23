@@ -238,7 +238,7 @@
           "VMs"
         ],
         "summary": "List VMs",
-        "description": "List VMs visible to the authenticated caller, optionally filtered by region, provider, owner, visibility, lifecycle state, platform, or creation time. All filters compose with AND semantics.",
+        "description": "List VMs visible to the authenticated caller, optionally filtered by region, provider, owner, visibility, lifecycle state, platform, creation time, or attributes. All filters compose with AND semantics.",
         "parameters": [
           {
             "$ref": "#/components/parameters/Cursor"
@@ -329,6 +329,17 @@
               "format": "uuid"
             },
             "description": "Filter the caller organization\u2019s VMs by pool membership."
+          },
+          {
+            "in": "query",
+            "name": "attributes",
+            "required": false,
+            "style": "deepObject",
+            "explode": true,
+            "description": "Match VMs whose attributes hold each given key with exactly that value, as `attributes[team]=infra&attributes[env]=prod`.",
+            "schema": {
+              "$ref": "#/components/schemas/VmAttributes"
+            }
           }
         ],
         "responses": {
@@ -687,7 +698,7 @@
           "VMs"
         ],
         "summary": "Update a VM",
-        "description": "Update a VM's resources, SSH keys, or network policy, or make it immutable.",
+        "description": "Update a VM's resources, SSH keys, network policy, or attributes, or make it immutable.",
         "requestBody": {
           "required": true,
           "content": {
@@ -5218,6 +5229,10 @@
             "maxLength": 1024,
             "description": "Optional short description for the new VM. Blank strings normalize to null and forked VMs never inherit their source's description."
           },
+          "attributes": {
+            "$ref": "#/components/schemas/VmAttributesUpdate",
+            "description": "A change applied over the attributes the new VM copies from its source VM. A fork from an image or a Dockerfile starts with no attributes."
+          },
           "public": {
             "type": [
               "boolean",
@@ -5493,6 +5508,10 @@
             ],
             "maxLength": 1024,
             "description": "Short optional description owned by this VM."
+          },
+          "attributes": {
+            "$ref": "#/components/schemas/VmAttributes",
+            "description": "The VM's attributes. Change them with `attributes` on `PATCH /v1/vms/{id}` and match them with `attributes[key]=value` on `GET /v1/vms`. Forks copy them, so anyone who can fork a public VM can read its attributes."
           },
           "hostname": {
             "type": [
@@ -7494,6 +7513,10 @@
             ],
             "maxLength": 1024,
             "description": "Replace the VM description. Null or a blank string clears it; omit this field to leave it unchanged."
+          },
+          "attributes": {
+            "$ref": "#/components/schemas/VmAttributesUpdate",
+            "description": "A change to the VM's attributes. Keys named are written or removed; the rest are kept, so concurrent changes to different keys do not overwrite each other. Omit it to leave the attributes unchanged. The attributes are stored before the response."
           },
           "immutable": {
             "type": "boolean",
@@ -12422,6 +12445,38 @@
             },
             "description": "Unrevoked API keys, newest first."
           }
+        }
+      },
+      "VmAttributes": {
+        "type": "object",
+        "description": "Key-value pairs for the owner's own use, such as labels to find VMs by. At most 50 keys. A key is 1-40 characters and contains no `[` or `]`; a value is a string of at most 500 characters.",
+        "maxProperties": 50,
+        "propertyNames": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[^\\[\\]]+$"
+        },
+        "additionalProperties": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "VmAttributesUpdate": {
+        "type": "object",
+        "description": "A change to a VM's attributes: a string writes its key, `null` removes the key, and keys not named are kept, so `{}` changes nothing. The resulting attributes must hold at most 50 keys.",
+        "propertyNames": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[^\\[\\]]+$"
+        },
+        "additionalProperties": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
         }
       }
     }

@@ -1345,6 +1345,33 @@ async function testFalseMutationResultsExitNonzero(): Promise<void> {
   }
 }
 
+async function testAttributesFlagsFailBeforeRequest(): Promise<void> {
+  for (const { args, message } of [
+    { args: ["update", "vm_1", "--attribute", "team"], message: /must use KEY=VALUE/ },
+    { args: ["ls", "--attribute", "=infra"], message: /must use KEY=VALUE/ },
+  ]) {
+    await withCapturedServer((_request, res) => jsonResponse(res, { vm_id: "vm_1" }), async (baseUrl, requests) => {
+      const result = await runCli(baseUrl, args);
+      assert.equal(result.code, 1, args.join(" "));
+      assert.equal(requests.length, 0, args.join(" "));
+      assert.match(result.stderr, message);
+    });
+  }
+}
+
+async function testVmsGetShowsAttributes(): Promise<void> {
+  await withCapturedServer(
+    (_request, res) => jsonResponse(res, { vm_id: "vm_1", description: "CI runner", state: "idle" }),
+    async (baseUrl) => {
+      const result = await runCli(baseUrl, ["vms", "get", "vm_1"]);
+      assert.equal(result.code, 0, result.stderr);
+      const shown = JSON.parse(stdoutText(result)) as { description: string; attributes: unknown };
+      assert.equal(shown.description, "CI runner");
+      assert.deepEqual(shown.attributes, {});
+    },
+  );
+}
+
 async function testRemainingHttpCommandSurface(): Promise<void> {
   const cases: Array<{
     name: string;
@@ -1422,6 +1449,35 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
       method: "PATCH",
       url: "/api/v1/vms/vm_1",
       body: { immutable: true },
+    },
+    {
+      name: "vms update --attribute",
+      args: [
+        "vms", "update",
+        "--attribute", "team=infra",
+        "--attribute", "query=a=b",
+        "--attribute", "stale=null",
+        "vm_1",
+      ],
+      response: { vm_id: "vm_1", state: "idle", attributes: { team: "infra", query: "a=b" } },
+      method: "PATCH",
+      url: "/api/v1/vms/vm_1",
+      body: { attributes: { team: "infra", query: "a=b", stale: null } },
+    },
+    {
+      name: "vms fork --attribute",
+      args: ["vms", "fork", "ubuntu", "--attribute", "env=ci", "--attribute", "stale=null"],
+      response: { vm_id: "vm_child" },
+      method: "POST",
+      url: "/api/v1/fork",
+      body: { source_vm_name: "ubuntu", attributes: { env: "ci", stale: null } },
+    },
+    {
+      name: "vms ls --attribute",
+      args: ["vms", "ls", "--attribute", "team=infra", "--attribute", "env=a&b"],
+      response: { vms: [] },
+      method: "GET",
+      url: "/api/v1/vms?attributes%5Bteam%5D=infra&attributes%5Benv%5D=a%26b",
     },
     {
       name: "runs ls",
@@ -1538,6 +1594,8 @@ async function testRemainingHttpCommandSurface(): Promise<void> {
 }
 
 await testForkSelectsPoolsAndUpdateRefusesThem();
+await testAttributesFlagsFailBeforeRequest();
+await testVmsGetShowsAttributes();
 await testConfigCommandsAreLocalAndPreserveExistingSettings();
 await testSyncAndMutationJsonResults();
 await testRunJsonKeepsRunIdAcrossStates();
