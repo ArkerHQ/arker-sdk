@@ -599,6 +599,16 @@
         "description": "Lists the organization's activity, one event per action: API requests, runs, network and SSH traffic, automatic actions and account changes, across every region, within the retained history window. Filters combine with AND; the values of one filter with OR. Newly recorded actions appear within seconds.",
         "parameters": [
           {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "description": "Only events with this text, ignoring case, in their action, ids, error code, attribute values or member's email.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
             "name": "actions",
             "in": "query",
             "required": false,

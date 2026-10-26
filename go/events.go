@@ -53,6 +53,7 @@ type DurationRange struct {
 // EventFilter picks the events a page lists. Values of one field match any
 // of them; fields combine.
 type EventFilter struct {
+	Search      string // text in an event's action, ids, error code, attributes or member's email
 	Actions     []string
 	States      []string
 	Regions     []string
@@ -83,6 +84,7 @@ type ListEventsOptions struct {
 func (c *Client) ListEvents(ctx context.Context, opts ListEventsOptions) (*EventList, error) {
 	f := opts.Filter
 	q := newQuery()
+	q.str("search", f.Search)
 	q.each("actions", f.Actions)
 	q.each("states", f.States)
 	q.each("regions", f.Regions)

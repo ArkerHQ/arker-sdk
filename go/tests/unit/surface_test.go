@@ -685,6 +685,7 @@ func TestListEventsSendsTheFilterAsFlatParameters(t *testing.T) {
 	exit, under := 1, int64(5000)
 	page, err := c.ListEvents(context.Background(), arker.ListEventsOptions{
 		Filter: arker.EventFilter{
+			Search:     "bad_request",
 			Actions:    []string{"run", "fork"},
 			States:     []string{"completed"},
 			VMIDs:      []string{"vm_1"},
@@ -703,7 +704,7 @@ func TestListEventsSendsTheFilterAsFlatParameters(t *testing.T) {
 	}
 	want := "/v1/events?actions=run&actions=fork&actors=me&duration_ms_lt=5000" +
 		"&ended_at_gte=2026-10-20T00%3A00%3A00Z&exit_code=1&limit=10&order=asc&order_by=ended_at" +
-		"&states=completed&via=api&via=ssh&vm_ids=vm_1"
+		"&search=bad_request&states=completed&via=api&via=ssh&vm_ids=vm_1"
 	if got != want {
 		t.Fatalf("control plane saw %q, want %q", got, want)
 	}

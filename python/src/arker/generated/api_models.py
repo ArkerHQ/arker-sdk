@@ -1745,6 +1745,7 @@ class ListOrgRunsParameters:
 
 @dataclass(frozen=True)
 class ListEventsParameters:
+    search: str | None = None
     actions: list[EventAction] | None = None
     states: list[EventState] | None = None
     regions: list[str] | None = None

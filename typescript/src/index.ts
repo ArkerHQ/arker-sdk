@@ -436,6 +436,8 @@ export type EventRange<T> = { gte?: T; lt?: T };
 /** Which events a page lists. Values of one filter match any of them;
  *  filters combine. */
 export type EventFilter = {
+  /** Text in an event's action, ids, error code, attribute values or member's email. */
+  search?: string;
   actions?: ApiSchema<"EventAction">[];
   states?: ApiSchema<"EventState">[];
   regions?: string[];
@@ -875,6 +877,7 @@ export class Arker {
   async listEvents(opts: ListEventsOptions = {}): Promise<ListEventsResponse> {
     const filter = opts.filter ?? {};
     const query: ListEventsParameters = {
+      search: filter.search,
       actions: filter.actions,
       states: filter.states,
       regions: filter.regions,

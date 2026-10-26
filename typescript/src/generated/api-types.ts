@@ -4223,6 +4223,8 @@ export interface operations {
     listEvents: {
         parameters: {
             query?: {
+                /** @description Only events with this text, ignoring case, in their action, ids, error code, attribute values or member's email. */
+                search?: string;
                 /** @description Only these actions. Repeat the parameter for more than one. */
                 actions?: components["schemas"]["EventAction"][];
                 /** @description Only events in these states. */
