@@ -1456,8 +1456,8 @@ export interface components {
         };
         SyncReadOperationRequest: {
             /**
-             * @description Sync operation performed.
-             * @constant
+             * @description Sync operation performed. (enum property replaced by openapi-typescript)
+             * @enum {string}
              */
             op: "read";
             /** @description Path inside the VM. */
@@ -1465,8 +1465,8 @@ export interface components {
         };
         SyncWriteOperationRequest: {
             /**
-             * @description Sync operation performed.
-             * @constant
+             * @description Sync operation performed. (enum property replaced by openapi-typescript)
+             * @enum {string}
              */
             op: "write";
             /** @description Files to write in this sync operation. */
@@ -1474,8 +1474,8 @@ export interface components {
         };
         SyncManifestOperationRequest: {
             /**
-             * @description Sync operation performed.
-             * @constant
+             * @description Sync operation performed. (enum property replaced by openapi-typescript)
+             * @enum {string}
              */
             op: "manifest";
             /** @description Non-root directory inside the VM to list recursively. */
@@ -2500,6 +2500,7 @@ export interface components {
         PaymentRequired: components["schemas"]["ErrorMetadata"] & {
             /** @constant */
             code: "payment_required";
+            details?: components["schemas"]["PaymentRequiredDetails"];
         } & {
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -2507,6 +2508,20 @@ export interface components {
              */
             code: "payment_required";
         };
+        /** @description Why compute was refused and where to resolve it. A field is absent when the server does not know it. */
+        PaymentRequiredDetails: {
+            reason?: components["schemas"]["PaymentRequiredReason"];
+            /**
+             * Format: uri
+             * @description Console page where the organization's billing is managed.
+             */
+            billing_url?: string;
+        };
+        /**
+         * @description no_payment_method: no payment method and no credit. credit_exhausted: no payment method and the credit has run out. payment_failed: a payment did not go through. billing_review: billing is under review; contact support. account_blocked: compute is blocked for this account; contact support. Clients must tolerate values added later.
+         * @enum {string}
+         */
+        PaymentRequiredReason: "no_payment_method" | "credit_exhausted" | "payment_failed" | "billing_review" | "account_blocked";
         /** @description A specific account action must occur before this operation. Complete the named action, such as accepting legal terms or converting the billing plan. */
         ActionRequired: components["schemas"]["ErrorMetadata"] & {
             /** @constant */
@@ -2846,7 +2861,7 @@ export interface components {
         /** @description One network policy rule, keyed by its id in a policy's `rules`. `match` ANDs its present fields (absent ⇒ catch-all). Rules are evaluated highest `priority` first, and the first rule that matches decides. */
         PolicyRule: {
             /**
-             * @description Traffic direction: `outbound` controls connections initiated by the VM; `inbound` exposes a guest port. Unknown values are rejected.
+             * @description Traffic direction: `outbound` controls connections initiated by the VM; `inbound` exposes a guest port. Unknown values are rejected. (enum property replaced by openapi-typescript)
              * @enum {string}
              */
             type: "outbound" | "inbound";
@@ -2920,7 +2935,7 @@ export interface components {
         /** @description A rule that acts on the VM itself when its clock fires. It names exactly one clock: `at` a time, `after_created`, or `after_last_running_start`. It has no `priority` and does not affect traffic. */
         ScheduleRule: {
             /**
-             * @description `schedule`.
+             * @description `schedule`. (enum property replaced by openapi-typescript)
              * @enum {string}
              */
             type: "schedule";
@@ -2948,7 +2963,7 @@ export interface components {
          */
         LifecycleRule: {
             /**
-             * @description `lifecycle`.
+             * @description `lifecycle`. (enum property replaced by openapi-typescript)
              * @enum {string}
              */
             type: "lifecycle";
