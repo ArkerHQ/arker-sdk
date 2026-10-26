@@ -134,7 +134,7 @@ export interface paths {
         };
         /**
          * List events
-         * @description Lists the organization's activity, one event per action: API requests, runs, network and SSH traffic, automatic actions and account changes, across every region, within the retained history window. Filters combine with AND; the values of one filter with OR. Newly recorded actions appear within seconds.
+         * @description Lists the organization's activity, one event per action: API requests, runs, network and SSH traffic, automatic actions and account changes, across every region, within the retained history window. Only the organization's own actions are listed: what its members and keys did, what its configuration did, and credit or quota changes Arker made to it; never how Arker places, moves, suspends or restores a VM on its own. Every value is one documented here; search matches only what is published. Filters combine with AND; the values of one filter with OR. Newly recorded actions appear within seconds.
          */
         get: operations["listEvents"];
         put?: never;
@@ -3498,7 +3498,7 @@ export interface components {
          * @description What an event records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection; `sign_in` a member's session entering the organization, by signing in or switching to it.
          * @enum {string}
          */
-        EventAction: "run" | "fork" | "sync" | "delete" | "signal" | "vm_update" | "vm_suspend" | "policies_update" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "inbound_request" | "outbound_request" | "ssh_session" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_update" | "member_remove" | "org_rename" | "member_add" | "member_invite" | "member_invite_revoke" | "org_create" | "org_delete" | "sign_in" | "sign_out" | "terms_accept" | "billing_checkout" | "payment_method_update" | "billing_block" | "billing_unblock" | "credit_grant" | "org_access_update" | "billing_class_update" | "quota_update";
+        EventAction: "run" | "fork" | "sync" | "delete" | "signal" | "vm_update" | "vm_suspend" | "policies_update" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "inbound_request" | "outbound_request" | "ssh_session" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_update" | "member_remove" | "org_rename" | "member_add" | "member_invite" | "member_invite_revoke" | "org_create" | "org_delete" | "sign_in" | "sign_out" | "terms_accept" | "billing_checkout" | "payment_method_update" | "credit_grant" | "quota_update";
         /** @enum {string} */
         EventState: "running" | "completed" | "failed" | "cancelled";
         /** @enum {string} */
@@ -3529,20 +3529,20 @@ export interface components {
             duration_ms: number | null;
             /** @description Who initiated the action, and how. Null for an automatic action, or when Arker does not know who acted. */
             actor: components["schemas"]["EventActor"] | null;
-            /** @description The region that served the action; null for one the console served, such as an API key's. */
+            /** @description The region of the Arker service that handled the action; null for one the console served, such as an API key's. */
             region: string | null;
             /** @description The `x-request-id` of the request that made the action. */
             request_id: string | null;
-            /** @description Why the action failed or was refused. */
+            /** @description Why the action failed or was refused: the code its request was answered with, or `internal` when Arker failed it itself. */
             error_code: components["schemas"]["ErrorCode"] | null;
-            /** @description Facts only some actions have, such as a run's `run_id` and `exit_code`, a fork's `source_vm_id`, or an inbound request's `port`. */
+            /** @description Facts only some actions have, and no others: `run_id`, `session_id`, `exit_code` (a run command's own), `type`, `source_vm_id`, `vm_name`, `filesystem_id`, `mount_id`, `pool_id`, `fields`, `port`, `method`, `guest_status`, `host`, `fingerprint`, `caller_ip`, `ssh_key_id`, `key_id`, `email`, `role`, `name`, `tos`, `privacy_policy`, `amount_cents`, `region`, `resource` and `cap`. */
             attributes: {
                 [key: string]: string | number | boolean | null;
             };
         };
         EventActor: {
             via: components["schemas"]["EventVia"];
-            /** @description Who: a member's email in the console; an API key's `api_key_id`; an SSH key's id, or its fingerprint when it is no account key. None when Arker acted. */
+            /** @description Who: a member's email in the console; one of the organization's API keys' `api_key_id`; an SSH key's id, or its fingerprint when it is no account key. None when Arker acted, or for a member or key the organization no longer has. */
             id?: string;
         };
         /**

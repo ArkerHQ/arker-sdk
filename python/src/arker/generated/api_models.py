@@ -1685,11 +1685,7 @@ EventAction: TypeAlias = Literal[
     'terms_accept',
     'billing_checkout',
     'payment_method_update',
-    'billing_block',
-    'billing_unblock',
     'credit_grant',
-    'org_access_update',
-    'billing_class_update',
     'quota_update',
 ]
 
