@@ -4,49 +4,18 @@ These shims are experimental. Full core sandbox parity is not established, and
 strict coverage gates remain failing. Apps and Functions are excluded; images,
 secrets, filesystems, drives, mounts, policies and sandbox lifecycle remain in scope.
 
-## Measurement
+## Validation
 
-| Scope | Python APIs / vendor signatures | TypeScript APIs / vendor signatures |
-| --- | ---: | ---: |
-| Core sandbox | 1123 / 936 | 982 / 786 |
-| Expanded | 1146 / 951 | 1052 / 850 |
+Run the unit, packed-consumer and differential suites described in
+[README.md](README.md). Save reports and evidence outside the checkout. Historical
+runs do not certify the current source or dependencies.
 
-Inventory, declarations, observed API calls and verified signatures are distinct.
 Live API credit requires one unchanged scenario to pass on the reference vendor,
-shim-native and shim-Arker routes, with matching runtime/vendor fingerprints.
-Failed or stale evidence cannot earn credit. Signature credit additionally needs
-explicit signature attestations; current live recorders emit API IDs only.
-Neither method presence nor a passing unit test establishes full compatibility.
-
-The inventory scripts expose strict gates for both scopes and languages. Run them
-with fresh evidence using the commands in [README.md](README.md). Historical
-cohorts are not current-source validation after runtime or scenario changes.
-
-## Current validation
-
-- Python combined unit suite: 650 passed after integrating current main.
-  Live-derived E2B and Blaxel corrections also passed 75 focused regressions.
-- TypeScript combined tests, build and packed ESM/CommonJS consumers passed for
-  the base SDK and all four optional vendor packages. Dedicated filesystem and
-  sandbox regression files are included in the standard handle-test command.
-- Router tests cover reserved JSON keys, malformed cache entries, byte limits,
-  priority/race lookup, invalidation and cross-language cache interoperability.
-- Native live probes established that E2B `depth=None` uses one directory level,
-  and Blaxel async grep returns relative paths and preserves context newlines.
-  The pinned Blaxel Python sync filesystem has no grep API.
-- At `6e4480e`, nine of eleven live suites pass using prepared source parents.
-  E2B and Daytona filesystem and Modal process/filesystem comparisons pass in
-  both languages. Python Blaxel grep/process/filesystem and TypeScript native
-  Blaxel tests pass. Strict named creation and private fetch still fail on Arker.
-- Current evidence contains 30 passing Python events and 18 passing/3 failing
-  TypeScript events. The separate strict-name test also fails. Both evidence
-  files are in `evidence/core-filesystem-20261022-{python,typescript}.jsonl`.
-- Core scenario coverage is **105/1123 Python** and **41/982 TypeScript**; expanded
-  coverage is 105/1146 and 41/1052. No events are rejected as stale. All four
-  strict gates exit 1. Signature-tested/live counts remain zero because the
-  recorders do not attest signatures. These counts are not full API equivalence.
-- Prepared source cleanup was independently confirmed by a not-found response.
-  Source preparation is not evidence of default-image or arbitrary-image parity.
+shim-native and shim-Arker routes with matching runtime/vendor fingerprints.
+Signature credit additionally requires explicit signature attestations; the live
+recorders currently emit API IDs only. Method presence and unit tests do not
+establish full compatibility. Both languages expose strict coverage gates, which
+must pass with fresh evidence before claiming parity.
 
 ## Remaining release requirements
 
