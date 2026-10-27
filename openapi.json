@@ -11116,7 +11116,8 @@
                   "outbound": "#/components/schemas/PolicyRule",
                   "inbound": "#/components/schemas/PolicyRule",
                   "schedule": "#/components/schemas/ScheduleRule",
-                  "lifecycle": "#/components/schemas/LifecycleRule"
+                  "lifecycle": "#/components/schemas/LifecycleRule",
+                  "outbound_guard": "#/components/schemas/OutboundGuardRule"
                 }
               }
             },

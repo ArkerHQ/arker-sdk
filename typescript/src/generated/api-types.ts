@@ -2987,7 +2987,7 @@ export interface components {
         /** @description An independent outbound permission floor, not a ranked allow rule. A connection must match at least one scope in each guard AND be admitted by the ordinary outbound policy. An empty allow list denies all outbound traffic. Guards preserve inbound, lifecycle and secret-rewrite rules, and apply again to the final proxy destination after host rewriting. With no ranked network rules, the base is open and the guards alone constrain it. At most 64 guards and 65,536 projected scopes are supported; excessive intersection work fails closed. */
         OutboundGuardRule: {
             /**
-             * @description Fixed rule family for an independent outbound permission floor.
+             * @description Fixed rule family for an independent outbound permission floor. (enum property replaced by openapi-typescript)
              * @enum {string}
              */
             type: "outbound_guard";
