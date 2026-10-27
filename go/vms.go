@@ -102,12 +102,16 @@ type ForkRequest struct {
 	SourceOrgName string `json:"source_org_name,omitempty"`
 	Image         string `json:"image,omitempty"`
 
-	Name          string     `json:"name,omitempty"`
-	Description   string     `json:"description,omitempty"`
-	Public        *bool      `json:"public,omitempty"`
-	SSHPublicKeys []string   `json:"ssh_public_keys,omitempty"`
-	Resources     *Resources `json:"resources,omitempty"`
-	Platforms     []string   `json:"platforms,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Attributes is a change applied over the attributes the new VM copies from
+	// its source VM: a value sets its key, a nil value removes it, and keys
+	// not named are kept. A fork from an image starts with no attributes.
+	Attributes    map[string]*string `json:"attributes,omitempty"`
+	Public        *bool              `json:"public,omitempty"`
+	SSHPublicKeys []string           `json:"ssh_public_keys,omitempty"`
+	Resources     *Resources         `json:"resources,omitempty"`
+	Platforms     []string           `json:"platforms,omitempty"`
 	// Layers is the state inherited from the source. Omit it, or pass
 	// ["disk","memory"], for a warm fork that resumes where the source left off.
 	Layers          []string      `json:"layers,omitempty"`
@@ -144,6 +148,7 @@ type VMInfo struct {
 	PoolID              *string              `json:"pool_id,omitempty"`
 	Name                string               `json:"name,omitempty"`
 	Description         string               `json:"description,omitempty"`
+	Attributes          map[string]string    `json:"attributes,omitempty"`
 	OwnerOrgID          string               `json:"owner_org_id,omitempty"`
 	Hostname            string               `json:"hostname,omitempty"`
 	CreatedAt           string               `json:"created_at,omitempty"`
@@ -270,6 +275,9 @@ type ListVMsOptions struct {
 	OrgID    string
 	State    string
 	Public   *bool
+	// Attributes lists only VMs whose attributes hold every given key with
+	// exactly that value.
+	Attributes map[string]string
 }
 
 // VMList is one page of VMs.
@@ -289,6 +297,7 @@ func (c *Client) ListVMs(ctx context.Context, opts ListVMsOptions) (*VMList, err
 	q.str("org_id", opts.OrgID)
 	q.str("state", opts.State)
 	q.boolPtr("public", opts.Public)
+	q.deepObject("attributes", opts.Attributes)
 	var out struct {
 		VMs        []VMInfo `json:"vms"`
 		NextCursor string   `json:"next_cursor"`
@@ -345,6 +354,12 @@ type UpdateRequest struct {
 	SSHPublicKeys *[]string     `json:"ssh_public_keys,omitempty"`
 	Policies      *PolicyUpdate `json:"policies,omitempty"`
 
+	// Attributes changes the VM's attributes by key: a value sets its key, a nil
+	// value removes it, and keys not named are kept.
+	//
+	//	Attributes: map[string]*string{"team": arker.Ptr("infra"), "stale": nil}
+	Attributes map[string]*string `json:"attributes,omitempty"`
+
 	// Immutable freezes the VM for good: it can still be viewed, listed,
 	// forked and deleted, but anything that changes or starts it is refused,
 	// and its forks are mutable. Only true is accepted, so false is simply
@@ -352,8 +367,9 @@ type UpdateRequest struct {
 	Immutable bool `json:"immutable,omitempty"`
 }
 
-// Update changes this VM's description, resources, authorized SSH keys and/or
-// network policy, or makes it immutable, and returns the updated record.
+// Update changes this VM's description, resources, authorized SSH keys,
+// network policy and/or attributes, or makes it immutable, and returns the
+// updated record.
 func (v *VM) Update(ctx context.Context, req UpdateRequest) (*VMInfo, error) {
 	var info VMInfo
 	if _, err := v.do(ctx, http.MethodPatch, v.path(""), req, &info); err != nil {
@@ -404,6 +420,13 @@ func (q *query) boolPtr(key string, value *bool) {
 func (q *query) csv(key string, values []string) {
 	if len(values) > 0 {
 		q.values.Set(key, strings.Join(values, ","))
+	}
+}
+
+// deepObject adds one key[name]=value pair per entry.
+func (q *query) deepObject(key string, values map[string]string) {
+	for name, value := range values {
+		q.values.Set(key+"["+name+"]", value)
 	}
 }
 

@@ -243,6 +243,90 @@ func TestUpdateLeavesImmutableOffTheWireByDefault(t *testing.T) {
 	}
 }
 
+func TestUpdateChangesAttributesByKeyAndSendsNullToRemove(t *testing.T) {
+	var body map[string]any
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, `{"vm_id":"vm_1","attributes":{"team":"infra"}}`)
+	}, reject(t, "control"))
+
+	info, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{
+		Attributes: map[string]*string{"team": arker.Ptr("infra"), "stale": nil},
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	want := map[string]any{"attributes": map[string]any{"team": "infra", "stale": nil}}
+	if !reflect.DeepEqual(body, want) {
+		t.Fatalf("body = %v, want %v", body, want)
+	}
+	if want := map[string]string{"team": "infra"}; !reflect.DeepEqual(info.Attributes, want) {
+		t.Fatalf("attributes = %v, want %v", info.Attributes, want)
+	}
+}
+
+func TestUpdateLeavesAttributesOffTheWireByDefault(t *testing.T) {
+	var body map[string]any
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, forkVM)
+	}, reject(t, "control"))
+
+	info, err := c.VM("vm_1").Update(context.Background(), arker.UpdateRequest{Description: arker.Ptr("CI runner")})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if _, present := body["attributes"]; present {
+		t.Fatal("a description-only update sent attributes")
+	}
+	if len(info.Attributes) != 0 {
+		t.Fatalf("a VM without attributes read as %v", info.Attributes)
+	}
+}
+
+func TestForkSendsAttributesChangesThroughUnchanged(t *testing.T) {
+	var body map[string]any
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, `{"vm_id":"vm_child","attributes":{"team":"infra","env":"ci"}}`)
+	}, reject(t, "control"))
+
+	child, err := c.VM("vm_source").Fork(context.Background(), arker.ForkRequest{
+		Attributes: map[string]*string{"env": arker.Ptr("ci"), "stale": nil},
+	})
+	if err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+	want := map[string]any{"source_vm_id": "vm_source", "attributes": map[string]any{"env": "ci", "stale": nil}}
+	if !reflect.DeepEqual(body, want) {
+		t.Fatalf("body = %v, want %v", body, want)
+	}
+	if want := map[string]string{"team": "infra", "env": "ci"}; !reflect.DeepEqual(child.Info.Attributes, want) {
+		t.Fatalf("attributes = %v, want %v", child.Info.Attributes, want)
+	}
+}
+
+func TestListVMsFiltersByAttributesAsDeepObjectPairs(t *testing.T) {
+	var query string
+	c := twoPlane(t, reject(t, "regional"), func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.RawQuery
+		fmt.Fprint(w, `{"vms":[{"vm_id":"vm_1"}]}`)
+	})
+
+	list, err := c.ListVMs(context.Background(), arker.ListVMsOptions{
+		Attributes: map[string]string{"team": "infra", "env": "a&b"},
+	})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if want := "attributes%5Benv%5D=a%26b&attributes%5Bteam%5D=infra"; query != want {
+		t.Fatalf("query = %q, want %q", query, want)
+	}
+	if len(list.VMs[0].Info.Attributes) != 0 {
+		t.Fatalf("a VM without attributes read as %v", list.VMs[0].Info.Attributes)
+	}
+}
+
 func TestUpdateLeavesDescriptionAloneByDefault(t *testing.T) {
 	var body map[string]any
 	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {

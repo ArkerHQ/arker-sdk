@@ -26,6 +26,8 @@ import type {
   VM,
   RunResult,
   Vm,
+  VmAttributes,
+  VmAttributesUpdate,
   ListVmsParameters,
 } from "@arker-ai/sdk";
 
@@ -94,8 +96,13 @@ const FORK_RESOURCE_OPTIONS: OptionSpecs = {
   },
 };
 
+const ATTRIBUTE_OPTIONS: OptionSpecs = {
+  attribute: { type: "string", repeatable: true },
+};
+
 const FORK_OPTIONS: OptionSpecs = {
   ...GLOBAL_OPTIONS,
+  ...ATTRIBUTE_OPTIONS,
   ...FORK_RESOURCE_OPTIONS,
   context: { type: "string" },
   description: { type: "string", allowEmpty: true },
@@ -139,6 +146,7 @@ const VM_LIST_OPTIONS: OptionSpecs = {
   ...PAGINATION_OPTIONS,
   "created-after": { type: "string" },
   "created-before": { type: "string" },
+  ...ATTRIBUTE_OPTIONS,
   platform: { type: "string" },
   public: { type: "boolean" },
   "source-org-id": { type: "string" },
@@ -199,6 +207,7 @@ const API_KEY_CREATE_OPTIONS: OptionSpecs = {
 const UPDATE_OPTIONS: OptionSpecs = {
   ...GLOBAL_OPTIONS,
   ...FORK_RESOURCE_OPTIONS,
+  ...ATTRIBUTE_OPTIONS,
   description: { type: "string", allowEmpty: true },
   immutable: { type: "boolean" },
   "policies-file": { type: "string" },
@@ -788,6 +797,7 @@ async function cmdVms(args: ParsedArgs, client: Arker): Promise<void> {
         platform: args.flags.platform as string | undefined,
         created_after: args.flags["created-after"] as string | undefined,
         created_before: args.flags["created-before"] as string | undefined,
+        attributes: attributesFromArgs(args),
       });
       if (args.flags.json) return out({ vms: res.vms, next_cursor: res.nextCursor });
       for (const vm of res.vms) out(fmtVm(vm));
@@ -834,6 +844,7 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
   const context = args.flags.context as string | undefined;
   const name = args.flags.name as string | undefined;
   const description = args.flags.description as string | undefined;
+  const attributes = attributesChangeFromArgs(args);
   const publicFlag = boolFlag(args, "public");
   const pool = poolFlags(args);
 
@@ -933,6 +944,7 @@ async function cmdFork(args: ParsedArgs, client: Arker): Promise<void> {
     ...pool,
     name,
     description,
+    ...(attributes ? { attributes } : {}),
     public: publicFlag,
     ...(platforms && platforms.length > 0 ? { platforms } : {}),
     ...(resources ? { resources } : {}),
@@ -1001,6 +1013,26 @@ function sshPublicKeysFromArgs(args: ParsedArgs): { provided: boolean; values: s
   const values = [...(direct ?? []), ...fromFile];
   if (values.some((key) => key.trim().length === 0)) die("SSH public keys must not be empty");
   return { provided: direct !== undefined || file !== undefined, values };
+}
+
+/** `--attribute KEY=VALUE` flags as an object, or undefined when none are given. */
+function attributesFromArgs(args: ParsedArgs): VmAttributes | undefined {
+  const assignments = args.flags.attribute as string[] | undefined;
+  if (assignments === undefined) return undefined;
+  const attributes: VmAttributes = {};
+  for (const assignment of assignments) {
+    const equal = assignment.indexOf("=");
+    if (equal <= 0) die('parameter "attribute" must use KEY=VALUE');
+    attributes[assignment.slice(0, equal)] = assignment.slice(equal + 1);
+  }
+  return attributes;
+}
+
+/** `--attribute KEY=VALUE` sets a key, and `--attribute KEY=null` removes it. */
+function attributesChangeFromArgs(args: ParsedArgs): VmAttributesUpdate | undefined {
+  const sets = attributesFromArgs(args);
+  if (sets === undefined) return undefined;
+  return Object.fromEntries(Object.entries(sets).map(([key, value]) => [key, value === "null" ? null : value]));
 }
 
 function policySecretValues(policies: { secrets?: unknown } | undefined): string[] {
@@ -1458,12 +1490,13 @@ async function cmdSync(args: ParsedArgs, client: Arker): Promise<void> {
 
 async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
   const vm = args.positional[0];
-  if (!vm) die("usage: arker update <vm_id> [--description TEXT] [--immutable] [resource, SSH key, or policy flags]");
+  if (!vm) die("usage: arker update <vm_id> [--description TEXT] [--attribute KEY=VALUE] [--immutable] [resource, SSH key, or policy flags]");
   const memoryMib = numFlag(args, "memory-mib");
   const vcpu = numFlag(args, "vcpu");
   const diskMib = numFlag(args, "disk-mib");
   const vgpu = numFlag(args, "vgpu");
   const description = args.flags.description as string | undefined;
+  const attributes = attributesChangeFromArgs(args);
   const sshPublicKeys = sshPublicKeysFromArgs(args);
   const policiesFile = args.flags["policies-file"] as string | undefined;
   const policies = policiesFile === undefined
@@ -1472,9 +1505,10 @@ async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
   const immutable = boolFlag(args, "immutable");
   if (
     memoryMib === undefined && vcpu === undefined && diskMib === undefined && vgpu === undefined &&
-    description === undefined && !sshPublicKeys.provided && policies === undefined && immutable === undefined
+    description === undefined && !sshPublicKeys.provided && policies === undefined &&
+    attributes === undefined && immutable === undefined
   ) {
-    die("update: pass at least one description, resource, SSH key, policy, or --immutable flag");
+    die("update: pass at least one description, attributes, resource, SSH key, policy, or --immutable flag");
   }
   const updated = await withSecretRedaction(
     policySecretValues(policies),
@@ -1487,6 +1521,7 @@ async function cmdUpdate(args: ParsedArgs, client: Arker): Promise<void> {
         : {}),
       ...(sshPublicKeys.provided ? { ssh_public_keys: sshPublicKeys.values } : {}),
       ...(policies !== undefined ? { policies } : {}),
+      ...(attributes !== undefined ? { attributes } : {}),
       ...(immutable ? { immutable } : {}),
     }),
   );
@@ -1874,6 +1909,7 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   yes: { desc: "buy without asking for confirmation" },
   immutable: { desc: "make the VM immutable for good: forkable but never changed or started again; send it alone" },
   json: { desc: "emit JSON instead of tabular output" },
+  attribute: { placeholder: "<key=value>", desc: "set an attribute (KEY=null removes it), or match one when listing; repeatable" },
   limit: { placeholder: "<n>", desc: "maximum rows to return; the command-specific service cap applies" },
   layers: { placeholder: "<disk[,memory]>", desc: "state layers to inherit from a source VM" },
   lite: { desc: "omit large activity previews and permit up to 20,000 rows" },
@@ -2079,7 +2115,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   update: {
     synopsis: ["arker update <vm> [flags]"],
-    summary: "Update a VM's description, resources, SSH keys, or network policy, or make it immutable.",
+    summary: "Update a VM's description, attributes, resources, SSH keys, or network policy, or make it immutable.",
   },
   vms: {
     synopsis: ["arker vms <ls|get|rm|fork|run|update> [args] [flags]"],
@@ -2216,6 +2252,7 @@ function usage(command?: string, positional: string[] = []): void {
       "  --state <idle|running>     filter by VM state",
       "  --platform <token>         filter by concrete platform ID",
       "  --created-after <time> --created-before <time>",
+      "  --attribute <key=value>      match an attribute (repeatable; every pair must match)",
       "",
       "Fork flags:",
       "  --image <reference>        fork from an OCI image",
@@ -2230,6 +2267,7 @@ function usage(command?: string, positional: string[] = []): void {
       "  --policies-file <path>     JSON policy document for the new VM",
       "  --source-org-name <name>   organization name that owns the source VM",
       "  --description <text>       short description for the new VM",
+      "  --attribute <key=value>      set a key over the attributes copied from the source; KEY=null removes it (repeatable)",
       "  --vcpu <n>                 vCPU count for the new VM (capped by source max_vcpus)",
       "  --memory-mib <n>           memory (MiB) for the new VM",
       "  --disk-mib <n>             disk size (MiB) for the new VM",
@@ -2238,6 +2276,7 @@ function usage(command?: string, positional: string[] = []): void {
       "",
       "Update flags:",
       "  --description <text>       replace the VM description (empty clears it)",
+      "  --attribute <key=value>      set an attribute; KEY=null removes it; others are kept (repeatable)",
       "  --vcpu <n> --memory-mib <n> --disk-mib <n> --vgpu <fraction>",
       "  --ssh-public-key <key>     replace authorized SSH keys; repeatable",
       "  --ssh-public-keys-file <path>  replace keys from a file; empty clears them",

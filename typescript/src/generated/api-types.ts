@@ -93,7 +93,7 @@ export interface paths {
         };
         /**
          * List VMs
-         * @description List VMs visible to the authenticated caller, optionally filtered by region, provider, owner, visibility, lifecycle state, platform, or creation time. All filters compose with AND semantics.
+         * @description List VMs visible to the authenticated caller, optionally filtered by region, provider, owner, visibility, lifecycle state, platform, creation time, or attributes. All filters compose with AND semantics.
          */
         get: operations["listVms"];
         put?: never;
@@ -150,7 +150,7 @@ export interface paths {
         head?: never;
         /**
          * Update a VM
-         * @description Update a VM's resources, SSH keys, or network policy, or make it immutable.
+         * @description Update a VM's resources, SSH keys, network policy, or attributes, or make it immutable.
          */
         patch: operations["patchVm"];
         trace?: never;
@@ -965,6 +965,8 @@ export interface components {
             name?: string | null;
             /** @description Optional short description for the new VM. Blank strings normalize to null and forked VMs never inherit their source's description. */
             description?: string | null;
+            /** @description A change applied over the attributes the new VM copies from its source VM. A fork from an image or a Dockerfile starts with no attributes. */
+            attributes?: components["schemas"]["VmAttributesUpdate"];
             /** @description Make the new VM publicly forkable from other orgs. */
             public?: boolean | null;
             /** @description SSH keys to authorize on the new VM, by key id. They are its whole set: the source VM's keys are not inherited. Omit it to create the VM with no keys. Configure inbound reachability through the VM's policy. */
@@ -1082,6 +1084,8 @@ export interface components {
             name?: string | null;
             /** @description Short optional description owned by this VM. */
             description: string | null;
+            /** @description The VM's attributes. Change them with `attributes` on `PATCH /v1/vms/{id}` and match them with `attributes[key]=value` on `GET /v1/vms`. Forks copy them, so anyone who can fork a public VM can read its attributes. */
+            attributes?: components["schemas"]["VmAttributes"];
             /** @description Nullable base `.app` hostname for inbound services. The bare hostname selects guest port 8080. For another port, insert `-<port>` before the first dot: `<vm>-<port>.<provider>-<region>.arker.app`. Clients must not require this field to be present. */
             readonly hostname?: string | null;
             /** @description When `true`, other orgs can fork this VM (but cannot run on it). */
@@ -1743,6 +1747,8 @@ export interface components {
         PatchVmRequest: {
             /** @description Replace the VM description. Null or a blank string clears it; omit this field to leave it unchanged. */
             description?: string | null;
+            /** @description A change to the VM's attributes. Keys named are written or removed; the rest are kept, so concurrent changes to different keys do not overwrite each other. Omit it to leave the attributes unchanged. The attributes are stored before the response. */
+            attributes?: components["schemas"]["VmAttributesUpdate"];
             /** @description Make the VM immutable. Only `true` is accepted, and it must be the only field in its request: an immutable VM cannot be made mutable again. An immutable VM can be viewed, listed, forked, and deleted, and every request that would change it or start it is refused. A running VM is refused with `resource_busy`; retry once it is idle. Repeating the request for an immutable VM changes nothing. */
             immutable?: boolean;
             /** @description CPU, memory, and disk configuration. */
@@ -3483,6 +3489,14 @@ export interface components {
             /** @description Unrevoked API keys, newest first. */
             api_keys: components["schemas"]["ApiKey"][];
         };
+        /** @description Key-value pairs for the owner's own use, such as labels to find VMs by. At most 50 keys. A key is 1-40 characters and contains no `[` or `]`; a value is a string of at most 500 characters. */
+        VmAttributes: {
+            [key: string]: string;
+        };
+        /** @description A change to a VM's attributes: a string writes its key, `null` removes the key, and keys not named are kept, so `{}` changes nothing. The resulting attributes must hold at most 50 keys. */
+        VmAttributesUpdate: {
+            [key: string]: string | null;
+        };
     };
     responses: {
         Conflict: {
@@ -4064,6 +4078,8 @@ export interface operations {
                 created_before?: string;
                 /** @description Filter the caller organization’s VMs by pool membership. */
                 pool_id?: string;
+                /** @description Match VMs whose attributes hold each given key with exactly that value, as `attributes[team]=infra&attributes[env]=prod`. */
+                attributes?: components["schemas"]["VmAttributes"];
             };
             header?: never;
             path?: never;
