@@ -768,9 +768,9 @@ export interface components {
          * @description Stable public error codes. ErrorBody selects the required details for each code; clients must not parse message text.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "insufficient_resources" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "resource_busy" | "invalid_state" | "already_exists" | "idempotency_conflict" | "expired" | "payload_too_large" | "method_not_allowed" | "unsupported_operation" | "unrecoverable" | "capacity_unavailable" | "unavailable" | "internal" | "rate_limited" | "quota_exceeded" | "payment_required" | "action_required" | "operation_failed" | "gateway_timeout";
+        ErrorCode: "bad_request" | "insufficient_resources" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "resource_busy" | "invalid_state" | "already_exists" | "idempotency_conflict" | "idempotency_in_progress" | "expired" | "payload_too_large" | "method_not_allowed" | "unsupported_operation" | "unrecoverable" | "capacity_unavailable" | "unavailable" | "internal" | "rate_limited" | "quota_exceeded" | "payment_required" | "action_required" | "operation_failed" | "gateway_timeout";
         /** @description Typed HTTP error body. The code selects its required details. Endpoint responses must narrow this union to their permitted codes. */
-        ErrorBody: components["schemas"]["BadRequest"] | components["schemas"]["InsufficientResources"] | components["schemas"]["Unauthorized"] | components["schemas"]["Forbidden"] | components["schemas"]["NotFound"] | components["schemas"]["Conflict"] | components["schemas"]["ResourceBusy"] | components["schemas"]["InvalidState"] | components["schemas"]["AlreadyExists"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["Expired"] | components["schemas"]["PayloadTooLarge"] | components["schemas"]["MethodNotAllowed"] | components["schemas"]["UnsupportedOperation"] | components["schemas"]["Unrecoverable"] | components["schemas"]["CapacityUnavailable"] | components["schemas"]["Unavailable"] | components["schemas"]["Internal"] | components["schemas"]["RateLimited"] | components["schemas"]["QuotaExceeded"] | components["schemas"]["PaymentRequired"] | components["schemas"]["ActionRequired"] | components["schemas"]["OperationFailed"] | components["schemas"]["GatewayTimeout"];
+        ErrorBody: components["schemas"]["BadRequest"] | components["schemas"]["InsufficientResources"] | components["schemas"]["Unauthorized"] | components["schemas"]["Forbidden"] | components["schemas"]["NotFound"] | components["schemas"]["Conflict"] | components["schemas"]["ResourceBusy"] | components["schemas"]["InvalidState"] | components["schemas"]["AlreadyExists"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["IdempotencyInProgress"] | components["schemas"]["Expired"] | components["schemas"]["PayloadTooLarge"] | components["schemas"]["MethodNotAllowed"] | components["schemas"]["UnsupportedOperation"] | components["schemas"]["Unrecoverable"] | components["schemas"]["CapacityUnavailable"] | components["schemas"]["Unavailable"] | components["schemas"]["Internal"] | components["schemas"]["RateLimited"] | components["schemas"]["QuotaExceeded"] | components["schemas"]["PaymentRequired"] | components["schemas"]["ActionRequired"] | components["schemas"]["OperationFailed"] | components["schemas"]["GatewayTimeout"];
         /** @description Public HTTP error envelope. Every code has one HTTP status, documented on its body schema. Code/status matching is enforced at the response boundary. */
         ErrorResponse: {
             error: components["schemas"]["ErrorBody"];
@@ -2378,6 +2378,17 @@ export interface components {
              */
             code: "idempotency_conflict";
         };
+        /** @description A request with this idempotency key is still being completed. Retry the same request with the same key after Retry-After to receive its result. */
+        IdempotencyInProgress: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "idempotency_in_progress";
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "idempotency_in_progress";
+        };
         /** @description A time-limited resource is known to have expired. Create a replacement. Use not_found when missing and expired cannot be distinguished. */
         Expired: components["schemas"]["ErrorMetadata"] & {
             /** @constant */
@@ -2736,6 +2747,9 @@ export interface components {
         IdempotencyConflictErrorResponse: {
             error: components["schemas"]["IdempotencyConflict"];
         };
+        IdempotencyInProgressErrorResponse: {
+            error: components["schemas"]["IdempotencyInProgress"];
+        };
         PaymentRequiredErrorResponse: {
             error: components["schemas"]["PaymentRequired"];
         };
@@ -2809,9 +2823,9 @@ export interface components {
             /** @description The error category and its details, request metadata, and recovery context. */
             error: components["schemas"]["BadRequest"] | components["schemas"]["InsufficientResources"];
         };
-        AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse: {
+        AlreadyExistsOrConflictOrIdempotencyInProgressOrInvalidStateOrResourceBusyErrorResponse: {
             /** @description The error category and its details, request metadata, and recovery context. */
-            error: components["schemas"]["AlreadyExists"] | components["schemas"]["Conflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
+            error: components["schemas"]["AlreadyExists"] | components["schemas"]["Conflict"] | components["schemas"]["IdempotencyInProgress"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
         };
         AlreadyExistsOrInvalidStateOrResourceBusyErrorResponse: {
             /** @description The error category and its details, request metadata, and recovery context. */
@@ -3614,6 +3628,16 @@ export interface components {
                 "application/json": components["schemas"]["IdempotencyConflictErrorResponse"];
             };
         };
+        /** @description HTTP 409: A request with this idempotency key is still being completed. Retry the same request with the same key after Retry-After to receive its result. */
+        IdempotencyInProgressError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["IdempotencyInProgressErrorResponse"];
+            };
+        };
         /** @description HTTP 410: A time-limited resource is known to have expired. Create a replacement. Use not_found when missing and expired cannot be distinguished. */
         ExpiredError: {
             headers: {
@@ -3765,14 +3789,14 @@ export interface components {
                 "application/json": components["schemas"]["BadRequestOrInsufficientResourcesErrorResponse"];
             };
         };
-        /** @description HTTP 409: already_exists, conflict, invalid_state, resource_busy. The code selects the required details. */
-        AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError: {
+        /** @description HTTP 409: already_exists, conflict, idempotency_in_progress, invalid_state, resource_busy. The code selects the required details. */
+        AlreadyExistsOrConflictOrIdempotencyInProgressOrInvalidStateOrResourceBusyError: {
             headers: {
                 "Retry-After": components["headers"]["RetryAfter"];
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse"];
+                "application/json": components["schemas"]["AlreadyExistsOrConflictOrIdempotencyInProgressOrInvalidStateOrResourceBusyErrorResponse"];
             };
         };
         /** @description HTTP 409: already_exists, invalid_state, resource_busy. The code selects the required details. */
@@ -4030,7 +4054,7 @@ export interface operations {
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
-            409: components["responses"]["AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError"];
+            409: components["responses"]["AlreadyExistsOrConflictOrIdempotencyInProgressOrInvalidStateOrResourceBusyError"];
             413: components["responses"]["PayloadTooLargeError"];
             422: components["responses"]["OperationFailedOrUnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];

@@ -181,8 +181,10 @@ const RUN_POLL_MAX_CONSECUTIVE_FAILURES = 10;
 // "keep polling" rather than a false completion.
 const TERMINAL_RUN_STATES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
 const RETRYABLE_HTTP = new Set([429, 502, 503, 504]);
+// idempotency_in_progress: a request with the same key is still being
+// completed; repeating it with that key returns its result.
 const RETRYABLE_CODES: ReadonlySet<string> = new Set([
-  "unavailable", "capacity_unavailable", "rate_limited", "gateway_timeout",
+  "unavailable", "capacity_unavailable", "rate_limited", "gateway_timeout", "idempotency_in_progress",
 ]);
 const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 export type ComputeProvider = string;

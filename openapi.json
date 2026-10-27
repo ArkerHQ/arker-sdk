@@ -207,7 +207,7 @@
             "$ref": "#/components/responses/NotFoundError"
           },
           "409": {
-            "$ref": "#/components/responses/AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError"
+            "$ref": "#/components/responses/AlreadyExistsOrConflictOrIdempotencyInProgressOrInvalidStateOrResourceBusyError"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLargeError"
@@ -3426,6 +3426,40 @@
           }
         }
       },
+      "IdempotencyInProgressError": {
+        "description": "HTTP 409: A request with this idempotency key is still being completed. Retry the same request with the same key after Retry-After to receive its result.",
+        "x-http-status": 409,
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/IdempotencyInProgressErrorResponse"
+            },
+            "examples": {
+              "idempotency_in_progress": {
+                "summary": "IdempotencyInProgress",
+                "value": {
+                  "error": {
+                    "code": "idempotency_in_progress",
+                    "message": "The request with this idempotency key is still completing.",
+                    "timestamp": "2026-09-11T12:00:00Z",
+                    "request_id": "example-request-id",
+                    "request": {
+                      "kind": "matched",
+                      "operation_id": "fork"
+                    },
+                    "retry_after_seconds": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "ExpiredError": {
         "description": "HTTP 410: A time-limited resource is known to have expired. Create a replacement. Use not_found when missing and expired cannot be distinguished.",
         "x-http-status": 410,
@@ -4002,8 +4036,8 @@
           }
         }
       },
-      "AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError": {
-        "description": "HTTP 409: already_exists, conflict, invalid_state, resource_busy. The code selects the required details.",
+      "AlreadyExistsOrConflictOrIdempotencyInProgressOrInvalidStateOrResourceBusyError": {
+        "description": "HTTP 409: already_exists, conflict, idempotency_in_progress, invalid_state, resource_busy. The code selects the required details.",
         "x-http-status": 409,
         "headers": {
           "Retry-After": {
@@ -4013,7 +4047,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse"
+              "$ref": "#/components/schemas/AlreadyExistsOrConflictOrIdempotencyInProgressOrInvalidStateOrResourceBusyErrorResponse"
             },
             "examples": {
               "already_exists": {
@@ -4021,6 +4055,9 @@
               },
               "conflict": {
                 "$ref": "#/components/responses/ConflictError/content/application~1json/examples/conflict"
+              },
+              "idempotency_in_progress": {
+                "$ref": "#/components/responses/IdempotencyInProgressError/content/application~1json/examples/idempotency_in_progress"
               },
               "invalid_state": {
                 "$ref": "#/components/responses/InvalidStateError/content/application~1json/examples/invalid_state"
@@ -4425,6 +4462,7 @@
           "invalid_state",
           "already_exists",
           "idempotency_conflict",
+          "idempotency_in_progress",
           "expired",
           "payload_too_large",
           "method_not_allowed",
@@ -4473,6 +4511,9 @@
           },
           {
             "$ref": "#/components/schemas/IdempotencyConflict"
+          },
+          {
+            "$ref": "#/components/schemas/IdempotencyInProgress"
           },
           {
             "$ref": "#/components/schemas/Expired"
@@ -4531,6 +4572,7 @@
             "invalid_state": "#/components/schemas/InvalidState",
             "already_exists": "#/components/schemas/AlreadyExists",
             "idempotency_conflict": "#/components/schemas/IdempotencyConflict",
+            "idempotency_in_progress": "#/components/schemas/IdempotencyInProgress",
             "expired": "#/components/schemas/Expired",
             "payload_too_large": "#/components/schemas/PayloadTooLarge",
             "method_not_allowed": "#/components/schemas/MethodNotAllowed",
@@ -9470,6 +9512,28 @@
         ],
         "unevaluatedProperties": false
       },
+      "IdempotencyInProgress": {
+        "description": "A request with this idempotency key is still being completed. Retry the same request with the same key after Retry-After to receive its result.",
+        "x-http-status": 409,
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ErrorMetadata"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "idempotency_in_progress"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          }
+        ],
+        "unevaluatedProperties": false
+      },
       "Expired": {
         "description": "A time-limited resource is known to have expired. Create a replacement. Use not_found when missing and expired cannot be distinguished.",
         "x-http-status": 410,
@@ -10253,6 +10317,18 @@
           }
         }
       },
+      "IdempotencyInProgressErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/IdempotencyInProgress"
+          }
+        }
+      },
       "PaymentRequiredErrorResponse": {
         "type": "object",
         "required": [
@@ -10556,7 +10632,7 @@
           }
         }
       },
-      "AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse": {
+      "AlreadyExistsOrConflictOrIdempotencyInProgressOrInvalidStateOrResourceBusyErrorResponse": {
         "type": "object",
         "required": [
           "error"
@@ -10572,6 +10648,9 @@
                 "$ref": "#/components/schemas/Conflict"
               },
               {
+                "$ref": "#/components/schemas/IdempotencyInProgress"
+              },
+              {
                 "$ref": "#/components/schemas/InvalidState"
               },
               {
@@ -10583,6 +10662,7 @@
               "mapping": {
                 "already_exists": "#/components/schemas/AlreadyExists",
                 "conflict": "#/components/schemas/Conflict",
+                "idempotency_in_progress": "#/components/schemas/IdempotencyInProgress",
                 "invalid_state": "#/components/schemas/InvalidState",
                 "resource_busy": "#/components/schemas/ResourceBusy"
               }

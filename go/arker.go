@@ -44,8 +44,11 @@ const (
 var terminalRunStates = map[string]bool{"completed": true, "failed": true, "cancelled": true}
 
 // Codes the service marks retryable by name when it omits the `retryable` flag.
+// idempotency_in_progress: a request with the same key is still being
+// completed; repeating it with that key returns its result.
 var retryableCodes = map[string]bool{
 	"unavailable": true, "bad_gateway": true, "stale_route": true, "capacity_unavailable": true,
+	"idempotency_in_progress": true,
 }
 
 // 429 and 503 are refusals -- the origin did no work. 502 and 504 are gateway

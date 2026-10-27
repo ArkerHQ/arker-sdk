@@ -1968,6 +1968,29 @@ async function testForkRetryReusesTheSameIdempotencyKey(): Promise<void> {
   assert.equal(first, fetch.calls[1]!.headers["idempotency-key"]);
 }
 
+async function testForkRetriesWhileItsKeyIsStillBeingCompleted(): Promise<void> {
+  // A request with the same key is still being completed; repeating it with
+  // that key returns its VM.
+  const fetch = new FakeFetch();
+  const fork = (method: string, url: string) => method === "POST" && url.endsWith("/v1/fork");
+  fetch.addJson(fork, 409, {
+    error: {
+      code: "idempotency_in_progress",
+      message: "still completing",
+      retry_after_seconds: 0,
+      request_id: "req-test",
+      request: { kind: "matched", operation_id: "fork" },
+      timestamp: "2026-01-01T00:00:00.000Z",
+    },
+  });
+  fetch.addJson(fork, 200, FORK_VM);
+
+  const vm = await clientWithRetry(fetch, 2).fork({ source_vm_id: "source-vm-id", idempotencyKey: "caller-chosen" });
+
+  assert.deepEqual(fetch.calls.map((call) => call.headers["idempotency-key"]), ["caller-chosen", "caller-chosen"]);
+  assert.equal(vm.id, FORK_VM.vm_id);
+}
+
 async function testForkUsesAnExplicitIdempotencyKeyVerbatim(): Promise<void> {
   const fetch = forkFetch(200);
 
@@ -2016,6 +2039,7 @@ await testForkSendsNoKeyUnlessAsked,
   testForkGeneratesAKeyWhenIdempotencyIsRequested,
   testAnExplicitKeyWinsOverTheFlag();
 await testForkRetryReusesTheSameIdempotencyKey();
+await testForkRetriesWhileItsKeyIsStillBeingCompleted();
 await testForkUsesAnExplicitIdempotencyKeyVerbatim();
 await testVmForkAlsoCarriesAKey();
 await testTwoForksDoNotShareAGeneratedKey();

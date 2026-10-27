@@ -2958,6 +2958,34 @@ def test_fork_retry_reuses_the_same_idempotency_key() -> None:
     assert first == t.calls[1]["headers"]["idempotency-key"]
 
 
+def test_fork_retries_while_its_key_is_still_being_completed() -> None:
+    """A request with the same key is still being completed; repeating it
+    with that key returns its VM."""
+    t = FakeTransport()
+    fork = lambda method, url: method == "POST" and url.endswith("/v1/fork")
+    t.add_json(
+        fork,
+        409,
+        {
+            "error": {
+                "code": "idempotency_in_progress",
+                "message": "still completing",
+                "retry_after_seconds": 0,
+                "request_id": "req-test",
+                "request": {"kind": "matched", "operation_id": "fork"},
+                "timestamp": "2026-01-01T00:00:00.000Z",
+            }
+        },
+    )
+    t.add_json(fork, 200, _FORK_VM)
+
+    with use_transport(t):
+        vm = _retrying_client().fork(source_vm_id="source-vm-id", idempotency_key="caller-chosen")
+
+    assert [call["headers"]["idempotency-key"] for call in t.calls] == ["caller-chosen"] * 2
+    assert vm.id == _FORK_VM["vm_id"]
+
+
 def test_fork_uses_an_explicit_idempotency_key_verbatim() -> None:
     t = _fork_transport(200)
 

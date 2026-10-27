@@ -133,6 +133,31 @@ func TestForkRetryReusesTheSameIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestForkRetriesWhileItsKeyIsStillBeingCompleted(t *testing.T) {
+	// A request with the same key is still being completed; repeating it with
+	// that key returns its VM.
+	var keys []string
+	var n int32
+	c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		if atomic.AddInt32(&n, 1) == 1 {
+			w.WriteHeader(http.StatusConflict)
+			fmt.Fprint(w, `{"error":{"code":"idempotency_in_progress","message":"still completing","retry_after_seconds":0}}`)
+			return
+		}
+		fmt.Fprint(w, forkVM)
+	})
+	defer done()
+
+	_, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base", IdempotencyKey: "caller-chosen"})
+	if err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+	if len(keys) != 2 || keys[0] != "caller-chosen" || keys[1] != "caller-chosen" {
+		t.Fatalf("expected one retry with the caller's key, got %q", keys)
+	}
+}
+
 func TestForkUsesAnExplicitKeyVerbatim(t *testing.T) {
 	var key string
 	c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {

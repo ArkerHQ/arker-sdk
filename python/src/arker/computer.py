@@ -181,7 +181,15 @@ TERMINAL_RUN_STATES = frozenset({"completed", "failed", "cancelled"})
 # as the background ack arrives and run() never gets to poll.
 REQUEST_TIMEOUT_S = 300
 RETRYABLE_HTTP = {429, 502, 503, 504}
-RETRYABLE_CODES = {"unavailable", "capacity_unavailable", "rate_limited", "gateway_timeout"}
+# idempotency_in_progress: a request with the same key is still being
+# completed; repeating it with that key returns its result.
+RETRYABLE_CODES = {
+    "unavailable",
+    "capacity_unavailable",
+    "rate_limited",
+    "gateway_timeout",
+    "idempotency_in_progress",
+}
 ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 ComputeProvider = str
 DEFAULT_CONTROL_BASE_URL = "https://arker.ai/api"

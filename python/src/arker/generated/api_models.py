@@ -46,6 +46,7 @@ ErrorCode: TypeAlias = Literal[
     'invalid_state',
     'already_exists',
     'idempotency_conflict',
+    'idempotency_in_progress',
     'expired',
     'payload_too_large',
     'method_not_allowed',
@@ -1018,6 +1019,11 @@ class IdempotencyConflict(ErrorMetadata):
 
 
 @dataclass(frozen=True)
+class IdempotencyInProgress(ErrorMetadata):
+    code: Literal['idempotency_in_progress'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
 class Expired(ErrorMetadata):
     code: Literal['expired'] = field(kw_only=True)
     details: ResourceErrorDetails = field(kw_only=True)
@@ -1195,6 +1201,11 @@ class IdempotencyConflictErrorResponse:
 
 
 @dataclass(frozen=True)
+class IdempotencyInProgressErrorResponse:
+    error: IdempotencyInProgress
+
+
+@dataclass(frozen=True)
 class UnsupportedOperationErrorResponse:
     error: UnsupportedOperation
 
@@ -1310,8 +1321,10 @@ class BadRequestOrInsufficientResourcesErrorResponse:
 
 
 @dataclass(frozen=True)
-class AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse:
-    error: AlreadyExists | Conflict | InvalidState | ResourceBusy
+class AlreadyExistsOrConflictOrIdempotencyInProgressOrInvalidStateOrResourceBusyErrorResponse:
+    error: (
+        AlreadyExists | Conflict | IdempotencyInProgress | InvalidState | ResourceBusy
+    )
 
 
 @dataclass(frozen=True)
@@ -2140,6 +2153,7 @@ ErrorBody: TypeAlias = (
     | InvalidState
     | AlreadyExists
     | IdempotencyConflict
+    | IdempotencyInProgress
     | Expired
     | PayloadTooLarge
     | MethodNotAllowed
