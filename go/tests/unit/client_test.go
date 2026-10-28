@@ -135,11 +135,11 @@ func TestForkRetryReusesTheSameIdempotencyKey(t *testing.T) {
 
 func TestOnlyAKeyedBusyForkWithARetryHintIsReplayed(t *testing.T) {
 	for _, tc := range []struct {
-		name string
+		name  string
 		keyed bool
-		code string
-		hint string
-		want int
+		code  string
+		hint  string
+		want  int
 	}{
 		{"keyed", true, "resource_busy", `,"retry_after_seconds":0`, 2},
 		{"unkeyed", false, "resource_busy", `,"retry_after_seconds":0`, 1},
