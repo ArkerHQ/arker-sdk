@@ -1968,6 +1968,31 @@ async function testForkRetryReusesTheSameIdempotencyKey(): Promise<void> {
   assert.equal(first, fetch.calls[1]!.headers["idempotency-key"]);
 }
 
+async function testOnlyAKeyedBusyForkWithARetryHintIsReplayed(): Promise<void> {
+  for (const [keyed, code, hint, retries] of [
+    [true, "resource_busy", 0, true], [false, "resource_busy", 0, false],
+    [true, "idempotency_conflict", 0, false], [true, "resource_busy", undefined, false],
+    [true, "resource_busy", -1, false], [true, "resource_busy", 0.5, false],
+    [true, "resource_busy", true, false],
+  ] as const) {
+    const fetch = new FakeFetch();
+    fetch.addJson(() => true, 409, { error: { code, message: "busy", details: { resource: "vm" }, retry_after_seconds: hint, recovery: { work: "unknown" }, timestamp: "2026-01-01T00:00:00Z", request_id: "request-test", request: { kind: "matched", operation_id: "fork" } } });
+    fetch.addJson(() => true, 200, FORK_VM);
+    const operation = clientWithRetry(fetch, 2).fork({ source_vm_id: "source-vm-id", idempotency: keyed });
+    if (retries) await operation;
+    else await assert.rejects(operation, ArkerError);
+    assert.equal(fetch.calls.length, retries ? 2 : 1);
+    if (retries) {
+      assert.equal(fetch.calls[0]!.headers["idempotency-key"], fetch.calls[1]!.headers["idempotency-key"]);
+      assert.equal(fetch.calls[0]!.body, fetch.calls[1]!.body);
+    }
+  }
+  const fetch = new FakeFetch();
+  fetch.addJson(() => true, 409, { error: { code: "resource_busy", message: "busy", details: { resource: "vm" }, retry_after_seconds: 0, recovery: { work: "unknown" }, timestamp: "2026-01-01T00:00:00Z", request_id: "request-test", request: { kind: "matched", operation_id: "fork" } } });
+  await assert.rejects(clientWithRetry(fetch, 2)._request("POST", "/v1/vms/child/runs", {}, undefined, { "Idempotency-Key": "same-key" }), ArkerError);
+  assert.equal(fetch.calls.length, 1);
+}
+
 async function testForkUsesAnExplicitIdempotencyKeyVerbatim(): Promise<void> {
   const fetch = forkFetch(200);
 
@@ -2016,6 +2041,7 @@ await testForkSendsNoKeyUnlessAsked,
   testForkGeneratesAKeyWhenIdempotencyIsRequested,
   testAnExplicitKeyWinsOverTheFlag();
 await testForkRetryReusesTheSameIdempotencyKey();
+await testOnlyAKeyedBusyForkWithARetryHintIsReplayed();
 await testForkUsesAnExplicitIdempotencyKeyVerbatim();
 await testVmForkAlsoCarriesAKey();
 await testTwoForksDoNotShareAGeneratedKey();

@@ -1726,7 +1726,10 @@ def _request_json(
         payload = _parse_json(text)
         parsed_error = _extract_error(payload, status)
         if _is_retryable(
-            status, parsed_error, replay_safe=should_retry_network_failures or bool(headers.get("Idempotency-Key"))
+            status,
+            parsed_error,
+            replay_safe=should_retry_network_failures or bool(headers.get("Idempotency-Key")),
+            keyed_fork=method.upper() == "POST" and path == "/v1/fork" and bool(headers.get("Idempotency-Key")),
         ):
             delay = _retry_delay(retry, attempt, parsed_error)
             if _can_retry_again(retry, attempt, deadline, delay):
@@ -2069,7 +2072,13 @@ def _delete_after_failed_build(vm: VM, attempts: int = 3, base_delay_s: float = 
             time.sleep(base_delay_s * (attempt + 1))
 
 
-def _is_retryable(status: int, error: ArkerError | None, *, replay_safe: bool = False) -> bool:
+def _is_retryable(
+    status: int, error: ArkerError | None, *, replay_safe: bool = False, keyed_fork: bool = False
+) -> bool:
+    # Replaying the same fork key resolves its existing operation, even when
+    # the original request's outcome is still unknown.
+    if keyed_fork and status == 409 and error and error.code == "resource_busy" and error.body:
+        return _wire_retry_after(getattr(error.body, "retry_after_seconds", None)) is not None
     if error and error.code == "quota_exceeded":
         return False
     if error and error.body and error.body.recovery:

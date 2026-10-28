@@ -952,6 +952,7 @@ export class Arker {
       this.retry,
       maxQueueingSecs ?? undefined,
       retryNetworkFailures,
+      method === "POST" && path === "/v1/fork" && Boolean(headers["Idempotency-Key"]),
     );
   }
 
@@ -2225,6 +2226,7 @@ async function requestJson<T>(
   retry: RetryConfig,
   maxQueueingSecs?: number,
   retryNetworkFailures?: boolean,
+  keyedFork = false,
 ): Promise<T> {
   const headers = { ...requestHeaders };
   let requestBody: string | undefined;
@@ -2262,7 +2264,7 @@ async function requestJson<T>(
       const payload = parseJson(text);
       const parsedError = extractError(payload, status);
 
-      if (isRetryable(status, parsedError, shouldRetryNetworkFailures || Boolean(headers["Idempotency-Key"]))) {
+      if (isRetryable(status, parsedError, shouldRetryNetworkFailures || Boolean(headers["Idempotency-Key"]), keyedFork)) {
         const delay = retryDelay(retry, attempt, parsedError);
         if (canRetryAgain(retry, attempt, queueingDeadline, delay)) {
           await sleep(delay);
@@ -2342,7 +2344,11 @@ function wireRetryAfter(value: unknown): number | undefined {
   return value;
 }
 
-function isRetryable(status: number, error?: ArkerError, replaySafe = false): boolean {
+function isRetryable(status: number, error?: ArkerError, replaySafe = false, keyedFork = false): boolean {
+  // The same fork key resolves the existing operation rather than creating another.
+  if (keyedFork && status === 409 && error?.code === "resource_busy" && error.body) {
+    return "retry_after_seconds" in error.body && wireRetryAfter(error.body.retry_after_seconds) !== undefined;
+  }
   if (error?.code === "quota_exceeded") return false;
   const work = error?.body?.recovery?.work;
   if (work !== undefined) {
