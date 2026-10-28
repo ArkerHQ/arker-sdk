@@ -18,6 +18,7 @@ from ._compat import (
     format_not_found,
     get_or_none,
     import_optional,
+    pop_arker_config,
     routed_create,
     routed_get,
     run_command,
@@ -104,12 +105,8 @@ class Sandbox(UnsupportedMixin):
 
     @classmethod
     def create(cls, *args: Any, **kwargs: Any) -> Sandbox:
+        arker_config = pop_arker_config(kwargs)
         native_kwargs = dict(kwargs)
-        arker_config = kwargs.pop("arker", None) or {}
-        router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
-        native_kwargs.pop("arker", None)
-        native_kwargs.pop("router_config_path", None)
-        native_kwargs.pop("routerConfigPath", None)
         block_network = kwargs.pop("block_network", kwargs.pop("blockNetwork", False))
         outbound_cidrs = kwargs.pop("outbound_cidr_allowlist", kwargs.pop("outboundCidrAllowlist", None))
         outbound_domains = kwargs.pop("outbound_domain_allowlist", kwargs.pop("outboundDomainAllowlist", None))
@@ -121,8 +118,6 @@ class Sandbox(UnsupportedMixin):
             if camel in native_kwargs:
                 native_kwargs.pop(camel)
                 native_kwargs[snake] = value
-        if router_path:
-            arker_config = {**arker_config, "router_config_path": router_path}
         native = cls._native_sandbox()
 
         def create_native() -> Any:
@@ -159,10 +154,7 @@ class Sandbox(UnsupportedMixin):
 
     @classmethod
     def from_id(cls, sandbox_id: str, client: Any | None = None, **kwargs: Any) -> Sandbox:
-        arker_config = kwargs.pop("arker", None) or {}
-        router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
-        if router_path:
-            arker_config = {**arker_config, "router_config_path": router_path}
+        arker_config = pop_arker_config(kwargs)
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise TypeError(f"Sandbox.from_id received unsupported option(s): {unsupported}")

@@ -20,6 +20,7 @@ from ._compat import (
     format_not_found,
     get_or_none,
     import_optional,
+    pop_arker_config,
     resolve_compat_path,
     routed_create,
     routed_get,
@@ -558,10 +559,7 @@ class SyncSandboxInstance(UnsupportedMixin):
 
     @classmethod
     def create(cls, sandbox: Any = None, **kwargs: Any) -> SyncSandboxInstance:
-        arker_config = kwargs.pop("arker", None) or {}
-        router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
-        if router_path:
-            arker_config = {**arker_config, "router_config_path": router_path}
+        arker_config = pop_arker_config(kwargs)
         native = cls._native_class()
 
         def create_native() -> Any:
@@ -617,10 +615,7 @@ class SyncSandboxInstance(UnsupportedMixin):
 
     @classmethod
     def get(cls, sandbox_id: str, **kwargs: Any) -> SyncSandboxInstance:
-        arker_config = kwargs.pop("arker", None) or {}
-        router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
-        if router_path:
-            arker_config = {**arker_config, "router_config_path": router_path}
+        arker_config = pop_arker_config(kwargs)
         if kwargs:
             raise TypeError(f"SandboxInstance.get received unsupported option(s): {', '.join(sorted(kwargs))}")
         native = cls._native_class()

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -11,6 +11,7 @@ import {
 import { ModalClient as Shim } from "../src/modal.js";
 import { Arker } from "../src/index.js";
 import { recordEvidence } from "../scripts/compat-evidence.js";
+import { withLiveRouter } from "./compat-live-router.js";
 
 async function program(Client: typeof Native | typeof Shim, id: string) {
   const client = new Client();
@@ -60,101 +61,82 @@ async function program(Client: typeof Native | typeof Shim, id: string) {
   }
 }
 
-if (
-  !process.env.MODAL_TOKEN_ID ||
-  !process.env.MODAL_TOKEN_SECRET ||
-  !process.env.ARKER_API_KEY
-) {
-  throw new Error("Live Modal and Arker credentials required");
-}
-const directory = await mkdtemp(join(tmpdir(), "compat-modal-filesystem-"));
-const previous = process.env.COMPUTESDK_ROUTER_CONFIG;
-const native = new Native();
-try {
-  const app = await native.apps.fromName("arker-compat-image-test", {
-    createIfMissing: false,
-  });
-  const image = await native.images.fromRegistry("python:3.12-slim").build(app);
-  for (const [provider, Client, route] of [
-    ["modal", Native, "reference"],
-    ["modal", Shim, "native"],
-    ["arker", Shim, "arker"],
-  ] as const) {
-    const path = join(directory, provider + ".json");
-    await writeFile(
-      path,
-      JSON.stringify({
-        version: 1,
-        existing: { strategy: "priority", order: [provider] },
-        create: { strategy: "priority", order: [provider] },
-      }),
-    );
-    process.env.COMPUTESDK_ROUTER_CONFIG = path;
-    const replayKey = "modal-filesystem-" + randomUUID();
-    const fixture = await (provider === "modal"
-      ? native.sandboxes.create(app, image, {
-          blockNetwork: true,
-          timeoutMs: 180000,
-        })
-      : new Arker()
-          .fork({
-            image: "python:3.12-slim",
-            idempotencyKey: replayKey,
-            policies: {
-              policies: [
-                { type: "inbound", action: "deny" },
-                { type: "outbound", action: "deny" },
-              ],
-            },
+await withLiveRouter(["MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET", "ARKER_API_KEY"], async ({ setProvider }) => {
+  const native = new Native();
+  try {
+    const app = await native.apps.fromName("arker-compat-image-test", {
+      createIfMissing: false,
+    });
+    const image = await native.images.fromRegistry("python:3.12-slim").build(app);
+    for (const [provider, Client, route] of [
+      ["modal", Native, "reference"],
+      ["modal", Shim, "native"],
+      ["arker", Shim, "arker"],
+    ] as const) {
+      await setProvider(provider);
+      const replayKey = "modal-filesystem-" + randomUUID();
+      const fixture = await (provider === "modal"
+        ? native.sandboxes.create(app, image, {
+            blockNetwork: true,
+            timeoutMs: 180000,
           })
-          .catch((error) => {
-            throw new Error(
-              `Fork did not return an owned VM; reconcile replay key ${replayKey} before another attempt`,
-              { cause: error },
-            );
-          }));
-    const id = "sandboxId" in fixture ? fixture.sandboxId : fixture.id;
-    let outcome: "passed" | "failed" = "failed";
-    try {
-      await program(Client, id);
-      outcome = "passed";
-      console.log(`PASS Modal filesystem program: ${route}`);
-    } finally {
+        : new Arker()
+            .fork({
+              image: "python:3.12-slim",
+              idempotencyKey: replayKey,
+              policies: {
+                policies: [
+                  { type: "inbound", action: "deny" },
+                  { type: "outbound", action: "deny" },
+                ],
+              },
+            })
+            .catch((error) => {
+              throw new Error(
+                `Fork did not return an owned VM; reconcile replay key ${replayKey} before another attempt`,
+                { cause: error },
+              );
+            }));
+      const id = "sandboxId" in fixture ? fixture.sandboxId : fixture.id;
+      let outcome: "passed" | "failed" = "failed";
       try {
-        if ("terminate" in fixture) await fixture.terminate();
-        else await fixture.delete();
-      } catch (error) {
-        outcome = "failed";
-        throw error;
+        await program(Client, id);
+        outcome = "passed";
+        console.log(`PASS Modal filesystem program: ${route}`);
       } finally {
-        await recordEvidence(
-          "modal",
-          route,
-          "from-id-filesystem-binary-metadata-local-copy",
-          [
-            "ModalClient.sandboxes.fromId",
-            "Sandbox.filesystem",
-            ...[
-              "makeDirectory",
-              "writeBytes",
-              "readBytes",
-              "writeText",
-              "readText",
-              "stat",
-              "listFiles",
-              "copyToLocal",
-              "copyFromLocal",
-              "remove",
-            ].map((name) => "Sandbox.filesystem." + name),
-          ],
-          outcome,
-        );
+        try {
+          if ("terminate" in fixture) await fixture.terminate();
+          else await fixture.delete();
+        } catch (error) {
+          outcome = "failed";
+          throw error;
+        } finally {
+          await recordEvidence(
+            "modal",
+            route,
+            "from-id-filesystem-binary-metadata-local-copy",
+            [
+              "ModalClient.sandboxes.fromId",
+              "Sandbox.filesystem",
+              ...[
+                "makeDirectory",
+                "writeBytes",
+                "readBytes",
+                "writeText",
+                "readText",
+                "stat",
+                "listFiles",
+                "copyToLocal",
+                "copyFromLocal",
+                "remove",
+              ].map((name) => "Sandbox.filesystem." + name),
+            ],
+            outcome,
+          );
+        }
       }
     }
+  } finally {
+    native.close();
   }
-} finally {
-  native.close();
-  if (previous === undefined) delete process.env.COMPUTESDK_ROUTER_CONFIG;
-  else process.env.COMPUTESDK_ROUTER_CONFIG = previous;
-  await rm(directory, { recursive: true, force: true });
-}
+});

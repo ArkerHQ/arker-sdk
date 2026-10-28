@@ -1,5 +1,6 @@
 import { Sandbox, NotFoundError, CommandExitError, FileType } from "e2b";
 import { defineProvider } from "@computesdk/provider";
+import { onMissing } from "./common.js";
 
 const provider = defineProvider<Sandbox, Record<string, never>>({
   name: "e2b",
@@ -19,12 +20,9 @@ const provider = defineProvider<Sandbox, Record<string, never>>({
         return { instance, instanceId: instance.sandboxId };
       },
       async getById(_config, id) {
-        try {
+        return onMissing(async () => {
           return { instance: await Sandbox.connect(id), instanceId: id };
-        } catch (error) {
-          if (error instanceof NotFoundError) return null;
-          throw error;
-        }
+        }, (error) => error instanceof NotFoundError, null);
       },
       async destroy(_config, id) {
         await Sandbox.kill(id);
@@ -101,13 +99,10 @@ const provider = defineProvider<Sandbox, Record<string, never>>({
 export function createNativeE2BProvider() {
   return Object.assign(provider({}), {
     ownershipProbe: async (id: string) => {
-      try {
+      return onMissing(async () => {
         await Sandbox.getInfo(id);
         return true;
-      } catch (error) {
-        if (error instanceof NotFoundError) return false;
-        throw error;
-      }
+      }, (error) => error instanceof NotFoundError, false);
     },
   });
 }

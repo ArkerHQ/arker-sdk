@@ -114,6 +114,12 @@ def source_env(monkeypatch) -> None:
     monkeypatch.setenv("ARKER_SOURCE", "catalog-template")
 
 
+@pytest.fixture
+def arker_env(monkeypatch):
+    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
+    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+
+
 class FakeTransport:
     """Scripts httpx responses by (method, url); drive it with ``use_transport``."""
 
@@ -225,9 +231,7 @@ def add_arker_not_found(t: FakeTransport, vm_id: str) -> None:
     )
 
 
-def test_shared_fork_keeps_policy_secrets_and_uses_image_source_id(monkeypatch):
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_shared_fork_keeps_policy_secrets_and_uses_image_source_id(arker_env):
     config = {
         "source_vm_id": "vm_image_parent",
         "policies": {"secrets": {"TEST_TOKEN": "synthetic-policy-secret"}},
@@ -252,9 +256,7 @@ def test_shared_fork_keeps_policy_secrets_and_uses_image_source_id(monkeypatch):
     assert config["policies"] == {"secrets": {"TEST_TOKEN": "synthetic-policy-secret"}}
 
 
-def test_shared_fork_preserves_legacy_named_source_environment(monkeypatch):
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_shared_fork_preserves_legacy_named_source_environment(monkeypatch, arker_env):
     monkeypatch.delenv("ARKER_SOURCE", raising=False)
     monkeypatch.setenv("ARKER_SOURCE_VM", "legacy-source-name")
     t = FakeTransport()
@@ -265,9 +267,7 @@ def test_shared_fork_preserves_legacy_named_source_environment(monkeypatch):
 
 
 @pytest.mark.parametrize("configured_id", [None, "configured-parent-id"])
-def test_shared_fork_accepts_unambiguous_parent_id_environment(monkeypatch, configured_id):
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_shared_fork_accepts_unambiguous_parent_id_environment(monkeypatch, arker_env, configured_id):
     monkeypatch.setenv("ARKER_SOURCE_VM_ID", "environment-parent-id")
     monkeypatch.setenv("ARKER_SOURCE_VM", "legacy-source-name")
     transport = FakeTransport()
@@ -280,9 +280,7 @@ def test_shared_fork_accepts_unambiguous_parent_id_environment(monkeypatch, conf
 
 
 @pytest.mark.parametrize("ordered", [False, True])
-def test_native_network_floor_preserves_configured_policy_controls(monkeypatch, ordered):
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_native_network_floor_preserves_configured_policy_controls(arker_env, ordered):
     base = [{"type": "inbound", "action": "deny"}]
     controls = {"policies": base} if ordered else {"rules": {"private-ingress": base[0]}}
     controls["secrets"] = {"TOKEN": "synthetic-only"}
@@ -317,9 +315,7 @@ def test_native_network_floor_preserves_configured_policy_controls(monkeypatch, 
         lambda: ModalSandbox.create(block_network=True),
     ],
 )
-def test_provider_block_network_options_translate_to_arker_policy(monkeypatch, create) -> None:
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_provider_block_network_options_translate_to_arker_policy(arker_env, create) -> None:
     t = FakeTransport()
     t.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, vm_payload("vm_policy"))
 
@@ -331,9 +327,7 @@ def test_provider_block_network_options_translate_to_arker_policy(monkeypatch, c
     assert guards == [{"type": "outbound_guard", "allow": []}]
 
 
-def test_allowlist_policies_intersect_inherited_rules(monkeypatch) -> None:
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_allowlist_policies_intersect_inherited_rules(arker_env) -> None:
     t = FakeTransport()
     t.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, vm_payload("vm_policy"))
 
@@ -354,9 +348,7 @@ def test_allowlist_policies_intersect_inherited_rules(monkeypatch) -> None:
     }
 
 
-def test_daytona_official_surface(monkeypatch) -> None:
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_daytona_official_surface(arker_env) -> None:
     t = FakeTransport()
     add_create_run_delete(t, "vm_daytona", "Hello, World!\n")
     t.add_json(
@@ -375,32 +367,22 @@ def test_daytona_official_surface(monkeypatch) -> None:
         sandbox.delete()
 
     assert json.loads(t.calls[0]["body"])["source_vm_name"] == "catalog-template"
-    first_run = json.loads(t.calls[1]["body"])
-    assert first_run["command"].startswith(
-        '(\nsetpriv --reuid=daytona --regid="$(id -g daytona)" --init-groups -- python3 -I '
-    )
-    assert json.loads(shlex.split(first_run["command"])[-2]) == {
-        "operation": "exec",
-        "command": "echo 'Hello, World!'",
-        "cwd": "/workspace",
-        "env": {"FOO": "bar"},
-    }
-    assert first_run["timeout"] == 7
-    alias_run = json.loads(t.calls[2]["body"])
-    assert alias_run["command"].startswith(
-        '(\nsetpriv --reuid=daytona --regid="$(id -g daytona)" --init-groups -- python3 -I '
-    )
-    assert json.loads(shlex.split(alias_run["command"])[-2]) == {
-        "operation": "exec",
-        "command": "echo 'Hello, World!'",
-        "cwd": "/workspace",
-        "env": {"ALIAS": "yes"},
-    }
-    assert alias_run["timeout"] == 9
+    for call, env, timeout in zip(t.calls[1:3], ({"FOO": "bar"}, {"ALIAS": "yes"}), (7, 9), strict=True):
+        run = json.loads(call["body"])
+        assert run["command"].startswith(
+            '(\nsetpriv --reuid=daytona --regid="$(id -g daytona)" --init-groups -- python3 -I '
+        )
+        assert json.loads(shlex.split(run["command"])[-2]) == {
+            "operation": "exec",
+            "command": "echo 'Hello, World!'",
+            "cwd": "/workspace",
+            "env": env,
+        }
+        assert run["timeout"] == timeout
 
 
 @pytest.mark.parametrize("keyword", [False, True])
-def test_daytona_accepts_typed_create_params_and_gib_resources(monkeypatch, keyword):
+def test_daytona_accepts_typed_create_params_and_gib_resources(arker_env, keyword):
     from dataclasses import dataclass
 
     @dataclass
@@ -415,8 +397,6 @@ def test_daytona_accepts_typed_create_params_and_gib_resources(monkeypatch, keyw
             assert exclude_none is True
             return {"image": "ubuntu:24.04", "name": "typed", "resources": Resources()}
 
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
     transport = FakeTransport()
     transport.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, vm_payload("typed"))
     with use_transport(transport):
@@ -427,9 +407,7 @@ def test_daytona_accepts_typed_create_params_and_gib_resources(monkeypatch, keyw
     assert json.loads(transport.calls[0]["body"])["resources"] == {"vcpu": 4, "memory_mib": 8192, "disk_mib": 20480}
 
 
-def test_daytona_does_not_drop_unsupported_resource_requests(monkeypatch):
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_daytona_does_not_drop_unsupported_resource_requests(arker_env):
     with use_transport(FakeTransport()), pytest.raises(TypeError, match="gpu"):
         Daytona().create(image="ubuntu:24.04", resources={"cpu": 4, "gpu": 1})
 
@@ -444,9 +422,8 @@ def test_compat_requires_source(monkeypatch) -> None:
 
 def test_arker_shim_config_customizes_source_without_forwarding_to_client(
     monkeypatch,
+    arker_env,
 ) -> None:
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
     t = FakeTransport()
     t.add_json(
         lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/fork",
@@ -463,9 +440,7 @@ def test_arker_shim_config_customizes_source_without_forwarding_to_client(
     assert body["name"] == "custom-name"
 
 
-def test_python_shims_translate_or_reject_arker_create_options(monkeypatch) -> None:
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_python_shims_translate_or_reject_arker_create_options(arker_env) -> None:
     t = FakeTransport()
     for vm_id in ("vm_daytona_image", "vm_blaxel_image"):
         t.add_json(
@@ -501,9 +476,7 @@ def test_python_shims_translate_or_reject_arker_create_options(monkeypatch) -> N
     }
 
 
-def test_e2b_official_surface(monkeypatch) -> None:
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_e2b_official_surface(arker_env) -> None:
     t = FakeTransport()
     add_create_run_delete(t, "vm_e2b", "Hello from E2B Sandbox!\n")
 
@@ -540,31 +513,36 @@ def test_e2b_nested_native_surface_delegates_provider_extensions() -> None:
     assert sandbox.get_host(3000) == "native-3000.example"
 
 
+class LocalE2BVM:
+    def __init__(self, vm_id):
+        self.id = vm_id
+
+    def sync(self, path, content=None):
+        target = Path(path)
+        if content is None:
+            return target.read_bytes()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content.encode() if isinstance(content, str) else content)
+        return None
+
+    def run(self, command, **_options):
+        command = command.replace("setpriv --reuid=user --regid=user --init-groups -- ", "")
+        completed = subprocess.run(command, shell=True, text=True, capture_output=True, check=False)
+        return sdk.CompletedRunResult(
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+            stdout_bytes=completed.stdout.encode(),
+            stderr_bytes=completed.stderr.encode(),
+            exit_code=completed.returncode,
+        )
+
+
 def test_e2b_arker_git_runs_official_workflow_against_local_repository(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(e2b_shim, "_identity_command", lambda command, **_options: command)
 
-    class LocalVM:
-        id = "local-git"
-
-        def run(self, command, **_options):
-            completed = subprocess.run(
-                command,
-                shell=True,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            return sdk.CompletedRunResult(
-                stdout=completed.stdout,
-                stderr=completed.stderr,
-                stdout_bytes=completed.stdout.encode(),
-                stderr_bytes=completed.stderr.encode(),
-                exit_code=completed.returncode,
-            )
-
     remote = tmp_path / "remote.git"
     checkout = tmp_path / "checkout"
-    sandbox = E2BSandbox(vm=LocalVM())
+    sandbox = E2BSandbox(vm=LocalE2BVM("local-git"))
 
     sandbox.git.init(str(remote), bare=True, initial_branch="main", cwd=str(tmp_path))
     sandbox.git.clone(str(remote), str(checkout), cwd=str(tmp_path))
@@ -582,29 +560,7 @@ def test_e2b_arker_git_runs_official_workflow_against_local_repository(monkeypat
 
 
 def test_e2b_arker_files_write_batch_metadata_and_rename(tmp_path) -> None:
-    class LocalVM:
-        id = "local-files"
-
-        def sync(self, path, content=None):
-            target = Path(path)
-            if content is None:
-                return target.read_bytes()
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(content.encode() if isinstance(content, str) else content)
-            return None
-
-        def run(self, command, **_options):
-            command = command.replace("setpriv --reuid=user --regid=user --init-groups -- ", "")
-            completed = subprocess.run(command, shell=True, text=True, capture_output=True, check=False)
-            return sdk.CompletedRunResult(
-                stdout=completed.stdout,
-                stderr=completed.stderr,
-                stdout_bytes=completed.stdout.encode(),
-                stderr_bytes=completed.stderr.encode(),
-                exit_code=completed.returncode,
-            )
-
-    sandbox = E2BSandbox(vm=LocalVM())
+    sandbox = E2BSandbox(vm=LocalE2BVM("local-files"))
     first = tmp_path / "nested" / "first.txt"
     second = tmp_path / "second.bin"
     renamed = tmp_path / "renamed" / "first.txt"
@@ -638,10 +594,8 @@ def test_e2b_arker_files_write_batch_metadata_and_rename(tmp_path) -> None:
     assert not (tmp_path / "blocked").exists()
 
 
-def test_modal_official_surface(monkeypatch) -> None:
+def test_modal_official_surface(monkeypatch, arker_env) -> None:
     monkeypatch.setattr("arker.modal.import_optional", lambda _: None)
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
     t = FakeTransport()
     add_create_run_delete(t, "vm_modal", "hello\n")
 
@@ -657,9 +611,7 @@ def test_modal_official_surface(monkeypatch) -> None:
     assert run["timeout"] == 2
 
 
-def test_blaxel_official_surface(monkeypatch) -> None:
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_blaxel_official_surface(arker_env) -> None:
     t = FakeTransport()
     add_create_run_delete(t, "vm_blaxel", "hello from blaxel\n")
 
@@ -714,11 +666,8 @@ def test_blaxel_native_surface_delegates_without_losing_provider_features() -> N
     assert sandbox.snapshot("checkpoint") == "snapshot:checkpoint"
 
 
-def test_blaxel_typed_request_and_directory_attributes(monkeypatch) -> None:
+def test_blaxel_typed_request_and_directory_attributes(monkeypatch, arker_env) -> None:
     from arker._compat_process import GuestProcesses
-
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
 
     class TypedRequest:
         def to_dict(self):
@@ -983,12 +932,10 @@ def test_blaxel_remove_is_nonrecursive_unless_requested(monkeypatch) -> None:
     assert "rm -r --" in calls[-1]
 
 
-def test_blaxel_async_surface_uses_shared_router(monkeypatch) -> None:
+def test_blaxel_async_surface_uses_shared_router(monkeypatch, arker_env) -> None:
     from arker._compat_process import GuestProcesses
     from arker.blaxel import SandboxInstance
 
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
     t = FakeTransport()
     add_create_run_delete(t, "vm_blaxel_async", "async")
     monkeypatch.setattr(GuestProcesses, "exec", lambda self, request: types.SimpleNamespace(stdout="async"))
@@ -1023,9 +970,7 @@ def test_compat_imports_preserve_vendor_builders(monkeypatch, shim_name, native_
     assert shim.CreationBuilder is builder
 
 
-def test_unsupported_calls_fail_fast(monkeypatch) -> None:
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_unsupported_calls_fail_fast(arker_env) -> None:
     t = FakeTransport()
     t.add_json(
         lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/fork",
@@ -1042,9 +987,7 @@ def test_unsupported_calls_fail_fast(monkeypatch) -> None:
             ModalSandbox.create(image="alpine")
 
 
-def test_daytona_get_falls_back_to_native_sdk(monkeypatch) -> None:
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_daytona_get_falls_back_to_native_sdk(monkeypatch, arker_env) -> None:
 
     class NativeProcess:
         def exec(self, command: str) -> Any:
@@ -1075,9 +1018,7 @@ def test_daytona_get_falls_back_to_native_sdk(monkeypatch) -> None:
         assert sandbox.process.exec("echo native").result == "native:echo native"
 
 
-def test_daytona_delete_by_id_falls_back_to_native_sdk(monkeypatch) -> None:
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_daytona_delete_by_id_falls_back_to_native_sdk(monkeypatch, arker_env) -> None:
     deleted: list[str] = []
 
     class NativeDaytona:
@@ -1094,9 +1035,7 @@ def test_daytona_delete_by_id_falls_back_to_native_sdk(monkeypatch) -> None:
     assert deleted == ["native_daytona"]
 
 
-def test_e2b_connect_falls_back_to_native_sdk(monkeypatch) -> None:
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_e2b_connect_falls_back_to_native_sdk(monkeypatch, arker_env) -> None:
 
     class NativeCommands:
         def run(self, command: str) -> Any:
@@ -1126,9 +1065,7 @@ def test_e2b_connect_falls_back_to_native_sdk(monkeypatch) -> None:
         assert sandbox.commands.run("echo native").stdout == "native:echo native"
 
 
-def test_modal_from_id_falls_back_to_native_sdk(monkeypatch) -> None:
-    monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
-    monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
+def test_modal_from_id_falls_back_to_native_sdk(monkeypatch, arker_env) -> None:
 
     class NativeProcess:
         stdout = types.SimpleNamespace(read=lambda: "native stdout")

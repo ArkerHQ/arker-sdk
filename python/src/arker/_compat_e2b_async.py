@@ -28,34 +28,27 @@ async def _route(method, *args, **kwargs):
     )
 
 
-class _AsyncFiles:
+class _AsyncComponent:
+    def __getattr__(self, name):
+        component = self._component
+        if component._native is not None:
+            return getattr(component._native, name)
+        function = getattr(component, name)
+
+        async def invoke(*args, **kwargs):
+            return await _call(function, *args, **kwargs)
+
+        return invoke
+
+
+class _AsyncFiles(_AsyncComponent):
     def __init__(self, files):
-        self._files = files
-
-    def __getattr__(self, name):
-        if self._files._native is not None:
-            return getattr(self._files._native, name)
-        function = getattr(self._files, name)
-
-        async def invoke(*args, **kwargs):
-            return await _call(function, *args, **kwargs)
-
-        return invoke
+        self._files = self._component = files
 
 
-class _AsyncCommands:
+class _AsyncCommands(_AsyncComponent):
     def __init__(self, commands):
-        self._commands = commands
-
-    def __getattr__(self, name):
-        if self._commands._native is not None:
-            return getattr(self._commands._native, name)
-        function = getattr(self._commands, name)
-
-        async def invoke(*args, **kwargs):
-            return await _call(function, *args, **kwargs)
-
-        return invoke
+        self._commands = self._component = commands
 
     async def run(
         self,

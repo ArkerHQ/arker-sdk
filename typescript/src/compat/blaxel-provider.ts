@@ -4,6 +4,7 @@ import {
   createConfigGate,
   createConfigStamp,
 } from "@computesdk/provider";
+import { onMissing } from "./common.js";
 
 type Config = {
   apiKey?: string;
@@ -215,21 +216,16 @@ const provider = defineProvider<SandboxInstance, Config>({
         }),
       getById: (config, id) =>
         configured(config, async () => {
-          try {
+          return onMissing(async () => {
             const instance = await SandboxInstance.get(id);
             return { instance: owned(instance, config), instanceId: id };
-          } catch (error) {
-            if (missing(error)) return null;
-            throw error;
-          }
+          }, missing, null);
         }),
       destroy: (config, id) =>
         configured(config, async () => {
-          try {
+          return onMissing(async () => {
             await SandboxInstance.delete(id);
-          } catch (error) {
-            if (!missing(error)) throw error;
-          }
+          }, missing, undefined);
         }),
       list: (config) =>
         configured(config, async () => {
@@ -292,13 +288,10 @@ const provider = defineProvider<SandboxInstance, Config>({
           await instance.fs.rm(path, true);
         },
         exists: async (instance, path) => {
-          try {
+          return onMissing(async () => {
             await instance.fs.read(path);
             return true;
-          } catch (error) {
-            if (missing(error)) return false;
-            throw error;
-          }
+          }, missing, false);
         },
         readdir: async (instance, path) => {
           const directory = await instance.fs.ls(path);

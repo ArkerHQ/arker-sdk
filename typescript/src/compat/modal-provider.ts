@@ -8,7 +8,7 @@ import {
   type Image,
   type SandboxCreateParams,
 } from "modal";
-import { shellQuote } from "./common.js";
+import { onMissing, shellQuote } from "./common.js";
 
 function missing(error: unknown): boolean {
   if (error instanceof NotFoundError) return true;
@@ -95,14 +95,11 @@ export function createNativeModalProvider(client: () => ModalClient) {
           return { instance, instanceId: instance.sandboxId };
         },
         async getById(_config, id) {
-          try {
+          return onMissing(async () => {
             const instance = await client().sandboxes.fromId(id);
             await instance.poll();
             return { instance, instanceId: instance.sandboxId };
-          } catch (error) {
-            if (missing(error)) return null;
-            throw error;
-          }
+          }, missing, null);
         },
         async list() {
           const values = [];
@@ -111,11 +108,9 @@ export function createNativeModalProvider(client: () => ModalClient) {
           return values;
         },
         async destroy(_config, id) {
-          try {
+          return onMissing(async () => {
             await (await client().sandboxes.fromId(id)).terminate();
-          } catch (error) {
-            if (!missing(error)) throw error;
-          }
+          }, missing, undefined);
         },
         async runCommand(instance, command, options) {
           const start = Date.now();
@@ -178,13 +173,10 @@ export function createNativeModalProvider(client: () => ModalClient) {
               modified: new Date(entry.modifiedTime * 1000),
             })),
           exists: async (instance, path) => {
-            try {
+            return onMissing(async () => {
               await instance.filesystem.stat(await absolute(instance, path));
               return true;
-            } catch (error) {
-              if (error instanceof SandboxFilesystemNotFoundError) return false;
-              throw error;
-            }
+            }, (error) => error instanceof SandboxFilesystemNotFoundError, false);
           },
           remove: async (instance, path) => {
             if (
@@ -193,14 +185,11 @@ export function createNativeModalProvider(client: () => ModalClient) {
                 .every((segment) => segment === "" || segment === ".")
             )
               throw new Error("Refusing ambiguous Modal removal path");
-            try {
+            return onMissing(async () => {
               await instance.filesystem.remove(await absolute(instance, path), {
                 recursive: true,
               });
-            } catch (error) {
-              if (!(error instanceof SandboxFilesystemNotFoundError))
-                throw error;
-            }
+            }, (error) => error instanceof SandboxFilesystemNotFoundError, undefined);
           },
         },
         getInstance: (instance) => instance,

@@ -15,6 +15,7 @@ from ._compat import (
     format_not_found,
     get_or_none,
     import_optional,
+    pop_arker_config,
     routed_create,
     routed_get,
     run_command,
@@ -133,11 +134,7 @@ class Daytona(UnsupportedMixin):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._native_args = args
         self._native_kwargs = dict(kwargs)
-        self._arker_config = self._native_kwargs.pop("arker", None)
-        router_path = self._native_kwargs.pop("router_config_path", self._native_kwargs.pop("routerConfigPath", None))
-        self._arker_config = dict(self._arker_config or {})
-        if router_path:
-            self._arker_config["router_config_path"] = router_path
+        self._arker_config = dict(pop_arker_config(self._native_kwargs))
         self._native = None
 
     def _native_client(self) -> Any | None:
@@ -233,8 +230,8 @@ class Daytona(UnsupportedMixin):
         )
         return Sandbox(vm=result if provider == "arker" else None, native=result if provider == "daytona" else None)
 
-    def get(self, sandbox_id: str) -> Sandbox:
-        found = routed_get(
+    def _lookup(self, sandbox_id: str):
+        return routed_get(
             sandbox_id,
             "daytona",
             self._arker_config,
@@ -243,6 +240,9 @@ class Daytona(UnsupportedMixin):
                 "daytona": lambda: self._native_get(sandbox_id),
             },
         )
+
+    def get(self, sandbox_id: str) -> Sandbox:
+        found = self._lookup(sandbox_id)
         if found is None:
             raise format_not_found("Sandbox", sandbox_id)
         provider, result = found
@@ -256,15 +256,7 @@ class Daytona(UnsupportedMixin):
         if not isinstance(sandbox, str):
             sandbox.delete()
             return
-        found = routed_get(
-            sandbox,
-            "daytona",
-            self._arker_config,
-            {
-                "arker": lambda: arker_get(sandbox, self._arker_config),
-                "daytona": lambda: self._native_get(sandbox),
-            },
-        )
+        found = self._lookup(sandbox)
         if found is None:
             native = self._native_client()
             if native is not None and hasattr(native, "delete"):

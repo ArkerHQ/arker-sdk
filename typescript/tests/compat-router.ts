@@ -7,6 +7,16 @@ import { AlreadyExistsError, InvalidError } from "modal";
 import { createRoutedProvider, JsonRouteCache, parseRouterConfig, isArkerVmIdentifier, providerAcceptsIdentifier, RouterLookupTimeoutError } from "../src/compat/router.js";
 import { CompatibilityCreationNotStartedError } from "../src/compat/common.js";
 
+const configCases: {
+  base: Record<string, unknown>;
+  cases: Array<{ name: string; patch: Record<string, unknown>; error?: string }>;
+} = JSON.parse(await readFile(new URL("../../compatibility/router-config-cases.json", import.meta.url), "utf8"));
+for (const testCase of configCases.cases) {
+  const parse = () => parseRouterConfig({ ...configCases.base, ...testCase.patch }, ["blaxel", "arker"]);
+  if (testCase.error) assert.throws(parse, new RegExp(testCase.error), testCase.name);
+  else assert.equal(parse().version, 1, testCase.name);
+}
+
 function sandbox(id: string, provider: string) {
   return { instanceId: id, sandboxId: id, provider, destroy: async () => undefined };
 }

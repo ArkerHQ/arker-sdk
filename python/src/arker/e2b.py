@@ -24,6 +24,7 @@ from ._compat import (
     format_not_found,
     get_or_none,
     import_optional,
+    pop_arker_config,
     resolve_compat_path,
     routed_create,
     routed_get,
@@ -594,10 +595,7 @@ class Sandbox(UnsupportedMixin):
                 "the E2B Python API uses timeout in seconds"
             )
         allow_internet_access = kwargs.pop("allow_internet_access", kwargs.pop("allowInternetAccess", None))
-        arker_config = kwargs.pop("arker", None) or {}
-        router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
-        if router_path:
-            arker_config = {**arker_config, "router_config_path": router_path}
+        arker_config = pop_arker_config(kwargs)
         native = cls._native_sandbox()
 
         def create_native() -> Any:
@@ -675,10 +673,7 @@ class Sandbox(UnsupportedMixin):
 
     @classmethod
     def _lookup(cls, sandbox_id: str, kwargs: dict[str, Any]):
-        arker_config = kwargs.pop("arker", None) or {}
-        router_path = kwargs.pop("router_config_path", kwargs.pop("routerConfigPath", None))
-        if router_path:
-            arker_config = {**arker_config, "router_config_path": router_path}
+        arker_config = pop_arker_config(kwargs)
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise TypeError(f"Sandbox lookup received unsupported option(s): {unsupported}")

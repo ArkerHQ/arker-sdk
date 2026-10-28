@@ -165,3 +165,17 @@ export function emitFinalOutput(result: CommandResult, options?: RunCommandOptio
   if (result.stdout && options?.onStdout) options.onStdout(result.stdout);
   if (result.stderr && options?.onStderr) options.onStderr(result.stderr);
 }
+
+/** Convert only provider-recognized absence; preserve every other failure. */
+export async function onMissing<T, F>(
+  operation: () => Promise<T>,
+  isMissing: (error: unknown) => boolean,
+  fallback: F,
+): Promise<T | F> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (isMissing(error)) return fallback;
+    throw error;
+  }
+}

@@ -1,7 +1,7 @@
 import { Daytona, type DaytonaConfig, type Sandbox } from "@daytona/sdk";
 import { defineProvider } from "@computesdk/provider";
 import { randomUUID } from "node:crypto";
-import { shellQuote } from "./common.js";
+import { onMissing, shellQuote } from "./common.js";
 
 function missing(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -37,13 +37,10 @@ export function createNativeDaytonaProvider(config: DaytonaConfig = {}) {
           return { instance, instanceId: instance.id };
         },
         async getById(_config, id) {
-          try {
+          return onMissing(async () => {
             const instance = await client().get(id);
             return { instance, instanceId: instance.id };
-          } catch (error) {
-            if (missing(error)) return null;
-            throw error;
-          }
+          }, missing, null);
         },
         async list() {
           const items = [];
@@ -52,11 +49,9 @@ export function createNativeDaytonaProvider(config: DaytonaConfig = {}) {
           return items;
         },
         async destroy(_config, id) {
-          try {
+          return onMissing(async () => {
             await (await client().get(id)).delete();
-          } catch (error) {
-            if (!missing(error)) throw error;
-          }
+          }, missing, undefined);
         },
         async runCommand(instance, command, options) {
           const start = Date.now();
@@ -119,13 +114,10 @@ export function createNativeDaytonaProvider(config: DaytonaConfig = {}) {
           mkdir: (instance, path) => instance.fs.createFolder(path, "755"),
           remove: (instance, path) => instance.fs.deleteFile(path, true),
           exists: async (instance, path) => {
-            try {
+            return onMissing(async () => {
               await instance.fs.getFileDetails(path);
               return true;
-            } catch (error) {
-              if (missing(error)) return false;
-              throw error;
-            }
+            }, missing, false);
           },
           readdir: async (instance, path) =>
             (await instance.fs.listFiles(path)).map((entry) => ({

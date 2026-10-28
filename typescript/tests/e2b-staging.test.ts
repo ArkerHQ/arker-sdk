@@ -100,16 +100,28 @@ test("requested-user reads and writes enforce permissions and reject FIFOs witho
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test("read cleanup failure preserves the primary error", async () => {
-  const sandbox = Reflect.construct(Sandbox, [{
-    provider: "arker", sandboxId: "local",
-    getInstance: () => ({ sync: async () => { throw new Error("primary read failure"); } }),
-    runCommand: async (command: string) => {
-      if (command.startsWith("rm ")) throw new Error("cleanup failure");
-      return { stdout: "", stderr: "", exitCode: 0 };
-    },
-  }]) as Sandbox;
-  await assert.rejects(sandbox.files.read("/file", { user: "user" }), /primary read failure/);
+test("staging preserves the primary failure and never hides a cleanup failure", async () => {
+  for (const operation of ["read", "write"] as const) {
+    for (const cleanup of [new Error("cleanup failure"), undefined, false]) {
+      for (const primary of [undefined, new Error("primary transfer failure")]) {
+        const sandbox = Reflect.construct(Sandbox, [{
+          provider: "arker", sandboxId: "local",
+          getInstance: () => ({ sync: async () => {
+            if (primary) throw primary;
+            return new Uint8Array();
+          } }),
+          runCommand: async (command: string) => {
+            if (command.startsWith("rm ")) throw cleanup;
+            return { stdout: "", stderr: "", exitCode: 0 };
+          },
+        }]) as Sandbox;
+        await assert.rejects(operation === "read"
+          ? sandbox.files.read("/file", { user: "user" })
+          : sandbox.files.write("/file", "data"), (error: unknown) =>
+            primary ? error === primary : error instanceof Error && error.message === String(cleanup instanceof Error ? cleanup.message : cleanup));
+      }
+    }
+  }
 });
 
 test("staging reservation failure does not sync or delete someone else's path", async () => {

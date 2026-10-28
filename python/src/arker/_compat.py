@@ -78,6 +78,13 @@ class UnsupportedMixin:
         )
 
 
+def pop_arker_config(options: dict[str, Any]) -> dict[str, Any]:
+    """Consume shim options, keeping snake-case router-path precedence."""
+    config = options.pop("arker", None) or {}
+    router_path = options.pop("router_config_path", options.pop("routerConfigPath", None))
+    return {**config, "router_config_path": router_path} if router_path else config
+
+
 def arker_client(config: dict[str, Any] | None = None) -> Arker:
     cfg = {key: value for key, value in (config or {}).items() if key in ARKER_CLIENT_KEYS}
     return Arker(**cfg)

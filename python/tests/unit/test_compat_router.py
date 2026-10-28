@@ -29,22 +29,27 @@ def _cache_writer(path: str, prefix: str) -> None:
         cache.set(f"{prefix}-{index}", "arker")
 
 
-@pytest.fixture
-def router_file(tmp_path: Path) -> Path:
-    path = tmp_path / "computesdk_router.json"
+def _write_router(path, *, order=("e2b", "arker"), strategy="priority", create=None, **fields):
     path.write_text(
         json.dumps(
             {
                 "version": 1,
-                "existing": {"strategy": "race", "order": ["e2b", "arker"]},
-                "create": {
-                    "strategy": "weighted",
-                    "weights": {"e2b": 90, "arker": 10},
-                    "fallback": ["e2b", "arker"],
-                },
-                "cache": {"path": str(tmp_path / "routes.json"), "maxBytes": 4096, "maxEntries": 10},
+                "existing": {"strategy": strategy, "order": list(order)},
+                "create": create if create is not None else {"strategy": "priority", "order": list(order)},
+                **fields,
             }
         )
+    )
+
+
+@pytest.fixture
+def router_file(tmp_path: Path) -> Path:
+    path = tmp_path / "computesdk_router.json"
+    _write_router(
+        path,
+        strategy="race",
+        create={"strategy": "weighted", "weights": {"e2b": 90, "arker": 10}, "fallback": ["e2b", "arker"]},
+        cache={"path": str(tmp_path / "routes.json"), "maxBytes": 4096, "maxEntries": 10},
     )
     return path
 
@@ -56,11 +61,17 @@ def test_loads_same_versioned_schema_as_typescript(router_file: Path) -> None:
     assert config.create.weights == {"e2b": 90, "arker": 10}
 
 
-def test_rejects_boolean_schema_version(router_file: Path) -> None:
-    raw = json.loads(router_file.read_text())
-    raw["version"] = True
-    with pytest.raises(ValueError, match="unsupported router config version"):
-        RouterConfig.from_dict(raw)
+_CONFIG_CASES = json.loads((Path(__file__).resolve().parents[3] / "compatibility/router-config-cases.json").read_text())
+
+
+@pytest.mark.parametrize("case", _CONFIG_CASES["cases"], ids=lambda case: case["name"])
+def test_shared_router_config_contract(case):
+    raw = {**_CONFIG_CASES["base"], **case["patch"]}
+    if "error" in case:
+        with pytest.raises(ValueError, match=case["error"]):
+            RouterConfig.from_dict(raw)
+    else:
+        assert RouterConfig.from_dict(raw).version == 1
 
 
 def test_large_weights_do_not_overflow() -> None:
@@ -237,16 +248,7 @@ def test_lookup_does_not_hide_http_failures_containing_not_found(status) -> None
 def test_creation_caches_native_identifier_shapes(tmp_path, native, identifier):
     path = tmp_path / "router.json"
     cache_path = tmp_path / "cache.json"
-    path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": ["blaxel", "arker"]},
-                "create": {"strategy": "priority", "order": ["blaxel", "arker"]},
-                "cache": {"path": str(cache_path)},
-            }
-        )
-    )
+    _write_router(path, order=["blaxel", "arker"], cache={"path": str(cache_path)})
     routed_create("blaxel", {"router_config_path": str(path)}, {"blaxel": lambda: native, "arker": lambda: None})
     assert JsonRouteCache(cache_path).get(identifier) == "blaxel"
 
@@ -258,15 +260,7 @@ def test_successful_creation_never_falls_through_on_metadata_failure(tmp_path):
             raise RuntimeError("metadata unavailable")
 
     path = tmp_path / "router.json"
-    path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": ["blaxel", "arker"]},
-                "create": {"strategy": "priority", "order": ["blaxel", "arker"]},
-            }
-        )
-    )
+    _write_router(path, order=["blaxel", "arker"])
     created = Created()
 
     def duplicate():
@@ -299,16 +293,7 @@ def test_default_router_uses_native_only_without_arker_credentials(tmp_path: Pat
 
 def test_rejects_unknown_fields_and_credentials(tmp_path: Path) -> None:
     path = tmp_path / "computesdk_router.json"
-    path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "race", "order": ["e2b"]},
-                "create": {"strategy": "priority", "order": ["e2b"]},
-                "apiKey": "must-not-be-accepted",
-            }
-        )
-    )
+    _write_router(path, order=["e2b"], strategy="race", apiKey="must-not-be-accepted")
     with pytest.raises(ValueError, match=r"unknown field.*apiKey"):
         load_router_config(path)
 
@@ -414,15 +399,7 @@ def test_json_cache_preserves_updates_from_multiple_processes(tmp_path: Path) ->
 
 def test_race_waits_for_parallel_miss_before_accepting_hit(tmp_path: Path) -> None:
     config_path = tmp_path / "computesdk_router.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "race", "order": ["e2b", "arker"]},
-                "create": {"strategy": "priority", "order": ["e2b", "arker"]},
-            }
-        )
-    )
+    _write_router(config_path, strategy="race")
 
     hit_finished = threading.Event()
 
@@ -449,16 +426,7 @@ def test_lookup_evicts_cache_entry_for_removed_provider(tmp_path: Path) -> None:
     cache_path = tmp_path / "routes.json"
     JsonRouteCache(cache_path).set("vm-a", "removed-provider")
     config_path = tmp_path / "computesdk_router.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": ["e2b", "arker"]},
-                "create": {"strategy": "priority", "order": ["e2b", "arker"]},
-                "cache": {"path": str(cache_path)},
-            }
-        )
-    )
+    _write_router(config_path, cache={"path": str(cache_path)})
 
     found = routed_get(
         "vm-a",
@@ -473,30 +441,14 @@ def test_lookup_evicts_cache_entry_for_removed_provider(tmp_path: Path) -> None:
 
 def test_routing_rejects_provider_not_configured_by_shim(tmp_path: Path) -> None:
     config_path = tmp_path / "computesdk_router.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": ["modal", "e2b"]},
-                "create": {"strategy": "priority", "order": ["modal", "e2b"]},
-            }
-        )
-    )
+    _write_router(config_path, order=["modal", "e2b"])
     with pytest.raises(ValueError, match=r'unknown provider "modal"'):
         routed_get("vm-a", "e2b", {"router_config_path": config_path}, {"e2b": lambda: None})
 
 
 def test_race_propagates_one_provider_error(tmp_path: Path) -> None:
     config_path = tmp_path / "computesdk_router.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "race", "order": ["e2b", "arker"]},
-                "create": {"strategy": "priority", "order": ["e2b", "arker"]},
-            }
-        )
-    )
+    _write_router(config_path, strategy="race")
 
     def fails() -> None:
         raise RuntimeError("temporary lookup failure")
@@ -514,15 +466,7 @@ def test_missing_arker_source_falls_back_to_native_provider(tmp_path: Path, monk
     monkeypatch.delenv("ARKER_SOURCE", raising=False)
     monkeypatch.delenv("ARKER_SOURCE_VM", raising=False)
     config_path = tmp_path / "computesdk_router.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": ["arker", "e2b"]},
-                "create": {"strategy": "priority", "order": ["arker", "e2b"]},
-            }
-        )
-    )
+    _write_router(config_path, order=["arker", "e2b"])
 
     def missing_source() -> None:
         arker_source({})
@@ -583,15 +527,7 @@ def _grpc_create_failure():
 )
 def test_ambiguous_create_outcome_does_not_fall_through(tmp_path: Path, failure: Exception) -> None:
     config_path = tmp_path / "computesdk_router.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": ["e2b", "arker"]},
-                "create": {"strategy": "priority", "order": ["e2b", "arker"]},
-            }
-        )
-    )
+    _write_router(config_path)
     duplicate_creates = 0
 
     def ambiguous() -> None:
@@ -637,15 +573,12 @@ def test_unknown_lookup_error_text_cannot_trigger_fallback() -> None:
 def test_native_first_lookup_accepts_an_arker_identifier(tmp_path, native, strategy, stale_cache) -> None:
     identifier = "vmh-b471cad989f2eab9-01M548DGAXJ48SGE3SRTRR8HNV"
     path = tmp_path / "router.json"
-    path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": strategy, "order": [native, "arker"]},
-                "create": {"strategy": "priority", "order": ["arker"]},
-                "cache": {"path": str(tmp_path / "cache.json")},
-            }
-        )
+    _write_router(
+        path,
+        order=[native, "arker"],
+        strategy=strategy,
+        create={"strategy": "priority", "order": ["arker"]},
+        cache={"path": str(tmp_path / "cache.json")},
     )
 
     def incompatible():
@@ -694,16 +627,7 @@ def test_cache_cannot_override_configured_providers(tmp_path: Path) -> None:
     cache_path = tmp_path / "ownership.json"
     JsonRouteCache(cache_path).set("existing", "arker")
     config_path = tmp_path / "computesdk_router.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": ["e2b"]},
-                "create": {"strategy": "priority", "order": ["e2b"]},
-                "cache": {"path": str(cache_path)},
-            }
-        )
-    )
+    _write_router(config_path, order=["e2b"], cache={"path": str(cache_path)})
 
     def excluded() -> None:
         raise AssertionError("excluded provider queried")

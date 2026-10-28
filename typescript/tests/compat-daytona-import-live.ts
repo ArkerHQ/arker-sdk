@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { Daytona as Native } from "@daytona/sdk";
 import { Daytona as Shim } from "../src/daytona.js";
 import { recordEvidence } from "../scripts/compat-evidence.js";
+import { withLiveRouter } from "./compat-live-router.js";
 
 async function program(Client: typeof Native | typeof Shim) {
   const client = new Client();
@@ -45,27 +43,14 @@ async function program(Client: typeof Native | typeof Shim) {
   }
 }
 
-if (!process.env.DAYTONA_API_KEY || !process.env.ARKER_API_KEY)
-  throw new Error("Live Daytona and Arker credentials required");
-const directory = await mkdtemp(join(tmpdir(), "compat-daytona-import-"));
-const previous = process.env.COMPUTESDK_ROUTER_CONFIG;
-const key = process.env.DAYTONA_API_KEY;
-try {
+await withLiveRouter(["DAYTONA_API_KEY", "ARKER_API_KEY"], async ({ setProvider }) => {
+  const key = process.env.DAYTONA_API_KEY;
   for (const [provider, Client, route] of [
     ["daytona", Native, "reference"],
     ["daytona", Shim, "native"],
     ["arker", Shim, "arker"],
   ] as const) {
-    const path = join(directory, provider + ".json");
-    await writeFile(
-      path,
-      JSON.stringify({
-        version: 1,
-        existing: { strategy: "priority", order: [provider] },
-        create: { strategy: "priority", order: [provider] },
-      }),
-    );
-    process.env.COMPUTESDK_ROUTER_CONFIG = path;
+    await setProvider(provider);
     if (provider === "arker") delete process.env.DAYTONA_API_KEY;
     else process.env.DAYTONA_API_KEY = key;
     let outcome = "failed";
@@ -89,9 +74,4 @@ try {
       );
     }
   }
-} finally {
-  process.env.DAYTONA_API_KEY = key;
-  if (previous === undefined) delete process.env.COMPUTESDK_ROUTER_CONFIG;
-  else process.env.COMPUTESDK_ROUTER_CONFIG = previous;
-  await rm(directory, { recursive: true });
-}
+});

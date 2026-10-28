@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, readFile, stat, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { withLiveRouter } from "./compat-live-router.js";
 
 import { SandboxInstance as Native } from "@blaxel/core";
 import { SandboxInstance as Shim } from "../src/blaxel.js";
@@ -10,7 +10,7 @@ import { recordEvidence } from "../scripts/compat-evidence.js";
 import { traceVendor } from "./compat-trace.js";
 
 // This program uses only official Blaxel calls; the harness changes the import.
-async function program(SandboxInstance: typeof Native | typeof Shim): Promise<void> {
+async function program(SandboxInstance: typeof Native | typeof Shim, directory: string): Promise<void> {
   const sandboxName = `arker-import-${randomUUID().slice(0, 12)}`;
   const sandbox = await SandboxInstance.create({ name: sandboxName });
   try {
@@ -124,22 +124,13 @@ async function program(SandboxInstance: typeof Native | typeof Shim): Promise<vo
   }
 }
 
-if (!process.env.ARKER_API_KEY || !process.env.BL_API_KEY) throw new Error("Live Arker and Blaxel credentials required");
-const directory = await mkdtemp(join(tmpdir(), "blaxel-import-"));
-const previous = process.env.COMPUTESDK_ROUTER_CONFIG;
-try {
+await withLiveRouter(["ARKER_API_KEY", "BL_API_KEY"], async ({ directory, setProvider }) => {
   for (const [provider, constructor] of [["blaxel", Native], ["blaxel", Shim], ["arker", Shim]] as const) {
-    const config = join(directory, "router.json");
-    await writeFile(config, JSON.stringify({
-      version: 1,
-      existing: { strategy: "priority", order: [provider] },
-      create: { strategy: "priority", order: [provider] },
-    }));
-    process.env.COMPUTESDK_ROUTER_CONFIG = config;
+    await setProvider(provider);
     const called = new Set<string>();
     let outcome = "failed";
     try {
-      await program(traceVendor(constructor, "SandboxInstance.static", called));
+      await program(traceVendor(constructor, "SandboxInstance.static", called), directory);
       outcome = "passed";
     } finally {
       await recordEvidence("blaxel", constructor === Native ? "reference" : provider === "arker" ? "arker" : "native",
@@ -147,8 +138,4 @@ try {
     }
     console.log(`PASS Blaxel unchanged program: ${constructor === Native ? "native SDK" : "shim"} on ${provider}`);
   }
-} finally {
-  if (previous === undefined) delete process.env.COMPUTESDK_ROUTER_CONFIG;
-  else process.env.COMPUTESDK_ROUTER_CONFIG = previous;
-  await rm(directory, { recursive: true, force: true });
-}
+});

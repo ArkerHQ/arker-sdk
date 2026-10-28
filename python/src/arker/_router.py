@@ -106,7 +106,7 @@ class RouterConfig:
         cache_raw = _mapping(raw.get("cache", {}), "cache")
         _reject_unknown(cache_raw, {"path", "maxBytes", "maxEntries"}, "cache")
         cache_path = cache_raw.get("path")
-        if cache_path is not None and (not isinstance(cache_path, str) or not cache_path):
+        if "path" in cache_raw and (not isinstance(cache_path, str) or not cache_path):
             raise ValueError("cache.path must be a non-empty string")
         max_bytes = cache_raw.get("maxBytes", 4 * 1024 * 1024)
         max_entries = cache_raw.get("maxEntries", 20_000)

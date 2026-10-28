@@ -28,6 +28,17 @@ export function e2bProcessError(error: unknown): unknown {
     : error;
 }
 
+export async function killE2BProcess(manager: Pick<GuestProcesses, "get" | "kill">, pid: string): Promise<boolean> {
+  try {
+    if ((await manager.get(pid)).status !== "running") return false;
+  } catch (error) {
+    if (error instanceof GuestProcessError && error.code === "process_not_found") return false;
+    throw error;
+  }
+  await manager.kill(pid);
+  return true;
+}
+
 // keyof excludes vendor-private fields but makes additions to the public handle fail typechecking.
 class CompatCommandHandle implements Pick<CommandHandle, keyof CommandHandle> {
   readonly pid: number;
@@ -134,19 +145,7 @@ class CompatCommandHandle implements Pick<CommandHandle, keyof CommandHandle> {
   }
 
   async kill(): Promise<boolean> {
-    try {
-      if ((await this.manager.get(this.started.pid)).status !== "running")
-        return false;
-    } catch (error) {
-      if (
-        error instanceof GuestProcessError &&
-        error.code === "process_not_found"
-      )
-        return false;
-      throw error;
-    }
-    await this.manager.kill(this.started.pid);
-    return true;
+    return killE2BProcess(this.manager, this.started.pid);
   }
 
   async sendStdin(

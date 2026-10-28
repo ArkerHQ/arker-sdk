@@ -19,8 +19,8 @@ import {
   shellQuote,
 } from "./compat/common.js";
 import { createCompatSdk, createCompatRouter } from "./compat/runtime.js";
-import { GuestProcesses, GuestProcessError } from "./compat/guest-process.js";
-import { e2bCommandHandle, e2bProcessError } from "./compat/e2b-command.js";
+import { GuestProcesses } from "./compat/guest-process.js";
+import { e2bCommandHandle, e2bProcessError, killE2BProcess } from "./compat/e2b-command.js";
 import { createNativeE2BProvider } from "./compat/e2b-provider.js";
 
 export interface CommandExitResult {
@@ -76,6 +76,30 @@ function identityCommand(command: string, options?: { user?: string; cwd?: strin
 
 function filesystemCommand(command: string, user: unknown): string {
   return user === undefined ? command : identityCommand(command, { user: user as string, cwd: "/" });
+}
+
+async function withStagedFile<T>(
+  box: UniversalSandbox,
+  operation: "read" | "write",
+  transfer: (path: string) => Promise<T>,
+): Promise<T> {
+  const directory = `/tmp/.computesdk-e2b-${operation}-${randomUUID()}`;
+  const created = await box.runCommand(`mkdir -m 700 -- ${shellQuote(directory)}`);
+  if (created.exitCode !== 0) throw new Error(created.stderr || "private staging directory creation failed");
+  let failed = false;
+  try {
+    return await transfer(`${directory}/data`);
+  } catch (error) {
+    failed = true;
+    throw error instanceof Error ? error : new Error(String(error));
+  } finally {
+    try {
+      const cleanup = await box.runCommand(`rm -rf -- ${shellQuote(directory)}`);
+      if (cleanup.exitCode !== 0) throw new Error(cleanup.stderr || `temporary file cleanup failed with exit ${cleanup.exitCode}`);
+    } catch (error) {
+      if (!failed) throw error instanceof Error ? error : new Error(String(error));
+    }
+  }
 }
 
 async function validateE2BIdentity(box: UniversalSandbox): Promise<void> {
@@ -192,14 +216,7 @@ export class Sandbox {
       kill: async (pid, options) => {
         if (this.#native?.commands) return this.#native.commands.kill(pid, options);
         assertSupportedObjectKeys(options, [], "e2b", "commands.kill");
-        try {
-          if ((await this.#processes!.get(String(pid))).status !== "running") return false;
-        } catch (error) {
-          if (error instanceof GuestProcessError && error.code === "process_not_found") return false;
-          throw error;
-        }
-        await this.#processes!.kill(String(pid));
-        return true;
+        return killE2BProcess(this.#processes!, String(pid));
       },
       sendStdin: async (pid, data, options) => {
         if (this.#native?.commands) return this.#native.commands.sendStdin(pid, data, options);
@@ -227,26 +244,12 @@ export class Sandbox {
         const resolved = resolveCompatPath(path, E2B_HOME);
         if (options?.user !== undefined) {
           const vm = (this.#box as unknown as { getInstance(): VM }).getInstance();
-          const directory = `/tmp/.computesdk-e2b-read-${randomUUID()}`;
-          const staged = `${directory}/data`;
           const command = identityCommand(`python3 -c ${shellQuote(fileIO)} read ${shellQuote(resolved)}`, { user: options.user as string, cwd: "/" });
-          const created = await this.#box.runCommand(`mkdir -m 700 -- ${shellQuote(directory)}`);
-          if (created.exitCode !== 0) throw new Error(created.stderr || "private staging directory creation failed");
-          let readError: Error | undefined;
-          let content: Uint8Array | undefined;
-          try {
+          const content = await withStagedFile(this.#box, "read", async (staged) => {
             const copied = await this.#box.runCommand(`umask 077; set -C; ${command} > ${shellQuote(staged)}`);
             if (copied.exitCode !== 0) throw new Error(copied.stderr || `read failed with exit ${copied.exitCode}`);
-            content = Uint8Array.from(await vm.sync(staged));
-          } catch (error) { readError = error instanceof Error ? error : new Error(String(error)); }
-          let cleanupError: unknown;
-          try {
-            const cleanup = await this.#box.runCommand(`rm -rf -- ${shellQuote(directory)}`);
-            if (cleanup.exitCode !== 0) throw new Error(cleanup.stderr || `temporary file cleanup failed with exit ${cleanup.exitCode}`);
-          } catch (error) { cleanupError = error; }
-          if (readError) throw readError;
-          if (cleanupError) throw cleanupError;
-          if (!content) throw new Error("Arker file read returned no data");
+            return Uint8Array.from(await vm.sync(staged));
+          });
           return format === "bytes" ? content : new TextDecoder().decode(content);
         }
         if (format === "bytes") {
@@ -268,33 +271,18 @@ export class Sandbox {
         if (typeof content !== "string" && !(content instanceof ArrayBuffer)) {
           throw new ArkerError("unsupported_operation", "files.write requires string, ArrayBuffer, Blob, or ReadableStream data", 422);
         }
-        const directory = `/tmp/.computesdk-e2b-write-${randomUUID()}`;
-        const staged = `${directory}/data`;
         const vm = (this.#box as unknown as { getInstance(): VM }).getInstance();
-        const userCommand = identityCommand(`python3 -c ${shellQuote(fileIO)} write ${shellQuote(resolved)}`, {
+        const command = identityCommand(`python3 -c ${shellQuote(fileIO)} write ${shellQuote(resolved)}`, {
           user: options?.user as string | undefined, cwd: "/",
-        }) + ` < ${shellQuote(staged)}`;
-        const created = await this.#box.runCommand(`mkdir -m 700 -- ${shellQuote(directory)}`);
-        if (created.exitCode !== 0) throw new Error(created.stderr || "private staging directory creation failed");
-        let writeError: Error | undefined;
-        try {
+        });
+        const data = content;
+        await withStagedFile(this.#box, "write", async (staged) => {
           const reserved = await this.#box.runCommand(`umask 077; set -C; : > ${shellQuote(staged)}`);
           if (reserved.exitCode !== 0) throw new Error(reserved.stderr || "private staging file creation failed");
-          await vm.sync(staged, typeof content === "string" ? new TextEncoder().encode(content) : new Uint8Array(content));
-          const written = await this.#box.runCommand(userCommand);
-          if (written.exitCode !== 0) writeError = new Error(written.stderr || `write failed with exit ${written.exitCode}`);
-        } catch (error) {
-          writeError = error instanceof Error ? error : new Error(String(error));
-        }
-        let cleanupError: Error | undefined;
-        try {
-          const cleanup = await this.#box.runCommand(`rm -rf -- ${shellQuote(directory)}`);
-          if (cleanup.exitCode !== 0) cleanupError = new Error(cleanup.stderr || `temporary file cleanup failed with exit ${cleanup.exitCode}`);
-        } catch (error) {
-          cleanupError = error instanceof Error ? error : new Error(String(error));
-        }
-        if (writeError) throw writeError;
-        if (cleanupError) throw cleanupError;
+          await vm.sync(staged, typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(data));
+          const written = await this.#box.runCommand(`${command} < ${shellQuote(staged)}`);
+          if (written.exitCode !== 0) throw new Error(written.stderr || `write failed with exit ${written.exitCode}`);
+        });
         return { name: resolved.split("/").at(-1)!, type: FileType.FILE, path: resolved };
       },
       writeFiles: async (

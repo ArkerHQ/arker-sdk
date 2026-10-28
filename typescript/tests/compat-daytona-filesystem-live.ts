@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { Daytona as Native } from "@daytona/sdk";
 import { Daytona as Shim } from "../src/daytona.js";
 import { recordEvidence } from "../scripts/compat-evidence.js";
+import { withLiveRouter } from "./compat-live-router.js";
 
 export async function program(Client: typeof Native | typeof Shim, progress: (stage: string) => void = () => {}) {
   progress("client-init");
@@ -59,46 +57,31 @@ export async function program(Client: typeof Native | typeof Shim, progress: (st
 }
 
 export async function main() {
-if (!process.env.DAYTONA_API_KEY || !process.env.ARKER_API_KEY) throw new Error("Live Daytona and Arker credentials required");
-const directory = await mkdtemp(join(tmpdir(), "daytona-filesystem-evidence-"));
-const previous = process.env.COMPUTESDK_ROUTER_CONFIG;
-const key = process.env.DAYTONA_API_KEY;
-let primary: unknown;
-let failed = false;
-try {
-  for (const [provider, Client, route] of [["daytona", Native, "reference"], ["daytona", Shim, "native"], ["arker", Shim, "arker"]] as const) {
-    const config = join(directory, `${route}.json`);
-    await writeFile(config, JSON.stringify({ version: 1, existing: { strategy: "priority", order: [provider] }, create: { strategy: "priority", order: [provider] } }));
-    process.env.COMPUTESDK_ROUTER_CONFIG = config;
-    if (provider === "arker") delete process.env.DAYTONA_API_KEY;
-    else process.env.DAYTONA_API_KEY = key;
-    let outcome = "failed";
-    let failure: unknown;
-    let stage = "setup";
-    try { await program(Client, value => { stage = value; }); outcome = "passed"; }
-    catch (error) { failure = error; }
-    try {
-      await recordEvidence("daytona", route, "buffered-filesystem", [
-        "Sandbox.fs.createFolder", "Sandbox.fs.uploadFile", "Sandbox.fs.downloadFile", "Sandbox.fs.getFileDetails",
-        "Sandbox.fs.listFiles", "Sandbox.fs.setFilePermissions", "Sandbox.fs.moveFiles", "Sandbox.fs.deleteFile",
-      ], outcome);
-    } catch (error) { if (!failure) { failure = error; stage = "evidence"; } }
-    if (failure) {
-      const allowed = new Set(["Error", "TypeError", "AssertionError", "CompatibilityCreationNotStartedError", "UnsupportedCompatibilityOption", "DaytonaError", "DaytonaForbiddenError", "DaytonaNotFoundError", "DaytonaBadRequestError"]);
-      const name = failure instanceof Error ? failure.constructor.name : "UnknownError";
-      console.error(`Daytona filesystem ${route} failed at ${stage}: ${allowed.has(name) ? name : "ProviderError"}.`);
-      throw failure;
+  await withLiveRouter(["DAYTONA_API_KEY", "ARKER_API_KEY"], async ({ setProvider }) => {
+    const key = process.env.DAYTONA_API_KEY;
+    for (const [provider, Client, route] of [["daytona", Native, "reference"], ["daytona", Shim, "native"], ["arker", Shim, "arker"]] as const) {
+      await setProvider(provider);
+      if (provider === "arker") delete process.env.DAYTONA_API_KEY;
+      else process.env.DAYTONA_API_KEY = key;
+      let outcome = "failed";
+      let failure: unknown;
+      let stage = "setup";
+      try { await program(Client, value => { stage = value; }); outcome = "passed"; }
+      catch (error) { failure = error; }
+      try {
+        await recordEvidence("daytona", route, "buffered-filesystem", [
+          "Sandbox.fs.createFolder", "Sandbox.fs.uploadFile", "Sandbox.fs.downloadFile", "Sandbox.fs.getFileDetails",
+          "Sandbox.fs.listFiles", "Sandbox.fs.setFilePermissions", "Sandbox.fs.moveFiles", "Sandbox.fs.deleteFile",
+        ], outcome);
+      } catch (error) { if (!failure) { failure = error; stage = "evidence"; } }
+      if (failure) {
+        const allowed = new Set(["Error", "TypeError", "AssertionError", "CompatibilityCreationNotStartedError", "UnsupportedCompatibilityOption", "DaytonaError", "DaytonaForbiddenError", "DaytonaNotFoundError", "DaytonaBadRequestError"]);
+        const name = failure instanceof Error ? failure.constructor.name : "UnknownError";
+        console.error(`Daytona filesystem ${route} failed at ${stage}: ${allowed.has(name) ? name : "ProviderError"}.`);
+        throw failure;
+      }
     }
-  }
-} catch (error) { failed = true; primary = error; }
-finally {
-  process.env.DAYTONA_API_KEY = key;
-  if (previous === undefined) delete process.env.COMPUTESDK_ROUTER_CONFIG;
-  else process.env.COMPUTESDK_ROUTER_CONFIG = previous;
-  try { await rm(directory, { recursive: true, force: true }); }
-  catch (error) { if (!failed) { failed = true; primary = error; } }
-}
-if (failed) throw primary;
+  });
 }
 
 if (import.meta.main) {

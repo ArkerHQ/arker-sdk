@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { FileType, Sandbox as Native } from "e2b";
 import { Sandbox as Shim } from "../src/e2b.js";
 import { recordEvidence } from "../scripts/compat-evidence.js";
 import { traceVendor } from "./compat-trace.js";
+import { withLiveRouter } from "./compat-live-router.js";
 
 type SandboxConstructor = { create(): Promise<Native | Shim> };
 
@@ -109,27 +107,14 @@ async function program(Sandbox: SandboxConstructor): Promise<void> {
   }
 }
 
-if (!process.env.E2B_API_KEY || !process.env.ARKER_API_KEY)
-  throw new Error("Live E2B and Arker credentials required");
-const directory = await mkdtemp(join(tmpdir(), "compat-e2b-files-"));
-const previous = process.env.COMPUTESDK_ROUTER_CONFIG;
-const nativeKey = process.env.E2B_API_KEY;
-try {
+await withLiveRouter(["E2B_API_KEY", "ARKER_API_KEY"], async ({ setProvider }) => {
+  const nativeKey = process.env.E2B_API_KEY;
   for (const [provider, constructor] of [
     ["e2b", Native],
     ["e2b", Shim],
     ["arker", Shim],
   ] as const) {
-    const config = join(directory, "router.json");
-    await writeFile(
-      config,
-      JSON.stringify({
-        version: 1,
-        existing: { strategy: "priority", order: [provider] },
-        create: { strategy: "priority", order: [provider] },
-      }),
-    );
-    process.env.COMPUTESDK_ROUTER_CONFIG = config;
+    await setProvider(provider);
     if (provider === "arker") delete process.env.E2B_API_KEY;
     else process.env.E2B_API_KEY = nativeKey;
     const called = new Set<string>();
@@ -151,10 +136,4 @@ try {
       );
     }
   }
-} finally {
-  if (nativeKey === undefined) delete process.env.E2B_API_KEY;
-  else process.env.E2B_API_KEY = nativeKey;
-  if (previous === undefined) delete process.env.COMPUTESDK_ROUTER_CONFIG;
-  else process.env.COMPUTESDK_ROUTER_CONFIG = previous;
-  await rm(directory, { recursive: true });
-}
+});

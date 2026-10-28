@@ -141,6 +141,15 @@ function installFakeCompute(box: FakeSandbox, options: { getByIdResult?: Sandbox
   };
 }
 
+async function withFakeCompute(
+  box: FakeSandbox,
+  run: (fake: ReturnType<typeof installFakeCompute>) => Promise<void>,
+  options: Parameters<typeof installFakeCompute>[1] = {},
+): Promise<void> {
+  const fake = installFakeCompute(box, options);
+  try { await run(fake); } finally { fake.cleanup(); }
+}
+
 function assertArkerFirst(config: CapturedComputeConfig, fallbackName: string): void {
   void fallbackName;
   assert.deepEqual(config.providers.map((provider) => provider.name), ["arker-compat-router"]);
@@ -148,8 +157,7 @@ function assertArkerFirst(config: CapturedComputeConfig, fallbackName: string): 
 
 async function testDaytonaSurface(): Promise<void> {
   const box = new FakeSandbox("daytona-box");
-  const fake = installFakeCompute(box);
-  try {
+  await withFakeCompute(box, async (fake) => {
     const daytona = new Daytona({ apiKey: "daytona-key", arker: { apiKey: "ark-key", baseUrl: "https://arker.invalid/api" } });
     const sandbox = await daytona.create();
     assertArkerFirst(fake.captured(), "daytona");
@@ -187,9 +195,7 @@ async function testDaytonaSurface(): Promise<void> {
       () => new Daytona({ apiKey: "daytona-key", unknownOption: "unsupported" } as any),
       /unsupported option\(s\) 'unknownOption'/,
     );
-  } finally {
-    fake.cleanup();
-  }
+  });
 }
 
 async function testNativeProviderExtensionsAreDelegated(): Promise<void> {
@@ -199,44 +205,32 @@ async function testNativeProviderExtensionsAreDelegated(): Promise<void> {
     ["modal", async () => new ModalClient().sandboxes.create(), "tunnels"],
   ] as const) {
     const native = { [extension]: function () { return `${provider}:${this === native}`; } };
-    const fake = installFakeCompute(new FakeSandbox(`${provider}-box`, provider, native));
-    try {
+    await withFakeCompute(new FakeSandbox(`${provider}-box`, provider, native), async () => {
       const sandbox = await create() as any;
       assert.equal(sandbox[extension](), `${provider}:true`);
-    } finally {
-      fake.cleanup();
-    }
+    });
   }
 
   const native = { process: { advanced: () => "native-process-extension" } };
-  const fake = installFakeCompute(new FakeSandbox("daytona-nested", "daytona", native));
-  try {
+  await withFakeCompute(new FakeSandbox("daytona-nested", "daytona", native), async () => {
     const sandbox = await new Daytona().create() as any;
     assert.equal(sandbox.process.advanced(), "native-process-extension");
-  } finally {
-    fake.cleanup();
-  }
+  });
 }
 
 async function testDaytonaGetNotFound(): Promise<void> {
-  const fake = installFakeCompute(new FakeSandbox("unused"), { getByIdResult: null });
-  try {
+  await withFakeCompute(new FakeSandbox("unused"), async (fake) => {
     const daytona = new Daytona({ apiKey: "daytona-key" });
     await assert.rejects(() => daytona.get("missing"), /Sandbox missing not found/);
-  } finally {
-    fake.cleanup();
-  }
+  }, { getByIdResult: null });
 }
 
 async function testDaytonaImageBuilderIsNotDiscarded(): Promise<void> {
   const image = DaytonaImage.base("alpine:3.21").runCommands("echo expected-image");
-  const fake = installFakeCompute(new FakeSandbox("native-image", "daytona"));
-  try {
+  await withFakeCompute(new FakeSandbox("native-image", "daytona"), async (fake) => {
     await new Daytona().create({ image });
     assert.equal((fake.createCalls[0] as any).image, image);
-  } finally {
-    fake.cleanup();
-  }
+  });
   let requests = 0;
   const client = new Daytona({ arker: {
     apiKey: "ark-test", source: "ubuntu", baseUrl: "https://arker.invalid/api",
@@ -256,18 +250,16 @@ async function testDaytonaNativeExecutionPreservesResponseAndInputs(): Promise<v
       return response;
     },
   } };
-  const fake = installFakeCompute(new FakeSandbox("native-exec", "daytona", native));
-  try {
+  await withFakeCompute(new FakeSandbox("native-exec", "daytona", native), async () => {
     const sandbox = await new Daytona().create();
     assert.equal(await sandbox.process.executeCommand("exit 17", "/tmp", { VALUE: "kept" }, 7), response);
     assert.deepEqual(calls, [["exit 17", "/tmp", { VALUE: "kept" }, 7]]);
-  } finally { fake.cleanup(); }
+  });
 }
 
 async function testE2BSurface(): Promise<void> {
   const box = new FakeSandbox("e2b-box");
-  const fake = installFakeCompute(box);
-  try {
+  await withFakeCompute(box, async (fake) => {
     const sandbox = await E2BSandbox.create("catalog-template", { timeoutMs: 123 });
     assertArkerFirst(fake.captured(), "e2b");
     assert.deepEqual(fake.createCalls[0], { templateId: "catalog-template", timeout: 123 });
@@ -311,9 +303,7 @@ async function testE2BSurface(): Promise<void> {
       () => E2BSandbox.create("template", { envVars: { A: "B" } } as any),
       /unsupported option\(s\) 'envVars'/,
     );
-  } finally {
-    fake.cleanup();
-  }
+  });
 }
 
 async function testE2BNativeErrorIdentity(): Promise<void> {
@@ -341,12 +331,8 @@ async function testE2BNativeErrorIdentity(): Promise<void> {
   }
 }
 
-async function testE2BArkerGitRunsOfficialWorkflowAgainstLocalRepository(): Promise<void> {
-  const root = mkdtempSync(join(tmpdir(), "arker-e2b-git-"));
-  const remote = join(root, "remote.git");
-  const checkout = join(root, "checkout");
-  const box = new FakeSandbox("git-vm");
-  box.runCommand = async (command, options) => {
+function localE2BCommand(box: FakeSandbox): FakeSandbox["runCommand"] {
+  return async (command, options) => {
     if (command.startsWith("command -v setpriv >/dev/null ")) {
       return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
     }
@@ -369,6 +355,14 @@ async function testE2BArkerGitRunsOfficialWorkflowAgainstLocalRepository(): Prom
       };
     }
   };
+}
+
+async function testE2BArkerGitRunsOfficialWorkflowAgainstLocalRepository(): Promise<void> {
+  const root = mkdtempSync(join(tmpdir(), "arker-e2b-git-"));
+  const remote = join(root, "remote.git");
+  const checkout = join(root, "checkout");
+  const box = new FakeSandbox("git-vm");
+  box.runCommand = localE2BCommand(box);
   const fake = installFakeCompute(box);
   try {
     const sandbox = await E2BSandbox.create();
@@ -407,24 +401,7 @@ async function testE2BArkerFilesBatchMetadataAndRename(): Promise<void> {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, content);
   };
-  box.runCommand = async (command, options) => {
-    if (command.startsWith("command -v setpriv >/dev/null ")) {
-      return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
-    }
-    box.runCalls.push({ command, options });
-    command = command.replace("setpriv --reuid=user --regid=user --init-groups -- ", "");
-    try {
-      return {
-        stdout: execFileSync("/bin/bash", ["-lc", command], { encoding: "utf8" }),
-        stderr: "",
-        exitCode: 0,
-        durationMs: 0,
-      };
-    } catch (error) {
-      const failure = error as { stdout?: string; stderr?: string; status?: number };
-      return { stdout: failure.stdout ?? "", stderr: failure.stderr ?? "", exitCode: failure.status ?? 1, durationMs: 0 };
-    }
-  };
+  box.runCommand = localE2BCommand(box);
   const fake = installFakeCompute(box);
   try {
     const sandbox = await E2BSandbox.create();
@@ -540,9 +517,19 @@ type FetchCall = {
   body?: string;
 };
 
+function vmPayload(vmId: string) {
+  return { vm_id: vmId, owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z",
+    public: false, state: "idle", sessions: [], tunnels: [] };
+}
+
 class FakeFetch {
   readonly calls: FetchCall[] = [];
   private readonly script: Array<{ predicate: (method: string, url: string) => boolean; response: Response }> = [];
+
+  addFork(vmId: string): void {
+    this.addJson((method, url) => method === "POST" && url === "https://arker.invalid/api/v1/fork",
+      200, vmPayload(vmId));
+  }
 
   addJson(predicate: (method: string, url: string) => boolean, status: number, body: unknown): void {
     this.script.push({
@@ -632,11 +619,7 @@ async function testInternalArkerProvider(): Promise<void> {
 
 async function testInternalArkerProviderImageAndResources(): Promise<void> {
   const fetch = new FakeFetch();
-  fetch.addJson(
-    (method, url) => method === "POST" && url === "https://arker.invalid/api/v1/fork",
-    200,
-    { vm_id: "vm_image", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] },
-  );
+  fetch.addFork("vm_image");
   const provider = createArkerComputeProvider({ apiKey: "ark-key", baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false });
   await assert.rejects(
     () => provider.sandbox.create({ image: DaytonaImage.base("alpine:3.21") } as any),
@@ -652,11 +635,7 @@ async function testInternalArkerProviderImageAndResources(): Promise<void> {
 
 async function testInternalArkerProviderMapsLifetimeToServerSchedule(): Promise<void> {
   const fetch = new FakeFetch();
-  fetch.addJson(
-    (method, url) => method === "POST" && url === "https://arker.invalid/api/v1/fork",
-    200,
-    { vm_id: "vm_ttl", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] },
-  );
+  fetch.addFork("vm_ttl");
   const configuredPolicies = {
     secrets: { TOKEN: "synthetic" },
     policies: [{ type: "outbound", priority: 1, action: "deny" }],
@@ -693,22 +672,22 @@ async function testInternalArkerProviderMapsLifetimeToServerSchedule(): Promise<
   assert.equal(fetch.calls.length, 1, "reserved policy collisions must not issue a fork request");
 }
 
+async function assertCreateRejectedBeforeRequest(options: Record<string, unknown>, error: RegExp): Promise<void> {
+  let requests = 0;
+  const provider = createArkerComputeProvider({
+    apiKey: "test", baseUrl: "https://arker.invalid/api", retry: false,
+    fetch: async () => { requests++; return Response.json(vmPayload("unexpected-vm")); },
+  });
+  await assert.rejects(() => provider.sandbox.create({ templateId: "source", ...options }), error);
+  assert.equal(requests, 0);
+}
+
 async function testInternalArkerProviderRejectsUntranslatedPolicyControls(): Promise<void> {
   for (const [key, value] of Object.entries({
     networkPolicy: { allowInternetAccess: false }, networkPolicies: [],
     internetAccess: false, autoStopInterval: 0,
   })) {
-    const fetch = new FakeFetch();
-    fetch.addJson(() => true, 200, {
-      vm_id: "unexpected-vm", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z",
-      public: false, state: "idle", sessions: [], tunnels: [],
-    });
-    const provider = createArkerComputeProvider({
-      apiKey: "test", baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false,
-    });
-    await assert.rejects(() => provider.sandbox.create({ templateId: "source", [key]: value }),
-      new RegExp(`does not support option\\(s\\): ${key}`));
-    assert.equal(fetch.calls.length, 0);
+    await assertCreateRejectedBeforeRequest({ [key]: value }, new RegExp(`does not support option\\(s\\): ${key}`));
   }
 }
 
@@ -732,16 +711,7 @@ async function testModalEmptyAllowlistIsNotUnrestricted(): Promise<void> {
 async function testInvalidNetworkAllowlistsNeverMeanUnrestricted(): Promise<void> {
   for (const key of ["domainAllowList", "networkAllowList", "outboundDomainAllowlist", "outboundCidrAllowlist"]) {
     for (const value of [{}, false, 7, [7]]) {
-      let requests = 0;
-      const provider = createArkerComputeProvider({
-        apiKey: "test", baseUrl: "https://arker.invalid/api", fetch: async () => {
-          requests++;
-          return new Response(JSON.stringify({ vm_id: "unexpected", owner_org_id: "owner",
-            created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] }));
-        }, retry: false,
-      });
-      await assert.rejects(() => provider.sandbox.create({ templateId: "source", [key]: value }), /allowlist/);
-      assert.equal(requests, 0);
+      await assertCreateRejectedBeforeRequest({ [key]: value }, /allowlist/);
     }
   }
 }
@@ -755,7 +725,7 @@ async function testInternalArkerDirectoryNames(): Promise<void> {
     symlinkSync("missing", join(directory, "dangling"));
     const fetch = new FakeFetch();
     fetch.addJson((method, url) => method === "POST" && url.endsWith("/v1/fork"), 200,
-      { vm_id: "vm_directory", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] });
+      vmPayload("vm_directory"));
     const localFetch: typeof globalThis.fetch = async (input, init) => {
       if (String(input).endsWith("/runs")) {
         const request = JSON.parse(String(init?.body));
@@ -790,11 +760,7 @@ async function testInternalArkerDirectoryNames(): Promise<void> {
 async function testInternalArkerProviderSourceProvenance(): Promise<void> {
   const fetch = new FakeFetch();
   for (const id of ["vm_from_template", "vm_from_snapshot"]) {
-    fetch.addJson(
-      (method, url) => method === "POST" && url === "https://arker.invalid/api/v1/fork",
-      200,
-      { vm_id: id, owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] },
-    );
+    fetch.addFork(id);
   }
   const provider = createArkerComputeProvider({ apiKey: "ark-key", baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false });
   await provider.sandbox.create({ templateId: "vm-template-name" });
@@ -807,7 +773,7 @@ async function testSharedForkPolicySecretsAndRegistry(): Promise<void> {
   const fetch = new FakeFetch();
   for (const id of ["vm_child", "vm_image"]) {
     fetch.addJson((method, url) => method === "POST" && url.endsWith("/v1/fork"), 200,
-      { vm_id: id, owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] });
+      vmPayload(id));
   }
   const policies = { secrets: { TEST_TOKEN: "synthetic-policy-secret" }, rules: { inherited: { type: "outbound", action: "allow" } } } as any;
   const registryAuth = { username: "synthetic", password: "synthetic-registry-password" };
@@ -835,7 +801,7 @@ async function testSharedForkParentIdEnvironment(): Promise<void> {
     for (const configuredId of [undefined, "configured-parent-id"]) {
       const fetch = new FakeFetch();
       fetch.addJson((method, url) => method === "POST" && url.endsWith("/v1/fork"), 200,
-        { vm_id: "vm_child", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] });
+        vmPayload("vm_child"));
       const provider = createArkerComputeProvider({ apiKey: "test", sourceVmId: configuredId,
         baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false });
       await provider.sandbox.create();
@@ -852,7 +818,7 @@ async function testSharedForkParentIdEnvironment(): Promise<void> {
 async function testDaytonaResourceUnits(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson((method, url) => method === "POST" && url.endsWith("/v1/fork"), 200,
-    { vm_id: "vm_resources", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] });
+    vmPayload("vm_resources"));
   fetch.addJson((method, url) => method === "POST" && url.endsWith("/runs"), 200,
     { state: "completed", stdout: "", stdout_encoding: "utf-8", stderr: "", stderr_encoding: "utf-8", exit_code: 0 });
   const client = new Daytona({ arker: { apiKey: "ark-key", baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false } });
@@ -862,11 +828,7 @@ async function testDaytonaResourceUnits(): Promise<void> {
 
 async function testInternalArkerProviderPolicyReplacement(): Promise<void> {
   const fetch = new FakeFetch();
-  fetch.addJson(
-    (method, url) => method === "POST" && url === "https://arker.invalid/api/v1/fork",
-    200,
-    { vm_id: "vm_policy", owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] },
-  );
+  fetch.addFork("vm_policy");
   const provider = createArkerComputeProvider({
     apiKey: "ark-key",
     baseUrl: "https://arker.invalid/api",
@@ -893,7 +855,7 @@ async function testOrderedPolicyControlsSurviveNativeNetworkRestrictions(): Prom
   const fetch = new FakeFetch();
   for (const id of ["vm_first", "vm_second"]) {
     fetch.addJson((method, url) => method === "POST" && url.endsWith("/v1/fork"), 200,
-      { vm_id: id, owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z", public: false, state: "idle", sessions: [], tunnels: [] });
+      vmPayload(id));
   }
   const policies = {
     secrets: { TOKEN: "synthetic-only" },
@@ -921,8 +883,7 @@ async function testOrderedPolicyControlsSurviveNativeNetworkRestrictions(): Prom
 
 async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
   const created = new FakeSandbox("new-box");
-  const fake = installFakeCompute(created, { getByIdResult: null });
-  try {
+  await withFakeCompute(created, async (fake) => {
     await BlaxelSandbox.createIfNotExists({ name: "named-box" }, { timeout: 30 });
     await BlaxelSandbox.create({
       name: "new-box",
@@ -949,9 +910,7 @@ async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
     const arker = createArkerComputeProvider({ apiKey: "test", baseUrl: "https://example.invalid" });
     await assert.rejects(() => arker.sandbox.create({ network: { firewall: { rulesets: ["proxy"] } } } as any), /network/);
     await assert.rejects(() => arker.sandbox.create({ createIfNotExist: true } as any), /createIfNotExist/);
-  } finally {
-    fake.cleanup();
-  }
+  }, { getByIdResult: null });
 }
 
 async function testBlaxelInitializationFailureDeletesCreatedVm(): Promise<void> {
@@ -978,8 +937,7 @@ async function testBlaxelBinaryFiles(): Promise<void> {
     box.runCalls.push({ command, options });
     return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
   };
-  const fake = installFakeCompute(box);
-  try {
+  await withFakeCompute(box, async () => {
     const sandbox = await BlaxelSandbox.create();
     const payload = Uint8Array.from({ length: 256 }, (_, i) => i);
     assert.deepEqual(await sandbox.fs.mkdir("relative"), {
@@ -996,7 +954,7 @@ async function testBlaxelBinaryFiles(): Promise<void> {
     assert.deepEqual(files.get("/blaxel/binary"), payload);
     await sandbox.fs.writeBinary("empty", new Uint8Array());
     assert.equal((await sandbox.fs.readBinary("empty")).size, 0);
-  } finally { fake.cleanup(); }
+  });
 }
 
 async function testBlaxelFilesystemOperationsAndRelativePaths(): Promise<void> {
@@ -1023,8 +981,7 @@ async function testBlaxelFilesystemOperationsAndRelativePaths(): Promise<void> {
     }
     return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
   };
-  const fake = installFakeCompute(box);
-  try {
+  await withFakeCompute(box, async () => {
     const sandbox = await BlaxelSandbox.create();
     await sandbox.fs.write("bare", "one");
     await sandbox.fs.write("nested/file", "two");
@@ -1051,9 +1008,7 @@ async function testBlaxelFilesystemOperationsAndRelativePaths(): Promise<void> {
     await assert.rejects(() => sandbox.fs.grep("hello", "/work", { contextLines: 2 }), /contextLines/);
     assert.throws(() => sandbox.fs.watch("/work", () => undefined), /ordered filesystem event stream/);
     await assert.rejects(() => sandbox.fs.search("needle", "/work"), /fuzzy scoring/);
-  } finally {
-    fake.cleanup();
-  }
+  });
 }
 
 async function testBlaxelNonrecursiveRemoval(): Promise<void> {
@@ -1081,8 +1036,7 @@ async function testBlaxelDirectoryPaths(): Promise<void> {
       { name: "child", type: "directory" },
     ];
   };
-  const fake = installFakeCompute(box);
-  try {
+  await withFakeCompute(box, async () => {
     const sandbox = await BlaxelSandbox.create();
     const listing = await sandbox.fs.ls("nested/");
     assert.equal(listing.name, "nested");
@@ -1090,7 +1044,7 @@ async function testBlaxelDirectoryPaths(): Promise<void> {
     assert.equal(listing.files[0]?.path, "/blaxel/nested/line\nbreak");
     assert.equal(listing.files[0]?.size, 7);
     assert.equal(listing.subdirectories[0]?.path, "/blaxel/nested/child");
-  } finally { fake.cleanup(); }
+  });
 }
 
 async function testBlaxelAbsoluteDirectoryDisplayPaths(): Promise<void> {
@@ -1101,14 +1055,13 @@ async function testBlaxelAbsoluteDirectoryDisplayPaths(): Promise<void> {
   ] as const) {
     const box = new FakeSandbox();
     box.filesystem.readdir = async () => [{ name: "probe", type: "file", size: 1 }];
-    const fake = installFakeCompute(box);
-    try {
+    await withFakeCompute(box, async () => {
       const sandbox = await BlaxelSandbox.create();
       const listing = await sandbox.fs.ls(path);
       assert.equal(listing.name, name);
       assert.equal(listing.path, display);
       assert.equal(listing.files[0]?.path, entryPath);
-    } finally { fake.cleanup(); }
+    });
   }
 }
 
