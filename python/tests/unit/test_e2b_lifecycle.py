@@ -6,10 +6,20 @@ import pytest
 import arker.e2b as shim
 
 
-@pytest.mark.parametrize("timeout", [None, 17])
-def test_arker_creation_maps_e2b_lifetime_to_server_delete_schedule(timeout, monkeypatch):
+@pytest.fixture
+def fork_requests(monkeypatch):
     requests = []
     child = types.SimpleNamespace(id="child")
+    monkeypatch.setattr(
+        "arker._compat.arker_client",
+        lambda config: types.SimpleNamespace(fork=lambda **request: requests.append(request) or child),
+    )
+    return requests, child
+
+
+@pytest.mark.parametrize("timeout", [None, 17])
+def test_arker_creation_maps_e2b_lifetime_to_server_delete_schedule(timeout, fork_requests):
+    requests, child = fork_requests
     config = {
         "source": "template",
         "policies": {
@@ -17,10 +27,6 @@ def test_arker_creation_maps_e2b_lifetime_to_server_delete_schedule(timeout, mon
             "rules": {"custom": {"type": "outbound", "priority": 7, "action": "allow"}},
         },
     }
-    monkeypatch.setattr(
-        "arker._compat.arker_client",
-        lambda config: types.SimpleNamespace(fork=lambda **request: requests.append(request) or child),
-    )
 
     assert (
         shim.Sandbox._create_arker(
@@ -152,49 +158,46 @@ def test_arker_stream_reads_are_not_faked_with_a_buffer():
         sandbox.files.read("/binary", format="stream")
 
 
-def test_arker_writes_and_metadata_match_e2b_default_user(monkeypatch):
-    commands = []
-    staged = []
-    vm = types.SimpleNamespace(id="arker", sync=lambda path, content: staged.append((path, content)))
-    monkeypatch.setattr(
-        shim,
-        "run_command",
-        lambda vm, command, **kwargs: (
-            commands.append(command)
-            or shim._CommonCommandResult(
-                stdout="/tmp/file\x1f4\x1f81a4\x1f-rw-r--r--\x1fuser\x1fuser\x1f1\x1fregular file",
-                stderr="",
-                exit_code=0,
-            )
-        ),
-    )
-    files = shim.Sandbox(vm=vm).files
-    files.write("/tmp/file", "data")
-    info = files.get_info("/tmp/file")
-    assert commands[2].startswith("setpriv --reuid=user --regid=user --init-groups -- sh -c ")
-    assert "write /tmp/file" in commands[2]
-    assert " < /tmp/.computesdk-e2b-write-" in commands[2]
-    assert commands[3].startswith("rm -rf -- /tmp/.computesdk-e2b-write-")
-    assert staged[0][0].startswith("/tmp/.computesdk-e2b-write-")
-    assert info.permissions == "-rw-r--r--"
-    assert (info.owner, info.group) == ("user", "user")
+@pytest.mark.parametrize("outcome", ["success", "permission-denied", "upload-interrupted"])
+def test_arker_write_staging_cleanup_and_user_permissions(monkeypatch, outcome):
+    commands, staged = [], []
+    metadata = "/tmp/file\x1f4\x1f81a4\x1f-rw-r--r--\x1fuser\x1fuser\x1f1\x1fregular file"
 
-
-def test_arker_write_preserves_user_permission_failure_and_cleans_staging(monkeypatch):
-    commands = []
-    vm = types.SimpleNamespace(id="arker", sync=lambda path, content: None)
+    def sync(path, content):
+        if outcome == "upload-interrupted":
+            raise OSError("upload interrupted")
+        staged.append((path, content))
 
     def run(vm, command, **kwargs):
         commands.append(command)
-        denied = command.startswith("setpriv ")
+        denied = outcome == "permission-denied" and command.startswith("setpriv ")
         return shim._CommonCommandResult(
-            stdout="", stderr="Permission denied" if denied else "", exit_code=1 if denied else 0
+            stdout=metadata if outcome == "success" else "",
+            stderr="Permission denied" if denied else "",
+            exit_code=1 if denied else 0,
         )
 
     monkeypatch.setattr(shim, "run_command", run)
-    with pytest.raises(RuntimeError, match="Permission denied"):
-        shim.Sandbox(vm=vm).files.write("/root/owned", "data")
-    assert commands[2].startswith("setpriv --reuid=user --regid=user --init-groups -- ")
+    files = shim.Sandbox(vm=types.SimpleNamespace(id="arker", sync=sync)).files
+    if outcome == "upload-interrupted":
+        with pytest.raises(OSError, match="upload interrupted"):
+            files.write("/tmp/file", "data")
+        assert len(commands) == 3
+        assert commands[2].startswith("rm -rf -- /tmp/.computesdk-e2b-write-")
+        return
+    if outcome == "permission-denied":
+        with pytest.raises(RuntimeError, match="Permission denied"):
+            files.write("/root/owned", "data")
+        assert commands[2].startswith("setpriv --reuid=user --regid=user --init-groups -- ")
+    else:
+        files.write("/tmp/file", "data")
+        info = files.get_info("/tmp/file")
+        assert commands[2].startswith("setpriv --reuid=user --regid=user --init-groups -- sh -c ")
+        assert "write /tmp/file" in commands[2]
+        assert " < /tmp/.computesdk-e2b-write-" in commands[2]
+        assert staged[0][0].startswith("/tmp/.computesdk-e2b-write-")
+        assert info.permissions == "-rw-r--r--"
+        assert (info.owner, info.group) == ("user", "user")
     assert commands[3].startswith("rm -rf -- /tmp/.computesdk-e2b-write-")
 
 
@@ -205,14 +208,10 @@ def test_python_create_does_not_misread_millisecond_alias_as_seconds(alias, monk
         shim.Sandbox.create(**{alias: 300_000})
 
 
-def test_arker_creation_preserves_legacy_ordered_policy(monkeypatch):
-    requests = []
+def test_arker_creation_preserves_legacy_ordered_policy(fork_requests):
+    requests, _ = fork_requests
     ordered = [{"type": "outbound", "priority": 1, "action": "deny"}]
     config = {"source": "template", "policies": {"policies": ordered}}
-    monkeypatch.setattr(
-        "arker._compat.arker_client",
-        lambda config: types.SimpleNamespace(fork=lambda **request: requests.append(request) or object()),
-    )
 
     shim.Sandbox._create_arker(config, None, None, None, {})
 
@@ -221,25 +220,6 @@ def test_arker_creation_preserves_legacy_ordered_policy(monkeypatch):
         {"type": "schedule", "after_created": 300, "action": "delete"}
     ]
     assert config == {"source": "template", "policies": {"policies": ordered}}
-
-
-def test_arker_write_cleans_partial_staging_after_sync_failure(monkeypatch):
-    commands = []
-
-    def fail_sync(path, content):
-        raise OSError("upload interrupted")
-
-    monkeypatch.setattr(
-        shim,
-        "run_command",
-        lambda vm, command, **kwargs: (
-            commands.append(command) or shim._CommonCommandResult(stdout="", stderr="", exit_code=0)
-        ),
-    )
-    with pytest.raises(OSError, match="upload interrupted"):
-        shim.Sandbox(vm=types.SimpleNamespace(id="arker", sync=fail_sync)).files.write("/tmp/file", "data")
-    assert len(commands) == 3
-    assert commands[2].startswith("rm -rf -- /tmp/.computesdk-e2b-write-")
 
 
 @pytest.mark.parametrize("deleted", [True, False])
@@ -284,8 +264,10 @@ def test_kill_only_treats_authoritative_absence_as_false(status):
         assert raised.value is error
 
 
-def test_connect_probes_metadata_before_connecting_only_the_winner(monkeypatch):
+@pytest.mark.parametrize("owner", ["arker", "e2b"])
+def test_connect_probes_metadata_before_connecting_only_the_winner(monkeypatch, owner):
     calls = []
+    identifier = "shared-id" if owner == "arker" else "native-id"
     native = types.SimpleNamespace(
         get_info=lambda identifier: calls.append(("info", identifier)) or object(),
         connect=lambda identifier: (
@@ -296,25 +278,13 @@ def test_connect_probes_metadata_before_connecting_only_the_winner(monkeypatch):
     monkeypatch.setattr(shim, "_validate_e2b_identity", lambda vm: None)
 
     def route(identifier, provider, config, getters):
-        getters["e2b"]()
+        metadata = getters["e2b"]()
         assert calls == [("info", identifier)]
-        return "arker", types.SimpleNamespace(id="arker-winner")
+        return owner, metadata if owner == "e2b" else types.SimpleNamespace(id="arker-winner")
 
     monkeypatch.setattr(shim, "routed_get", route)
-    assert shim.Sandbox.connect("shared-id").sandbox_id == "arker-winner"
-    assert calls == [("info", "shared-id")]
-
-
-def test_connect_resolves_native_handle_after_native_ownership_wins(monkeypatch):
-    calls = []
-    native = types.SimpleNamespace(
-        get_info=lambda identifier: calls.append("info") or object(),
-        connect=lambda identifier: calls.append("connect") or types.SimpleNamespace(sandbox_id=identifier),
-    )
-    monkeypatch.setattr(shim.Sandbox, "_native_sandbox", staticmethod(lambda: native))
-    monkeypatch.setattr(shim, "routed_get", lambda identifier, provider, config, getters: ("e2b", getters["e2b"]()))
-    assert shim.Sandbox.connect("native-id").sandbox_id == "native-id"
-    assert calls == ["info", "connect"]
+    assert shim.Sandbox.connect(identifier).sandbox_id == (identifier if owner == "e2b" else "arker-winner")
+    assert calls == ([("info", identifier), ("connect", identifier)] if owner == "e2b" else [("info", identifier)])
 
 
 @pytest.mark.parametrize("owner", ["e2b", "arker", None])

@@ -4,12 +4,10 @@ import { Daytona as Native, Image, type Sandbox } from "@daytona/sdk";
 import { createNativeDaytonaProvider } from "../src/compat/daytona-provider.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { preserveProperties } from "./provider-fixtures.js";
 
-test("native Daytona bridge preserves Image objects, endpoint and target, errors and vendor instance", async () => {
-  const original = {
-    create: Native.prototype.create,
-    get: Native.prototype.get,
-  };
+test("native Daytona bridge preserves Image objects, endpoint and target, errors and vendor instance", async (t) => {
+  preserveProperties(t, Native.prototype, "create", "get");
   const image = Image.base("alpine:3.21").runCommands("echo marker");
   const box = { id: "native-image" } as Sandbox;
   const calls: unknown[] = [];
@@ -19,52 +17,42 @@ test("native Daytona bridge preserves Image objects, endpoint and target, errors
     calls.push([params, options]);
     return box;
   };
-  try {
-    const provider = createNativeDaytonaProvider({
-      apiKey: "dtn-test",
-      apiUrl: "https://daytona.invalid/api",
-      target: "us",
-    });
-    const sandbox = await provider.instances.create({
-      image,
-      envs: { VALUE: "kept" },
-      name: "requested",
-      timeout: 15500,
-    } as any);
-    assert.equal(sandbox.getInstance(), box);
-    assert.deepEqual(calls, [
-      [
-        { image, envVars: { VALUE: "kept" }, name: "requested" },
-        { timeout: 15.5 },
-      ],
-    ]);
-    const denied = Object.assign(new Error("forbidden"), { statusCode: 403 });
-    Native.prototype.get = async () => {
+  const provider = createNativeDaytonaProvider({
+    apiKey: "dtn-test",
+    apiUrl: "https://daytona.invalid/api",
+    target: "us",
+  });
+  const sandbox = await provider.instances.create({
+    image,
+    envs: { VALUE: "kept" },
+    name: "requested",
+    timeout: 15500,
+  } as any);
+  assert.equal(sandbox.getInstance(), box);
+  assert.deepEqual(calls, [
+    [
+      { image, envVars: { VALUE: "kept" }, name: "requested" },
+      { timeout: 15.5 },
+    ],
+  ]);
+  const denied = Object.assign(new Error("forbidden"), { statusCode: 403 });
+  for (const [method, operation] of [
+    ["get", () => provider.instances.getById("native-image")],
+    ["create", () => provider.instances.create()],
+  ] as const) {
+    Native.prototype[method] = async () => {
       throw denied;
     };
-    await assert.rejects(
-      provider.instances.getById("native-image"),
-      (error) => error === denied,
-    );
-    Native.prototype.get = async () => {
-      throw Object.assign(new Error("missing"), { statusCode: 404 });
-    };
-    assert.equal(await provider.instances.getById("missing"), null);
-    Native.prototype.create = async () => {
-      throw denied;
-    };
-    await assert.rejects(
-      provider.instances.create(),
-      (error) => error === denied,
-    );
-  } finally {
-    Native.prototype.create = original.create;
-    Native.prototype.get = original.get;
+    await assert.rejects(operation(), (error) => error === denied);
   }
+  Native.prototype.get = async () => {
+    throw Object.assign(new Error("missing"), { statusCode: 404 });
+  };
+  assert.equal(await provider.instances.getById("missing"), null);
 });
 
-test("ComputeSDK command normalization preserves exact output and exit status without changing native public execution", async () => {
-  const original = Native.prototype.create;
+test("ComputeSDK command normalization preserves exact output and exit status without changing native public execution", async (t) => {
+  preserveProperties(t, Native.prototype, "create");
   const execute = promisify(execFile);
   Native.prototype.create = async () =>
     ({
@@ -83,21 +71,17 @@ test("ComputeSDK command normalization preserves exact output and exit status wi
         },
       },
     }) as unknown as Sandbox;
-  try {
-    const sandbox = await createNativeDaytonaProvider({
-      apiKey: "dtn-test",
-    }).instances.create();
-    const result = await sandbox.runCommand(
-      "printf '%s\\n' \"$VALUE\"; printf 'errλ\\n' >&2; exit 17",
-      {
-        cwd: "/tmp",
-        env: { VALUE: "outλ" },
-      },
-    );
-    assert.equal(result.stdout, "outλ\n");
-    assert.equal(result.stderr, "errλ\n");
-    assert.equal(result.exitCode, 17);
-  } finally {
-    Native.prototype.create = original;
-  }
+  const sandbox = await createNativeDaytonaProvider({
+    apiKey: "dtn-test",
+  }).instances.create();
+  const result = await sandbox.runCommand(
+    "printf '%s\\n' \"$VALUE\"; printf 'errλ\\n' >&2; exit 17",
+    {
+      cwd: "/tmp",
+      env: { VALUE: "outλ" },
+    },
+  );
+  assert.equal(result.stdout, "outλ\n");
+  assert.equal(result.stderr, "errλ\n");
+  assert.equal(result.exitCode, 17);
 });

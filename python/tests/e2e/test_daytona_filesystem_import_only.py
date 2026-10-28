@@ -2,7 +2,6 @@
 
 import asyncio
 import inspect
-import json
 import os
 import uuid
 
@@ -87,24 +86,13 @@ async def program(Client, progress=lambda stage: None):
 
 @pytest.mark.parametrize("style", ["sync", "async"])
 @pytest.mark.parametrize("provider,shim", [("daytona", False), ("daytona", True), ("arker", True)])
-def test_daytona_filesystem(style, provider, shim, tmp_path, monkeypatch):
+def test_daytona_filesystem(style, provider, shim, live_router, monkeypatch):
     if not os.getenv("DAYTONA_API_KEY") or not os.getenv("ARKER_API_KEY"):
         pytest.skip("Live Daytona and Arker credentials required")
     import daytona as native
 
     from arker import daytona as translated
 
-    config = tmp_path / "router.json"
-    config.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": [provider]},
-                "create": {"strategy": "priority", "order": [provider]},
-            }
-        )
-    )
-    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(config))
     if provider == "arker":
         monkeypatch.delenv("DAYTONA_API_KEY")
     client = getattr(translated if shim else native, "AsyncDaytona" if style == "async" else "Daytona")

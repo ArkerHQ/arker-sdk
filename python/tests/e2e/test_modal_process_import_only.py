@@ -1,10 +1,9 @@
 """Compare Modal process behavior with only the Sandbox import changed."""
 
-import json
 import os
 
 import pytest
-from compat_evidence import record
+from compat_evidence import record_scenario
 
 PROGRAM = r"""
 from modal import Sandbox
@@ -58,22 +57,11 @@ def program(identifier):
 
 
 @pytest.mark.parametrize("provider,shim", [("modal", False), ("modal", True), ("arker", True)])
-def test_modal_process_import_only(provider, shim, tmp_path, monkeypatch):
+def test_modal_process_import_only(provider, shim, live_router, monkeypatch):
     modal = pytest.importorskip("modal")
     required = ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET") if provider == "modal" else ("ARKER_API_KEY",)
     if not all(os.environ.get(key) for key in required):
         pytest.skip("Live credentials required")
-    config = tmp_path / "router.json"
-    config.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": [provider]},
-                "create": {"strategy": "priority", "order": [provider]},
-            }
-        )
-    )
-    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(config))
     if provider == "modal":
         fixture = modal.Sandbox.create(
             app=modal.App.lookup("arker-compat-image-test", create_if_missing=True), timeout=180
@@ -91,37 +79,35 @@ def test_modal_process_import_only(provider, shim, tmp_path, monkeypatch):
         cleanup = fixture.delete
         monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
         monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
-    outcome = "failed"
-    try:
-        source = PROGRAM.replace("from modal import Sandbox", "from arker.modal import Sandbox") if shim else PROGRAM
-        namespace = {}
-        exec(compile(source, "modal_process_import_only.py", "exec"), namespace)
-        namespace["program"](identifier)
-        outcome = "passed"
-    finally:
+    with record_scenario(
+        "modal",
+        "sync",
+        provider,
+        shim,
+        "import-only-process-binary-env-startup",
+        [
+            "Sandbox.from_id",
+            "Sandbox.object_id",
+            "Sandbox.exec",
+            "ContainerProcess.poll",
+            "ContainerProcess.wait",
+            "ContainerProcess.returncode",
+            "ContainerProcess.stdout",
+            "ContainerProcess.stderr",
+            "ContainerProcess.stdin",
+            "ContainerProcess.stdout.read",
+            "ContainerProcess.stderr.read",
+            "ContainerProcess.stdin.write",
+            "ContainerProcess.stdin.write_eof",
+            "ContainerProcess.stdin.drain",
+        ],
+    ):
         try:
-            cleanup()
-        finally:
-            record(
-                "modal",
-                "sync",
-                "reference" if not shim else "arker" if provider == "arker" else "native",
-                "import-only-process-binary-env-startup",
-                [
-                    "Sandbox.from_id",
-                    "Sandbox.object_id",
-                    "Sandbox.exec",
-                    "ContainerProcess.poll",
-                    "ContainerProcess.wait",
-                    "ContainerProcess.returncode",
-                    "ContainerProcess.stdout",
-                    "ContainerProcess.stderr",
-                    "ContainerProcess.stdin",
-                    "ContainerProcess.stdout.read",
-                    "ContainerProcess.stderr.read",
-                    "ContainerProcess.stdin.write",
-                    "ContainerProcess.stdin.write_eof",
-                    "ContainerProcess.stdin.drain",
-                ],
-                outcome,
+            source = (
+                PROGRAM.replace("from modal import Sandbox", "from arker.modal import Sandbox") if shim else PROGRAM
             )
+            namespace = {}
+            exec(compile(source, "modal_process_import_only.py", "exec"), namespace)
+            namespace["program"](identifier)
+        finally:
+            cleanup()

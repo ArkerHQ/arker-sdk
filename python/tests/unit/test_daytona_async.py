@@ -1,31 +1,18 @@
 import asyncio
-import json
-import threading
 import types
 
 import pytest
+from async_lifecycle_helpers import cancel_creation, run_async
+from async_lifecycle_helpers import configure_router as configure_router
+from async_lifecycle_helpers import late_arker_creation as late_arker_creation
 
 import arker.daytona as shim
 
 
-def router(tmp_path, monkeypatch, provider):
-    path = tmp_path / "router.json"
-    path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": [provider]},
-                "create": {"strategy": "priority", "order": [provider]},
-            }
-        )
-    )
-    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(path))
-    monkeypatch.setenv("ARKER_API_KEY", "ark_test")
-
-
-def test_async_daytona_arker_route_does_not_initialize_native_client(tmp_path, monkeypatch):
+@run_async
+async def test_async_daytona_arker_route_does_not_initialize_native_client(configure_router, monkeypatch):
     native = pytest.importorskip("daytona")
-    router(tmp_path, monkeypatch, "arker")
+    configure_router(["arker"])
     calls = []
 
     class Native:
@@ -42,142 +29,105 @@ def test_async_daytona_arker_route_does_not_initialize_native_client(tmp_path, m
         shim, "run_command", lambda *args, **kwargs: types.SimpleNamespace(stdout="async", stderr="", exit_code=0)
     )
 
-    async def scenario():
-        async with shim.AsyncDaytona() as client:
-            sandbox = await client.create()
-            assert sandbox.id == "arker"
-            assert (await sandbox.process.exec("printf async")).result == "async"
-            await client.delete(sandbox)
+    async with shim.AsyncDaytona() as client:
+        sandbox = await client.create()
+        assert sandbox.id == "arker"
+        assert (await sandbox.process.exec("printf async")).result == "async"
+        await client.delete(sandbox)
 
-    asyncio.run(scenario())
     assert calls == ["delete"]
 
 
-def test_async_daytona_native_objects_stay_on_original_loop(tmp_path, monkeypatch):
+@run_async
+async def test_async_daytona_native_objects_stay_on_original_loop(configure_router, monkeypatch):
     native = pytest.importorskip("daytona")
-    router(tmp_path, monkeypatch, "daytona")
+    configure_router(["daytona"])
     calls = []
 
-    async def scenario():
-        loop = asyncio.get_running_loop()
+    loop = asyncio.get_running_loop()
 
-        async def execute(command):
+    async def execute(command):
+        assert asyncio.get_running_loop() is loop
+        return types.SimpleNamespace(result=command)
+
+    async def delete(*args, **kwargs):
+        assert asyncio.get_running_loop() is loop
+        calls.append((args, kwargs))
+
+    box = types.SimpleNamespace(id="native", process=types.SimpleNamespace(exec=execute), delete=delete)
+
+    class Native:
+        def __init__(self):
             assert asyncio.get_running_loop() is loop
-            return types.SimpleNamespace(result=command)
+            calls.append("initialize")
 
-        async def delete(*args, **kwargs):
+        async def create(self, *args, **kwargs):
             assert asyncio.get_running_loop() is loop
-            calls.append((args, kwargs))
+            return box
 
-        box = types.SimpleNamespace(id="native", process=types.SimpleNamespace(exec=execute), delete=delete)
+        async def get(self, identifier):
+            assert asyncio.get_running_loop() is loop
+            assert identifier == "native"
+            return box
 
-        class Native:
-            def __init__(self):
-                assert asyncio.get_running_loop() is loop
-                calls.append("initialize")
+        async def close(self):
+            assert asyncio.get_running_loop() is loop
+            calls.append("close")
 
-            async def create(self, *args, **kwargs):
-                assert asyncio.get_running_loop() is loop
-                return box
+    monkeypatch.setattr(native, "AsyncDaytona", Native)
+    async with shim.AsyncDaytona() as client:
+        sandbox = await client.create()
+        assert sandbox.process is box.process
+        assert (await sandbox.process.exec("unchanged")).result == "unchanged"
+        connected = await client.get("native")
+        await client.delete(connected, timeout=10, wait=True)
 
-            async def get(self, identifier):
-                assert asyncio.get_running_loop() is loop
-                assert identifier == "native"
-                return box
-
-            async def close(self):
-                assert asyncio.get_running_loop() is loop
-                calls.append("close")
-
-        monkeypatch.setattr(native, "AsyncDaytona", Native)
-        async with shim.AsyncDaytona() as client:
-            sandbox = await client.create()
-            assert sandbox.process is box.process
-            assert (await sandbox.process.exec("unchanged")).result == "unchanged"
-            connected = await client.get("native")
-            await client.delete(connected, timeout=10, wait=True)
-
-    asyncio.run(scenario())
     assert calls == ["initialize", ((10,), {"wait": True}), "close"]
 
 
-def test_cancelled_daytona_creation_cleans_up_its_late_arker_result(tmp_path, monkeypatch):
-    router(tmp_path, monkeypatch, "arker")
-    entered, release, deleted = threading.Event(), threading.Event(), threading.Event()
+@run_async
+async def test_cancelled_daytona_creation_cleans_up_its_late_arker_result(configure_router, late_arker_creation):
+    configure_router(["arker"])
+    check = late_arker_creation(shim)
 
-    def create(*args, **kwargs):
-        entered.set()
-        assert release.wait(2)
-        return types.SimpleNamespace(id="late", delete=deleted.set)
-
-    monkeypatch.setattr(shim, "arker_create", create)
-
-    async def scenario():
-        async with shim.AsyncDaytona() as client:
-            pending = asyncio.create_task(client.create())
-            assert await asyncio.to_thread(entered.wait, 1)
-            pending.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await pending
-            release.set()
-            assert await asyncio.to_thread(deleted.wait, 1)
-
-    asyncio.run(scenario())
+    async with shim.AsyncDaytona() as client:
+        await check(client.create())
 
 
-def test_cancelled_daytona_native_creation_does_not_fall_through(tmp_path, monkeypatch):
+@run_async
+async def test_cancelled_daytona_native_creation_does_not_fall_through(configure_router, monkeypatch):
     native = pytest.importorskip("daytona")
-    path = tmp_path / "router.json"
-    path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": ["daytona", "arker"]},
-                "create": {"strategy": "priority", "order": ["daytona", "arker"]},
-            }
-        )
-    )
-    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(path))
-    monkeypatch.setenv("ARKER_API_KEY", "ark_test")
+    configure_router(["daytona", "arker"])
     calls = []
     monkeypatch.setattr(shim, "arker_create", lambda *args, **kwargs: calls.append("duplicate"))
 
-    async def scenario():
-        entered, cancelled = asyncio.Event(), asyncio.Event()
+    entered, cancelled = asyncio.Event(), asyncio.Event()
 
-        class Native:
-            async def create(self):
-                entered.set()
-                try:
-                    await asyncio.Event().wait()
-                finally:
-                    cancelled.set()
+    class Native:
+        async def create(self):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
 
-            async def close(self):
-                calls.append("close")
+        async def close(self):
+            calls.append("close")
 
-        monkeypatch.setattr(native, "AsyncDaytona", Native)
-        async with shim.AsyncDaytona() as client:
-            pending = asyncio.create_task(client.create())
-            await asyncio.wait_for(entered.wait(), 1)
-            pending.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await pending
-            await asyncio.wait_for(cancelled.wait(), 1)
+    monkeypatch.setattr(native, "AsyncDaytona", Native)
+    async with shim.AsyncDaytona() as client:
+        await cancel_creation(client.create(), entered, cancelled)
 
-    asyncio.run(scenario())
     assert calls == ["close"]
 
 
-def test_closed_daytona_client_cannot_reinitialize_a_native_client():
-    async def scenario():
-        client = shim.AsyncDaytona()
-        await client.close()
-        await client.close()
-        with pytest.raises(RuntimeError, match="closed"):
-            await client.create()
-
-    asyncio.run(scenario())
+@run_async
+async def test_closed_daytona_client_cannot_reinitialize_a_native_client():
+    client = shim.AsyncDaytona()
+    await client.close()
+    await client.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        await client.create()
 
 
 def test_arker_daytona_execution_returns_native_result_type_and_artifacts(monkeypatch):

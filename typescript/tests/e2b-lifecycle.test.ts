@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { createServer } from "node:http";
 import { test } from "node:test";
 import {
@@ -11,11 +10,21 @@ import {
 } from "e2b";
 import { Sandbox } from "../src/e2b.js";
 import { createNativeE2BProvider } from "../src/compat/e2b-provider.js";
+import { preserveProperties, preserveEnvironment, listen } from "./provider-fixtures.js";
+
+function arkerSandbox(overrides: Record<string, unknown>): Sandbox {
+  return Reflect.construct(Sandbox, [{
+    provider: "arker",
+    sandboxId: "arker",
+    getInstance: () => ({ sync: async () => undefined }),
+    runCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+    ...overrides,
+  }]) as Sandbox;
+}
 
 test("Arker identity execution preserves the process PID while dropping privileges", async () => {
   let processId = 0;
-  const sandbox = Reflect.construct(Sandbox, [{
-    provider: "arker", sandboxId: "arker",
+  const sandbox = arkerSandbox({
     runCommand: async (command: string) => {
       assert.match(command, /^setpriv --reuid=user --regid=user --init-groups -- /);
       command = command.replace(
@@ -31,7 +40,7 @@ test("Arker identity execution preserves the process PID while dropping privileg
       const exitCode = await new Promise<number>((resolve) => child.on("close", (code, signal) => resolve(code ?? (signal === "SIGTERM" ? 143 : 1))));
       return { stdout, stderr, exitCode };
     },
-  }]) as Sandbox;
+  });
   const identity = await sandbox.commands.run(`printf '%s %s' "$$" "$(id -u)"`);
   assert.equal(identity.stdout, `${processId} ${process.getuid!()}`);
   await assert.rejects(
@@ -67,10 +76,7 @@ test("native filesystem handles preserve binary options and write metadata", asy
 
 test("Arker filesystem options are rejected instead of silently ignored", async () => {
   let calls = 0;
-  const sandbox = Reflect.construct(Sandbox, [{
-    provider: "arker", sandboxId: "arker",
-    getInstance: () => ({ sync: async () => undefined }),
-    runCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+  const sandbox = arkerSandbox({
     filesystem: {
       readFile: async () => { calls++; return "wrong"; },
       writeFile: async () => { calls++; },
@@ -79,7 +85,7 @@ test("Arker filesystem options are rejected instead of silently ignored", async 
       exists: async () => { calls++; return false; },
       remove: async () => { calls++; },
     },
-  }]) as Sandbox;
+  });
   for (const method of ["read", "list", "exists", "remove", "makeDir"] as const) {
     await assert.rejects(sandbox.files[method]("/owned", { user: "another" }), /only the default user or root/);
   }
@@ -90,9 +96,7 @@ test("Arker filesystem options are rejected instead of silently ignored", async 
 test("Arker binary reads preserve every byte and the native Uint8Array type", async () => {
   const payload = Uint8Array.from({ length: 256 }, (_, index) => index);
   let calls = 0;
-  const sandbox = Reflect.construct(Sandbox, [{
-    provider: "arker", sandboxId: "arker",
-    runCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+  const sandbox = arkerSandbox({
     getInstance: () => ({ sync: async (path: string, data?: Uint8Array) => {
       calls++;
       if (data !== undefined) {
@@ -103,7 +107,7 @@ test("Arker binary reads preserve every byte and the native Uint8Array type", as
       assert.equal(path, "/binary");
       return Buffer.from(payload);
     } }),
-  }]) as Sandbox;
+  });
   const result = await sandbox.files.read("/binary", { format: "bytes" });
   assert.equal(result.constructor, Uint8Array);
   assert.deepEqual(result, payload);
@@ -117,10 +121,8 @@ test("Arker binary reads preserve every byte and the native Uint8Array type", as
 
 test("Arker writes and metadata match the E2B default user", async () => {
   const commands: string[] = [];
-  const sandbox = Reflect.construct(Sandbox, [{
-    provider: "arker", sandboxId: "arker",
+  const sandbox = arkerSandbox({
     filesystem: { writeFile: async () => undefined },
-    getInstance: () => ({ sync: async () => undefined }),
     runCommand: async (command: string) => {
       commands.push(command);
       return {
@@ -128,7 +130,7 @@ test("Arker writes and metadata match the E2B default user", async () => {
         stderr: "", exitCode: 0,
       };
     },
-  }]) as Sandbox;
+  });
   await sandbox.files.write("/tmp/file", "data");
   const info = await sandbox.files.getInfo("/tmp/file");
   assert.match(commands[2]!, /^setpriv --reuid=user --regid=user --init-groups -- sh -c /);
@@ -141,14 +143,12 @@ test("Arker writes and metadata match the E2B default user", async () => {
 
 test("Arker writes preserve user permission failures and clean staging", async () => {
   const commands: string[] = [];
-  const sandbox = Reflect.construct(Sandbox, [{
-    provider: "arker", sandboxId: "arker",
-    getInstance: () => ({ sync: async () => undefined }),
+  const sandbox = arkerSandbox({
     runCommand: async (command: string) => {
       commands.push(command);
       return { stdout: "", stderr: command.startsWith("setpriv ") ? "Permission denied" : "", exitCode: command.startsWith("setpriv ") ? 1 : 0 };
     },
-  }]) as Sandbox;
+  });
   await assert.rejects(sandbox.files.write("/root/owned", "data"), /Permission denied/);
   assert.match(commands[2]!, /^setpriv --reuid=user --regid=user --init-groups -- /);
   assert.match(commands[3]!, /^rm -rf -- \/tmp\/.computesdk-e2b-write-/);
@@ -156,21 +156,20 @@ test("Arker writes preserve user permission failures and clean staging", async (
 
 test("Arker writes clean partial staging after sync failure", async () => {
   const commands: string[] = [];
-  const sandbox = Reflect.construct(Sandbox, [{
-    provider: "arker", sandboxId: "arker",
+  const sandbox = arkerSandbox({
     getInstance: () => ({ sync: async () => { throw new Error("upload interrupted"); } }),
     runCommand: async (command: string) => {
       commands.push(command);
       return { stdout: "", stderr: "", exitCode: 0 };
     },
-  }]) as Sandbox;
+  });
   await assert.rejects(sandbox.files.write("/tmp/file", "data"), /upload interrupted/);
   assert.equal(commands.length, 3);
   assert.match(commands[2]!, /^rm -rf -- \/tmp\/.computesdk-e2b-write-/);
 });
 
-test("the shim provider preserves embedding SDK identity, native filesystem metadata and errors", async () => {
-  const original = { create: Native.create, connect: Native.connect };
+test("the shim provider preserves embedding SDK identity, native filesystem metadata and errors", async (t) => {
+  preserveProperties(t, Native, "create", "connect");
   const modifiedTime = new Date("2026-10-17T00:00:00Z");
   const failure = new CommandExitError({
     stdout: "output",
@@ -193,58 +192,41 @@ test("the shim provider preserves embedding SDK identity, native filesystem meta
   } as unknown as Native;
   Native.create = (async () => native) as typeof Native.create;
   Native.connect = (async () => native) as typeof Native.connect;
-  try {
-    const provider = createNativeE2BProvider();
-    const box = await provider.instances.create();
-    assert.equal(box.provider, "e2b");
-    assert.equal(box.getInstance(), native);
-    assert.equal(
-      (await provider.instances.getById("embedded"))!.getInstance(),
-      native,
-    );
-    assert.deepEqual(await box.filesystem.readdir("/"), [
-      { name: "folder", type: "directory", size: 4096, modified: modifiedTime },
-    ]);
-    const result = await box.runCommand("exit 17");
-    assert.deepEqual(
-      [result.stdout, result.stderr, result.exitCode],
-      ["output", "failure", 17],
-    );
-    const unavailable = new Error("fetch failed");
-    Native.create = async () => {
+  const provider = createNativeE2BProvider();
+  const box = await provider.instances.create();
+  assert.equal(box.provider, "e2b");
+  assert.equal(box.getInstance(), native);
+  assert.equal(
+    (await provider.instances.getById("embedded"))!.getInstance(),
+    native,
+  );
+  assert.deepEqual(await box.filesystem.readdir("/"), [
+    { name: "folder", type: "directory", size: 4096, modified: modifiedTime },
+  ]);
+  const result = await box.runCommand("exit 17");
+  assert.deepEqual(
+    [result.stdout, result.stderr, result.exitCode],
+    ["output", "failure", 17],
+  );
+  const unavailable = new Error("fetch failed");
+  for (const [method, operation] of [
+    ["create", () => provider.instances.create()],
+    ["connect", () => provider.instances.getById("embedded")],
+  ] as const) {
+    Native[method] = async () => {
       throw unavailable;
     };
-    Native.connect = async () => {
-      throw unavailable;
-    };
-    await assert.rejects(
-      provider.instances.create(),
-      (error) => error === unavailable,
-    );
-    await assert.rejects(
-      provider.instances.getById("embedded"),
-      (error) => error === unavailable,
-    );
-    Native.connect = async () => {
-      throw new NotFoundError("missing");
-    };
-    assert.equal(await provider.instances.getById("missing"), null);
-  } finally {
-    Native.create = original.create;
-    Native.connect = original.connect;
+    await assert.rejects(operation(), (error) => error === unavailable);
   }
+  Native.connect = async () => {
+    throw new NotFoundError("missing");
+  };
+  assert.equal(await provider.instances.getById("missing"), null);
 });
 
-test("static E2B deletion uses metadata ownership without connecting and preserves errors", async () => {
-  const previous = {
-    info: Native.getInfo,
-    kill: Native.kill,
-    connect: Native.connect,
-  };
-  const environment = {
-    key: process.env.ARKER_API_KEY,
-    router: process.env.COMPUTESDK_ROUTER_CONFIG,
-  };
+test("static E2B deletion uses metadata ownership without connecting and preserves errors", async (t) => {
+  preserveProperties(t, Native, "getInfo", "kill", "connect");
+  preserveEnvironment(t, "ARKER_API_KEY", "COMPUTESDK_ROUTER_CONFIG");
   delete process.env.ARKER_API_KEY;
   delete process.env.COMPUTESDK_ROUTER_CONFIG;
   let probes = 0;
@@ -264,27 +246,16 @@ test("static E2B deletion uses metadata ownership without connecting and preserv
     deletes++;
     return true;
   };
-  try {
-    assert.equal(await Sandbox.kill("native-id"), true);
-    assert.equal(await Sandbox.kill("native-id"), false);
-    await assert.rejects(
-      Sandbox.kill("native-id"),
-      (error) => error === unavailable,
-    );
-    assert.equal(deletes, 1);
-  } finally {
-    Native.getInfo = previous.info;
-    Native.kill = previous.kill;
-    Native.connect = previous.connect;
-    if (environment.key === undefined) delete process.env.ARKER_API_KEY;
-    else process.env.ARKER_API_KEY = environment.key;
-    if (environment.router === undefined)
-      delete process.env.COMPUTESDK_ROUTER_CONFIG;
-    else process.env.COMPUTESDK_ROUTER_CONFIG = environment.router;
-  }
+  assert.equal(await Sandbox.kill("native-id"), true);
+  assert.equal(await Sandbox.kill("native-id"), false);
+  await assert.rejects(
+    Sandbox.kill("native-id"),
+    (error) => error === unavailable,
+  );
+  assert.equal(deletes, 1);
 });
 
-test("static Arker deletion translates idempotent DELETE without probing incompatible native IDs", async () => {
+test("static Arker deletion translates idempotent DELETE without probing incompatible native IDs", async (t) => {
   const id = "vmh-b471cad989f2eab9-01M548DGAXJ48SGE3SRTRR8HNV";
   let deleted = false;
   let deletes = 0;
@@ -317,16 +288,9 @@ test("static Arker deletion translates idempotent DELETE without probing incompa
       );
     }
   });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const address = server.address();
-  assert(address && typeof address === "object");
-  const previous = {
-    key: process.env.ARKER_API_KEY,
-    base: process.env.ARKER_BASE_URL,
-    router: process.env.COMPUTESDK_ROUTER_CONFIG,
-    info: Native.getInfo,
-  };
+  const address = await listen(server);
+  preserveProperties(t, Native, "getInfo");
+  preserveEnvironment(t, "ARKER_API_KEY", "ARKER_BASE_URL", "COMPUTESDK_ROUTER_CONFIG");
   process.env.ARKER_API_KEY = "ark_test";
   process.env.ARKER_BASE_URL = `http://127.0.0.1:${address.port}/api`;
   delete process.env.COMPUTESDK_ROUTER_CONFIG;
@@ -338,15 +302,6 @@ test("static Arker deletion translates idempotent DELETE without probing incompa
     assert.equal(await Sandbox.kill(id), false);
     assert.equal(deletes, 1);
   } finally {
-    Native.getInfo = previous.info;
-    for (const [key, value] of [
-      ["ARKER_API_KEY", previous.key],
-      ["ARKER_BASE_URL", previous.base],
-      ["COMPUTESDK_ROUTER_CONFIG", previous.router],
-    ]) {
-      if (value === undefined) delete process.env[key!];
-      else process.env[key!] = value;
-    }
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

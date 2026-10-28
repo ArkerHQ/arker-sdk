@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import types
+
 import pytest
 
 import arker.modal as shim
@@ -7,55 +9,63 @@ from arker._compat import CommandResult, UnsupportedCompatibilityOption
 from arker.modal import Sandbox
 
 
-def test_arker_object_id_is_read_only():
-    class Guest:
-        id = "vm-test"
+@pytest.fixture
+def guest():
+    return types.SimpleNamespace(id="vm-test")
 
-    sandbox = Sandbox(vm=Guest())
+
+def test_arker_object_id_is_read_only(guest):
+    sandbox = Sandbox(vm=guest)
     assert sandbox.object_id == "vm-test"
     with pytest.raises(AttributeError):
         sandbox.object_id = "another"
 
 
-def test_native_exec_preserves_process_identity_and_options() -> None:
-    process = object()
-    options = {"text": False, "bufsize": 1, "pty": True, "stdout": object(), "secrets": [object()]}
+@pytest.mark.parametrize(
+    "method, args, options, result",
+    [
+        (
+            "exec",
+            ("cat",),
+            {"text": False, "bufsize": 1, "pty": True, "stdout": object(), "secrets": [object()]},
+            object(),
+        ),
+        ("terminate", (), {"wait": False}, None),
+        ("terminate", (), {"wait": True}, 137),
+        ("create", ("sleep", "60"), None, object()),
+    ],
+    ids=["exec", "terminate-no-wait", "terminate-wait", "create-resources"],
+)
+def test_native_calls_preserve_arguments_and_results(monkeypatch, method, args, options, result):
+    if method == "create":
+        native = pytest.importorskip("modal")
+        options = {
+            "image": native.Image.debian_slim().env({"TEST": "value"}),
+            "volumes": {"/data": native.Volume.from_name("test-volume")},
+            "secrets": [native.Secret.from_dict({"TEST": "value"})],
+        }
 
-    class Native:
-        def exec(self, *args, **kwargs):
-            assert args == ("cat",)
-            assert kwargs == options
-            return process
+    def forward(*received_args, **received_options):
+        assert received_args == args
+        assert received_options == options
+        assert all(received_options[key] is value for key, value in options.items())
+        return result
 
-    assert Sandbox(native=Native()).exec("cat", **options) is process
-
-
-@pytest.mark.parametrize("wait, result", [(False, None), (True, 137)])
-def test_native_terminate_preserves_wait_and_return_value(wait, result) -> None:
-    class Native:
-        def terminate(self, **kwargs):
-            assert kwargs == {"wait": wait}
-            return result
-
-    assert Sandbox(native=Native()).terminate(wait=wait) == result
-
-
-def test_arker_terminate_wait_rejected_before_delete() -> None:
-    class Guest:
-        id = "vm-test"
-
-        def delete(self):
-            pytest.fail("unsupported wait must not delete the VM")
-
-    with pytest.raises(UnsupportedCompatibilityOption):
-        Sandbox(vm=Guest()).terminate(wait=True)
+    native = types.SimpleNamespace(**{method: forward})
+    if method == "create":
+        monkeypatch.setattr(Sandbox, "_native_sandbox", lambda: native)
+        monkeypatch.setattr(shim, "routed_create", lambda provider, config, creators: ("modal", creators["modal"]()))
+        assert Sandbox.create(*args, **options)._native is result
+    else:
+        actual = getattr(Sandbox(native=native), method)(*args, **options)
+        if method == "exec":
+            assert actual is result
+        else:
+            assert actual == result
 
 
-def test_arker_exec_none_environment_value_omits_override(monkeypatch) -> None:
+def test_arker_exec_none_environment_value_omits_override(monkeypatch, guest) -> None:
     import subprocess
-
-    class Guest:
-        id = "vm-test"
 
     def run(vm, command, **kwargs):
         result = subprocess.run(
@@ -69,7 +79,7 @@ def test_arker_exec_none_environment_value_omits_override(monkeypatch) -> None:
 
     monkeypatch.setattr(shim, "run_command", run)
     monkeypatch.setattr(shim, "import_optional", lambda _: None)
-    process = Sandbox(vm=Guest()).exec(
+    process = Sandbox(vm=guest).exec(
         "sh",
         "-c",
         'printf "%s|%s" "$DROP_ME" "$KEEP_ME"',
@@ -152,48 +162,29 @@ def test_exec_local_secrets_precedence_and_native_defaults(tmp_path, monkeypatch
             running.wait(timeout=5)
 
 
-def test_exec_remote_secret_rejected_before_guest_execution():
-    native = pytest.importorskip("modal")
+@pytest.mark.parametrize(
+    "case, error, match",
+    [
+        ("terminate-wait", UnsupportedCompatibilityOption, None),
+        ("remote-secret", UnsupportedCompatibilityOption, "named or deployed"),
+        ("pty", TypeError, "unsupported option"),
+        ("pty_info", TypeError, "unsupported option"),
+        ("_pty_info", TypeError, "unsupported option"),
+    ],
+)
+def test_unsupported_options_rejected_before_guest_mutation(guest, case, error, match):
+    def unexpected_mutation(*args, **kwargs):
+        pytest.fail("unsupported options must not execute a process or delete the VM")
 
-    class Guest:
-        id = "local"
-
-        def run(self, *args, **kwargs):
-            pytest.fail("remote secrets must be rejected before executing anything")
-
-    with pytest.raises(UnsupportedCompatibilityOption, match="named or deployed"):
-        Sandbox(vm=Guest()).exec("true", secrets=[native.Secret.from_name("test-only")])
-
-
-def test_create_preserves_native_resource_options(monkeypatch, tmp_path):
-    native = pytest.importorskip("modal")
-    options = {
-        "image": native.Image.debian_slim().env({"TEST": "value"}),
-        "volumes": {"/data": native.Volume.from_name("test-volume")},
-        "secrets": [native.Secret.from_dict({"TEST": "value"})],
-    }
-    result = object()
-
-    class Native:
-        @staticmethod
-        def create(*args, **kwargs):
-            assert args == ("sleep", "60")
-            assert kwargs == options
-            assert all(kwargs[key] is value for key, value in options.items())
-            return result
-
-    monkeypatch.setattr(Sandbox, "_native_sandbox", lambda: Native)
-    monkeypatch.setattr(shim, "routed_create", lambda provider, config, creators: ("modal", creators["modal"]()))
-    assert Sandbox.create("sleep", "60", **options)._native is result
-
-
-@pytest.mark.parametrize("options", [{"pty": True}, {"pty_info": object()}, {"_pty_info": object()}])
-def test_exec_nondefault_pty_still_rejected_before_execution(options):
-    class Guest:
-        id = "local"
-
-        def run(self, *args, **kwargs):
-            pytest.fail("unsupported PTY must not start a process")
-
-    with pytest.raises(TypeError, match="unsupported option"):
-        Sandbox(vm=Guest()).exec("true", **options)
+    guest.run = guest.delete = unexpected_mutation
+    sandbox = Sandbox(vm=guest)
+    if case == "remote-secret":
+        native = pytest.importorskip("modal")
+        options = {"secrets": [native.Secret.from_name("test-only")]}
+    else:
+        options = {case: True if case == "pty" else object()}
+    with pytest.raises(error, match=match):
+        if case == "terminate-wait":
+            sandbox.terminate(wait=True)
+        else:
+            sandbox.exec("true", **options)

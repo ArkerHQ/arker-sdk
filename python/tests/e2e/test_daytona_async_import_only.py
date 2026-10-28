@@ -1,11 +1,10 @@
 """Run one async Daytona program with only its client import changed."""
 
 import asyncio
-import json
 import os
 
 import pytest
-from compat_evidence import record
+from compat_evidence import record_scenario
 
 PROGRAM = r"""
 from daytona import AsyncDaytona
@@ -36,23 +35,12 @@ async def program():
 
 
 @pytest.mark.parametrize("provider,shim", [("daytona", False), ("daytona", True), ("arker", True)])
-def test_async_daytona_import_only(provider, shim, tmp_path, monkeypatch):
+def test_async_daytona_import_only(provider, shim, live_router, monkeypatch):
     pytest.importorskip("daytona")
     if not os.environ.get("DAYTONA_API_KEY" if provider == "daytona" else "ARKER_API_KEY"):
         pytest.skip("Live credentials required")
     if provider == "arker":
         monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
-    config = tmp_path / "router.json"
-    config.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": [provider]},
-                "create": {"strategy": "priority", "order": [provider]},
-            }
-        )
-    )
-    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(config))
     source = (
         PROGRAM.replace("from daytona import AsyncDaytona", "from arker.daytona import AsyncDaytona")
         if shim
@@ -60,25 +48,21 @@ def test_async_daytona_import_only(provider, shim, tmp_path, monkeypatch):
     )
     namespace = {}
     exec(compile(source, "daytona_async_import_only.py", "exec"), namespace)
-    outcome = "failed"
-    try:
+    with record_scenario(
+        "daytona",
+        "async",
+        provider,
+        shim,
+        "import-only-async-create-get-exec-delete",
+        [
+            "Daytona.create",
+            "Daytona.get",
+            "Daytona.delete",
+            "Daytona.close",
+            "Daytona.__aenter__",
+            "Daytona.__aexit__",
+            "Sandbox.id",
+            "Sandbox.process.exec",
+        ],
+    ):
         asyncio.run(namespace["program"]())
-        outcome = "passed"
-    finally:
-        record(
-            "daytona",
-            "async",
-            "reference" if not shim else "arker" if provider == "arker" else "native",
-            "import-only-async-create-get-exec-delete",
-            [
-                "Daytona.create",
-                "Daytona.get",
-                "Daytona.delete",
-                "Daytona.close",
-                "Daytona.__aenter__",
-                "Daytona.__aexit__",
-                "Sandbox.id",
-                "Sandbox.process.exec",
-            ],
-            outcome,
-        )

@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import uuid
 from pathlib import Path
 
 import pytest
-from compat_evidence import record
+from compat_evidence import record_scenario
 from test_blaxel_import_only import _async_program, _trace_program
 
 SERVER = Path(__file__).resolve().parents[3].joinpath("compatibility/http-service.py").read_text()
@@ -51,21 +50,10 @@ finally:
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize("provider,shim", [("blaxel", False), ("blaxel", True), ("arker", True)])
-def test_fetch_import_only(provider, shim, asynchronous, tmp_path, monkeypatch):
+def test_fetch_import_only(provider, shim, asynchronous, live_router, monkeypatch):
     pytest.importorskip("blaxel")
     if not os.environ.get("BL_API_KEY") or (provider == "arker" and not os.environ.get("ARKER_API_KEY")):
         pytest.skip("live credentials required")
-    config = tmp_path / "router.json"
-    config.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": [provider]},
-                "create": {"strategy": "priority", "order": [provider]},
-            }
-        )
-    )
-    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(config))
     source = (
         PROGRAM.replace(
             "from blaxel.core.sandbox import SyncSandboxInstance, ProcessRequestWithLog",
@@ -102,18 +90,9 @@ def test_fetch_import_only(provider, shim, asynchronous, tmp_path, monkeypatch):
     source = _trace_program(source)
     if asynchronous:
         source = _async_program(source)
-    outcome = "failed"
-    try:
+    with record_scenario(
+        "blaxel", "async" if asynchronous else "sync", provider, shim, "import-only-private-fetch", called
+    ):
         exec(compile(source, "blaxel_fetch_import_only.py", "exec"), namespace)
         if asynchronous:
             asyncio.run(namespace["program"]())
-        outcome = "passed"
-    finally:
-        record(
-            "blaxel",
-            "async" if asynchronous else "sync",
-            "reference" if not shim else "arker" if provider == "arker" else "native",
-            "import-only-private-fetch",
-            sorted(called),
-            outcome,
-        )

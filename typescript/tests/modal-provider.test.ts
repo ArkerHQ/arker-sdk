@@ -62,12 +62,10 @@ test("Modal ownership treats only typed absence as not found and preserves other
   const provider = createNativeModalProvider(() => client);
   assert.equal(await provider.instances.getById("sb-missing"), null);
   failure = Object.assign(new Error("forbidden"), { code: 7 });
-  await assert.rejects(
-    provider.instances.getById("sb-denied"),
-    (error) => error === failure,
-  );
-  await assert.rejects(
-    provider.instances.destroy("sb-denied"),
-    (error) => error === failure,
-  );
+  for (const operation of [
+    () => provider.instances.getById("sb-denied"),
+    () => provider.instances.destroy("sb-denied"),
+  ]) {
+    await assert.rejects(operation(), (error) => error === failure);
+  }
 });

@@ -4,6 +4,7 @@ import importlib.metadata
 import json
 import os
 import runpy
+from contextlib import contextmanager
 from pathlib import Path
 
 if os.environ.get("COMPAT_COVERAGE_EVIDENCE") and not os.environ.get("COMPAT_COVERAGE_RUN", "").strip():
@@ -47,3 +48,15 @@ def record(provider, style, route, scenario, apis, outcome):
         os.close(descriptor)
     if changed:
         raise RuntimeError("Implementation or vendor version changed during the live compatibility scenario")
+
+
+@contextmanager
+def record_scenario(vendor, style, provider, shim, scenario, apis):
+    """A scenario passes only after its program and cleanup have completed."""
+    outcome = "failed"
+    try:
+        yield
+        outcome = "passed"
+    finally:
+        route = "reference" if not shim else "arker" if provider == "arker" else "native"
+        record(vendor, style, route, scenario, sorted(apis), outcome)

@@ -1,12 +1,11 @@
 """Bounded filesystem differential with only the Sandbox import changed."""
 
 import asyncio
-import json
 import os
 import uuid
 
 import pytest
-from compat_evidence import record
+from compat_evidence import record_scenario
 
 PROGRAM = r"""
 from modal import Sandbox
@@ -68,22 +67,11 @@ async def program(identifier, asynchronous):
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize("provider,shim", [("modal", False), ("modal", True), ("arker", True)])
-def test_modal_filesystem_import_only(provider, shim, asynchronous, tmp_path, monkeypatch):
+def test_modal_filesystem_import_only(provider, shim, asynchronous, live_router, monkeypatch):
     modal = pytest.importorskip("modal")
     required = ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET") if provider == "modal" else ("ARKER_API_KEY",)
     if not all(os.environ.get(key) for key in required):
         pytest.skip("Live credentials required")
-    path = tmp_path / "router.json"
-    path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": [provider]},
-                "create": {"strategy": "priority", "order": [provider]},
-            }
-        )
-    )
-    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(path))
     if provider == "modal":
         fixture = modal.Sandbox.create(
             app=modal.App.lookup("arker-compat-image-test", create_if_missing=False), timeout=180
@@ -108,43 +96,38 @@ def test_modal_filesystem_import_only(provider, shim, asynchronous, tmp_path, mo
         identifier, cleanup = fixture.id, fixture.delete
         monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
         monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
-    outcome = "failed"
-    try:
-        source = PROGRAM.replace("from modal import Sandbox", "from arker.modal import Sandbox") if shim else PROGRAM
-        namespace = {}
-        exec(compile(source, "modal_filesystem_import_only.py", "exec"), namespace)
-        asyncio.run(namespace["program"](identifier, asynchronous))
-        outcome = "passed"
-    finally:
+    with record_scenario(
+        "modal",
+        "sync",
+        provider,
+        shim,
+        "import-only-filesystem-binary-metadata-local-copy-" + ("aio" if asynchronous else "blocking"),
+        [
+            "Sandbox.from_id",
+            "Sandbox.filesystem",
+            *[
+                "Sandbox.filesystem." + name
+                for name in (
+                    "make_directory",
+                    "write_bytes",
+                    "read_bytes",
+                    "write_text",
+                    "read_text",
+                    "stat",
+                    "list_files",
+                    "copy_to_local",
+                    "copy_from_local",
+                    "remove",
+                )
+            ],
+        ],
+    ):
         try:
-            cleanup()
-        except BaseException:
-            outcome = "failed"
-            raise
-        finally:
-            record(
-                "modal",
-                "sync",
-                "reference" if not shim else provider if provider == "arker" else "native",
-                "import-only-filesystem-binary-metadata-local-copy-" + ("aio" if asynchronous else "blocking"),
-                [
-                    "Sandbox.from_id",
-                    "Sandbox.filesystem",
-                    *[
-                        "Sandbox.filesystem." + name
-                        for name in (
-                            "make_directory",
-                            "write_bytes",
-                            "read_bytes",
-                            "write_text",
-                            "read_text",
-                            "stat",
-                            "list_files",
-                            "copy_to_local",
-                            "copy_from_local",
-                            "remove",
-                        )
-                    ],
-                ],
-                outcome,
+            source = (
+                PROGRAM.replace("from modal import Sandbox", "from arker.modal import Sandbox") if shim else PROGRAM
             )
+            namespace = {}
+            exec(compile(source, "modal_filesystem_import_only.py", "exec"), namespace)
+            asyncio.run(namespace["program"](identifier, asynchronous))
+        finally:
+            cleanup()

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import uuid
 
 import pytest
-from compat_evidence import record
+from compat_evidence import record_scenario
 from test_blaxel_import_only import _async_program, _trace_program
 
 PROGRAM = """
@@ -40,21 +39,10 @@ finally:
 
 @pytest.mark.parametrize("asynchronous", [True])
 @pytest.mark.parametrize("provider,shim", [("blaxel", False), ("blaxel", True), ("arker", True)])
-def test_grep_import_only(provider, shim, asynchronous, tmp_path, monkeypatch):
+def test_grep_import_only(provider, shim, asynchronous, live_router, monkeypatch):
     assert os.environ.get("BL_API_KEY"), "BL_API_KEY is required for live parity tests"
     if provider == "arker":
         assert os.environ.get("ARKER_API_KEY"), "ARKER_API_KEY is required for the Arker route"
-    config = tmp_path / "router.json"
-    config.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": [provider]},
-                "create": {"strategy": "priority", "order": [provider]},
-            }
-        )
-    )
-    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(config))
     source = PROGRAM.replace("from blaxel.core.sandbox import", "from arker.blaxel import") if shim else PROGRAM
     called = set()
 
@@ -66,18 +54,7 @@ def test_grep_import_only(provider, shim, asynchronous, tmp_path, monkeypatch):
     source = _trace_program(source)
     if asynchronous:
         source = _async_program(source)
-    outcome = "failed"
-    try:
+    with record_scenario("blaxel", "async" if asynchronous else "sync", provider, shim, "import-only-grep", called):
         exec(compile(source, "blaxel_grep_import_only.py", "exec"), namespace)
         if asynchronous:
             asyncio.run(namespace["program"]())
-        outcome = "passed"
-    finally:
-        record(
-            "blaxel",
-            "async" if asynchronous else "sync",
-            "reference" if not shim else "arker" if provider == "arker" else "native",
-            "import-only-grep",
-            sorted(called),
-            outcome,
-        )

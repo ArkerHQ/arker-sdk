@@ -1,11 +1,10 @@
 """Exercise original async E2B code with only its Sandbox import changed."""
 
 import asyncio
-import json
 import os
 
 import pytest
-from compat_evidence import record
+from compat_evidence import record_scenario
 
 PROGRAM = r"""
 from e2b import AsyncSandbox, AsyncCommandHandle, CommandExitException, CommandResult, NotFoundException
@@ -77,23 +76,12 @@ async def program():
 
 
 @pytest.mark.parametrize("provider,shim", [("e2b", False), ("e2b", True), ("arker", True)])
-def test_async_import_only(provider, shim, tmp_path, monkeypatch):
+def test_async_import_only(provider, shim, live_router, monkeypatch):
     pytest.importorskip("e2b")
     if not os.environ.get("E2B_API_KEY" if provider == "e2b" else "ARKER_API_KEY"):
         pytest.skip("Live credentials required")
     if provider == "arker":
         monkeypatch.delenv("E2B_API_KEY", raising=False)
-    config = tmp_path / "router.json"
-    config.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": [provider]},
-                "create": {"strategy": "priority", "order": [provider]},
-            }
-        )
-    )
-    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(config))
     source = (
         PROGRAM.replace("from e2b import AsyncSandbox,", "from arker.e2b import AsyncSandbox\nfrom e2b import")
         if shim
@@ -101,36 +89,32 @@ def test_async_import_only(provider, shim, tmp_path, monkeypatch):
     )
     namespace = {"asyncio": asyncio}
     exec(compile(source, "e2b_async_import_only.py", "exec"), namespace)
-    outcome = "failed"
-    try:
+    with record_scenario(
+        "e2b",
+        "async",
+        provider,
+        shim,
+        "import-only-async-command-and-lifecycle",
+        [
+            "Sandbox.create",
+            "Sandbox.connect",
+            "Sandbox.get_host",
+            "Sandbox.kill",
+            "Sandbox.__aenter__",
+            "Sandbox.__aexit__",
+            "Sandbox.files.write",
+            "Sandbox.files.read",
+            "Sandbox.commands.run",
+            "Sandbox.commands.connect",
+            "Sandbox.commands.send_stdin",
+            "Sandbox.commands.close_stdin",
+            "Sandbox.commands.kill",
+            "CommandHandle.pid",
+            "CommandHandle.wait",
+            "CommandHandle.send_stdin",
+            "CommandHandle.close_stdin",
+            "CommandHandle.disconnect",
+            "CommandHandle.kill",
+        ],
+    ):
         asyncio.run(namespace["program"]())
-        outcome = "passed"
-    finally:
-        record(
-            "e2b",
-            "async",
-            "reference" if not shim else "arker" if provider == "arker" else "native",
-            "import-only-async-command-and-lifecycle",
-            [
-                "Sandbox.create",
-                "Sandbox.connect",
-                "Sandbox.get_host",
-                "Sandbox.kill",
-                "Sandbox.__aenter__",
-                "Sandbox.__aexit__",
-                "Sandbox.files.write",
-                "Sandbox.files.read",
-                "Sandbox.commands.run",
-                "Sandbox.commands.connect",
-                "Sandbox.commands.send_stdin",
-                "Sandbox.commands.close_stdin",
-                "Sandbox.commands.kill",
-                "CommandHandle.pid",
-                "CommandHandle.wait",
-                "CommandHandle.send_stdin",
-                "CommandHandle.close_stdin",
-                "CommandHandle.disconnect",
-                "CommandHandle.kill",
-            ],
-            outcome,
-        )

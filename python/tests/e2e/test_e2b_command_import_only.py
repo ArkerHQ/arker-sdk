@@ -1,10 +1,9 @@
 """Native E2B command semantics with only the Sandbox import changed."""
 
-import json
 import os
 
 import pytest
-from compat_evidence import record
+from compat_evidence import record_scenario
 
 PROGRAM = """
 import concurrent.futures
@@ -103,7 +102,7 @@ finally:
 
 
 @pytest.mark.parametrize("provider,shim", [("e2b", False), ("e2b", True), ("arker", True)])
-def test_command_import_only(provider, shim, tmp_path, monkeypatch):
+def test_command_import_only(provider, shim, live_router, monkeypatch):
     pytest.importorskip("e2b")
     if (provider == "e2b" and not os.environ.get("E2B_API_KEY")) or (
         provider == "arker" and not os.environ.get("ARKER_API_KEY")
@@ -111,17 +110,6 @@ def test_command_import_only(provider, shim, tmp_path, monkeypatch):
         pytest.skip("live credentials required")
     if provider == "arker":
         monkeypatch.delenv("E2B_API_KEY", raising=False)
-    config = tmp_path / "router.json"
-    config.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": [provider]},
-                "create": {"strategy": "priority", "order": [provider]},
-            }
-        )
-    )
-    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(config))
     source = (
         PROGRAM.replace(
             "from e2b import Sandbox, CommandResult, CommandExitException",
@@ -130,33 +118,29 @@ def test_command_import_only(provider, shim, tmp_path, monkeypatch):
         if shim
         else PROGRAM
     )
-    outcome = "failed"
-    try:
+    with record_scenario(
+        "e2b",
+        "sync",
+        provider,
+        shim,
+        "import-only-command-environment-and-exit",
+        [
+            "Sandbox.create",
+            "Sandbox.connect",
+            "Sandbox.__enter__",
+            "Sandbox.__exit__",
+            "Sandbox.commands.run",
+            "Sandbox.commands.connect",
+            "Sandbox.commands.send_stdin",
+            "Sandbox.commands.close_stdin",
+            "Sandbox.commands.kill",
+            "Sandbox.kill",
+            "CommandHandle.pid",
+            "CommandHandle.wait",
+            "CommandHandle.send_stdin",
+            "CommandHandle.close_stdin",
+            "CommandHandle.disconnect",
+            "CommandHandle.kill",
+        ],
+    ):
         exec(compile(source, "e2b_command_import_only.py", "exec"), {})
-        outcome = "passed"
-    finally:
-        record(
-            "e2b",
-            "sync",
-            "reference" if not shim else "arker" if provider == "arker" else "native",
-            "import-only-command-environment-and-exit",
-            [
-                "Sandbox.create",
-                "Sandbox.connect",
-                "Sandbox.__enter__",
-                "Sandbox.__exit__",
-                "Sandbox.commands.run",
-                "Sandbox.commands.connect",
-                "Sandbox.commands.send_stdin",
-                "Sandbox.commands.close_stdin",
-                "Sandbox.commands.kill",
-                "Sandbox.kill",
-                "CommandHandle.pid",
-                "CommandHandle.wait",
-                "CommandHandle.send_stdin",
-                "CommandHandle.close_stdin",
-                "CommandHandle.disconnect",
-                "CommandHandle.kill",
-            ],
-            outcome,
-        )

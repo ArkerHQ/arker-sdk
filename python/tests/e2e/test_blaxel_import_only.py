@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import json
 import os
 import uuid
 
 import pytest
-from compat_evidence import record
+from compat_evidence import record_scenario
+from compat_program import async_program
 
 PROGRAM = """
 from blaxel.core.sandbox import SyncSandboxInstance
@@ -154,18 +154,11 @@ finally:
 
 
 def _async_program(source: str) -> str:
-    class AwaitSandboxCalls(ast.NodeTransformer):
-        def visit_Call(self, node):
-            node = self.generic_visit(node)
-            target = node.func
-            while isinstance(target, ast.Attribute):
-                target = target.value
-            if isinstance(target, ast.Name) and target.id in {"SandboxInstance", "sandbox", "reconnected"}:
-                return ast.copy_location(ast.Await(value=node), node)
-            return node
-
-    tree = AwaitSandboxCalls().visit(ast.parse(source.replace("SyncSandboxInstance", "SandboxInstance")))
-    return "async def program():\n" + "\n".join("    " + line for line in ast.unparse(tree).splitlines())
+    return async_program(
+        source,
+        rename={"SyncSandboxInstance": "SandboxInstance"},
+        targets={"SandboxInstance", "sandbox", "reconnected"},
+    )
 
 
 def _trace_program(source: str) -> str:
@@ -199,21 +192,10 @@ def _trace_program(source: str) -> str:
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize("provider,shim", [("blaxel", False), ("blaxel", True), ("arker", True)])
-def test_import_only(provider, shim, asynchronous, tmp_path, monkeypatch) -> None:
+def test_import_only(provider, shim, asynchronous, live_router, monkeypatch) -> None:
     pytest.importorskip("blaxel")
     if not os.environ.get("BL_API_KEY") or (provider == "arker" and not os.environ.get("ARKER_API_KEY")):
         pytest.skip("live Blaxel and Arker credentials are required")
-    config = tmp_path / "router.json"
-    config.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": [provider]},
-                "create": {"strategy": "priority", "order": [provider]},
-            }
-        )
-    )
-    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(config))
     source = PROGRAM
     if shim:
         source = source.replace(
@@ -231,18 +213,9 @@ def test_import_only(provider, shim, asynchronous, tmp_path, monkeypatch) -> Non
     source = _trace_program(source)
     if asynchronous:
         source = _async_program(source)
-    outcome = "failed"
-    try:
+    with record_scenario(
+        "blaxel", "async" if asynchronous else "sync", provider, shim, "import-only-files-and-command-isolation", called
+    ):
         exec(compile(source, "blaxel_import_only.py", "exec"), namespace)
         if asynchronous:
             asyncio.run(namespace["program"]())
-        outcome = "passed"
-    finally:
-        record(
-            "blaxel",
-            "async" if asynchronous else "sync",
-            "reference" if not shim else provider if provider == "arker" else "native",
-            "import-only-files-and-command-isolation",
-            sorted(called),
-            outcome,
-        )
