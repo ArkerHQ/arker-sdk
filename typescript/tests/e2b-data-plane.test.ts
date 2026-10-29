@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import test from "node:test";
+import { closeServer as close } from "./provider-fixtures.js";
+import { serveDataPlane } from "./e2b-http-fixtures.js";
 import { CommandExitError, SandboxNotRunningError } from "e2b";
 import { createE2BDataPlane, scopedEnvdFetch, type E2BDataPlane } from "../src/compat/e2b-data-plane.js";
 async function listen(server: Server): Promise<string> {
@@ -8,7 +10,6 @@ async function listen(server: Server): Promise<string> {
   const address = server.address(); assert.ok(address && typeof address !== "string");
   return `http://127.0.0.1:${address.port}`;
 }
-async function close(server: Server) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 const operations: Record<string, (data: E2BDataPlane) => Promise<unknown>> = {
   read: data => data.files.read("/tmp/file"), write: data => data.files.write("/tmp/file", "content"),
   stat: data => data.files.getInfo("/tmp/file"), command: data => data.commands.run("true"),
@@ -50,7 +51,7 @@ test("fetch origin guard, explicit user header, and cancellation", async () => {
   await response.text(); assert.equal(calls, 1);
 });
 
-test("RPC cancellation reaches the socket without health probing", async () => {
+test("RPC cancellation reaches the socket without health probing", async t => {
   let calls = 0;
   let started!: () => void;
   let disconnected!: () => void;
@@ -59,17 +60,13 @@ test("RPC cancellation reaches the socket without health probing", async () => {
   const server = createServer((req, res) => {
     calls++; req.resume(); res.on("close", disconnected); started();
   });
-  const endpoint = await listen(server);
-  let data: E2BDataPlane | undefined;
-  try {
-    data = await createE2BDataPlane({ endpoint, envd_version: "0.10.2", envd_access_token: "guest" }, "platform");
-    const controller = new AbortController();
-    const pending = data.commands.run("sleep 60", { signal: controller.signal });
-    const rejection = assert.rejects(pending);
-    await start; controller.abort(); await rejection;
-    await Promise.race([end, new Promise((_, reject) => setTimeout(() => reject(new Error("socket not cancelled")), 1000))]);
-    assert.equal(calls, 1);
-  } finally { data?.close(); await close(server); }
+  const data = await serveDataPlane(t, server);
+  const controller = new AbortController();
+  const pending = data.commands.run("sleep 60", { signal: controller.signal });
+  const rejection = assert.rejects(pending);
+  await start; controller.abort(); await rejection;
+  await Promise.race([end, new Promise((_, reject) => setTimeout(() => reject(new Error("socket not cancelled")), 1000))]);
+  assert.equal(calls, 1);
 });
 
 test("409 reads are bounded, cancel the source, and preserve unrelated conflict status", async () => {
@@ -85,23 +82,19 @@ test("409 reads are bounded, cancel the source, and preserve unrelated conflict 
   assert.equal(cancelled, true);
 });
 
-test("close aborts owned RPC requests and refuses reuse without network I/O", async () => {
+test("close aborts owned RPC requests and refuses reuse without network I/O", async t => {
   let started!: () => void;
   const pendingRequest = new Promise<void>(resolve => { started = resolve; });
   let calls = 0;
   const server = createServer((req, _res) => { calls++; req.resume(); started(); });
-  const endpoint = await listen(server);
-  let data: E2BDataPlane | undefined;
-  try {
-    data = await createE2BDataPlane({ endpoint, envd_version: "0.10.2", envd_access_token: "guest" }, "platform");
-    const failure = assert.rejects(data.commands.run("sleep 60"));
-    await pendingRequest; data.close(); data.close(); await failure;
-    await assert.rejects(data.files.read("/tmp/file"), /closed/);
-    assert.equal(calls, 1);
-  } finally { data?.close(); await close(server); }
+  const data = await serveDataPlane(t, server);
+  const failure = assert.rejects(data.commands.run("sleep 60"));
+  await pendingRequest; data.close(); data.close(); await failure;
+  await assert.rejects(data.files.read("/tmp/file"), /closed/);
+  assert.equal(calls, 1);
 });
 
-test("native command exit retains the plain e2b consumer's error class", async () => {
+test("native command exit retains the plain e2b consumer's error class", async t => {
   const frame = (value: unknown, flags = 0) => {
     const payload = Buffer.from(JSON.stringify(value)), header = Buffer.alloc(5);
     header[0] = flags; header.writeUInt32BE(payload.length, 1);
@@ -113,12 +106,8 @@ test("native command exit retains the plain e2b consumer's error class", async (
     res.write(frame({ event: { end: { exitCode: 7, exited: true, status: "exited" } } }));
     res.end(frame({}, 2));
   });
-  const endpoint = await listen(server);
-  let data: E2BDataPlane | undefined;
-  try {
-    data = await createE2BDataPlane({ endpoint, envd_version: "0.10.2", envd_access_token: "guest" }, "platform");
-    await assert.rejects(data.commands.run("exit 7"), error => error instanceof CommandExitError && error.exitCode === 7);
-  } finally { data?.close(); await close(server); }
+  const data = await serveDataPlane(t, server);
+  await assert.rejects(data.commands.run("exit 7"), error => error instanceof CommandExitError && error.exitCode === 7);
 });
 
 test("RPC header failures release request ownership before the data plane closes", async () => {
@@ -164,15 +153,12 @@ test("already-aborted REST signals reach the transport", async () => {
   assert.equal(signal?.aborted, true);
 });
 
-test("native file requests inherit connection timeout and allow a zero per-call override", async () => {
+test("native file requests inherit connection timeout and allow a zero per-call override", async t => {
   const server = createServer((_request, response) => {
     setTimeout(() => { response.writeHead(200); response.end("content"); }, 80);
   });
-  const endpoint = await listen(server);
-  const plane = await createE2BDataPlane({ endpoint, envd_version: "0.10.2", envd_access_token: "guest" }, "platform", 20);
-  try {
-    await assert.rejects(plane.files.read("/file"), /timeout|timed out/i);
-    assert.equal(await plane.files.read("/file", { requestTimeoutMs: 0 }), "content");
-    await assert.rejects(plane.files.read("/file"), /timeout|timed out/i);
-  } finally { plane.close(); await close(server); }
+  const plane = await serveDataPlane(t, server, 20);
+  await assert.rejects(plane.files.read("/file"), /timeout|timed out/i);
+  assert.equal(await plane.files.read("/file", { requestTimeoutMs: 0 }), "content");
+  await assert.rejects(plane.files.read("/file"), /timeout|timed out/i);
 });

@@ -2,14 +2,13 @@
 
 import asyncio
 import json
-import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from e2b import TimeoutException
+from http_fixtures import HTTPHandler
 from test_computer import FakeTransport, client, use_transport
 
 from arker._compat_e2b_lifecycle import AsyncLifecycle, Lifecycle, _options
@@ -38,10 +37,10 @@ def test_timeout_budget_preserves_disabled_retry_and_other_client_defaults():
 
 
 @pytest.fixture
-def delayed_server():
+def delayed_server(http_server):
     calls = []
 
-    class Handler(BaseHTTPRequestHandler):
+    class Handler(HTTPHandler):
         def do_GET(self):
             self.respond()
 
@@ -68,21 +67,11 @@ def delayed_server():
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
-        def log_message(self, *args):
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    worker = threading.Thread(target=server.serve_forever, daemon=True)
-    worker.start()
-    try:
-        yield (
-            Arker(api_key="synthetic", base_url=f"http://127.0.0.1:{server.server_port}", retry=False).vm("vm-a"),
-            calls,
-        )
-    finally:
-        server.shutdown()
-        server.server_close()
-        worker.join()
+    server = http_server(Handler)
+    yield (
+        Arker(api_key="synthetic", base_url=f"http://127.0.0.1:{server.server_port}", retry=False).vm("vm-a"),
+        calls,
+    )
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])

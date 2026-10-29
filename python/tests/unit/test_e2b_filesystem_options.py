@@ -3,43 +3,28 @@
 import asyncio
 import base64
 import json
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from e2b import InvalidArgumentException
+from http_fixtures import HTTPHandler
 
 from arker._compat_e2b_data_plane import EnvdDescriptor, create_data_plane
 
 
 @pytest.fixture
-def filesystem_server():
+def filesystem_server(http_server):
     calls = []
     response = {"status": 200, "body": {}}
 
-    class Handler(BaseHTTPRequestHandler):
+    class Handler(HTTPHandler):
         def do_POST(self):
-            body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            body = self.read_body()
             calls.append((self.path, json.loads(body), dict(self.headers)))
             payload = json.dumps(response["body"]).encode()
-            self.send_response(response["status"])
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+            self.send_body(payload, status=response["status"])
 
-        def log_message(self, *args):
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield EnvdDescriptor(f"http://127.0.0.1:{server.server_port}", "0.10.2", "guest"), calls, response
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join()
+    server = http_server(Handler)
+    yield EnvdDescriptor(f"http://127.0.0.1:{server.server_port}", "0.10.2", "guest"), calls, response
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])

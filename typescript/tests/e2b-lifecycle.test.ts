@@ -13,7 +13,7 @@ import { Arker, type VM } from "../src/index.js";
 import { rememberTrafficToken } from "../src/compat/e2b-network.js";
 import { createArkerComputeProvider } from "../src/compat/arker-provider.js";
 import { createNativeE2BProvider } from "../src/compat/e2b-provider.js";
-import { preserveProperties, preserveEnvironment, listen } from "./provider-fixtures.js";
+import { preserveProperties, preserveEnvironment, listen, closeServer } from "./provider-fixtures.js";
 
 test("native filesystem handles preserve binary options and write metadata", async () => {
   const marker = { path: "/binary", name: "binary" };
@@ -174,8 +174,7 @@ test("static Arker deletion translates idempotent DELETE without probing incompa
     assert.equal(await Sandbox.kill(id), false);
     assert.equal(deletes, 1);
   } finally {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await closeServer(server);
   }
 });
 

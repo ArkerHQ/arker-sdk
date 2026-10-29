@@ -5,52 +5,34 @@ import inspect
 import json
 import random
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
 import pytest
+from http_fixtures import HTTPHandler
 
 from arker._compat_e2b_data_plane import EnvdDescriptor, _paused, create_data_plane
 
 
 @pytest.fixture
-def servers():
+def servers(http_server):
     received = []
     redirected = []
     behavior = {"status": 409, "requirement": "explicit_resume"}
 
-    class Target(BaseHTTPRequestHandler):
-        def consume_body(self):
-            # Closing with an unread chunked RPC body can reset the response.
-            if self.headers.get("Transfer-Encoding", "").lower() == "chunked":
-                while True:
-                    size = int(self.rfile.readline().split(b";", 1)[0], 16)
-                    if size == 0:
-                        while self.rfile.readline() not in (b"\r\n", b""):
-                            pass
-                        break
-                    assert len(self.rfile.read(size)) == size
-                    assert self.rfile.read(2) == b"\r\n"
-            else:
-                size = int(self.headers.get("Content-Length", "0"))
-                assert len(self.rfile.read(size)) == size
-
+    class Target(HTTPHandler):
         def do_GET(self):
-            self.consume_body()
+            self.read_body()
             redirected.append(dict(self.headers))
             self.send_response(200)
             self.end_headers()
 
         do_POST = do_GET
 
-        def log_message(self, *args):
-            pass
-
-    target = ThreadingHTTPServer(("127.0.0.1", 0), Target)
+    target = http_server(Target)
 
     class Handler(Target):
         def do_GET(self):
-            self.consume_body()
+            self.read_body()
             received.append((self.path, dict(self.headers)))
             body = json.dumps(
                 {
@@ -60,25 +42,14 @@ def servers():
                     }
                 }
             ).encode()
-            self.send_response(behavior["status"])
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Location", f"http://127.0.0.1:{target.server_port}/stolen")
-            self.end_headers()
-            self.wfile.write(body)
+            self.send_body(
+                body, status=behavior["status"], headers={"Location": f"http://127.0.0.1:{target.server_port}/stolen"}
+            )
 
         do_POST = do_GET
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threads = [threading.Thread(target=s.serve_forever, daemon=True) for s in (server, target)]
-    for thread in threads:
-        thread.start()
+    server = http_server(Handler)
     yield f"http://127.0.0.1:{server.server_port}", behavior, received, redirected
-    for instance in (server, target):
-        instance.shutdown()
-        instance.server_close()
-    for thread in threads:
-        thread.join()
 
 
 def call(data, operation):
@@ -163,23 +134,18 @@ def test_paused_match_is_strict_and_descriptor_hides_token():
         assert not _paused(409, body)
 
 
-def test_async_rpc_task_cancellation_is_preserved_without_health_probe():
+def test_async_rpc_task_cancellation_is_preserved_without_health_probe(http_server):
     started = threading.Event()
     release = threading.Event()
     requests = []
 
-    class Handler(BaseHTTPRequestHandler):
+    class Handler(HTTPHandler):
         def do_POST(self):
             requests.append(self.path)
             started.set()
             release.wait(3)
 
-        def log_message(self, *args):
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    server = http_server(Handler)
 
     async def run():
         descriptor = EnvdDescriptor(f"http://127.0.0.1:{server.server_port}", "0.10.2", "guest")
@@ -196,9 +162,6 @@ def test_async_rpc_task_cancellation_is_preserved_without_health_probe():
         asyncio.run(run())
     finally:
         release.set()
-        server.shutdown()
-        server.server_close()
-        thread.join()
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])

@@ -2,61 +2,34 @@
 
 import asyncio
 import json
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from e2b import FileType
+from http_fixtures import HTTPHandler
 
 from arker._compat_e2b_data_plane import EnvdDescriptor, create_data_plane
 
 
 @pytest.fixture
-def file_server():
+def file_server(http_server):
     payload = bytes(range(256)) * 512
     requests = []
 
-    class Handler(BaseHTTPRequestHandler):
+    class Handler(HTTPHandler):
         def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-Type", "application/octet-stream")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+            self.send_body(payload, content_type="application/octet-stream")
 
         def do_POST(self):
-            if self.headers.get("Transfer-Encoding") == "chunked":
-                chunks = []
-                while size := int(self.rfile.readline().strip(), 16):
-                    chunks.append(self.rfile.read(size))
-                    self.rfile.read(2)
-                self.rfile.readline()
-                body = b"".join(chunks)
-            else:
-                body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            body = self.read_body()
             requests.append((self.path, body, dict(self.headers)))
             result = json.dumps(
                 [{"name": "value", "path": "/value", "type": "file", "metadata": {"kind": "binary"}}]
             ).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(result)))
-            self.end_headers()
-            self.wfile.write(result)
+            self.send_body(result)
 
-        def log_message(self, *args):
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield EnvdDescriptor(f"http://127.0.0.1:{server.server_port}", "0.10.2", "guest"), payload, requests
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join()
+    server = http_server(Handler)
+    yield EnvdDescriptor(f"http://127.0.0.1:{server.server_port}", "0.10.2", "guest"), payload, requests
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])

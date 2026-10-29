@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from http_fixtures import http_server as http_server
 
 ARKER_ENV_VARS = (
     "ARKER_API_KEY",
