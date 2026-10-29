@@ -29,6 +29,13 @@ def test_atomic_creation_forwards_one_native_create_without_lookup(monkeypatch, 
     request = {"name": "named", "memory": 2048}
     if asynchronous:
 
+        class AsyncNative:
+            @staticmethod
+            async def create(sandbox, **kwargs):
+                return Native.create(sandbox, **kwargs)
+
+        monkeypatch.setattr(blaxel, "import_optional", lambda name: SimpleNamespace(SandboxInstance=AsyncNative))
+
         async def wrap(cls, sandbox):
             return sandbox
 
@@ -369,3 +376,24 @@ def test_named_fork_reuses_ordinary_policy_read_to_write_normalization(monkeypat
     assert "Idempotency-Key" not in calls[1][0]
     assert calls[1][0]["Arker-VM-Name-Mode"] == "create"
     assert policy == original
+
+
+def test_cancel_during_busy_retry_prevents_another_creation_post(named_client, monkeypatch):
+    import threading
+
+    from arker._compat_async import RoutingCancelled
+    from arker.computer import ArkerError
+
+    creation, client, _ = named_client
+    cancelled = threading.Event()
+    attempts = []
+
+    def busy(*args, **kwargs):
+        attempts.append(args)
+        raise ArkerError("resource_busy", "pending", 409)
+
+    client._request = busy
+    monkeypatch.setattr(creation.time, "sleep", lambda _: cancelled.set())
+    with pytest.raises(RoutingCancelled):
+        creation.fork_named(client, {"name": "named"}, config={}, cancelled=cancelled.is_set)
+    assert len(attempts) == 1

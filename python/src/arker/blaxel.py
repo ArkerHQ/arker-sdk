@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -16,12 +17,18 @@ from ._compat import (
     routed_create,
     routed_get,
 )
-from ._compat_async import route
+from ._compat_async import NativeBridge, RoutingCancelled, call, route
 from ._compat_blaxel_errors import control_call, not_found
 from .computer import VM
 
 if TYPE_CHECKING:
     from blaxel.core.sandbox import SandboxFileSystem, SandboxProcess, SyncSandboxFileSystem, SyncSandboxProcess
+
+
+def _dispose_created(sandbox):
+    plane = getattr(sandbox, "_data_plane", None)
+    if plane is not None:
+        plane.close()
 
 
 def _record_cleanup_failure(error, cleanup_error, sandbox_id):
@@ -139,6 +146,10 @@ class SyncSandboxInstance(UnsupportedMixin):
         module = import_optional("blaxel.core.sandbox")
         return getattr(module, "SyncSandboxInstance", None) if module is not None else None
 
+    @staticmethod
+    def _creation_cancelled() -> bool:
+        return False
+
     @classmethod
     def create(cls, sandbox: Any = None, **kwargs: Any) -> SyncSandboxInstance:
         arker_config = pop_arker_config(kwargs)
@@ -175,11 +186,17 @@ class SyncSandboxInstance(UnsupportedMixin):
                     f"SandboxInstance.create option(s) are not supported by Arker: {names}"
                 )
             validate_native()
+            if cls._creation_cancelled():
+                raise RoutingCancelled("Async routing was cancelled")
             memory = values.get("memory")
             return arker_create(
                 arker_config,
                 fork=lambda client, request: fork_named(
-                    client, request, config=arker_config or {}, get_or_create=get_or_create
+                    client,
+                    request,
+                    config=arker_config or {},
+                    get_or_create=get_or_create,
+                    cancelled=cls._creation_cancelled,
                 ),
                 name=values.get("name"),
                 image=values.get("image"),
@@ -199,7 +216,7 @@ class SyncSandboxInstance(UnsupportedMixin):
             try:
                 instance._plane()
             except BaseException as error:
-                if kwargs.get("create_if_not_exist", False):
+                if kwargs.get("create_if_not_exist", False) or cls._creation_cancelled():
                     raise
                 try:
                     result.delete()
@@ -304,23 +321,62 @@ class SandboxInstance:
         native = None
         if sandbox._vm is None:
             module = import_optional("blaxel.core.sandbox")
-            native = await module.SandboxInstance.get(sandbox.id)
+            native = sandbox._native
+            if not isinstance(native, module.SandboxInstance):
+                native = await module.SandboxInstance.get(sandbox.id)
         return cls(sandbox, native)
 
     @classmethod
     async def create(cls, sandbox: Any = None, **kwargs: Any) -> SandboxInstance:
+        """Cancel the wait without deleting an accepted remote creation."""
         owns_creation = not kwargs.get("create_if_not_exist", False)
-        created = await route(
-            lambda: SyncSandboxInstance.create(sandbox, **kwargs),
-            cleanup=(lambda result: result.delete()) if owns_creation else None,
-            drain_on_cancel=True,
-        )
+        module = import_optional("blaxel.core.sandbox")
+        native = getattr(module, "SandboxInstance", None)
+        bridge = NativeBridge(native, asyncio.get_running_loop())
+
+        class RoutedSync(SyncSandboxInstance):
+            @staticmethod
+            def _native_class():
+                return bridge if native is not None else None
+
+            _creation_cancelled = staticmethod(bridge.cancelled.is_set)
+
+        lock = threading.Lock()
+        cancelled = False
+        pending = []
+
+        def create():
+            result = RoutedSync.create(sandbox, **kwargs)
+            with lock:
+                if not cancelled:
+                    pending.append(result)
+                    return result
+            # The originating event loop may already be closed.
+            _dispose_created(result)
+            return result
+
+        try:
+            created = await route(create, bridges=(bridge,))
+        except asyncio.CancelledError:
+            with lock:
+                cancelled = True
+                completed = pending.pop() if pending else None
+            if completed is not None:
+                _dispose_created(completed)
+            raise
         try:
             return await cls._wrap(created)
+        except asyncio.CancelledError:
+            await route(lambda: _dispose_created(created), drain_on_cancel=True)
+            raise
         except BaseException as error:
             if owns_creation:
                 try:
-                    await route(created.delete, drain_on_cancel=True)
+                    native_result = getattr(created, "_native", None)
+                    if native_result is not None:
+                        await call(native_result.delete)
+                    else:
+                        await route(created.delete, drain_on_cancel=True)
                 except Exception as cleanup_error:
                     _record_cleanup_failure(error, cleanup_error, created.id)
             raise
@@ -336,6 +392,9 @@ class SandboxInstance:
     async def delete(self) -> None:
         if isinstance(self, str):
             await asyncio.to_thread(SyncSandboxInstance.delete, self)
+            return
+        if self._native is not None:
+            await self._native.delete()
             return
         try:
             if self._native is None:

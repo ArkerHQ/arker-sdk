@@ -31,9 +31,10 @@ must pass with fresh evidence before claiming parity.
   and timeouts remain explicit; they do not imply native creation cancellation.
 - Blaxel private HTTP fetch, sessions, redirect/cookie/timeout behavior and
   network configuration need complete differential validation. Async strict-create
-  cancellation drains creation and removes the newly owned sandbox; native Blaxel
-  can leave that sandbox running. This cleanup difference is not parity credit.
-  Cancellation of get-or-create preserves resources whose ownership is unknown.
+  cancellation stops waiting without deleting an accepted or uncertain remote
+  creation. Local clients are closed even when the originating event loop shuts
+  down; cancellation also prevents a later busy-response retry. Fresh live
+  comparisons of this implementation remain required.
 - E2B sandbox expiry, request timeouts, cancellation, streamed reads, process
   enumeration and native error identities have unverified or unsupported cases.
 - Daytona custom users, image working-directory/shell selection, streaming,
@@ -41,7 +42,8 @@ must pass with fresh evidence before claiming parity.
   [filesystem contract](daytona-filesystem.md) for source prerequisites and
   [volume contract](daytona-volumes.md) for mount and deletion limits.
 - Modal native Image/Secret/Volume handles are forwarded on native routes but
-  are not fully translated for Arker creation. Remote secrets, PTYs and broader
+  have local registry/secret recipe support for Arker creation; opaque handles
+  and Volume recipes remain incomplete. Remote secrets, PTYs and broader
   async/lifecycle behavior remain incomplete.
 - Guest process helpers require Python; arbitrary Python-free images are not
   drop-in compatible. Preparing a source is an explicit prerequisite, not proof

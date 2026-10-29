@@ -6,12 +6,15 @@ import os
 import re
 import time
 
+from ._compat_async import RoutingCancelled
 from ._compat_blaxel_errors import creation_error
 from .computer import REQUEST_TIMEOUT_S, VM, ArkerError, _drop_none, _policy_update, _vm_info
 
 
-def fork_named(client, request, *, config, get_or_create=False):
+def fork_named(client, request, *, config, get_or_create=False, cancelled=lambda: False):
     name = request.get("name")
+    if cancelled():
+        raise RoutingCancelled("Async routing was cancelled")
     if not name:
         return client.fork(**request)
     if not isinstance(name, str) or re.fullmatch(r"[a-z0-9-]+", name) is None:
@@ -37,6 +40,8 @@ def fork_named(client, request, *, config, get_or_create=False):
         request = {**request, "policies": _drop_none(_policy_update(request["policies"]))}
     deadline = time.monotonic() + REQUEST_TIMEOUT_S
     while True:
+        if cancelled():
+            raise RoutingCancelled("Async routing was cancelled")
         try:
             wire = client._request(
                 "POST",

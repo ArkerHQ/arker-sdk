@@ -11,8 +11,10 @@ processes, policies, or lifecycle behavior. These still have unverified gaps.
 
 For Arker routes, set `ARKER_API_KEY`, `ARKER_PROVIDER`, `ARKER_REGION`, and
 `ARKER_SOURCE_VM_ID` to select your prepared parent. An explicit `ARKER_BASE_URL`
-replaces provider/region configuration. Keep native provider credentials for
-native routes.
+replaces provider/region configuration. Named Blaxel creation additionally
+requires `ARKER_CONTROL_BASE_URL` when using a custom endpoint; it must identify
+the public global gateway that coordinates names. Keep native provider
+credentials for native routes.
 
 E2B signed file URLs are unavailable on BYOC and self-hosted pool workers.
 When URL preparation returns the specific unsupported-capability error, sandbox
