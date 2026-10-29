@@ -109,6 +109,7 @@ class Sandbox(UnsupportedMixin):
     def create(cls, *args: Any, **kwargs: Any) -> Sandbox:
         arker_config = pop_arker_config(kwargs)
         native_kwargs = dict(kwargs)
+        timeout = kwargs.pop("timeout", 300)
         block_network = kwargs.pop("block_network", kwargs.pop("blockNetwork", False))
         outbound_cidrs = kwargs.pop("outbound_cidr_allowlist", kwargs.pop("outboundCidrAllowlist", None))
         outbound_domains = kwargs.pop("outbound_domain_allowlist", kwargs.pop("outboundDomainAllowlist", None))
@@ -133,16 +134,33 @@ class Sandbox(UnsupportedMixin):
                 raise UnsupportedCompatibilityOption(
                     f"Sandbox.create option(s) are not supported by Arker: {', '.join(names)}"
                 )
-            return arker_create(
-                arker_config,
-                policies=compat_network_policies(
+            from modal.exception import InvalidError
+            from modal_proto import api_pb2
+
+            lifetime = api_pb2.Sandbox(timeout_secs=timeout).timeout_secs or 300
+            if not 10 <= lifetime <= 86_400:
+                raise InvalidError("Timeout must be between 10s and 86400s (inclusive).")
+            configured = (arker_config or {}).get("policies") or {}
+            if "policies" in configured:
+                raise UnsupportedCompatibilityOption("Modal lifetime requires named policies, not ordered policies")
+            if "computesdk-modal-lifetime" in configured.get("rules", {}):
+                raise UnsupportedCompatibilityOption("Policy id 'computesdk-modal-lifetime' is reserved")
+            policies = (
+                compat_network_policies(
                     block_all=bool(block_network),
                     domains=outbound_domains,
                     cidrs=outbound_cidrs,
                     domain_ports=[443],
                     empty_allowlist_blocks=True,
-                ),
+                )
+                or {}
             )
+            policies.setdefault("rules", {})["computesdk-modal-lifetime"] = {
+                "type": "schedule",
+                "after_created": lifetime,
+                "action": "delete",
+            }
+            return arker_create(arker_config, policies=policies)
 
         provider, result = routed_create(
             "modal",

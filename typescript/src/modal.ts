@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { InvalidError, ModalClient as NativeModalClient, type ModalClientParams, type Sandbox as NativeSandbox, type SandboxExecParams, type ContainerProcess, type SandboxTerminateParams } from "modal";
 import type { RunCommandOptions } from "computesdk";
 
@@ -174,7 +175,30 @@ export class ModalClient {
       arker,
       fallbackProvider: createNativeModalProvider(() => this.#nativeClient()),
       routerConfigPath,
-      mapArkerCreateOptions: ({ modalCreateParams, ...rest }) => ({ ...rest, ...(modalCreateParams as Record<string, unknown>) }),
+      arkerLifetimePolicyId: "computesdk-modal-lifetime",
+      mapArkerCreateOptions: ({ modalCreateParams, ...rest }) => {
+        if (arker?.policies && "policies" in arker.policies) {
+          throw new Error("Modal lifetime requires named policies, not ordered policies");
+        }
+        const { timeoutMs, ...options } = (modalCreateParams ?? {}) as Record<string, unknown>;
+        if (timeoutMs != null && (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs))) {
+          throw new Error("timeoutMs must be a finite number");
+        }
+        if (typeof timeoutMs === "number" && timeoutMs <= 0) {
+          throw new Error(`timeoutMs must be positive, got ${timeoutMs}`);
+        }
+        if (typeof timeoutMs === "number" && timeoutMs % 1000 !== 0) {
+          throw new Error(`timeoutMs must be a multiple of 1000ms, got ${timeoutMs}`);
+        }
+        const timeout = (timeoutMs as number | undefined) ?? 300_000;
+        if (timeout < 10_000 || timeout > 86_400_000) {
+          const require = createRequire(typeof import.meta.url === "string" ? import.meta.url : __filename);
+          const { ClientError, Status } = createRequire(require.resolve("modal"))("nice-grpc");
+          throw new ClientError("/modal.client.ModalClient/SandboxCreateV2", Status.INVALID_ARGUMENT,
+            "Timeout must be between 10s and 86400s (inclusive).");
+        }
+        return { ...rest, ...options, timeout };
+      },
     });
     return guardUnsupported(this, "modal");
   }

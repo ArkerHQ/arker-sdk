@@ -319,7 +319,7 @@ export type ForkMetadataMapper = (source: Readonly<ForkOptions>, metadata: unkno
 
 export type ForkExecutor = (client: Arker, request: ForkOptions) => Promise<VM>;
 
-export function createArkerComputeProvider(config: ArkerComputeProviderConfig = {}, mapMetadata?: ForkMetadataMapper, lookupTransport?: RequestTransportOptions, fork?: ForkExecutor): DirectProvider {
+export function createArkerComputeProvider(config: ArkerComputeProviderConfig = {}, mapMetadata?: ForkMetadataMapper, lookupTransport?: RequestTransportOptions, fork?: ForkExecutor, lifetimePolicyId = "computesdk-e2b-lifetime"): DirectProvider {
   async function destroy(sandboxId: string): Promise<void> {
     const client = makeClient(config);
     try {
@@ -385,9 +385,8 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
         )) {
           throw new ArkerError("invalid_request", "timeout must be a positive finite number no greater than 86400000 milliseconds", 422);
         }
-        const lifetimePolicyId = "computesdk-e2b-lifetime";
         if (timeoutMs !== undefined && Object.hasOwn(config.policies?.rules ?? {}, lifetimePolicyId)) {
-          throw new ArkerError("invalid_request", `policy id '${lifetimePolicyId}' is reserved for the E2B sandbox lifetime`, 422);
+          throw new ArkerError("invalid_request", `policy id '${lifetimePolicyId}' is reserved for the sandbox lifetime`, 422);
         }
         const lifetime = timeoutMs === undefined ? undefined : {
           [lifetimePolicyId]: { type: "schedule" as const, after_created: Math.ceil(timeoutMs / 1000), action: "delete" as const },

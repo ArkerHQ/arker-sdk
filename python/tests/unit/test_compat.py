@@ -63,7 +63,10 @@ def test_modal_empty_allowlist_is_not_unrestricted(monkeypatch, option):
     )
     ModalSandbox.create(**{option: []})
     assert captured[0]["policies"] is not None
-    assert list(captured[0]["policies"]["rules"].values()) == [{"type": "outbound_guard", "allow": []}]
+    assert list(captured[0]["policies"]["rules"].values()) == [
+        {"type": "outbound_guard", "allow": []},
+        {"type": "schedule", "after_created": 300, "action": "delete"},
+    ]
 
 
 @pytest.mark.parametrize("value", [{}, {"example.com": True}, False, 7, [7]])
@@ -302,6 +305,11 @@ def test_allowlist_policies_intersect_inherited_rules(arker_env) -> None:
         )
 
     body = json.loads(t.calls[0]["body"])
+    assert body["policies"]["rules"].pop("computesdk-modal-lifetime") == {
+        "type": "schedule",
+        "after_created": 300,
+        "action": "delete",
+    }
     assert len(body["policies"]["rules"]) == 1
     assert next(iter(body["policies"]["rules"].values())) == {
         "type": "outbound_guard",

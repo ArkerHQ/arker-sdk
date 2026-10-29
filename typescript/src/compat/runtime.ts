@@ -20,12 +20,13 @@ export interface CreateCompatSdkOptions {
   routerConfigPath?: string;
   mapArkerForkMetadata?: ForkMetadataMapper;
   arkerFork?: ForkExecutor;
+  arkerLifetimePolicyId?: string;
   mapArkerCreateOptions?: (options: Record<string, unknown>) => Record<string, unknown>;
 }
 
 export function createCompatRouter(options: CreateCompatSdkOptions) {
   const hasArker = !!(options.arker?.apiKey || globalThis.process?.env?.ARKER_API_KEY?.trim());
-  const arker = hasArker ? createArkerComputeProvider(options.arker, options.mapArkerForkMetadata, options.arkerLookupTransport, options.arkerFork) : undefined;
+  const arker = hasArker ? createArkerComputeProvider(options.arker, options.mapArkerForkMetadata, options.arkerLookupTransport, options.arkerFork, options.arkerLifetimePolicyId) : undefined;
   if (arker && options.mapArkerCreateOptions) {
     const create = arker.sandbox.create.bind(arker.sandbox);
     arker.sandbox.create = (values) => create(options.mapArkerCreateOptions!(values ?? {}));

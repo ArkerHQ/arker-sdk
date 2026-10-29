@@ -6,7 +6,7 @@ const suites = [
   "e2b-transport", "e2b-lifecycle-extended", "e2b-paused-admission", "e2b-mounts", "e2b-urls", "e2b-urls-unsupported",
   "e2b-lifecycle", "e2b-filesystem", "e2b-staging", "compat-live-router", "compat-trace",
   "blaxel-provider", "daytona-provider", "daytona-filesystem", "modal-provider",
-  "modal-sandbox", "modal-command", "modal-filesystem", "guest-process-input",
+  "modal-sandbox", "modal-lifetime", "modal-command", "modal-filesystem", "guest-process-input",
 ];
 const outDir = "node_modules/.cache/compat-tests";
 await build({

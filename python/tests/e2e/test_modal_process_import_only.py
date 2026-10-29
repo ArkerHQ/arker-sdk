@@ -111,3 +111,71 @@ def test_modal_process_import_only(provider, shim, live_router, monkeypatch):
             namespace["program"](identifier)
         finally:
             cleanup()
+
+
+ASYNC_PROGRAM = r"""
+from modal import Sandbox
+from modal.container_process import ContainerProcess
+
+async def program(options):
+    sandbox = await Sandbox.create.aio(**options)
+    try:
+        found = await Sandbox.from_id.aio(sandbox.object_id)
+        assert found.object_id == sandbox.object_id
+        process = await found.exec.aio("sh", "-c", "cat; printf error >&2; exit 17", text=False)
+        assert isinstance(process, ContainerProcess)
+        data = bytes(range(256)) * 1024
+        process.stdin.write(data)
+        process.stdin.write_eof()
+        await process.stdin.drain.aio()
+        assert await process.stdout.read.aio() == data
+        assert await process.stderr.read.aio() == b"error"
+        assert await process.wait.aio() == 17
+        assert await process.stdout.read.aio() == b""
+    finally:
+        await sandbox.terminate.aio()
+"""
+
+
+@pytest.mark.parametrize("provider,shim", [("modal", False), ("modal", True), ("arker", True)])
+def test_modal_async_process_import_only(provider, shim, live_router, monkeypatch):
+    import asyncio
+    from contextlib import nullcontext
+
+    modal = pytest.importorskip("modal")
+    required = ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET") if provider == "modal" else ("ARKER_API_KEY",)
+    if not all(os.environ.get(key) for key in required):
+        pytest.skip("Live credentials required")
+    app = modal.App("arker-compat-async-process") if provider == "modal" else None
+    options = {"app": app, "timeout": 180} if app else {}
+    if provider == "arker":
+        monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
+        monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
+    with (
+        record_scenario(
+            "modal",
+            "async",
+            provider,
+            shim,
+            "import-only-async-create-process-cleanup",
+            [
+                "Sandbox.create",
+                "Sandbox.from_id",
+                "Sandbox.exec",
+                "Sandbox.terminate",
+                "ContainerProcess.stdin.drain",
+                "ContainerProcess.stdout.read",
+                "ContainerProcess.stderr.read",
+                "ContainerProcess.wait",
+            ],
+        ),
+        app.run() if app else nullcontext(),
+    ):
+        source = (
+            ASYNC_PROGRAM.replace("from modal import Sandbox", "from arker.modal import Sandbox")
+            if shim
+            else ASYNC_PROGRAM
+        )
+        namespace = {}
+        exec(compile(source, "modal_async_process_import_only.py", "exec"), namespace)
+        asyncio.run(namespace["program"](options))
