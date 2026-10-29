@@ -107,7 +107,11 @@ class AsyncDaytona:
         class Routed(Daytona):
             @property
             def volume(self):
-                return VolumeService(owner._configuration._arker_config, lambda: volumes)
+                return VolumeService(
+                    owner._configuration._arker_config,
+                    lambda: volumes,
+                    native_available=owner._native is not None or owner._configuration._native_volume_available(),
+                )
 
             def _native_client(self):
                 return bridge

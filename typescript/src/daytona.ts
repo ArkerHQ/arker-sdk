@@ -1,7 +1,10 @@
 import { DaytonaError } from "@daytona/sdk";
-import type { DaytonaConfig as NativeDaytonaConfig, Sandbox as NativeSandbox } from "@daytona/sdk";
+import { Daytona as NativeDaytona, type DaytonaConfig as NativeDaytonaConfig, type Sandbox as NativeSandbox, type VolumeMount } from "@daytona/sdk";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { createNativeDaytonaProvider } from "./compat/daytona-provider.js";
 import { DaytonaFileSystem, daytonaGuestCommand } from "./compat/daytona-filesystem.js";
+import { DaytonaVolumeService } from "./compat/daytona-volumes.js";
 import { ArkerError } from "./index.js";
 
 import { assertSupportedObjectKeys, guardUnsupported, nativeInstance, type UniversalSandbox } from "./compat/common.js";
@@ -33,13 +36,38 @@ export interface ExecuteCommandOptions {
 }
 
 const DAYTONA_CONFIG_KEYS = ["apiKey", "jwtToken", "organizationId", "apiUrl", "serverUrl", "target", "otelEnabled", "useDeprecatedPolling", "requestTimeoutMs", "_experimental", "arker", "routerConfigPath"] as const;
-const DAYTONA_CREATE_OPTION_KEYS = ["image", "snapshot", "envVars", "name", "language", "resources", "networkBlockAll", "networkAllowList", "domainAllowList"] as const;
+const DAYTONA_CREATE_OPTION_KEYS = ["image", "snapshot", "envVars", "name", "language", "resources", "volumes", "networkBlockAll", "networkAllowList", "domainAllowList"] as const;
+
+type DaytonaEnvReader = { get(name: string): string | undefined };
+type DaytonaEnvReaderConstructor = new () => DaytonaEnvReader;
+
+let daytonaEnvReaderConstructor: DaytonaEnvReaderConstructor | undefined;
+
+function loadDaytonaEnvReader(): DaytonaEnvReaderConstructor {
+  if (daytonaEnvReaderConstructor) return daytonaEnvReaderConstructor;
+  const require = createRequire(typeof import.meta.url === "string" ? import.meta.url : __filename);
+  const entry = require.resolve("@daytona/sdk");
+  const runtime = require(join(dirname(entry), "utils", "Runtime.js")) as {
+    DaytonaEnvReader?: DaytonaEnvReaderConstructor;
+  };
+  if (!runtime.DaytonaEnvReader) throw new Error("Installed @daytona/sdk does not expose its credential environment reader");
+  return (daytonaEnvReaderConstructor = runtime.DaytonaEnvReader);
+}
+
+function hasNativeDaytonaCredentials(config: NativeDaytonaConfig): boolean {
+  const reader = new (loadDaytonaEnvReader())();
+  let apiKey = !config.apiKey && config.jwtToken ? undefined : config.apiKey;
+  let jwtToken = config.jwtToken;
+  apiKey ||= jwtToken ? undefined : reader.get("DAYTONA_API_KEY");
+  jwtToken ||= reader.get("DAYTONA_JWT_TOKEN");
+  return !!(apiKey || jwtToken);
+}
 
 function arkerCreateOptions(options: Record<string, unknown>): Record<string, unknown> {
   if (options.image !== undefined && typeof options.image !== "string") {
     throw new ArkerError("unsupported_operation", "Daytona Image builders are not supported on Arker; use a published image reference or route to Daytona", 422);
   }
-  const { resources, ...rest } = options;
+  const { resources, volumes: _volumes, ...rest } = options;
   if (resources === undefined) return rest;
   if (typeof resources !== "object" || resources === null || Array.isArray(resources)) throw new TypeError("Daytona resources must be an object");
   assertSupportedObjectKeys(resources, ["cpu", "memory", "disk"], "daytona", "resources");
@@ -125,17 +153,31 @@ export class Sandbox {
 export class Daytona {
   #sdk: CompatSdk;
   #closeNative: () => Promise<void>;
+  #native?: NativeDaytona;
+  readonly volume: DaytonaVolumeService;
 
   constructor(config?: DaytonaCompatConfig) {
     assertSupportedObjectKeys(config, DAYTONA_CONFIG_KEYS, "daytona", "new Daytona");
     const { arker, routerConfigPath, ...native } = config ?? {};
-    const provider = createNativeDaytonaProvider(native);
+    const hasArker = !!(arker?.apiKey || globalThis.process?.env?.ARKER_API_KEY?.trim());
+    const nativeEnabled = hasNativeDaytonaCredentials(native);
+    if (!hasArker && !nativeEnabled) this.#native = new NativeDaytona(native);
+    const nativeClient = () => (this.#native ??= new NativeDaytona(native));
+    this.volume = new DaytonaVolumeService(arker, () => nativeClient().volume, routerConfigPath, nativeEnabled);
+    const provider = createNativeDaytonaProvider(native, nativeClient, async (options) => {
+      await this.volume.assertNativeMounts((options as Record<string, unknown> | undefined)?.volumes);
+    });
     this.#closeNative = provider.close;
     this.#sdk = createCompatSdk({
       arker,
       fallbackProvider: provider,
       routerConfigPath,
       mapArkerCreateOptions: arkerCreateOptions,
+      prepareArkerCreateOptions: async (options) => ({
+        options: arkerCreateOptions(options),
+        context: await this.volume.resolveMounts(options.volumes),
+      }),
+      finishArkerCreate: (sandbox, mounts) => this.volume.attach(sandbox, mounts as Array<{ filesystemId: string; mountPath: string }>),
     });
     return guardUnsupported(this, "daytona");
   }
@@ -150,6 +192,7 @@ export class Daytona {
       ...(typeof source.name === "string" ? { name: source.name } : {}),
       ...(typeof source.language === "string" ? { runtime: source.language } : {}),
       ...(source.resources !== undefined ? { resources: source.resources } : {}),
+      ...(source.volumes !== undefined ? { volumes: source.volumes as VolumeMount[] } : {}),
       ...(typeof source.networkBlockAll === "boolean" ? { networkBlockAll: source.networkBlockAll } : {}),
       ...(typeof source.networkAllowList === "string" ? { networkAllowList: source.networkAllowList } : {}),
       ...(typeof source.domainAllowList === "string" ? { domainAllowList: source.domainAllowList } : {}),
@@ -174,6 +217,7 @@ export class Daytona {
 
   async [Symbol.asyncDispose](): Promise<void> {
     await this.#closeNative();
+    await this.#native?.[Symbol.asyncDispose]();
   }
 }
 export * from "@daytona/sdk";

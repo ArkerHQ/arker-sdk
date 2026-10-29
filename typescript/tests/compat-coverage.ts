@@ -23,6 +23,17 @@ const inventory = JSON.parse(execFileSync("bun", ["scripts/compat-coverage.ts"],
 assert.equal(inventory.complete_inventory, true, JSON.stringify(inventory.diagnostics));
 assert.equal(inventory.selected_scope, "expanded");
 assert.ok(inventory.apis.some((row: { api: string }) => row.api.startsWith("App.")));
+const daytonaVolume = inventory.apis.filter((row: { provider: string; api: string }) => (
+  row.provider === "daytona" && row.api.startsWith("Daytona.volume.")
+));
+assert.deepEqual(daytonaVolume.map((row: { api: string }) => row.api).sort(), [
+  "Daytona.volume.create", "Daytona.volume.delete", "Daytona.volume.get", "Daytona.volume.list",
+]);
+assert.ok(daytonaVolume.every((row: { declared_by_shim: boolean }) => row.declared_by_shim));
+assert.ok(daytonaVolume.every((row: { signatures: string[]; shim_signatures: string[] }) => (
+  row.signatures.length > 0 && row.shim_signatures.length > 0
+)));
+assert.ok(daytonaVolume.every((row: { status: string }) => row.status === "unverified"), "inventory roots are not passing evidence");
 const coreInventory = JSON.parse(execFileSync("bun", ["scripts/compat-coverage.ts", "--scope", "core-sandbox"], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
 assert.equal(coreInventory.selected_scope, "core-sandbox");
 assert.ok(coreInventory.scope_exclusions.some((row: { api: string }) => row.api.startsWith("App.")));

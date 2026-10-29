@@ -303,10 +303,11 @@ function retryable(error: unknown): boolean {
 export function createRoutedProvider(
   providers: Provider[],
   routerConfigPath?: string,
-  resource?: { namespace: string; identifier(instance: any): string | undefined },
+  resource?: { namespace: string; identifier(instance: any): string | undefined; requireUnique?: boolean },
 ): Provider & {
   list(): Promise<any[]>;
   getOwner(id: string): Promise<{ provider: string; instance?: any } | null>;
+  hasConfiguredProvider(name: string): Promise<boolean>;
 } {
   const cacheKey = (id: string) => resource ? `${resource.namespace}:${id}` : id;
   const byName = new Map(providers.map((provider) => [provider.name!, provider]));
@@ -367,7 +368,7 @@ export function createRoutedProvider(
         else rejectProbe(error);
       }).finally(() => clearTimeout(timer));
     });
-    let cachedName = await cache.get(cacheKey(id)).catch(() => null);
+    let cachedName = resource?.requireUnique ? null : await cache.get(cacheKey(id)).catch(() => null);
     const eligible = (name: string) => !!resource || providerAcceptsIdentifier(name, id, router.existing.order.includes("arker"));
     if (cachedName && (!byName.has(cachedName) || !router.existing.order.includes(cachedName) || !eligible(cachedName))) {
       await cache.delete(cacheKey(id)).catch(() => undefined);
@@ -380,14 +381,16 @@ export function createRoutedProvider(
       await cache.delete(cacheKey(id)).catch(() => undefined);
     }
     const candidates = router.existing.order.filter((name) => name !== cachedName && eligible(name)).map((name) => byName.get(name)!);
-    if (router.existing.strategy === "race") {
+    if (resource?.requireUnique || router.existing.strategy === "race") {
       const completed = await Promise.allSettled(candidates.map(probe));
       for (const result of completed) {
         if (result.status === "rejected") throw result.reason;
       }
-      for (const result of completed) {
-        if (result.status === "fulfilled" && result.value) return rememberOwner(id, result.value);
+      const matches = completed.flatMap((result) => result.status === "fulfilled" && result.value ? [result.value] : []);
+      if (resource?.requireUnique && matches.length > 1) {
+        throw new Error(`Resource name ${JSON.stringify(id)} is ambiguous across configured providers`);
       }
+      if (matches[0]) return rememberOwner(id, matches[0]);
       return null;
     }
     for (const provider of candidates) {
@@ -399,6 +402,9 @@ export function createRoutedProvider(
 
   return {
     name: "arker-compat-router",
+    async hasConfiguredProvider(name: string) {
+      return (await configured).existing.order.includes(name);
+    },
     async list() {
       const router = await configured;
       const results = [];

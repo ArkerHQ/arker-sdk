@@ -146,11 +146,36 @@ class Daytona(UnsupportedMixin):
         self._native = module.Daytona(*self._native_args, **self._native_kwargs)
         return self._native
 
+    def _native_volume_available(self):
+        if self._native is not None:
+            return True
+        environment = import_optional("daytona._utils.env")
+        if environment is None:
+            return False
+
+        # Invalid native constructor arguments must still reach native validation.
+        if len(self._native_args) > 1 or set(self._native_kwargs) - {"config"}:
+            return True
+        config = self._native_args[0] if self._native_args else self._native_kwargs.get("config")
+        if config is not None and not hasattr(config, "api_key"):
+            return True
+        env = environment.DaytonaEnvReader()
+        return bool(
+            getattr(config, "api_key", None)
+            or getattr(config, "jwt_token", None)
+            or env.get("DAYTONA_API_KEY")
+            or env.get("DAYTONA_JWT_TOKEN")
+        )
+
     @property
     def volume(self):
         from ._daytona_volumes import VolumeService
 
-        return VolumeService(self._arker_config, lambda: self._native_client().volume)
+        return VolumeService(
+            self._arker_config,
+            lambda: self._native_client().volume,
+            native_available=self._native_volume_available(),
+        )
 
     def create(self, *args: Any, **kwargs: Any) -> Sandbox:
         def create_native() -> Any:

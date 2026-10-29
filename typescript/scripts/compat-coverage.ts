@@ -11,6 +11,7 @@ const roots = [
   ["e2b", "e2b", "Volume", "../src/e2b.js"],
   ["e2b", "e2b", "Secret", "../src/e2b.js"],
   ["daytona", "@daytona/sdk", "Daytona", "../src/daytona.js"],
+  ["daytona", "@daytona/sdk", "Daytona", "../src/daytona.js", "volume"],
   ["daytona", "@daytona/sdk", "Sandbox", "../src/daytona.js"],
   ["daytona", "@daytona/sdk", "Image", "../src/daytona.js"],
   ["modal", "modal", "ModalClient", "../src/modal.js"],
@@ -77,7 +78,8 @@ type Row = {
   status: string;
 };
 const rows = new Map<string, Row>();
-function inventory(provider: string, prefix: string, type: ts.Type, shim: ts.Type | undefined, depth = 0): void {
+function inventory(provider: string, prefix: string, type: ts.Type, shim: ts.Type | undefined, depth = 0): number {
+  let inspected = 0;
   for (const property of checker.getPropertiesOfType(type)) {
     const name = property.name;
     if (name.startsWith("_") || name.startsWith("#") || name === "prototype") continue;
@@ -91,6 +93,7 @@ function inventory(provider: string, prefix: string, type: ts.Type, shim: ts.Typ
     const api = `${prefix}.${name}`;
     const id = `typescript:${provider}:async:${api}`;
     const shimProperty = shim ? checker.getPropertyOfType(shim, name) : undefined;
+    inspected++;
     rows.set(id, {
       id, provider, api,
       kind: signatures.length ? "method" : "property",
@@ -110,16 +113,28 @@ function inventory(provider: string, prefix: string, type: ts.Type, shim: ts.Typ
       inventory(provider, api, value, shimValue, depth + 1);
     }
   }
+  return inspected;
 }
 
 const missingRoots: string[] = [];
-for (const [index, [provider, , name]] of roots.entries()) {
-  const before = rows.size;
+for (const [index, [provider, , name, , qualifiedProperty]] of roots.entries()) {
+  let inspected = 0;
   const native = types.get(`Native${index}`)!;
   const shim = types.get(`Shim${index}`);
-  inventory(provider, name, native.instance, shim?.instance);
-  inventory(provider, `${name}.static`, native.constructor, shim?.constructor);
-  if (rows.size === before) missingRoots.push(`${provider}:${name}`);
+  if (qualifiedProperty) {
+    const nativeProperty = checker.getPropertyOfType(native.instance, qualifiedProperty);
+    const shimProperty = shim ? checker.getPropertyOfType(shim.instance, qualifiedProperty) : undefined;
+    if (nativeProperty) {
+      const declaration = nativeProperty.valueDeclaration ?? nativeProperty.declarations?.[0]!;
+      const nativeType = checker.getTypeOfSymbolAtLocation(nativeProperty, declaration);
+      const shimType = shimProperty ? checker.getTypeOfSymbolAtLocation(shimProperty, shimProperty.valueDeclaration ?? declaration) : undefined;
+      inspected = inventory(provider, `${name}.${qualifiedProperty}`, nativeType, shimType);
+    }
+  } else {
+    inspected = inventory(provider, name, native.instance, shim?.instance)
+      + inventory(provider, `${name}.static`, native.constructor, shim?.constructor);
+  }
+  if (inspected === 0) missingRoots.push(`${provider}:${name}${qualifiedProperty ? `.${qualifiedProperty}` : ""}`);
 }
 const diagnostics = ts.getPreEmitDiagnostics(program).filter((diagnostic) => diagnostic.file?.fileName === filename);
 const vendorVersions: Record<string, string> = {};

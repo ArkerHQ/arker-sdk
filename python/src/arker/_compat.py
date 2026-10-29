@@ -269,7 +269,9 @@ def get_or_none(getter: Callable[[], Any]) -> Any | None:
         raise
 
 
-def router_config(config: dict[str, Any] | None, native_provider: str) -> RouterConfig:
+def router_config(
+    config: dict[str, Any] | None, native_provider: str, *, providers: dict[str, Any] | None = None
+) -> RouterConfig:
     cfg = config or {}
     path = cfg.get("router_config_path") or cfg.get("routerConfigPath") or os.environ.get("COMPUTESDK_ROUTER_CONFIG")
     if path:
@@ -279,6 +281,8 @@ def router_config(config: dict[str, Any] | None, native_provider: str) -> Router
         return load_router_config(default_path)
     has_arker = bool(cfg.get("api_key") or os.environ.get("ARKER_API_KEY"))
     order = ["arker", native_provider] if has_arker else [native_provider]
+    if providers is not None:
+        order = [name for name in order if name in providers]
     return RouterConfig.from_dict(
         {
             "version": 1,
@@ -327,7 +331,7 @@ def routed_create(
     resource: str | None = None,
     resource_id: Callable[[Any], str] | None = None,
 ) -> tuple[str, Any]:
-    router = router_config(config, native_provider)
+    router = router_config(config, native_provider, providers=creators)
     if router.create.strategy == "weighted":
         _validate_router_providers([*router.create.weights, *router.create.fallback], creators)
         first = select_weighted_provider(router.create.weights)
@@ -368,7 +372,7 @@ def routed_get(
     require_unique: bool = False,
 ) -> tuple[str, Any] | None:
     cache_identifier = f"{resource}:{identifier}" if resource else identifier
-    router = router_config(config, native_provider)
+    router = router_config(config, native_provider, providers=getters)
     started = time.monotonic()
 
     def remaining() -> float:
@@ -467,6 +471,6 @@ def routed_get(
 
 def routed_list(native_provider: str, config: dict[str, Any] | None, listers: dict[str, Any]) -> list[Any]:
     """List each configured resource backend without treating errors as absence."""
-    router = router_config(config, native_provider)
+    router = router_config(config, native_provider, providers=listers)
     _validate_router_providers(list(router.existing.order), listers)
     return [item for name in router.existing.order for item in listers[name]()]

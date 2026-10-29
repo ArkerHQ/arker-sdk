@@ -14,6 +14,12 @@ from arker._compat import UnsupportedCompatibilityOption
 from arker.computer import ArkerError
 
 
+@pytest.fixture(autouse=True)
+def native_mock_credentials(monkeypatch):
+    # Native service doubles represent configured clients in these routing tests.
+    monkeypatch.setenv("DAYTONA_API_KEY", "daytona-synthetic")
+
+
 @pytest.fixture
 def store(configure_router, monkeypatch):
     configure_router(["arker"])

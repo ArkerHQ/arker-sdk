@@ -1,11 +1,13 @@
 # Daytona volumes
 
-Python sync and async clients route `volume.create`, `volume.get` and
+Python sync/async and TypeScript clients route `volume.create`, `volume.get` and
 `volume.list` through the configured providers. Arker-backed values use the
 native Daytona `Volume` model and retain their Arker client privately. Names
 must resolve to one provider: when multiple configured providers have the same
 name, lookup and attachment refuse the ambiguity. Authentication and tenant
-errors do not become misses or trigger creation elsewhere.
+errors do not become misses or trigger creation elsewhere. Without native
+credentials, default volume routing uses Arker alone. Explicit router files
+that request an unavailable provider fail before lookup.
 
 `ready` describes the committed logical filesystem namespace. Arker creation
 writes its marker and catalog record synchronously; there is no asynchronous
@@ -33,7 +35,7 @@ Nonempty `subpath` is refused before sandbox creation. The backend must persist
 and restore the subtree and enforce its storage credential prefix; guest
 symlinks or bind mounts are not substitutes. Potentially truncated 500-entry
 filesystem listings are refused. The server needs complete pagination for larger
-inventories. TypeScript volume service routing is not supplied by this patch.
+inventories.
 
 ## Differential checks
 

@@ -13,14 +13,19 @@ function missing(error: unknown): boolean {
   return (value.statusCode ?? value.status ?? value.response?.status) === 404;
 }
 
-export function createNativeDaytonaProvider(config: DaytonaConfig = {}) {
+export function createNativeDaytonaProvider(
+  config: DaytonaConfig = {},
+  getClient?: () => Daytona,
+  beforeCreate?: (options: unknown) => Promise<void>,
+) {
   let native: Daytona | undefined;
-  const client = () => (native ??= new Daytona(config));
+  const client = () => getClient?.() ?? (native ??= new Daytona(config));
   const provider = defineProvider<Sandbox, Record<string, never>>({
     name: "daytona",
     methods: {
       instances: {
         async create(_config, options) {
+          await beforeCreate?.(options);
           const { envs, snapshotId, templateId, runtime, timeout, ...rest } =
             options ?? {};
           const instance = await client().create(

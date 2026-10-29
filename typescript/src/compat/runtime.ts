@@ -22,14 +22,24 @@ export interface CreateCompatSdkOptions {
   arkerFork?: ForkExecutor;
   arkerLifetimePolicyId?: string;
   mapArkerCreateOptions?: (options: Record<string, unknown>) => Record<string, unknown>;
+  prepareArkerCreateOptions?: (options: Record<string, unknown>) => Promise<{ options: Record<string, unknown>; context: unknown }>;
+  finishArkerCreate?: (sandbox: any, context: unknown) => Promise<void>;
 }
 
 export function createCompatRouter(options: CreateCompatSdkOptions) {
   const hasArker = !!(options.arker?.apiKey || globalThis.process?.env?.ARKER_API_KEY?.trim());
   const arker = hasArker ? createArkerComputeProvider(options.arker, options.mapArkerForkMetadata, options.arkerLookupTransport, options.arkerFork, options.arkerLifetimePolicyId) : undefined;
-  if (arker && options.mapArkerCreateOptions) {
+  if (arker && (options.mapArkerCreateOptions || options.prepareArkerCreateOptions)) {
     const create = arker.sandbox.create.bind(arker.sandbox);
-    arker.sandbox.create = (values) => create(options.mapArkerCreateOptions!(values ?? {}));
+    arker.sandbox.create = async (values) => {
+      if (options.prepareArkerCreateOptions) {
+        const prepared = await options.prepareArkerCreateOptions(values ?? {});
+        const sandbox = await create(prepared.options);
+        await options.finishArkerCreate?.(sandbox, prepared.context);
+        return sandbox;
+      }
+      return create(options.mapArkerCreateOptions!(values ?? {}));
+    };
   }
   return createRoutedProvider([
     ...(arker ? [arker] : []),

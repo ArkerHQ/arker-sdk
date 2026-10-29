@@ -206,7 +206,7 @@ async function testDaytonaSurface(): Promise<void> {
 async function testNativeProviderExtensionsAreDelegated(): Promise<void> {
   for (const [provider, create, extension] of [
     ["e2b", async () => E2BSandbox.create(), "getHost"],
-    ["daytona", async () => new Daytona().create(), "getPreviewLink"],
+    ["daytona", async () => new Daytona({ apiKey: "daytona-test" }).create(), "getPreviewLink"],
     ["modal", async () => new ModalClient().sandboxes.create(), "tunnels"],
   ] as const) {
     const native = { [extension]: function () { return `${provider}:${this === native}`; } };
@@ -218,7 +218,7 @@ async function testNativeProviderExtensionsAreDelegated(): Promise<void> {
 
   const native = { process: { advanced: () => "native-process-extension" } };
   await withFakeCompute(new FakeSandbox("daytona-nested", "daytona", native), async () => {
-    const sandbox = await new Daytona().create() as any;
+    const sandbox = await new Daytona({ apiKey: "daytona-test" }).create() as any;
     assert.equal(sandbox.process.advanced(), "native-process-extension");
   });
 }
@@ -233,7 +233,7 @@ async function testDaytonaGetNotFound(): Promise<void> {
 async function testDaytonaImageBuilderIsNotDiscarded(): Promise<void> {
   const image = DaytonaImage.base("alpine:3.21").runCommands("echo expected-image");
   await withFakeCompute(new FakeSandbox("native-image", "daytona"), async (fake) => {
-    await new Daytona().create({ image });
+    await new Daytona({ apiKey: "daytona-test" }).create({ image });
     assert.equal((fake.createCalls[0] as any).image, image);
   });
   let requests = 0;
@@ -256,7 +256,7 @@ async function testDaytonaNativeExecutionPreservesResponseAndInputs(): Promise<v
     },
   } };
   await withFakeCompute(new FakeSandbox("native-exec", "daytona", native), async () => {
-    const sandbox = await new Daytona().create();
+    const sandbox = await new Daytona({ apiKey: "daytona-test" }).create();
     assert.equal(await sandbox.process.executeCommand("exit 17", "/tmp", { VALUE: "kept" }, 7), response);
     assert.deepEqual(calls, [["exit 17", "/tmp", { VALUE: "kept" }, 7]]);
   });

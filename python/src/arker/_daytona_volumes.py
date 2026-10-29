@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
 from ._compat import (
@@ -55,8 +56,16 @@ def _volume(info, client):
 
 
 class VolumeService:
-    def __init__(self, config, native):
+    def __init__(self, config, native, *, native_available=True):
         self.config, self.native = config, native
+        self.native_available = native_available
+
+    def _providers(self, **handlers):
+        if not self.native_available:
+            handlers.pop("daytona", None)
+        if not ((self.config or {}).get("api_key") or os.environ.get("ARKER_API_KEY")):
+            handlers.pop("arker", None)
+        return handlers
 
     def _list(self):
         client = arker_client(self.config)
@@ -98,7 +107,7 @@ class VolumeService:
         return routed_create(
             "daytona",
             self.config,
-            {"arker": create_arker, "daytona": lambda: self.native().create(name)},
+            self._providers(arker=create_arker, daytona=lambda: self.native().create(name)),
             resource="daytona-volume",
             resource_id=lambda volume: volume.id,
         )[1]
@@ -110,10 +119,10 @@ class VolumeService:
             name,
             "daytona",
             self.config,
-            {
-                "arker": lambda: get_or_none(lambda: self._get(name)),
-                "daytona": lambda: get_or_none(lambda: self.native().get(name)),
-            },
+            self._providers(
+                arker=lambda: get_or_none(lambda: self._get(name)),
+                daytona=lambda: get_or_none(lambda: self.native().get(name)),
+            ),
             resource="daytona-volume-name",
             require_unique=True,
         )
@@ -136,7 +145,7 @@ class VolumeService:
             identifier,
             "daytona",
             self.config,
-            {"arker": lambda: get_or_none(lambda: self._get(identifier)), "daytona": native},
+            self._providers(arker=lambda: get_or_none(lambda: self._get(identifier)), daytona=native),
             resource="daytona-volume-mount",
             require_unique=True,
         )
@@ -145,7 +154,9 @@ class VolumeService:
         return found[1]
 
     def list(self):
-        return routed_list("daytona", self.config, {"arker": self._list, "daytona": lambda: self.native().list()})
+        return routed_list(
+            "daytona", self.config, self._providers(arker=self._list, daytona=lambda: self.native().list())
+        )
 
     def delete(self, volume):
         from daytona.common.volume import Volume
@@ -255,7 +266,11 @@ class AsyncVolumeService:
         native = NativeVolumeOperations(self.owner)
         bridge_type = CreationBridge if method == "create" else NativeBridge
         bridge = bridge_type(native, self.owner._bind_loop())
-        service = VolumeService(self.owner._configuration._arker_config, lambda: bridge)
+        service = VolumeService(
+            self.owner._configuration._arker_config,
+            lambda: bridge,
+            native_available=self.owner._native is not None or self.owner._configuration._native_volume_available(),
+        )
 
         async def cleanup(volume):
             try:
