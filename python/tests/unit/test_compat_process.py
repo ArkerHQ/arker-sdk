@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from arker._compat_process import GuestProcesses
+from arker._compat_process import GuestProcesses, ProcessResult
 from arker.computer import BackgroundRunResult, CompletedRunResult
 
 
@@ -322,6 +322,7 @@ def test_foreground_callbacks_and_nonzero_exit(processes):
             "on_stdout": chunks.append,
         }
     )
+    assert type(finished) is ProcessResult
     assert finished.exit_code == 7
     assert finished.status == "failed"
     assert "".join(chunks) == "output"

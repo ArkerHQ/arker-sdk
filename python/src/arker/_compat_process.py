@@ -11,7 +11,7 @@ import uuid
 from importlib.resources import files
 from typing import Any
 
-from ._compat import CommandResult, import_optional
+from ._compat import CommandResult
 from .computer import REQUEST_TIMEOUT_S, VM, CompletedRunResult
 
 
@@ -39,10 +39,7 @@ class ProcessResult(CommandResult):
         return values
 
 
-def result(value: dict[str, Any]) -> ProcessResult | Any:
-    models = import_optional("blaxel.core.sandbox.client.models")
-    if models is not None:
-        return models.ProcessResponse.from_dict(value)
+def result(value: dict[str, Any]) -> ProcessResult:
     values = dict(value)
     for snake, camel in (
         ("exit_code", "exitCode"),
@@ -64,8 +61,7 @@ class SuccessResponse:
 
 
 def success(value):
-    models = import_optional("blaxel.core.sandbox.client.models")
-    return models.SuccessResponse.from_dict(value) if models is not None else SuccessResponse(**value)
+    return SuccessResponse(**value)
 
 
 class GuestProcessError(RuntimeError):
