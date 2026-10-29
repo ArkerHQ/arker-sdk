@@ -56,6 +56,10 @@
     {
       "name": "API keys",
       "description": "Create, list and revoke API keys, optionally limited to one VM or pool and one action."
+    },
+    {
+      "name": "Events",
+      "description": "Your organization's activity history."
     }
   ],
   "paths": {
@@ -206,8 +210,11 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
-            "$ref": "#/components/responses/AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError"
+            "$ref": "#/components/responses/AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLargeError"
@@ -370,6 +377,7 @@
           "Runs"
         ],
         "summary": "List organization runs",
+        "deprecated": true,
         "parameters": [
           {
             "in": "query",
@@ -569,7 +577,7 @@
             "$ref": "#/components/responses/UnavailableError"
           }
         },
-        "description": "Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.",
+        "description": "Deprecated: use `GET /v1/events`, which lists every action across regions. Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.",
         "servers": [
           {
             "url": "https://{regionalHost}/api",
@@ -582,6 +590,297 @@
             }
           }
         ]
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "operationId": "listEvents",
+        "tags": [
+          "Events"
+        ],
+        "summary": "List events",
+        "description": "Lists the organization's activity, one event per action: API requests, runs, network and SSH traffic, automatic actions and account changes, across every region, within the retained history window. Only the organization's own actions are listed: what its members and keys did, what its configuration did, and credit or quota changes Arker made to it; never how Arker places, moves, suspends or restores a VM on its own. Every value is one documented here; search matches only what is published. Filters combine with AND; the values of one filter with OR. Newly recorded actions appear within seconds.",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "description": "Only events with this text, ignoring case, in their action, ids, error code, attribute values or member's email.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "description": "Only events of this category. Without it, every event the caller can read: both categories for an admin, `compute` for anyone else. Reading `organization` needs an admin, or an API key with the admin role.",
+            "schema": {
+              "$ref": "#/components/schemas/EventCategory"
+            }
+          },
+          {
+            "name": "actions",
+            "in": "query",
+            "required": false,
+            "description": "Only these actions. Repeat the parameter for more than one.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/EventAction"
+              }
+            }
+          },
+          {
+            "name": "states",
+            "in": "query",
+            "required": false,
+            "description": "Only events in these states.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/EventState"
+              }
+            }
+          },
+          {
+            "name": "regions",
+            "in": "query",
+            "required": false,
+            "description": "Only actions these regions served.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "vm_ids",
+            "in": "query",
+            "required": false,
+            "description": "Only actions on these VMs.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "actors",
+            "in": "query",
+            "required": false,
+            "description": "Only actions these actors initiated: members by email, or `me` for the member calling, and API keys and SSH keys by id.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "via",
+            "in": "query",
+            "required": false,
+            "description": "Only actions initiated this way.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/EventVia"
+              }
+            }
+          },
+          {
+            "name": "request_ids",
+            "in": "query",
+            "required": false,
+            "description": "Only actions these requests made.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "error_codes",
+            "in": "query",
+            "required": false,
+            "description": "Only actions that failed with these codes.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/ErrorCode"
+              }
+            }
+          },
+          {
+            "name": "exit_code",
+            "in": "query",
+            "required": false,
+            "description": "Only runs that exited with this code.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "requested_at_gte",
+            "in": "query",
+            "required": false,
+            "description": "Only events whose `requested_at` is at or after this time. Events without one do not match.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "requested_at_lt",
+            "in": "query",
+            "required": false,
+            "description": "Only events whose `requested_at` is before this time. Events without one do not match.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "started_at_gte",
+            "in": "query",
+            "required": false,
+            "description": "Only events whose `started_at` is at or after this time. Events without one do not match.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "started_at_lt",
+            "in": "query",
+            "required": false,
+            "description": "Only events whose `started_at` is before this time. Events without one do not match.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "ended_at_gte",
+            "in": "query",
+            "required": false,
+            "description": "Only events whose `ended_at` is at or after this time. Events without one do not match.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "ended_at_lt",
+            "in": "query",
+            "required": false,
+            "description": "Only events whose `ended_at` is before this time. Events without one do not match.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "duration_ms_gte",
+            "in": "query",
+            "required": false,
+            "description": "Only events whose `duration_ms` is at or after this many milliseconds. Events without one do not match.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "duration_ms_lt",
+            "in": "query",
+            "required": false,
+            "description": "Only events whose `duration_ms` is before this many milliseconds. Events without one do not match.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "order_by",
+            "in": "query",
+            "required": false,
+            "description": "What events are ordered by; events without it come last, and `id` breaks ties.",
+            "schema": {
+              "$ref": "#/components/schemas/EventOrderBy",
+              "default": "requested_at"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "The direction of `order_by`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Events per page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "The previous page's `next_cursor`. It keeps that query's filters and order, so only `limit` may accompany it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListEventsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
       }
     },
     "/v1/vms/{id}": {
@@ -619,6 +918,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFoundError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -666,6 +968,9 @@
           },
           "409": {
             "$ref": "#/components/responses/InvalidStateOrResourceBusyError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -724,6 +1029,9 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/AlreadyExistsOrInvalidStateOrResourceBusyError"
           },
@@ -731,7 +1039,7 @@
             "$ref": "#/components/responses/PayloadTooLargeError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -788,7 +1096,7 @@
             "$ref": "#/components/responses/InvalidStateError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -845,6 +1153,9 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
@@ -852,7 +1163,7 @@
             "$ref": "#/components/responses/PayloadTooLargeError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -932,6 +1243,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFoundError"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
           },
           "409": {
             "$ref": "#/components/responses/ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError"
@@ -1037,6 +1351,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -1094,6 +1411,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -1139,10 +1459,10 @@
             "$ref": "#/components/responses/NotFoundError"
           },
           "409": {
-            "$ref": "#/components/responses/InvalidStateError"
+            "$ref": "#/components/responses/InvalidStateOrResourceBusyError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1151,7 +1471,7 @@
             "$ref": "#/components/responses/InternalError"
           },
           "503": {
-            "$ref": "#/components/responses/UnavailableError"
+            "$ref": "#/components/responses/CapacityUnavailableOrUnavailableError"
           },
           "504": {
             "$ref": "#/components/responses/GatewayTimeoutError"
@@ -1215,6 +1535,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -1272,11 +1595,17 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/ConflictOrInvalidStateError"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -1335,6 +1664,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -1389,11 +1721,17 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1440,7 +1778,10 @@
             "$ref": "#/components/responses/NotFoundError"
           },
           "409": {
-            "$ref": "#/components/responses/InvalidStateError"
+            "$ref": "#/components/responses/InvalidStateOrResourceBusyError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1449,7 +1790,7 @@
             "$ref": "#/components/responses/InternalError"
           },
           "503": {
-            "$ref": "#/components/responses/UnavailableError"
+            "$ref": "#/components/responses/CapacityUnavailableOrUnavailableError"
           },
           "504": {
             "$ref": "#/components/responses/GatewayTimeoutError"
@@ -1562,7 +1903,7 @@
             "$ref": "#/components/responses/InvalidStateOrResourceBusyError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -1621,11 +1962,17 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -1690,6 +2037,9 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/ConflictOrInvalidStateError"
           },
@@ -1697,7 +2047,7 @@
             "$ref": "#/components/responses/PayloadTooLargeError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1765,7 +2115,7 @@
             "$ref": "#/components/responses/InvalidStateError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1825,7 +2175,7 @@
             "$ref": "#/components/responses/InvalidStateError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1876,7 +2226,7 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/BadRequestError"
+            "$ref": "#/components/responses/BadRequestOrInsufficientResourcesError"
           },
           "401": {
             "$ref": "#/components/responses/UnauthorizedError"
@@ -1890,6 +2240,9 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/ConflictOrInvalidStateOrResourceBusyError"
           },
@@ -1897,7 +2250,7 @@
             "$ref": "#/components/responses/PayloadTooLargeError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -2013,6 +2366,9 @@
           },
           "403": {
             "$ref": "#/components/responses/ForbiddenError"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
           },
           "409": {
             "$ref": "#/components/responses/AlreadyExistsError"
@@ -2251,6 +2607,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       }
@@ -2296,6 +2655,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       },
@@ -2353,6 +2715,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       },
@@ -2394,6 +2759,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       }
@@ -2442,6 +2810,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       }
@@ -2879,7 +3250,7 @@
         "name": "Idempotency-Key",
         "in": "header",
         "required": false,
-        "description": "Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet.",
+        "description": "Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork retried while the original is still running may wait for it and returns the same VM; when it cannot wait, it answers 409 resource_busy with Retry-After and the VM id.",
         "schema": {
           "type": "string",
           "minLength": 1,
@@ -3319,7 +3690,7 @@
         }
       },
       "InvalidStateError": {
-        "description": "HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses unavailable.",
+        "description": "HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses resource_busy.",
         "x-http-status": 409,
         "headers": {
           "Retry-After": {
@@ -3490,6 +3861,39 @@
                     },
                     "details": {
                       "maximum_bytes": 1048576
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "RequestTimeoutError": {
+        "description": "HTTP 408: The request body was not received before the server's read deadline. Send the body promptly; the request did not start.",
+        "x-http-status": 408,
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RequestTimeoutErrorResponse"
+            },
+            "examples": {
+              "request_timeout": {
+                "summary": "RequestTimeout",
+                "value": {
+                  "error": {
+                    "code": "request_timeout",
+                    "message": "The request body was not received before its read deadline.",
+                    "timestamp": "2026-09-11T12:00:00Z",
+                    "request_id": "example-request-id",
+                    "request": {
+                      "kind": "matched",
+                      "operation_id": "fork"
                     }
                   }
                 }
@@ -4002,8 +4406,8 @@
           }
         }
       },
-      "AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError": {
-        "description": "HTTP 409: already_exists, conflict, invalid_state, resource_busy. The code selects the required details.",
+      "AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError": {
+        "description": "HTTP 409: already_exists, conflict, idempotency_conflict, invalid_state, resource_busy. The code selects the required details.",
         "x-http-status": 409,
         "headers": {
           "Retry-After": {
@@ -4013,7 +4417,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse"
+              "$ref": "#/components/schemas/AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse"
             },
             "examples": {
               "already_exists": {
@@ -4021,6 +4425,9 @@
               },
               "conflict": {
                 "$ref": "#/components/responses/ConflictError/content/application~1json/examples/conflict"
+              },
+              "idempotency_conflict": {
+                "$ref": "#/components/responses/IdempotencyConflictError/content/application~1json/examples/idempotency_conflict"
               },
               "invalid_state": {
                 "$ref": "#/components/responses/InvalidStateError/content/application~1json/examples/invalid_state"
@@ -4427,6 +4834,7 @@
           "idempotency_conflict",
           "expired",
           "payload_too_large",
+          "request_timeout",
           "method_not_allowed",
           "unsupported_operation",
           "unrecoverable",
@@ -4481,6 +4889,9 @@
             "$ref": "#/components/schemas/PayloadTooLarge"
           },
           {
+            "$ref": "#/components/schemas/RequestTimeout"
+          },
+          {
             "$ref": "#/components/schemas/MethodNotAllowed"
           },
           {
@@ -4533,6 +4944,7 @@
             "idempotency_conflict": "#/components/schemas/IdempotencyConflict",
             "expired": "#/components/schemas/Expired",
             "payload_too_large": "#/components/schemas/PayloadTooLarge",
+            "request_timeout": "#/components/schemas/RequestTimeout",
             "method_not_allowed": "#/components/schemas/MethodNotAllowed",
             "unsupported_operation": "#/components/schemas/UnsupportedOperation",
             "unrecoverable": "#/components/schemas/Unrecoverable",
@@ -7192,6 +7604,9 @@
             "$ref": "#/components/schemas/SyncBadRequestError"
           },
           {
+            "$ref": "#/components/schemas/SyncForbiddenError"
+          },
+          {
             "$ref": "#/components/schemas/SyncNotFoundError"
           },
           {
@@ -7199,6 +7614,9 @@
           },
           {
             "$ref": "#/components/schemas/SyncPayloadTooLargeError"
+          },
+          {
+            "$ref": "#/components/schemas/SyncInsufficientResourcesError"
           },
           {
             "$ref": "#/components/schemas/SyncUnsupportedOperationError"
@@ -7218,9 +7636,11 @@
           "propertyName": "code",
           "mapping": {
             "bad_request": "#/components/schemas/SyncBadRequestError",
+            "forbidden": "#/components/schemas/SyncForbiddenError",
             "not_found": "#/components/schemas/SyncNotFoundError",
             "conflict": "#/components/schemas/SyncConflictError",
             "payload_too_large": "#/components/schemas/SyncPayloadTooLargeError",
+            "insufficient_resources": "#/components/schemas/SyncInsufficientResourcesError",
             "unsupported_operation": "#/components/schemas/SyncUnsupportedOperationError",
             "unavailable": "#/components/schemas/SyncUnavailableError",
             "internal": "#/components/schemas/SyncInternalError",
@@ -7731,6 +8151,7 @@
           "fork",
           "listVms",
           "listOrgRuns",
+          "listEvents",
           "getVm",
           "deleteVm",
           "patchVm",
@@ -9397,7 +9818,7 @@
         "unevaluatedProperties": false
       },
       "InvalidState": {
-        "description": "The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses unavailable.",
+        "description": "The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses resource_busy.",
         "x-http-status": 409,
         "allOf": [
           {
@@ -9512,6 +9933,28 @@
               },
               "details": {
                 "$ref": "#/components/schemas/PayloadTooLargeDetails"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "RequestTimeout": {
+        "description": "The request body was not received before the server's read deadline. Send the body promptly; the request did not start.",
+        "x-http-status": 408,
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ErrorMetadata"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "request_timeout"
               }
             },
             "required": [
@@ -9958,6 +10401,32 @@
         ],
         "unevaluatedProperties": false
       },
+      "SyncForbiddenError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "forbidden",
+            "description": "Identifies this code as `forbidden`."
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Safe explanation of this file-operation failure."
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "description": "Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ErrorExecutionContext"
+          }
+        ],
+        "unevaluatedProperties": false
+      },
       "SyncNotFoundError": {
         "type": "object",
         "properties": {
@@ -10068,6 +10537,36 @@
         "required": [
           "code",
           "message"
+        ],
+        "description": "Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ErrorExecutionContext"
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "SyncInsufficientResourcesError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "insufficient_resources",
+            "description": "Identifies this code as `insufficient_resources`."
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Safe explanation of this file-operation failure."
+          },
+          "details": {
+            "$ref": "#/components/schemas/InsufficientResourcesDetails"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "details"
         ],
         "description": "Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope.",
         "allOf": [
@@ -10409,6 +10908,18 @@
           }
         }
       },
+      "RequestTimeoutErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/RequestTimeout"
+          }
+        }
+      },
       "MethodNotAllowedErrorResponse": {
         "type": "object",
         "required": [
@@ -10556,7 +11067,7 @@
           }
         }
       },
-      "AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse": {
+      "AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse": {
         "type": "object",
         "required": [
           "error"
@@ -10572,6 +11083,9 @@
                 "$ref": "#/components/schemas/Conflict"
               },
               {
+                "$ref": "#/components/schemas/IdempotencyConflict"
+              },
+              {
                 "$ref": "#/components/schemas/InvalidState"
               },
               {
@@ -10583,6 +11097,7 @@
               "mapping": {
                 "already_exists": "#/components/schemas/AlreadyExists",
                 "conflict": "#/components/schemas/Conflict",
+                "idempotency_conflict": "#/components/schemas/IdempotencyConflict",
                 "invalid_state": "#/components/schemas/InvalidState",
                 "resource_busy": "#/components/schemas/ResourceBusy"
               }
@@ -12471,6 +12986,247 @@
               "$ref": "#/components/schemas/ApiKey"
             },
             "description": "Unrevoked API keys, newest first."
+          }
+        }
+      },
+      "EventCategory": {
+        "type": "string",
+        "description": "Which side of the organization an event is about. `compute`: its VMs, runs, sessions, mounts, filesystems, pools, network and SSH traffic, and API and SSH keys. `organization`: its members, invitations, sign-ins, terms, billing, and credit and quota changes. Every member can read `compute`; `organization` needs an admin.",
+        "enum": [
+          "compute",
+          "organization"
+        ]
+      },
+      "EventAction": {
+        "type": "string",
+        "enum": [
+          "run",
+          "fork",
+          "sync",
+          "delete",
+          "signal",
+          "vm_update",
+          "vm_suspend",
+          "policies_update",
+          "run_cancel",
+          "session_create",
+          "session_update",
+          "session_delete",
+          "mount_create",
+          "mount_delete",
+          "filesystem_create",
+          "filesystem_delete",
+          "pool_create",
+          "pool_update",
+          "pool_delete",
+          "inbound_request",
+          "outbound_request",
+          "ssh_session",
+          "ssh_key_delete",
+          "api_key_create",
+          "api_key_revoke",
+          "member_update",
+          "member_remove",
+          "org_rename",
+          "member_add",
+          "member_invite",
+          "member_invite_revoke",
+          "org_create",
+          "org_delete",
+          "sign_in",
+          "sign_out",
+          "terms_accept",
+          "billing_checkout",
+          "payment_method_update",
+          "credit_grant",
+          "quota_update"
+        ],
+        "description": "What an event records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection; `sign_in` a member's session entering the organization, by signing in or switching to it."
+      },
+      "EventState": {
+        "type": "string",
+        "enum": [
+          "running",
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "EventOrderBy": {
+        "type": "string",
+        "enum": [
+          "requested_at",
+          "started_at",
+          "ended_at",
+          "duration_ms"
+        ]
+      },
+      "Event": {
+        "type": "object",
+        "required": [
+          "id",
+          "action",
+          "category",
+          "state",
+          "vm_id",
+          "requested_at",
+          "started_at",
+          "ended_at",
+          "duration_ms",
+          "actor",
+          "region",
+          "request_id",
+          "error_code",
+          "attributes"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The action's id, the same while it is running and once it ends."
+          },
+          "action": {
+            "$ref": "#/components/schemas/EventAction"
+          },
+          "category": {
+            "$ref": "#/components/schemas/EventCategory"
+          },
+          "state": {
+            "$ref": "#/components/schemas/EventState"
+          },
+          "vm_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The VM the action used; a fork's new VM. Null for an action on no VM."
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the request arrived, or an automatic action was triggered."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the action began executing; null before it does and for an action with no separate start."
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the action ended; null while it is running."
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "From `started_at`, or `requested_at` when there is none, to `ended_at`; null while running."
+          },
+          "actor": {
+            "description": "Who initiated the action, and how. Null for an automatic action, or when Arker does not know who acted.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EventActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The region of the Arker service that handled the action; null for one the console served, such as an API key's."
+          },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `x-request-id` of the request that made the action."
+          },
+          "error_code": {
+            "description": "Why the action failed or was refused: the code its request was answered with, or `internal` when Arker failed it itself.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "integer",
+                "boolean",
+                "null"
+              ]
+            },
+            "description": "Facts only some actions have, and no others: `run_id`, `session_id`, `exit_code` (a run command's own), `type`, `source_vm_id`, `vm_name`, `filesystem_id`, `mount_id`, `pool_id`, `fields`, `port`, `method`, `guest_status`, `host`, `fingerprint`, `caller_ip`, `ssh_key_id`, `key_id`, `email`, `role`, `name`, `tos`, `privacy_policy`, `amount_cents`, `region`, `resource` and `cap`."
+          }
+        }
+      },
+      "EventActor": {
+        "type": "object",
+        "required": [
+          "via"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "via": {
+            "$ref": "#/components/schemas/EventVia"
+          },
+          "id": {
+            "type": "string",
+            "description": "Who: a member's email in the console; one of the organization's API keys' `api_key_id`; an SSH key's id, or its fingerprint when it is no account key. None when Arker acted, or for a member or key the organization no longer has."
+          }
+        }
+      },
+      "EventVia": {
+        "type": "string",
+        "enum": [
+          "console",
+          "api",
+          "ssh",
+          "arker"
+        ],
+        "description": "How an action was initiated: by a member in the console, with an API key, over SSH with an SSH key, or by Arker."
+      },
+      "ListEventsResponse": {
+        "type": "object",
+        "required": [
+          "events",
+          "next_cursor"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "description": "Events, in the requested order."
+          },
+          "next_cursor": {
+            "description": "Cursor for the next page, or null when there is none.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       }

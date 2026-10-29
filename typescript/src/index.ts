@@ -427,6 +427,43 @@ export type ListOrgRunsResponse = ApiSchema<"ListOrgRunsResponse">;
 export type RunListRow = OrgRunListRow;
 export type CancelRunResponse = ApiSchema<"CancelRunResponse">;
 
+// ── Events ─────────────────────────────────────────────────────────
+export type Event = ApiSchema<"Event">;
+export type EventActor = ApiSchema<"EventActor">;
+export type ListEventsResponse = ApiSchema<"ListEventsResponse">;
+/** A `[gte, lt)` bound; either end may be left open. */
+export type EventRange<T> = { gte?: T; lt?: T };
+/** Which events a page lists. Values of one filter match any of them;
+ *  filters combine. */
+export type EventFilter = {
+  /** Text in an event's action, ids, error code, attribute values or member's email. */
+  search?: string;
+  /** `compute`, or `organization` (admins only); every event the caller can read when absent. */
+  category?: ApiSchema<"EventCategory">;
+  actions?: ApiSchema<"EventAction">[];
+  states?: ApiSchema<"EventState">[];
+  regions?: string[];
+  vmIds?: string[];
+  /** Member emails or `me`, API key ids, SSH key ids. */
+  actors?: string[];
+  via?: ApiSchema<"EventVia">[];
+  requestIds?: string[];
+  errorCodes?: ApiSchema<"ErrorCode">[];
+  exitCode?: number;
+  requestedAt?: EventRange<string>;
+  startedAt?: EventRange<string>;
+  endedAt?: EventRange<string>;
+  durationMs?: EventRange<number>;
+};
+export type ListEventsOptions = {
+  filter?: EventFilter;
+  orderBy?: ApiSchema<"EventOrderBy">;
+  order?: "asc" | "desc";
+  limit?: number;
+  /** A previous page's `next_cursor`; it carries that page's filter and order. */
+  cursor?: string;
+};
+
 // ── Sessions ───────────────────────────────────────────────────────
 export type CreateSessionRequest = ApiSchema<"CreateSessionRequest">;
 export type PatchSessionRequest = ApiSchema<"PatchSessionRequest">;
@@ -436,6 +473,7 @@ export type PtyTicketResponse = ApiSchema<"PtyTicketResponse">;
 // ── Operation query parameters ─────────────────────────────────────
 export type ListVmsParameters = ApiQuery<"listVms">;
 export type ListOrgRunsParameters = ApiQuery<"listOrgRuns">;
+export type ListEventsParameters = ApiQuery<"listEvents">;
 export type ListFilesystemsParameters = ApiQuery<"listFilesystems">;
 export type ListPoolsParameters = ApiQuery<"listPools">;
 export type ListMountsParameters = ApiQuery<"listMounts">;
@@ -835,6 +873,37 @@ export class Arker {
       dir: opts.dir,
     };
     return this._request("GET", buildQuery("/v1/runs", query), undefined, this.controlBaseUrl);
+  }
+
+  /** List the organization's activity across regions, one event per action. */
+  async listEvents(opts: ListEventsOptions = {}): Promise<ListEventsResponse> {
+    const filter = opts.filter ?? {};
+    const query: ListEventsParameters = {
+      search: filter.search,
+      category: filter.category,
+      actions: filter.actions,
+      states: filter.states,
+      regions: filter.regions,
+      vm_ids: filter.vmIds,
+      actors: filter.actors,
+      via: filter.via,
+      request_ids: filter.requestIds,
+      error_codes: filter.errorCodes,
+      exit_code: filter.exitCode,
+      requested_at_gte: filter.requestedAt?.gte,
+      requested_at_lt: filter.requestedAt?.lt,
+      started_at_gte: filter.startedAt?.gte,
+      started_at_lt: filter.startedAt?.lt,
+      ended_at_gte: filter.endedAt?.gte,
+      ended_at_lt: filter.endedAt?.lt,
+      duration_ms_gte: filter.durationMs?.gte,
+      duration_ms_lt: filter.durationMs?.lt,
+      order_by: opts.orderBy,
+      order: opts.order,
+      limit: opts.limit,
+      cursor: opts.cursor,
+    };
+    return this._request("GET", buildQuery("/v1/events", query), undefined, this.controlBaseUrl);
   }
 
   /** Fetch a VM from its regional endpoint. */
@@ -1832,7 +1901,7 @@ function buildQuery(path: string, params: Record<string, unknown>): string {
   const usp = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null) continue;
-    usp.append(key, String(value));
+    for (const item of Array.isArray(value) ? value : [value]) usp.append(key, String(item));
   }
   const qs = usp.toString();
   return qs ? `${path}?${qs}` : path;
