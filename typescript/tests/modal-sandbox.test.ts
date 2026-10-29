@@ -97,3 +97,24 @@ test("Modal native exec preserves secrets, PTY, process identity and termination
   assert.equal(await sandbox.terminate({ wait: true }), 137);
   assert.equal(await sandbox.terminate(), undefined);
 });
+
+
+test("Arker Modal exec accepts explicit native defaults without changing the command", async t => {
+  const spawn = t.mock.method(GuestProcesses.prototype, "exec", async () => ({ pid: "test" }) as GuestProcessResult);
+  const sandbox = new Sandbox({ sandboxId: "test", provider: "arker" } as never);
+  await sandbox.exec(["printf", "literal value"]);
+  await sandbox.exec(["printf", "literal value"], { pty: false, secrets: [], stdout: "pipe", stderr: "pipe", mode: "text" });
+  assert.deepEqual(spawn.mock.calls[1]!.arguments, spawn.mock.calls[0]!.arguments);
+  assert.equal(spawn.mock.calls[1]!.arguments[0]!.workingDir, "/");
+  assert.deepEqual(spawn.mock.calls[1]!.arguments[0]!.env, {});
+  assert.equal(spawn.mock.calls[1]!.arguments[0]!.timeout, undefined);
+});
+
+test("Arker Modal exec refuses unsupported PTY and secret values before spawning", async t => {
+  const spawn = t.mock.method(GuestProcesses.prototype, "exec", async () => ({ pid: "test" }) as GuestProcessResult);
+  const sandbox = new Sandbox({ sandboxId: "test", provider: "arker" } as never);
+  for (const options of [{ pty: true }, { pty: null }, { secrets: [new Secret("st-test")] }, { secrets: {} }, { secrets: null }]) {
+    await assert.rejects(sandbox.exec(["true"], options as SandboxExecParams & { mode?: "text" }), /not supported by Arker/);
+  }
+  assert.equal(spawn.mock.callCount(), 0);
+});

@@ -29,7 +29,7 @@ export interface ModalCompatConfig extends ModalClientParams {
 type ModalExecOptions = SandboxExecParams;
 
 const MODAL_CONFIG_KEYS = ["tokenId", "tokenSecret", "oauthRefreshToken", "oauthClientId", "oauthClientSecret", "oauthJwtKey", "environment", "endpoint", "timeoutMs", "maxRetries", "maxThrottleWaitSecs", "logger", "logLevel", "grpcMiddleware", "cpClient", "arker", "routerConfigPath"] as const;
-const MODAL_EXEC_OPTION_KEYS = ["workdir", "env", "timeoutMs", "stdout", "stderr", "mode"] as const;
+const MODAL_EXEC_OPTION_KEYS = ["workdir", "env", "timeoutMs", "stdout", "stderr", "mode", "pty", "secrets"] as const;
 const MODAL_CREATE_OPTION_KEYS = ["cpu", "cpuLimit", "memoryMiB", "memoryLimitMiB", "runtime", "gpu", "timeoutMs", "idleTimeoutMs", "workdir", "command", "env", "secrets", "volumes", "cloudBucketMounts", "pty", "encryptedPorts", "h2Ports", "unencryptedPorts", "blockNetwork", "outboundCidrAllowlist", "outboundDomainAllowlist", "experimentalOutboundPolicy", "inboundCidrAllowlist", "i6pn", "cloud", "regions", "verbose", "proxy", "readinessProbe", "name", "tags", "experimentalOptions", "customDomain", "includeOidcIdentityToken", "experimentalEnableSnapshot"] as const;
 
 function assertOptionValue(condition: boolean, message: string): void {
@@ -40,6 +40,15 @@ function toRunCommandOptions(opts: unknown): RunCommandOptions | undefined {
   assertSupportedObjectKeys(opts, MODAL_EXEC_OPTION_KEYS, "modal", "Sandbox.exec");
   if (opts === undefined) return undefined;
   const modalOpts = opts as ModalExecOptions;
+
+  assertOptionValue(
+    modalOpts.pty === undefined || modalOpts.pty === false,
+    "Sandbox.exec PTY is not supported by Arker; pty must be false or omitted.",
+  );
+  assertOptionValue(
+    modalOpts.secrets === undefined || (Array.isArray(modalOpts.secrets) && modalOpts.secrets.length === 0),
+    "Sandbox.exec secrets are not supported by Arker; secrets must be empty or omitted.",
+  );
 
   assertOptionValue(
     modalOpts.workdir === undefined || typeof modalOpts.workdir === "string",
