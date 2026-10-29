@@ -48,6 +48,7 @@ ErrorCode: TypeAlias = Literal[
     'idempotency_conflict',
     'expired',
     'payload_too_large',
+    'request_timeout',
     'method_not_allowed',
     'unsupported_operation',
     'unrecoverable',
@@ -1031,6 +1032,11 @@ class PayloadTooLarge(ErrorMetadata):
 
 
 @dataclass(frozen=True)
+class RequestTimeout(ErrorMetadata):
+    code: Literal['request_timeout'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
 class MethodNotAllowed(ErrorMetadata):
     code: Literal['method_not_allowed'] = field(kw_only=True)
     details: MethodNotAllowedDetails = field(kw_only=True)
@@ -1121,6 +1127,12 @@ class SyncBadRequestError(ErrorExecutionContext):
 
 
 @dataclass(frozen=True)
+class SyncForbiddenError(ErrorExecutionContext):
+    code: Literal['forbidden'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+
+
+@dataclass(frozen=True)
 class Details:
     resource: Literal['file', 'upload', 'resource']
 
@@ -1144,6 +1156,13 @@ class SyncPayloadTooLargeError(ErrorExecutionContext):
     code: Literal['payload_too_large'] = field(kw_only=True)
     message: str = field(kw_only=True)
     details: PayloadTooLargeDetails | None = None
+
+
+@dataclass(frozen=True)
+class SyncInsufficientResourcesError(ErrorExecutionContext):
+    code: Literal['insufficient_resources'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: InsufficientResourcesDetails = field(kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -1256,6 +1275,11 @@ class PayloadTooLargeErrorResponse:
 
 
 @dataclass(frozen=True)
+class RequestTimeoutErrorResponse:
+    error: RequestTimeout
+
+
+@dataclass(frozen=True)
 class MethodNotAllowedErrorResponse:
     error: MethodNotAllowed
 
@@ -1311,8 +1335,8 @@ class BadRequestOrInsufficientResourcesErrorResponse:
 
 
 @dataclass(frozen=True)
-class AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse:
-    error: AlreadyExists | Conflict | InvalidState | ResourceBusy
+class AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse:
+    error: AlreadyExists | Conflict | IdempotencyConflict | InvalidState | ResourceBusy
 
 
 @dataclass(frozen=True)
@@ -1645,6 +1669,9 @@ class ApiKeyPoolScope:
     pool_id: str
 
 
+EventCategory: TypeAlias = Literal['compute', 'organization']
+
+
 EventAction: TypeAlias = Literal[
     'run',
     'fork',
@@ -1741,6 +1768,7 @@ class ListOrgRunsParameters:
 @dataclass(frozen=True)
 class ListEventsParameters:
     search: str | None = None
+    category: EventCategory | None = None
     actions: list[EventAction] | None = None
     states: list[EventState] | None = None
     regions: list[str] | None = None
@@ -2027,9 +2055,11 @@ SyncReadResponse: TypeAlias = SyncReadInlineResponse | SyncReadPresignedResponse
 
 SyncFileError: TypeAlias = (
     SyncBadRequestError
+    | SyncForbiddenError
     | SyncNotFoundError
     | SyncConflictError
     | SyncPayloadTooLargeError
+    | SyncInsufficientResourcesError
     | SyncUnsupportedOperationError
     | SyncUnavailableError
     | SyncInternalError
@@ -2217,6 +2247,30 @@ class PolicyUpdate:
 PolicyRules: TypeAlias = dict[str, PolicyRule | ScheduleRule | LifecycleRule]
 
 
+@dataclass(frozen=True)
+class Event:
+    id: str
+    action: EventAction
+    category: EventCategory
+    state: EventState
+    vm_id: str | None
+    requested_at: str
+    started_at: str | None
+    ended_at: str | None
+    duration_ms: int | None
+    actor: EventActor | None
+    region: str | None
+    request_id: str | None
+    error_code: ErrorCode | None
+    attributes: dict[str, str | int | bool | None]
+
+
+@dataclass(frozen=True)
+class ListEventsResponse:
+    events: list[Event]
+    next_cursor: str | None
+
+
 ErrorBody: TypeAlias = (
     BadRequest
     | InsufficientResources
@@ -2230,6 +2284,7 @@ ErrorBody: TypeAlias = (
     | IdempotencyConflict
     | Expired
     | PayloadTooLarge
+    | RequestTimeout
     | MethodNotAllowed
     | UnsupportedOperation
     | Unrecoverable
@@ -2248,29 +2303,6 @@ ErrorBody: TypeAlias = (
 @dataclass(frozen=True)
 class ErrorResponse:
     error: ErrorBody
-
-
-@dataclass(frozen=True)
-class Event:
-    id: str
-    action: EventAction
-    state: EventState
-    vm_id: str | None
-    requested_at: str
-    started_at: str | None
-    ended_at: str | None
-    duration_ms: int | None
-    actor: EventActor | None
-    region: str | None
-    request_id: str | None
-    error_code: ErrorCode | None
-    attributes: dict[str, str | int | bool | None]
-
-
-@dataclass(frozen=True)
-class ListEventsResponse:
-    events: list[Event]
-    next_cursor: str | None
 
 
 @dataclass(frozen=True)

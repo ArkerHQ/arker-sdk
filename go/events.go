@@ -18,6 +18,7 @@ type EventActor struct {
 type Event struct {
 	ID          string         `json:"id"`
 	Action      string         `json:"action"`
+	Category    string         `json:"category"` // "compute" or "organization"
 	State       string         `json:"state"`
 	VMID        *string        `json:"vm_id"`
 	RequestedAt string         `json:"requested_at"`
@@ -54,6 +55,7 @@ type DurationRange struct {
 // of them; fields combine.
 type EventFilter struct {
 	Search      string // text in an event's action, ids, error code, attributes or member's email
+	Category    string // "compute" or "organization"; empty for every event the caller can read
 	Actions     []string
 	States      []string
 	Regions     []string
@@ -85,6 +87,7 @@ func (c *Client) ListEvents(ctx context.Context, opts ListEventsOptions) (*Event
 	f := opts.Filter
 	q := newQuery()
 	q.str("search", f.Search)
+	q.str("category", f.Category)
 	q.each("actions", f.Actions)
 	q.each("states", f.States)
 	q.each("regions", f.Regions)

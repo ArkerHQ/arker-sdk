@@ -753,7 +753,7 @@ def test_list_events_sends_the_filter_as_flat_parameters() -> None:
         lambda method, url: (
             method == "GET"
             and url
-            == "https://control.invalid/api/v1/events?search=bad_request&actions=run&actions=fork&states=completed&vm_ids=vm_1&actors=me&via=api&via=ssh&exit_code=1&ended_at_gte=2026-10-20T00%3A00%3A00Z&duration_ms_lt=5000&order_by=ended_at&order=asc&limit=10"
+            == "https://control.invalid/api/v1/events?search=bad_request&category=compute&actions=run&actions=fork&states=completed&vm_ids=vm_1&actors=me&via=api&via=ssh&exit_code=1&ended_at_gte=2026-10-20T00%3A00%3A00Z&duration_ms_lt=5000&order_by=ended_at&order=asc&limit=10"
         ),
         200,
         {
@@ -761,6 +761,7 @@ def test_list_events_sends_the_filter_as_flat_parameters() -> None:
                 {
                     "id": "ev_1",
                     "action": "run",
+                    "category": "compute",
                     "state": "completed",
                     "vm_id": "vm_1",
                     "requested_at": "2026-10-20T00:00:00Z",
@@ -787,6 +788,7 @@ def test_list_events_sends_the_filter_as_flat_parameters() -> None:
         page = arker.list_events(
             filter={
                 "search": "bad_request",
+                "category": "compute",
                 "actions": ["run", "fork"],
                 "states": ["completed"],
                 "vm_ids": ["vm_1"],

@@ -438,6 +438,8 @@ export type EventRange<T> = { gte?: T; lt?: T };
 export type EventFilter = {
   /** Text in an event's action, ids, error code, attribute values or member's email. */
   search?: string;
+  /** `compute`, or `organization` (admins only); every event the caller can read when absent. */
+  category?: ApiSchema<"EventCategory">;
   actions?: ApiSchema<"EventAction">[];
   states?: ApiSchema<"EventState">[];
   regions?: string[];
@@ -878,6 +880,7 @@ export class Arker {
     const filter = opts.filter ?? {};
     const query: ListEventsParameters = {
       search: filter.search,
+      category: filter.category,
       actions: filter.actions,
       states: filter.states,
       regions: filter.regions,

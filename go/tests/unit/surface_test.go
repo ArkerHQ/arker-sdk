@@ -665,7 +665,7 @@ func TestListEventsSendsTheFilterAsFlatParameters(t *testing.T) {
 	var got string
 	c := twoPlane(t, reject(t, "regional"), func(w http.ResponseWriter, r *http.Request) {
 		got = r.URL.Path + "?" + r.URL.RawQuery
-		fmt.Fprint(w, `{"events":[{"id":"ev_1","action":"run","state":"completed","vm_id":"vm_1",`+
+		fmt.Fprint(w, `{"events":[{"id":"ev_1","action":"run","category":"compute","state":"completed","vm_id":"vm_1",`+
 			`"requested_at":"2026-10-20T00:00:00Z","started_at":null,"ended_at":"2026-10-20T00:00:01Z",`+
 			`"duration_ms":1000,"actor":{"via":"arker"},"region":null,"request_id":null,"error_code":null,`+
 			`"attributes":{}}],"next_cursor":null}`)
@@ -674,6 +674,7 @@ func TestListEventsSendsTheFilterAsFlatParameters(t *testing.T) {
 	page, err := c.ListEvents(context.Background(), arker.ListEventsOptions{
 		Filter: arker.EventFilter{
 			Search:     "bad_request",
+			Category:   "compute",
 			Actions:    []string{"run", "fork"},
 			States:     []string{"completed"},
 			VMIDs:      []string{"vm_1"},
@@ -690,7 +691,7 @@ func TestListEventsSendsTheFilterAsFlatParameters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "/v1/events?actions=run&actions=fork&actors=me&duration_ms_lt=5000" +
+	want := "/v1/events?actions=run&actions=fork&actors=me&category=compute&duration_ms_lt=5000" +
 		"&ended_at_gte=2026-10-20T00%3A00%3A00Z&exit_code=1&limit=10&order=asc&order_by=ended_at" +
 		"&search=bad_request&states=completed&via=api&via=ssh&vm_ids=vm_1"
 	if got != want {
@@ -699,7 +700,7 @@ func TestListEventsSendsTheFilterAsFlatParameters(t *testing.T) {
 	if len(page.Events) != 1 || page.NextCursor != nil {
 		t.Fatalf("page = %+v", page)
 	}
-	if e := page.Events[0]; e.State != "completed" || e.EndedAt == nil || e.Actor == nil ||
+	if e := page.Events[0]; e.State != "completed" || e.Category != "compute" || e.EndedAt == nil || e.Actor == nil ||
 		e.Actor.Via != "arker" || e.Actor.ID != nil {
 		t.Fatalf("event = %+v", e)
 	}

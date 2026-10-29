@@ -298,10 +298,13 @@ class EventRange(TypedDict, total=False):
 class EventFilter(TypedDict, total=False):
     """Which events `list_events` lists. Values of one filter match any of
     them; filters combine. `search` matches text in an event's action, ids,
-    error code, attribute values or member's email. `actors` takes member
-    emails or `me`, API key ids and SSH key ids."""
+    error code, attribute values or member's email. `category` is `compute`
+    or `organization`, which only admins can read; without it, every event
+    the caller can read. `actors` takes member emails or `me`, API key ids
+    and SSH key ids."""
 
     search: str
+    category: str
     actions: list[str]
     states: list[str]
     regions: list[str]
@@ -595,6 +598,7 @@ class Arker:
 
         parameters = ListEventsParameters(
             search=filter.get("search"),
+            category=filter.get("category"),
             actions=filter.get("actions"),
             states=filter.get("states"),
             regions=filter.get("regions"),

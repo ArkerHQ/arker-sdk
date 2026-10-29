@@ -811,7 +811,7 @@ function testExplicitVmHandleUsesPlacementEndpoint(): void {
 async function testListEventsSendsTheFilterAsFlatParameters(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(
-    (method, url) => method === "GET" && url === "https://control.invalid/api/v1/events?search=bad_request&actions=run&actions=fork&states=completed&vm_ids=vm_1&actors=me&via=api&via=ssh&exit_code=1&ended_at_gte=2026-10-20T00%3A00%3A00Z&duration_ms_lt=5000&order_by=ended_at&order=asc&limit=10",
+    (method, url) => method === "GET" && url === "https://control.invalid/api/v1/events?search=bad_request&category=compute&actions=run&actions=fork&states=completed&vm_ids=vm_1&actors=me&via=api&via=ssh&exit_code=1&ended_at_gte=2026-10-20T00%3A00%3A00Z&duration_ms_lt=5000&order_by=ended_at&order=asc&limit=10",
     200,
     { events: [], next_cursor: null },
   );
@@ -825,6 +825,7 @@ async function testListEventsSendsTheFilterAsFlatParameters(): Promise<void> {
   const page = await arker.listEvents({
     filter: {
       search: "bad_request",
+      category: "compute",
       actions: ["run", "fork"],
       states: ["completed"],
       vmIds: ["vm_1"],
