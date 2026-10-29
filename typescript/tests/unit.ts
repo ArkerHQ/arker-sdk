@@ -743,7 +743,8 @@ async function testListedVmUsesItsPlacementEndpoint(): Promise<void> {
 
   const arker = new Arker({
     apiKey: "ark_live_test",
-    baseUrl: "https://fallback.invalid/api",
+    provider: "provider-one",
+    region: "region-one",
     fetch: fetch.fetch,
     retry: false,
   });
@@ -755,11 +756,50 @@ async function testListedVmUsesItsPlacementEndpoint(): Promise<void> {
 function testExplicitVmHandleUsesPlacementEndpoint(): void {
   const arker = new Arker({
     apiKey: "ark_live_test",
-    baseUrl: "https://fallback.invalid/api",
+    provider: "provider-one",
+    region: "region-one",
     retry: false,
   });
   const vm = arker.vm("vm_placed", { provider: "provider-two", region: "region-two" });
   assert.equal(vm.baseUrl, "https://provider-two-region-two.arker.ai/api");
+}
+
+async function testCustomApiOriginSurvivesVmHydration(): Promise<void> {
+  const previous = process.env.ARKER_BASE_URL;
+  try {
+    for (const fromEnvironment of [false, true]) {
+      const baseUrl = "https://custom.example/api";
+      if (fromEnvironment) process.env.ARKER_BASE_URL = baseUrl;
+      else delete process.env.ARKER_BASE_URL;
+      const fetch = new FakeFetch();
+      const row = {
+        vm_id: "vm_placed", owner_org_id: "org_1", created_at: "now",
+        provider: "provider-two", region: "region-two",
+      };
+      fetch.addJson((method, url) => method === "GET" && url === "https://control.example/api/v1/vms",
+        200, { vms: [row] });
+      for (let i = 0; i < 3; i++) {
+        fetch.addJson((method, url) => method === "GET" && url === `${baseUrl}/v1/vms/vm_placed`,
+          200, row);
+      }
+      const arker = new Arker({
+        apiKey: "ark_live_test", fetch: fetch.fetch, retry: false,
+        ...(fromEnvironment ? {} : { baseUrl: `${baseUrl}/` }),
+        controlBaseUrl: "https://control.example/api",
+        provider: "provider-one", region: "region-one",
+      });
+      const { vms } = await arker.listVms();
+      assert.equal(vms[0]!.baseUrl, baseUrl);
+      await vms[0]!.refresh();
+      await arker.vm(row.vm_id, row).refresh();
+      await arker.getVm(row.vm_id, row);
+      assert.equal(fetch.calls.length, 4);
+      assert.ok(fetch.calls.slice(1).every(call => call.url.startsWith(`${baseUrl}/`)));
+    }
+  } finally {
+    if (previous === undefined) delete process.env.ARKER_BASE_URL;
+    else process.env.ARKER_BASE_URL = previous;
+  }
 }
 
 async function testListRunsUsesControlPlaneAndFilters(): Promise<void> {
@@ -1325,6 +1365,7 @@ await testPoolsV2();
 await testPoolRefusals();
 await testPoolQuotaIsNotRetried();
 await testDiscoverRegionsRequiresNoConfiguredClient();
+await testCustomApiOriginSurvivesVmHydration();
 await testListedVmUsesItsPlacementEndpoint();
 testExplicitVmHandleUsesPlacementEndpoint();
 await testListRunsUsesControlPlaneAndFilters();

@@ -637,6 +637,7 @@ async function deleteAfterFailedBuild(vm: VM, attempts = 3, baseDelayMs = 1000):
 export class Arker {
   /** Regional API base URL for per-VM operations. */
   private readonly computeBaseUrl?: string;
+  private readonly explicitComputeBaseUrl: boolean;
   /** Control API base URL for cross-region administrative calls. */
   readonly controlBaseUrl: string;
   readonly region?: string;
@@ -663,6 +664,7 @@ export class Arker {
     if (!apiKey) throw new Error("apiKey is required; pass apiKey or set ARKER_API_KEY");
     this.apiKey = apiKey;
     this.computeBaseUrl = baseUrl ? normalizeBaseUrl(baseUrl) : undefined;
+    this.explicitComputeBaseUrl = explicitBaseUrl !== undefined;
     this.controlBaseUrl = normalizeBaseUrl(controlBaseUrl);
     this.region = region;
     this.provider = provider;
@@ -1002,6 +1004,7 @@ export class Arker {
     ref: string,
     placement?: { provider?: unknown; region?: string | null },
   ): string {
+    if (this.explicitComputeBaseUrl) return this.baseUrl;
     const provider = optionalComputeProvider(placement?.provider);
     const region = placement?.region?.trim();
     if (provider && region) return computeBaseUrl(provider, region);
