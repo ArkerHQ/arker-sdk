@@ -529,6 +529,7 @@ OpenApiOperationId: TypeAlias = Literal[
     'revokeApiKey',
     'setVmDeadline',
     'forkNamed',
+    'registerDaemonActivity',
 ]
 
 
@@ -1782,6 +1783,13 @@ ImageArgv: TypeAlias = list[ImageArgvItem]
 
 
 @dataclass(frozen=True)
+class RegisterDaemonActivityRequest:
+    pid: int
+    start_ticks: int
+    boot_id: str
+
+
+@dataclass(frozen=True)
 class ListVmsParameters:
     cursor: str | None = None
     limit: int | None = None
@@ -2115,6 +2123,11 @@ class GetVmLifecycleParameters:
 
 @dataclass(frozen=True)
 class SetVmDeadlineParameters:
+    id: str
+
+
+@dataclass(frozen=True)
+class RegisterDaemonActivityParameters:
     id: str
 
 

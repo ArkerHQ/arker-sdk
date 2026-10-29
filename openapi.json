@@ -3956,6 +3956,75 @@
         },
         "description": "Public global gateway only. Unsupported gateways reject this dedicated route before creation. Never fall back to /v1/fork. Ordinary fork rejects naming headers."
       }
+    },
+    "/v1/vms/{id}/daemon-activity": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/VmId"
+        }
+      ],
+      "post": {
+        "operationId": "registerDaemonActivity",
+        "tags": [
+          "VMs"
+        ],
+        "summary": "Register a daemon for child activity tracking",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDaemonActivityRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequiredError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ConflictOrInvalidStateError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
+          },
+          "204": {
+            "description": "The verified daemon is enrolled for subsequent child activity."
+          }
+        },
+        "description": "Register a native daemon before exposing its request endpoint. Requires vm:run and VM ownership. Verifies the guest boot ID and process start time, then places the daemon in an inherited cgroup. Live descendants prevent automatic idle pause and suspend; the daemon itself does not. Registration does not cover queued work without a live child, does not change deadlines or explicit deletion, and does not grant network or secret access. Repeat registration on the same live process is idempotent. Unsupported runtimes and guests refuse registration."
+      }
     }
   },
   "components": {
@@ -8985,7 +9054,8 @@
           "createApiKey",
           "revokeApiKey",
           "setVmDeadline",
-          "forkNamed"
+          "forkNamed",
+          "registerDaemonActivity"
         ],
         "description": "Exact operationId values declared by this API. Refresh this enum when operations are added or removed."
       },
@@ -14261,6 +14331,34 @@
           "pattern": "^[^\\u0000]*$"
         },
         "description": "An explicit OCI argument vector. Empty clears the corresponding startup field; omission of that field inherits it."
+      },
+      "RegisterDaemonActivityRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pid",
+          "start_ticks",
+          "boot_id"
+        ],
+        "properties": {
+          "pid": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 2,
+            "description": "Daemon process ID in the guest."
+          },
+          "start_ticks": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Exact Linux /proc process start time in clock ticks."
+          },
+          "boot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Guest /proc/sys/kernel/random/boot_id observed with the daemon identity."
+          }
+        }
       }
     }
   }
