@@ -6356,6 +6356,10 @@
             "additionalProperties": true,
             "maxProperties": 128,
             "description": "Caller metadata for the new VM. Omission inherits the parent VM metadata, if any; an explicit object replaces it; explicit null clears it. At most 16384 UTF-8 bytes when serialized, nesting depth 4 with the root at depth 0, and 128 object keys in total, including objects inside arrays. Values may be any JSON type. Metadata is descriptive and does not control VM permissions or lifecycle."
+          },
+          "immutable": {
+            "type": "boolean",
+            "description": "Register the captured VM as immutable before it becomes visible. The guest is not started. Requires a VM source with full memory and disk state; image sources, filesystem-only layers, commands, and resource overrides are rejected. Descendant forks are mutable unless they also request immutable. Not available on pool workers. Omitted or false creates a mutable VM."
           }
         },
         "not": {

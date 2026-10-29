@@ -101,7 +101,7 @@ function toFileEntries(stdout: string): FileEntry[] {
   return entries;
 }
 
-class ArkerComputeSandbox implements SandboxInterface {
+export class ArkerComputeSandbox implements SandboxInterface {
   readonly instanceId: string;
   readonly sandboxId: string;
   readonly provider = "arker";

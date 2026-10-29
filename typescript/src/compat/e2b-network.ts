@@ -21,7 +21,7 @@ export function validateE2BNetwork(network: E2BNetworkOptions | undefined): void
 
 type Policies = NonNullable<ForkOptions["policies"]>;
 type Rule = NonNullable<Policies["rules"]>[string];
-function managed(id: string, rule: Rule): boolean {
+export function managed(id: string, rule: Rule): boolean {
   if (!rule || rule.type !== "inbound" || rule.action !== "allow") return false;
   if (Object.keys(rule).some(key => !["type", "priority", "action", "auth", "match"].includes(key))
       || Object.keys(rule.match ?? {}).some(key => !["ports", "headers"].includes(key))) return false;

@@ -1,3 +1,5 @@
+import { forkArker } from "./compat/e2b-fork.js";
+import { ArkerComputeSandbox } from "./compat/arker-provider.js";
 import { listSandboxes, type E2BListOptions, type E2BPaginator } from "./compat/e2b-list.js";
 import { e2bForkMetadata } from "./compat/e2b-metadata.js";
 import { forkWithTraffic, trafficToken, validateE2BNetwork, type E2BNetworkOptions } from "./compat/e2b-network.js";
@@ -6,7 +8,7 @@ import { E2BFileURLs, prepareFileURLs, type E2BFileURLOptions } from "./compat/e
 import { bootstrapEnvd, validateEnvdEnvs } from "./compat/e2b-bootstrap.js";
 import { createE2BDataPlane, type E2BDataPlane, type EnvdDescriptor } from "./compat/e2b-data-plane.js";
 import type { VM } from "./index.js";
-import { Sandbox as VendorSandbox, SandboxNotFoundError, type Commands, type Filesystem, type Pty, type Git, type SandboxConnectOpts, type SandboxPauseOpts, type SandboxOpts, type SandboxApiOpts } from "e2b";
+import { Sandbox as VendorSandbox, SandboxNotFoundError, type Commands, type Filesystem, type Pty, type Git, type SandboxConnectOpts, type SandboxPauseOpts, type SandboxOpts, type SandboxApiOpts, type SandboxForkOpts } from "e2b";
 import {
   assertSupportedObjectKeys, guardUnsupported, nativeInstance, resolveTimeout,
   type CreateOptions, type UniversalSandbox,
@@ -18,11 +20,11 @@ export { Volume } from "./compat/e2b-mounts.js";
 export type { E2BVolumeMounts } from "./compat/e2b-mounts.js";
 export type E2BCreateOptions = Omit<SandboxOpts, "volumeMounts"> & CreateOptions & { volumeMounts?: E2BVolumeMounts };
 
-export type { CommandResult as CommandExitResult } from "e2b";
+export type { CommandResult as CommandExitResult, SandboxForkOpts } from "e2b";
 
 const descriptors = new WeakMap<E2BDataPlane, EnvdDescriptor>();
 
-type NativeSandbox = Pick<VendorSandbox, "kill" | "getHost" | "commands" | "files" | "git" | "pty" | "trafficAccessToken">;
+type NativeSandbox = Pick<VendorSandbox, "fork" | "kill" | "getHost" | "commands" | "files" | "git" | "pty" | "trafficAccessToken">;
 const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess", "volumeMounts", "network", "template", "apiKey", "secure", "validateApiKey", "debug", "lifecycle"] as const;
 
 function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMounts, lookupOptions?: SandboxApiOpts) {
@@ -172,6 +174,33 @@ export class Sandbox {
       }
       throw error;
     }
+  }
+
+  private static async wrapForks(values: Array<VendorSandbox | Error>): Promise<Array<Sandbox | Error>> {
+    return Promise.all(values.map(value => value instanceof Error ? value : Sandbox.wrap({
+      provider: "e2b", sandboxId: value.sandboxId, getInstance: () => value,
+    } as unknown as UniversalSandbox)));
+  }
+
+  static async fork(sandboxId: string, opts: SandboxForkOpts & Pick<CreateOptions, "routerConfigPath"> = {}): Promise<Array<Sandbox | Error>> {
+    const { routerConfigPath, ...options } = opts;
+    const owner = await createCompatRouter(routingOptions(routerConfigPath, undefined, options)).getOwner(sandboxId);
+    if (!owner) throw new SandboxNotFoundError(`Sandbox ${sandboxId} not found`);
+    if (owner.provider === "e2b") return Sandbox.wrapForks(await VendorSandbox.fork(sandboxId, options));
+    return new Sandbox(owner.instance as UniversalSandbox).fork(options);
+  }
+
+  async fork(opts?: SandboxForkOpts): Promise<Array<Sandbox | Error>> {
+    if (this.#native) return Sandbox.wrapForks(await this.#native.fork(opts));
+    const vm = (this.#box as UniversalSandbox & { getInstance(): VM }).getInstance();
+    return forkArker(vm, child => Sandbox.wrap(new ArkerComputeSandbox(child, async () => { await child.delete(); })),
+      async child => {
+        const failures: unknown[] = [];
+        try { child.closeDataPlane(); } catch (error) { failures.push(error); }
+        try { await (child.#box as UniversalSandbox & { getInstance(): VM }).getInstance().delete(); }
+        catch (error) { failures.push(error); }
+        if (failures.length) throw new AggregateError(failures, "Fork client cleanup failed");
+      }, opts);
   }
 
   static async connect(sandboxId: string, opts?: SandboxConnectOpts & Pick<CreateOptions, "routerConfigPath">): Promise<Sandbox> {

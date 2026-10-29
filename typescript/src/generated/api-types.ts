@@ -1198,6 +1198,8 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             } | null;
+            /** @description Register the captured VM as immutable before it becomes visible. The guest is not started. Requires a VM source with full memory and disk state; image sources, filesystem-only layers, commands, and resource overrides are rejected. Descendant forks are mutable unless they also request immutable. Not available on pool workers. Omitted or false creates a mutable VM. */
+            immutable?: boolean;
         } & ({
             source_vm_id: string;
             source_vm_name?: null;

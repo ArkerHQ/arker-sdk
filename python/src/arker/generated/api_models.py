@@ -2432,6 +2432,7 @@ class ForkRequest1:
     pool_name: str | None = None
     command: str | None = None
     metadata: dict[str, Any] | None = None
+    immutable: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -2459,6 +2460,7 @@ class ForkRequest2:
     pool_name: str | None = None
     command: str | None = None
     metadata: dict[str, Any] | None = None
+    immutable: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -2486,6 +2488,7 @@ class ForkRequest3:
     pool_name: str | None = None
     command: str | None = None
     metadata: dict[str, Any] | None = None
+    immutable: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -2513,6 +2516,7 @@ class ForkRequest4:
     pool_name: str | None = None
     command: str | None = None
     metadata: dict[str, Any] | None = None
+    immutable: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -2540,6 +2544,7 @@ class ForkRequest5:
     pool_name: str | None = None
     command: str | None = None
     metadata: dict[str, Any] | None = None
+    immutable: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -2567,6 +2572,7 @@ class ForkRequest6:
     pool_name: str | None = None
     command: str | None = None
     metadata: dict[str, Any] | None = None
+    immutable: bool | None = None
 
 
 ForkRequest: TypeAlias = (

@@ -409,6 +409,7 @@ class Arker:
     def _fork(self, options: dict[str, Any], *, base_url: str) -> VM:
         if options.get("policies") is not None:
             options["policies"] = _drop_none(_policy_update(options["policies"]))
+        request_timeout = options.pop("request_timeout", _UNSET)
         queueing_timeout = options.get("queueing_timeout")
         # Headers, not contract fields: pop both before the body is built, or
         # the server's validator rejects the unknown keys and every fork 400s.
@@ -421,6 +422,7 @@ class Arker:
                 base_url=base_url,
                 extra_headers=({"Idempotency-Key": idempotency_key} if idempotency_key else None),
                 max_queueing_s=(queueing_timeout if type(queueing_timeout) is int else None),
+                request_timeout=request_timeout,
                 preserve_nulls=True,
             )
         )

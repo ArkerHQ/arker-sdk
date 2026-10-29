@@ -332,6 +332,38 @@ class Sandbox(UnsupportedMixin):
         return found, native
 
     @classmethod
+    def _class_fork(cls, sandbox_id: str, timeout: int | None = None, count: int | None = None, **opts):
+        from e2b import SandboxNotFoundException
+
+        config = pop_arker_config(opts)
+        found, native = cls._lookup(sandbox_id, {"arker": config, **opts})
+        if found is None:
+            raise SandboxNotFoundException("Sandbox was not found")
+        provider, vm = found
+        if provider == "e2b":
+            return [
+                item if isinstance(item, Exception) else cls(native=item)
+                for item in native.fork(sandbox_id, timeout=timeout, count=count, **opts)
+            ]
+        return cls(vm=vm).fork(timeout=timeout, count=count, **opts)
+
+    @_InstanceOrClassMethod
+    def fork(self, timeout: int | None = None, count: int | None = None, **opts):
+        if self._native is not None:
+            return [
+                item if isinstance(item, Exception) else type(self)(native=item)
+                for item in self._native.fork(timeout=timeout, count=count, **opts)
+            ]
+        from ._compat_e2b_fork import fork_arker
+
+        def prepare(vm):
+            sandbox = type(self)(vm=vm)
+            sandbox._prepare_data_plane()
+            return sandbox
+
+        return fork_arker(self._vm, prepare, timeout=timeout, count=count, **opts)
+
+    @classmethod
     def _class_connect(cls, sandbox_id: str, **kwargs: Any) -> Sandbox:
         config = pop_arker_config(kwargs)
         found, native = cls._lookup(

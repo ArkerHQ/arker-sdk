@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 
 from ._compat import _InstanceOrClassMethod, import_optional
 from ._compat_async import NativeBridge, route
@@ -34,6 +35,22 @@ async def _route(method, *args, **kwargs):
         bridges=[bridge] if bridge else [],
         cleanup=(lambda result: result.kill()) if method == "create" else None,
     )
+
+
+async def _dispose_fork_clients(sandboxes):
+    failures = []
+    for sandbox in sandboxes:
+        if sandbox._data_plane is not None:
+            try:
+                await sandbox._data_plane.aclose()
+            except Exception as error:
+                failures.append(error)
+        try:
+            await _call(sandbox._sandbox._vm.delete)
+        except Exception as error:
+            failures.append(error)
+    if failures:
+        raise builtins.ExceptionGroup("Fork client cleanup failed", failures)
 
 
 class AsyncSandbox:
@@ -92,6 +109,83 @@ class AsyncSandbox:
                 ) from cleanup_error
             raise
         return sandbox
+
+    @classmethod
+    async def _class_fork(cls, sandbox_id, timeout=None, count=None, **opts):
+        from e2b import AsyncSandbox as NativeSandbox
+        from e2b import SandboxNotFoundException
+
+        from .e2b import Sandbox
+
+        # Lookup is read-only: unlike connect, it never updates the parent's deadline.
+        found, _ = await _call(Sandbox._lookup, sandbox_id, dict(opts))
+        if found is None:
+            raise SandboxNotFoundException("Sandbox was not found")
+        provider, vm = found
+        if provider == "e2b":
+            from ._compat import pop_arker_config
+
+            pop_arker_config(opts)
+            values = await NativeSandbox.fork(sandbox_id, timeout=timeout, count=count, **opts)
+            return [value if isinstance(value, Exception) else cls(Sandbox(native=value)) for value in values]
+        from ._compat import pop_arker_config
+
+        pop_arker_config(opts)
+        return await cls(Sandbox(vm=vm)).fork(timeout=timeout, count=count, **opts)
+
+    @_InstanceOrClassMethod
+    async def fork(self, timeout=None, count=None, **opts):
+        from ._compat_e2b_bootstrap import bootstrap_envd
+        from ._compat_e2b_fork import _join_cleanup, fork_arker_async
+        from ._compat_e2b_urls import prepare_file_urls
+        from .e2b import Sandbox
+
+        if self._sandbox._native is not None:
+            values = await self._sandbox._native.fork(timeout=timeout, count=count, **opts)
+            return [value if isinstance(value, Exception) else type(self)(Sandbox(native=value)) for value in values]
+
+        def prepare(vm):
+            sandbox = Sandbox(vm=vm)
+            sandbox._prepared_descriptor, _ = bootstrap_envd(vm)
+            prepare_file_urls(vm)
+            return sandbox
+
+        values = await fork_arker_async(self._sandbox._vm, prepare, timeout=timeout, count=count, **opts)
+        results = []
+        handles = []
+        try:
+            for value in values:
+                if isinstance(value, Exception):
+                    results.append(value)
+                    continue
+                sandbox = type(self)(value)
+                handles.append(sandbox)
+                try:
+                    await sandbox._prepare_data_plane()
+                except Exception as error:
+                    try:
+                        await _dispose_fork_clients([sandbox])
+                    except Exception as cleanup:
+                        error = builtins.ExceptionGroup(
+                            "Fork client initialization and cleanup failed", [error, cleanup]
+                        )
+                    results.append(error)
+                else:
+                    results.append(sandbox)
+            return results
+        except BaseException as error:
+            # Include values whose async client has not been constructed yet.
+            by_vm = {sandbox._sandbox._vm.id: sandbox for sandbox in handles}
+            all_handles = [
+                by_vm.get(value._vm.id) or type(self)(value) for value in values if not isinstance(value, Exception)
+            ]
+            try:
+                await _join_cleanup(asyncio.create_task(_dispose_fork_clients(all_handles)))
+            except Exception as cleanup:
+                raise builtins.BaseExceptionGroup(
+                    "Fork client initialization cleanup failed", [error, cleanup]
+                ) from None
+            raise
 
     @classmethod
     async def _class_connect(cls, sandbox_id: str, **kwargs):

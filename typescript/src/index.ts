@@ -716,7 +716,7 @@ export class Arker {
   }
 
   /** @internal */
-  async _fork(options: ForkRequest & ForkIdempotency, baseUrl: string): Promise<VM> {
+  async _fork(options: ForkRequest & ForkIdempotency, baseUrl: string, transport?: RequestTransportOptions): Promise<VM> {
     // A header, not a contract field: strip it before the body is built, or
     // the server's validator rejects the unknown key and every fork 400s.
     //
@@ -736,6 +736,8 @@ export class Arker {
       baseUrl,
       key ? { "Idempotency-Key": key } : undefined,
       request.queueing_timeout,
+      undefined,
+      transport,
     );
     return new VM(this, wire.vm_id, baseUrl, wire);
   }
@@ -1071,10 +1073,11 @@ export class VM {
   }
 
   /** Fork this VM and return its child. */
-  async fork(options: Partial<ForkRequest> & ForkIdempotency = {}): Promise<VM> {
+  async fork(options: Partial<ForkRequest> & ForkIdempotency = {}, transport?: RequestTransportOptions): Promise<VM> {
     return this._client._fork(
       { ...options, source_vm_id: this.id } as ForkRequest,
       this.baseUrl,
+      transport,
     );
   }
 
