@@ -2042,7 +2042,7 @@
             "$ref": "#/components/responses/NotFoundError"
           },
           "409": {
-            "$ref": "#/components/responses/InvalidStateError"
+            "$ref": "#/components/responses/ConflictOrInvalidStateError"
           },
           "422": {
             "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
@@ -2323,10 +2323,10 @@
           "Filesystems"
         ],
         "summary": "Delete a filesystem",
-        "description": "Delete a shared filesystem after all VM mounts have been removed.",
+        "description": "Delete a shared filesystem. By default deletion is destructive, including existing mounts. Set only_if_unmounted=true for an atomic global check; namespaces without complete reference accounting, including legacy namespaces, fail closed with 422. Mounted namespaces or unresolved runtime/checkpoint references return 409.",
         "responses": {
           "200": {
-            "description": "Delete result. The filesystem must not be mounted by any VM (no remaining `Mount` referencing it).",
+            "description": "Delete result.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2361,8 +2361,22 @@
           },
           "504": {
             "$ref": "#/components/responses/GatewayTimeoutError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ConflictError"
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "only_if_unmounted",
+            "in": "query",
+            "required": false,
+            "description": "Atomically refuse deletion while any global attachment or unresolved runtime/checkpoint reference exists. Legacy namespaces without global accounting return 422. Omitted or false preserves destructive deletion.",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ]
       }
     },
     "/v1/pools": {
@@ -7769,6 +7783,13 @@
             "type": "string",
             "description": "VM-side path where the filesystem is mounted."
           },
+          "subpath": {
+            "description": "Canonical relative path within the filesystem, or null when its root is mounted.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "region": {
             "description": "Region containing the resource or activity.",
             "type": [
@@ -7848,6 +7869,11 @@
           "path": {
             "description": "Path inside the VM.",
             "type": "string"
+          },
+          "subpath": {
+            "description": "Canonical relative path within the filesystem to mount. Omit to mount the filesystem root.",
+            "type": "string",
+            "maxLength": 512
           }
         }
       },

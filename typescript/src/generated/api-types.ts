@@ -536,7 +536,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a filesystem
-         * @description Delete a shared filesystem after all VM mounts have been removed.
+         * @description Delete a shared filesystem. By default deletion is destructive, including existing mounts. Set only_if_unmounted=true for an atomic global check; namespaces without complete reference accounting, including legacy namespaces, fail closed with 422. Mounted namespaces or unresolved runtime/checkpoint references return 409.
          */
         delete: operations["deleteFilesystem"];
         options?: never;
@@ -1690,6 +1690,8 @@ export interface components {
             filesystem_id: string;
             /** @description VM-side path where the filesystem is mounted. */
             path: string;
+            /** @description Canonical relative path within the filesystem, or null when its root is mounted. */
+            subpath?: string | null;
             /** @description Region containing the resource or activity. */
             region?: string | null;
             /**
@@ -1721,6 +1723,8 @@ export interface components {
             filesystem_id: string;
             /** @description Path inside the VM. */
             path?: string;
+            /** @description Canonical relative path within the filesystem to mount. Omit to mount the filesystem root. */
+            subpath?: string;
         };
         SyncReadOperationRequest: {
             /**
@@ -5492,7 +5496,7 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
-            409: components["responses"]["InvalidStateError"];
+            409: components["responses"]["ConflictOrInvalidStateError"];
             422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
@@ -5644,7 +5648,10 @@ export interface operations {
     };
     deleteFilesystem: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Atomically refuse deletion while any global attachment or unresolved runtime/checkpoint reference exists. Legacy namespaces without global accounting return 422. Omitted or false preserves destructive deletion. */
+                only_if_unmounted?: boolean;
+            };
             header?: never;
             path: {
                 /** @description Filesystem identifier. */
@@ -5654,7 +5661,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Delete result. The filesystem must not be mounted by any VM (no remaining `Mount` referencing it). */
+            /** @description Delete result. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5667,6 +5674,7 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            409: components["responses"]["ConflictError"];
             422: components["responses"]["UnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];

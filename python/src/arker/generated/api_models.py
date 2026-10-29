@@ -267,6 +267,7 @@ class Mount:
     vm_id: str
     filesystem_id: str
     path: str
+    subpath: str | None = None
     region: str | None = None
     state: Literal['attaching', 'mounted', 'failed'] | None = None
     state_detail: str | None = None
@@ -287,6 +288,7 @@ class DeleteMountResponse:
 class MountCreateRequest:
     filesystem_id: str
     path: str | None = None
+    subpath: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1984,6 +1986,7 @@ class GetFilesystemParameters:
 @dataclass(frozen=True)
 class DeleteFilesystemParameters:
     filesystem_id: str
+    only_if_unmounted: bool | None = None
 
 
 @dataclass(frozen=True)
