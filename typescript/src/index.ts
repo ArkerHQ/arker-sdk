@@ -1694,9 +1694,9 @@ export class VM {
   }
 
   /**
-   * Update this VM's description, resources, pool, SSH keys, or network
-   * policy, or make it immutable, via `PATCH /v1/vms/{id}`. Returns the
-   * updated `Vm`.
+   * Update this VM's description, resources, SSH keys, or network policy,
+   * or make it immutable, via `PATCH /v1/vms/{id}`. Returns the updated
+   * `Vm`. A VM's pool is set when it is forked and never changes.
    *
    * Accepts either a `PatchVmRequest` or flat resource fields
    * (`{ vcpu, memory_mib, disk_mib, vgpu }`), which are folded into
@@ -1716,7 +1716,7 @@ export class VM {
     request:
       | PatchVmRequest
       | (ResourcesInput &
-          Pick<PatchVmRequest, "description" | "ssh_public_keys" | "policies" | "pool_id" | "pool_name" | "immutable">),
+          Pick<PatchVmRequest, "description" | "ssh_public_keys" | "policies" | "immutable">),
   ): Promise<Vm> {
     const r = request as PatchVmRequest &
       ResourcesInput & { resources?: ResourcesInput | null };
@@ -1727,8 +1727,6 @@ export class VM {
         : { vcpu: r.vcpu, memory_mib: r.memory_mib, disk_mib: r.disk_mib, vgpu: r.vgpu };
     const body: PatchVmRequest = {
       description: r.description,
-      pool_id: r.pool_id,
-      pool_name: r.pool_name,
       resources,
       ssh_public_keys: r.ssh_public_keys,
       policies: r.policies && withoutReadOnlyPolicyFields(r.policies),

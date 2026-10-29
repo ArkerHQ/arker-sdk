@@ -831,6 +831,7 @@ class VM:
         time_to_background: int | None = None,
         queueing_timeout: int | None = None,
         end_symbol: str | None = None,
+        end_after_all_subprocesses: bool | None = None,
         policies: PolicyDoc | dict[str, Any] | None = None,
         signal: str | None = None,
         idempotency_key: str | None = None,
@@ -889,6 +890,17 @@ class VM:
         REPL commands. If it is unexpected, inspect ``stdout``, exit the active
         interpreter, pass ``end_symbol="none"``, or use another session.
 
+        ``end_after_all_subprocesses=True`` ends the run only after every
+        process ``command`` started has exited, including backgrounded and
+        detached ones (``cmd &``, ``nohup``, ``setsid``); processes an earlier
+        run left on the session are not waited on. ``exit_code`` stays the
+        foreground command's, and ``timeout`` still applies. The server refuses
+        it with ``signal`` or an ``end_symbol``, on guests that cannot track
+        the run's processes, and on a session that already has background
+        processes: a synchronous call raises :class:`ArkerError` with code
+        ``"unsupported_operation"``; a backgrounded run ends ``failed`` with
+        the reason in ``fail_reason``.
+
         ``stdout``/``stderr`` are decoded text; ``stdout_bytes``/``stderr_bytes``
         carry the raw bytes for output that is not valid UTF-8 (the service
         base64-encodes those and this SDK decodes them for you). ``stderr`` is
@@ -909,6 +921,7 @@ class VM:
             time_to_background=time_to_background,
             queueing_timeout=queueing_timeout,
             end_symbol=end_symbol,
+            end_after_all_subprocesses=end_after_all_subprocesses,
             signal=signal,
             policies=policies,
         )
@@ -983,14 +996,13 @@ class VM:
         disk_mib: int | None = None,
         vgpu: float | None = None,
         description: str | _UnsetType | None = _UNSET,
-        pool_id: str | None = None,
-        pool_name: str | None = None,
         ssh_public_keys: list[str] | None = None,
         policies: PolicyUpdate | PolicyDoc | dict[str, Any] | None = None,
         immutable: bool | None = None,
     ) -> Vm:
-        """Update this VM's description, resources, pool, SSH keys, or network
-        policy, or make it immutable, via ``PATCH /v1/vms/{id}``.
+        """Update this VM's description, resources, SSH keys, or network
+        policy, or make it immutable, via ``PATCH /v1/vms/{id}``. A VM's pool
+        is set when it is forked and never changes.
 
         Pass an empty ``ssh_public_keys`` list to remove all authorized keys.
 
@@ -1028,8 +1040,6 @@ class VM:
         if description is _UNSET:
             body = PatchVmRequest(
                 resources=resources,
-                pool_id=pool_id,
-                pool_name=pool_name,
                 ssh_public_keys=ssh_public_keys,
                 policies=_policy_update(policies),
                 immutable=immutable,
@@ -1038,8 +1048,6 @@ class VM:
             body = {
                 "description": _EXPLICIT_NULL if description is None else description,
                 "resources": resources,
-                "pool_id": pool_id,
-                "pool_name": pool_name,
                 "ssh_public_keys": ssh_public_keys,
                 "policies": _policy_update(policies),
                 "immutable": immutable,

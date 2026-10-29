@@ -45,6 +45,13 @@ type RunRequest struct {
 	Signal    string        `json:"signal,omitempty"`
 	Policies  *PolicyUpdate `json:"policies,omitempty"`
 
+	// EndAfterAllSubprocesses ends the run only after every process Command
+	// started has exited, backgrounded and detached ones included. The server
+	// refuses it with Signal or EndSymbol, and on a session that already has
+	// background processes: a synchronous call fails with code
+	// "unsupported_operation", a backgrounded run ends failed with FailReason.
+	EndAfterAllSubprocesses *bool `json:"end_after_all_subprocesses,omitempty"`
+
 	// IdempotencyKey asks the server to deduplicate the command. Unlike Fork it
 	// is not auto-generated: a run is usually cheap to repeat and only the
 	// caller knows whether theirs is. It does not make an ambiguous network

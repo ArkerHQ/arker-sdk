@@ -1076,9 +1076,13 @@ class QuotaExceeded(ErrorMetadata):
     details: QuotaExceededDetails = field(kw_only=True)
 
 
-@dataclass(frozen=True)
-class PaymentRequired(ErrorMetadata):
-    code: Literal['payment_required'] = field(kw_only=True)
+PaymentRequiredReason: TypeAlias = Literal[
+    'no_payment_method',
+    'credit_exhausted',
+    'payment_failed',
+    'billing_review',
+    'account_blocked',
+]
 
 
 @dataclass(frozen=True)
@@ -1189,11 +1193,6 @@ class SyncExpiredError(ErrorExecutionContext):
 @dataclass(frozen=True)
 class IdempotencyConflictErrorResponse:
     error: IdempotencyConflict
-
-
-@dataclass(frozen=True)
-class PaymentRequiredErrorResponse:
-    error: PaymentRequired
 
 
 @dataclass(frozen=True)
@@ -1973,39 +1972,6 @@ class RevokeApiKeyParameters:
     api_key_id: str
 
 
-ErrorBody: TypeAlias = (
-    BadRequest
-    | InsufficientResources
-    | Unauthorized
-    | Forbidden
-    | NotFound
-    | Conflict
-    | ResourceBusy
-    | InvalidState
-    | AlreadyExists
-    | IdempotencyConflict
-    | Expired
-    | PayloadTooLarge
-    | MethodNotAllowed
-    | UnsupportedOperation
-    | Unrecoverable
-    | CapacityUnavailable
-    | Unavailable
-    | Internal
-    | RateLimited
-    | QuotaExceeded
-    | PaymentRequired
-    | ActionRequired
-    | OperationFailed
-    | GatewayTimeout
-)
-
-
-@dataclass(frozen=True)
-class ErrorResponse:
-    error: ErrorBody
-
-
 @dataclass(frozen=True)
 class PolicyAction1:
     rewrite: Rewrite | None = None
@@ -2086,6 +2052,12 @@ class CompatiblePlatform:
     default_memory_mib: int | None = None
     default_disk_mib: int | None = None
     gpu: PlatformGpuLimits | None = None
+
+
+@dataclass(frozen=True)
+class PaymentRequiredDetails:
+    reason: PaymentRequiredReason | None = None
+    billing_url: str | None = None
 
 
 HealthUnavailableResponse: TypeAlias = (
@@ -2225,6 +2197,17 @@ class SyncCommitWriteResult:
 
 
 @dataclass(frozen=True)
+class PaymentRequired(ErrorMetadata):
+    code: Literal['payment_required'] = field(kw_only=True)
+    details: PaymentRequiredDetails | None = None
+
+
+@dataclass(frozen=True)
+class PaymentRequiredErrorResponse:
+    error: PaymentRequired
+
+
+@dataclass(frozen=True)
 class PolicyUpdate:
     rules: dict[str, PolicyRule | ScheduleRule | LifecycleRule | None] | None = None
     secrets: dict[str, str | None] | None = None
@@ -2232,6 +2215,39 @@ class PolicyUpdate:
 
 
 PolicyRules: TypeAlias = dict[str, PolicyRule | ScheduleRule | LifecycleRule]
+
+
+ErrorBody: TypeAlias = (
+    BadRequest
+    | InsufficientResources
+    | Unauthorized
+    | Forbidden
+    | NotFound
+    | Conflict
+    | ResourceBusy
+    | InvalidState
+    | AlreadyExists
+    | IdempotencyConflict
+    | Expired
+    | PayloadTooLarge
+    | MethodNotAllowed
+    | UnsupportedOperation
+    | Unrecoverable
+    | CapacityUnavailable
+    | Unavailable
+    | Internal
+    | RateLimited
+    | QuotaExceeded
+    | PaymentRequired
+    | ActionRequired
+    | OperationFailed
+    | GatewayTimeout
+)
+
+
+@dataclass(frozen=True)
+class ErrorResponse:
+    error: ErrorBody
 
 
 @dataclass(frozen=True)
@@ -2451,6 +2467,7 @@ class RunRequest:
     background: bool | None = None
     queueing_timeout: int | None = None
     end_symbol: str | None = 'auto'
+    end_after_all_subprocesses: bool | None = None
     signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
     policies: PolicyUpdate | None = None
 
@@ -2467,8 +2484,6 @@ class PatchVmRequest:
     resources: ResourcesInput | None = None
     ssh_public_keys: SshKeysUpdate | list[str] | None = None
     policies: PolicyUpdate | None = None
-    pool_id: str | None = None
-    pool_name: str | None = None
 
 
 @dataclass(frozen=True)

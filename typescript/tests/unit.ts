@@ -343,15 +343,12 @@ async function testRemovedRunNetworkInputsFailBeforeRequests(): Promise<void> {
   assert.equal(fetch.calls.length, 0);
 }
 
-async function testUpdatePreservesPoolSelector(): Promise<void> {
-  for (const selector of [{ pool_name: "main" }, { pool_id: "22222222-2222-4222-8222-222222222222" }]) {
-    for (const resources of [false, true]) {
-      const fetch = new FakeFetch();
-      fetch.addJson((method, url) => method === "PATCH" && url.endsWith("/v1/vms/vm_1"), 200, { vm_id: "vm_1" });
-      await client(fetch).vm("vm_1").update({ ...selector, ...(resources ? { vcpu: 2 } : {}) });
-      assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { ...selector, ...(resources ? { resources: { vcpu: 2 } } : {}) });
-    }
-  }
+async function testUpdateSendsNoPool(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson((method, url) => method === "PATCH" && url.endsWith("/v1/vms/vm_1"), 200, { vm_id: "vm_1" });
+  // @ts-expect-error A VM's pool is set when it is forked and never changes.
+  await client(fetch).vm("vm_1").update({ pool_id: "22222222-2222-4222-8222-222222222222", vcpu: 2 });
+  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { resources: { vcpu: 2 } });
 }
 
 async function testUpdateSendsTopLevelSshPublicKeys(): Promise<void> {
@@ -567,6 +564,24 @@ async function testExplicitZeroReturnsAckWithoutPolling(): Promise<void> {
   // Only the POST - no polling.
   assert.equal(fetch.calls.length, 1);
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { command: "sleep 999", time_to_background: 0 });
+}
+
+async function testRunSendsEndAfterAllSubprocessesOnlyWhenSet(): Promise<void> {
+  for (const [options, expected] of [
+    [{ end_after_all_subprocesses: true }, { command: "true", end_after_all_subprocesses: true }],
+    [{}, { command: "true" }],
+  ] as const) {
+    const fetch = new FakeFetch();
+    fetch.addJson(
+      (method, url) => method === "POST" && url === "https://test.invalid/api/v1/vms/vm_1/runs",
+      200,
+      { stdout: "", stdout_encoding: "utf-8", stderr: "", stderr_encoding: "utf-8", exit_code: 0 },
+    );
+
+    await client(fetch).vm("vm_1").run("true", options);
+
+    assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), expected);
+  }
 }
 
 async function testConfiguredPlacementRoutesNamedSourcesToMainEndpoint(): Promise<void> {
@@ -1325,7 +1340,7 @@ await testForkFromDockerfileBuildsFromItsBaseImage();
 await testForkOmitsSourceOrgWhenNotExplicit();
 await testForkOmitsUnconfiguredCapabilities();
 await testRemovedRunNetworkInputsFailBeforeRequests();
-await testUpdatePreservesPoolSelector();
+await testUpdateSendsNoPool();
 await testUpdateSendsTopLevelSshPublicKeys();
 await testUpdateSendsPolicies();
 await testNestedErrorWithoutOkStillParses();
@@ -1333,6 +1348,7 @@ await testCompletedRunDecodesOutput();
 await testSyncRunPollsBackgroundedRunToCompletion();
 await testRunPollBudgetIsUnboundedWithoutACallerTimeout();
 await testExplicitZeroReturnsAckWithoutPolling();
+await testRunSendsEndAfterAllSubprocessesOnlyWhenSet();
 await testConfiguredPlacementRoutesNamedSourcesToMainEndpoint();
 testArbitraryProviderBuildsEndpoint();
 testPlacementRequiresSeparateProviderAndRegion();

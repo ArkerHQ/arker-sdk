@@ -4126,7 +4126,11 @@
                 "value": {
                   "error": {
                     "code": "payment_required",
-                    "message": "Complete billing setup or resolve payment before starting compute.",
+                    "details": {
+                      "reason": "credit_exhausted",
+                      "billing_url": "https://arker.ai/console/settings/billing"
+                    },
+                    "message": "Your credit is used up. Add a payment method to keep using compute. Manage billing at https://arker.ai/console/settings/billing",
                     "timestamp": "2026-09-11T12:00:00Z",
                     "request_id": "example-request-id",
                     "request": {
@@ -5945,7 +5949,7 @@
           "pool_id": {
             "type": "string",
             "format": "uuid",
-            "description": "The pool the VM belongs to. Absent when the VM is in no pool."
+            "description": "The pool the VM belongs to, set when the VM is created and never changed. Absent when the VM is in no pool."
           }
         }
       },
@@ -6106,6 +6110,10 @@
               "null"
             ],
             "default": "auto"
+          },
+          "end_after_all_subprocesses": {
+            "description": "When false (default), the run ends when its foreground command or interactive turn completes; processes it deliberately leaves running remain owned by the session. When true, the run remains active after the foreground command exits and ends only after every process started by this run has exited. The foreground command's exit code remains the run's exit code. Timeout and cancellation continue to apply while waiting. This option is rejected when an interactive `end_symbol` is effective or when the selected runtime or guest cannot guarantee process attribution. A brush run creates no subprocesses, so the condition is already satisfied.",
+            "type": "boolean"
           },
           "signal": {
             "type": [
@@ -6281,7 +6289,7 @@
               "string",
               "null"
             ],
-            "description": "Client-safe platform failure explanation when `state` is `failed`. Distinct from `stderr`, which is the program's own error output. Null for runs that ran to completion."
+            "description": "Client-safe explanation when `state` is `failed`: the platform became unavailable before the command finished, or the run was refused, such as `end_after_all_subprocesses` on a session that already has background processes. Distinct from `stderr`, which is the program's own error output. Null for runs that ran to completion."
           },
           "stdout": {
             "description": "Standard output produced by the command. Available while the run is still going: poll this run and `stdout` grows as the command writes, so a long task can be followed live rather than only read at the end.",
@@ -7001,7 +7009,15 @@
           {
             "$ref": "#/components/schemas/SyncManifestOperationRequest"
           }
-        ]
+        ],
+        "discriminator": {
+          "propertyName": "op",
+          "mapping": {
+            "read": "#/components/schemas/SyncReadOperationRequest",
+            "write": "#/components/schemas/SyncWriteOperationRequest",
+            "manifest": "#/components/schemas/SyncManifestOperationRequest"
+          }
+        }
       },
       "SyncResponse": {
         "oneOf": [
@@ -7819,26 +7835,7 @@
                 "type": "null"
               }
             ]
-          },
-          "pool_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "Move the VM to another `managed` pool of the organization, or null to take it out of its pool. A VM cannot move into or out of a `byoc` or `self_hosted` pool (unsupported_operation). Mutually exclusive with pool_name. Omit both fields to keep the current pool."
-          },
-          "pool_name": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Move the VM to the `managed` pool with this name in the VM's region. Names are case-insensitive. Mutually exclusive with pool_id; otherwise the same as pool_id."
           }
-        },
-        "not": {
-          "required": [
-            "pool_id",
-            "pool_name"
-          ]
         }
       },
       "CompatiblePlatform": {
@@ -10056,6 +10053,9 @@
               "code": {
                 "type": "string",
                 "const": "payment_required"
+              },
+              "details": {
+                "$ref": "#/components/schemas/PaymentRequiredDetails"
               }
             },
             "required": [
@@ -10064,6 +10064,32 @@
           }
         ],
         "unevaluatedProperties": false
+      },
+      "PaymentRequiredDetails": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/PaymentRequiredReason"
+          },
+          "billing_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Console page where the organization's billing is managed."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Why compute was refused and where to resolve it. A field is absent when the server does not know it."
+      },
+      "PaymentRequiredReason": {
+        "type": "string",
+        "enum": [
+          "no_payment_method",
+          "credit_exhausted",
+          "payment_failed",
+          "billing_review",
+          "account_blocked"
+        ],
+        "description": "no_payment_method: no payment method and no credit. credit_exhausted: no payment method and the credit has run out. payment_failed: a payment did not go through. billing_review: billing is under review; contact support. account_blocked: compute is blocked for this account; contact support. Clients must tolerate values added later."
       },
       "ActionRequired": {
         "description": "A specific account action must occur before this operation. Complete the named action, such as accepting legal terms or converting the billing plan.",
@@ -11239,7 +11265,16 @@
                 {
                   "type": "null"
                 }
-              ]
+              ],
+              "discriminator": {
+                "propertyName": "type",
+                "mapping": {
+                  "outbound": "#/components/schemas/PolicyRule",
+                  "inbound": "#/components/schemas/PolicyRule",
+                  "schedule": "#/components/schemas/ScheduleRule",
+                  "lifecycle": "#/components/schemas/LifecycleRule"
+                }
+              }
             },
             "description": "Rules to write, keyed by rule id. A rule replaces any rule with the same id; `null` removes the rule with that id. Rules not named here are kept. The resulting policy must not give two rules of one `type` the same priority."
           },

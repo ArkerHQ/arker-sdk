@@ -1148,7 +1148,7 @@ export interface components {
             compatible_platforms?: components["schemas"]["CompatiblePlatform"][] | null;
             /**
              * Format: uuid
-             * @description The pool the VM belongs to. Absent when the VM is in no pool.
+             * @description The pool the VM belongs to, set when the VM is created and never changed. Absent when the VM is in no pool.
              */
             pool_id?: string;
         };
@@ -1215,6 +1215,8 @@ export interface components {
              * @default auto
              */
             end_symbol?: string | null;
+            /** @description When false (default), the run ends when its foreground command or interactive turn completes; processes it deliberately leaves running remain owned by the session. When true, the run remains active after the foreground command exits and ends only after every process started by this run has exited. The foreground command's exit code remains the run's exit code. Timeout and cancellation continue to apply while waiting. This option is rejected when an interactive `end_symbol` is effective or when the selected runtime or guest cannot guarantee process attribution. A brush run creates no subprocesses, so the condition is already satisfied. */
+            end_after_all_subprocesses?: boolean;
             /**
              * @description Deliver a signal to the selected persistent session's foreground process group: the run holding the session or, with no run in flight, an interpreter waiting between turns or an attached terminal's foreground job. When set, the service does not execute `command`; it returns a completed acknowledgement with no run id. When nothing is running in the session, the request fails with 404 and nothing is signalled. A run made only of shell builtins starts no process of its own, so it may have nothing to signal; the request then fails with 404 as well. Use `session_id` or `session_idx` to select the session. A signal is not a run and is not queued; a VM that is not running answers `409 invalid_state`.
              * @enum {string|null}
@@ -1267,7 +1269,7 @@ export interface components {
             completed_at?: string | null;
             /** @description Process exit code. Null when no process completed. */
             exit_code: number | null;
-            /** @description Client-safe platform failure explanation when `state` is `failed`. Distinct from `stderr`, which is the program's own error output. Null for runs that ran to completion. */
+            /** @description Client-safe explanation when `state` is `failed`: the platform became unavailable before the command finished, or the run was refused, such as `end_after_all_subprocesses` on a session that already has background processes. Distinct from `stderr`, which is the program's own error output. Null for runs that ran to completion. */
             fail_reason?: string | null;
             /** @description Standard output produced by the command. Available while the run is still going: poll this run and `stdout` grows as the command writes, so a long task can be followed live rather than only read at the end. */
             stdout: string;
@@ -1475,8 +1477,8 @@ export interface components {
         };
         SyncReadOperationRequest: {
             /**
-             * @description Sync operation performed.
-             * @constant
+             * @description Sync operation performed. (enum property replaced by openapi-typescript)
+             * @enum {string}
              */
             op: "read";
             /** @description Path inside the VM. */
@@ -1484,8 +1486,8 @@ export interface components {
         };
         SyncWriteOperationRequest: {
             /**
-             * @description Sync operation performed.
-             * @constant
+             * @description Sync operation performed. (enum property replaced by openapi-typescript)
+             * @enum {string}
              */
             op: "write";
             /** @description Files to write in this sync operation. */
@@ -1493,8 +1495,8 @@ export interface components {
         };
         SyncManifestOperationRequest: {
             /**
-             * @description Sync operation performed.
-             * @constant
+             * @description Sync operation performed. (enum property replaced by openapi-typescript)
+             * @enum {string}
              */
             op: "manifest";
             /** @description Non-root directory inside the VM to list recursively. */
@@ -1770,13 +1772,6 @@ export interface components {
             ssh_public_keys?: components["schemas"]["SshKeysUpdate"] | string[];
             /** @description A change to the VM's network policy. Rules and secrets named are written or removed; the rest are kept, so concurrent changes to different rules do not overwrite each other. Omit it to leave the policy unchanged. If the policy cannot be stored and applied, the request fails. Changing only `policies` is allowed while the organization's billing is restricted. */
             policies?: components["schemas"]["PolicyUpdate"] | null;
-            /**
-             * Format: uuid
-             * @description Move the VM to another `managed` pool of the organization, or null to take it out of its pool. A VM cannot move into or out of a `byoc` or `self_hosted` pool (unsupported_operation). Mutually exclusive with pool_name. Omit both fields to keep the current pool.
-             */
-            pool_id?: string | null;
-            /** @description Move the VM to the `managed` pool with this name in the VM's region. Names are case-insensitive. Mutually exclusive with pool_id; otherwise the same as pool_id. */
-            pool_name?: string;
         };
         /** @description One platform this source can be forked onto, with the resource limits that apply there. This is the authoritative per-platform record: when an entry carries bounds they win over the flat `min_*`/`max_*` fields on the VM, which are a single-platform convenience projection of the same data. CPU, memory, and disk limits come from the source VM; GPU limits come from the platform catalog. */
         CompatiblePlatform: {
@@ -2526,6 +2521,7 @@ export interface components {
         PaymentRequired: components["schemas"]["ErrorMetadata"] & {
             /** @constant */
             code: "payment_required";
+            details?: components["schemas"]["PaymentRequiredDetails"];
         } & {
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -2533,6 +2529,20 @@ export interface components {
              */
             code: "payment_required";
         };
+        /** @description Why compute was refused and where to resolve it. A field is absent when the server does not know it. */
+        PaymentRequiredDetails: {
+            reason?: components["schemas"]["PaymentRequiredReason"];
+            /**
+             * Format: uri
+             * @description Console page where the organization's billing is managed.
+             */
+            billing_url?: string;
+        };
+        /**
+         * @description no_payment_method: no payment method and no credit. credit_exhausted: no payment method and the credit has run out. payment_failed: a payment did not go through. billing_review: billing is under review; contact support. account_blocked: compute is blocked for this account; contact support. Clients must tolerate values added later.
+         * @enum {string}
+         */
+        PaymentRequiredReason: "no_payment_method" | "credit_exhausted" | "payment_failed" | "billing_review" | "account_blocked";
         /** @description A specific account action must occur before this operation. Complete the named action, such as accepting legal terms or converting the billing plan. */
         ActionRequired: components["schemas"]["ErrorMetadata"] & {
             /** @constant */
@@ -2872,7 +2882,7 @@ export interface components {
         /** @description One network policy rule, keyed by its id in a policy's `rules`. `match` ANDs its present fields (absent ⇒ catch-all). Rules are evaluated highest `priority` first, and the first rule that matches decides. */
         PolicyRule: {
             /**
-             * @description Traffic direction: `outbound` controls connections initiated by the VM; `inbound` exposes a guest port. Unknown values are rejected.
+             * @description Traffic direction: `outbound` controls connections initiated by the VM; `inbound` exposes a guest port. Unknown values are rejected. (enum property replaced by openapi-typescript)
              * @enum {string}
              */
             type: "outbound" | "inbound";
@@ -2946,7 +2956,7 @@ export interface components {
         /** @description A rule that acts on the VM itself when its clock fires. It names exactly one clock: `at` a time, `after_created`, or `after_last_running_start`. It has no `priority` and does not affect traffic. */
         ScheduleRule: {
             /**
-             * @description `schedule`.
+             * @description `schedule`. (enum property replaced by openapi-typescript)
              * @enum {string}
              */
             type: "schedule";
@@ -2974,7 +2984,7 @@ export interface components {
          */
         LifecycleRule: {
             /**
-             * @description `lifecycle`.
+             * @description `lifecycle`. (enum property replaced by openapi-typescript)
              * @enum {string}
              */
             type: "lifecycle";

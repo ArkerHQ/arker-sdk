@@ -1038,6 +1038,37 @@ def test_run_sends_policies() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({"end_after_all_subprocesses": True}, {"end_after_all_subprocesses": True}),
+        ({}, {}),
+    ],
+    ids=["set", "unset"],
+)
+def test_run_sends_end_after_all_subprocesses_only_when_set(kwargs, expected) -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "POST" and url.endswith("/v1/vms/vm_1/runs"),
+        200,
+        {
+            "stdout": "fg\nchild\n",
+            "stdout_encoding": "utf-8",
+            "stderr": "",
+            "stderr_encoding": "utf-8",
+            "exit_code": 0,
+        },
+    )
+
+    with use_transport(t):
+        client().vm("vm_1").run("(sleep 2; echo child) & echo fg", **kwargs)
+
+    assert json.loads(t.calls[0]["body"]) == {
+        "command": "(sleep 2; echo child) & echo fg",
+        **expected,
+    }
+
+
 def test_resize_patches_vm_resources() -> None:
     t = FakeTransport()
     t.add_json(
@@ -3031,13 +3062,11 @@ def test_generated_fork_key_fits_the_server_limit() -> None:
 
 
 @pytest.mark.parametrize("selector", [{"pool_name": "main"}, {"pool_id": "22222222-2222-4222-8222-222222222222"}])
-@pytest.mark.parametrize("description", [{}, {"description": "runner"}])
-def test_update_preserves_pool_selector(selector, description) -> None:
+def test_update_takes_no_pool(selector) -> None:
     t = FakeTransport()
-    t.add_json(lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"), 200, _fork_response("vm_1"))
-    with use_transport(t):
-        client().vm("vm_1").update(**selector, **description)
-    assert json.loads(t.calls[0]["body"]) == {**selector, **description}
+    with use_transport(t), pytest.raises(TypeError):
+        client().vm("vm_1").update(**selector)
+    assert t.calls == []
 
 
 @pytest.mark.parametrize("pool_type", ["byoc", "self_hosted"])
