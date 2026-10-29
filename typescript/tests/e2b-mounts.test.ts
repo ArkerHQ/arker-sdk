@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFile } from "node:fs/promises";
 import { Volume as NativeVolume, type SandboxOpts } from "e2b";
 import { ArkerVolume, Volumes } from "../src/compat/e2b-mounts.js";
+import mountReadySource from "../src/compat/e2b-mount-ready.generated.js";
+
+test("generated mount readiness matches the canonical Python source", async () => {
+  assert.equal(mountReadySource, await readFile("../python/src/arker/_guest_e2b_mount_ready.py", "utf8"));
+});
 
 function fixture() {
   const calls: unknown[] = [];

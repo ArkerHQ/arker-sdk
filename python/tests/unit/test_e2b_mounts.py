@@ -512,17 +512,6 @@ def test_weighted_volume_create_uses_policy_without_retrying_remote_failure(
     native.assert_not_called()
 
 
-def test_mount_readiness_generated_source_matches_python():
-    import json
-    from pathlib import Path
-
-    from arker._compat_e2b_mounts import _MOUNT_READY
-
-    root = Path(__file__).resolve().parents[3]
-    generated = (root / "typescript/src/compat/e2b-mount-ready.generated.ts").read_text()
-    assert json.loads(generated.split("export default ", 1)[1].strip().removesuffix(";")) == _MOUNT_READY
-
-
 def test_volume_list_uses_configured_backends_and_propagates_errors(client, tmp_path, configure_router, monkeypatch):
     import arker._compat_e2b_mounts as mounts
     import arker.e2b as shim
