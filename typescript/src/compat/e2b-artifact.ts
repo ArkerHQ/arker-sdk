@@ -12,6 +12,11 @@ export async function stageEnvdArtifact(vm: Pick<VM, "sync" | "run">, rootPath: 
       !/^https:\/\/storage\.googleapis\.com\/e2b-artifact-binaries\/envd\/v0\.10\.2\/(arm64\/)?envd$/.test(artifact.url)) {
     throw new Error("Invalid pinned envd artifact");
   }
+  return stagePinnedArtifact(vm, rootPath, artifact, cacheDirectory);
+}
+
+export async function stagePinnedArtifact(vm: Pick<VM, "sync" | "run">, rootPath: string,
+  artifact: EnvdArtifact, cacheDirectory: string): Promise<string> {
   await mkdir(cacheDirectory, { recursive: true, mode: 0o700 });
   const cached = join(cacheDirectory, artifact.sha256);
   let content: Uint8Array;

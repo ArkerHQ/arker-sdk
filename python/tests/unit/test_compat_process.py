@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import concurrent.futures
 import hashlib
@@ -358,27 +357,6 @@ def test_blaxel_signal_exit_keeps_explicit_positive_exit_codes(processes, comman
     )
     assert current.exit_code == expected
     assert manager.get(current.name).exit_code == expected
-
-
-def test_async_wait_cancellation_leaves_process_observable(processes):
-    from arker.blaxel import _AsyncProcess
-
-    manager, directory = processes
-
-    async def program():
-        process = _AsyncProcess(manager)
-        started = await process.exec({"command": "sleep 30", "name": "cancel", "workingDir": str(directory)})
-        assert started.status == "running"
-        waiter = asyncio.create_task(process.wait("cancel", max_wait=-1, interval=10))
-        await asyncio.sleep(0)
-        waiter.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await waiter
-        assert (await process.get("cancel")).status == "running"
-        await process.kill("cancel")
-        assert (await process.wait("cancel", max_wait=5000, interval=10)).status == "killed"
-
-    asyncio.run(program())
 
 
 def test_replayed_transport_request_recovers_same_process(processes):

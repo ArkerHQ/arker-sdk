@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import importlib
 import json
-import os
 import shlex
 import subprocess
 import sys
@@ -36,23 +34,6 @@ def test_blaxel_native_filesystem_retains_options_and_operation_identity():
     assert calls == [(("private",), {"permissions": "0700"})]
 
 
-def test_blaxel_custom_permissions_are_validated_and_applied_before_success(monkeypatch):
-    from arker._compat import CommandResult
-    from arker.blaxel import FileSystem
-
-    commands = []
-    monkeypatch.setattr(
-        "arker.blaxel.run_command",
-        lambda _vm, command: commands.append(command) or CommandResult("", "", 0),
-    )
-    filesystem = FileSystem(vm=object())
-    filesystem.mkdir("private", "0700")
-    assert commands == ["mkdir -p -- /blaxel/private && chmod -- 0700 /blaxel/private"]
-    with pytest.raises(ValueError, match="octal"):
-        filesystem.mkdir("invalid", "u+rwx")
-    assert len(commands) == 1
-
-
 @pytest.mark.parametrize("option", ["outbound_cidr_allowlist", "outbound_domain_allowlist"])
 def test_modal_empty_allowlist_is_not_unrestricted(monkeypatch, option):
     captured = []
@@ -81,31 +62,6 @@ def test_empty_allowlist_semantics_are_provider_specific():
     assert list(restricted["rules"].values()) == [{"type": "outbound_guard", "allow": []}]
     with pytest.raises(ValueError, match="block-all"):
         compat_network_policies(block_all=True, cidrs=[], empty_allowlist_blocks=True)
-
-
-@pytest.mark.parametrize(
-    "path, name, display, entry",
-    [
-        ("/", "/", "/", "/probe"),
-        ("/blaxel///nested/", "nested", "/blaxel/nested/", "/blaxel/nested/probe"),
-        ("/blaxel/nested/../", "..", "/blaxel/nested/../", "/blaxel/probe"),
-    ],
-)
-def test_blaxel_absolute_directory_display_paths(monkeypatch, path, name, display, entry):
-    from arker._compat import CommandResult
-    from arker.blaxel import FileSystem
-
-    monkeypatch.setattr(
-        "arker.blaxel.run_command",
-        lambda *_: CommandResult(
-            stdout="f\0probe\0complete\0",
-            stderr="",
-            exit_code=0,
-        ),
-    )
-    listing = FileSystem(vm=object()).ls(path)
-    assert (listing.name, listing.path) == (name, display)
-    assert listing.files[0].path == entry
 
 
 @pytest.fixture(autouse=True)
@@ -412,8 +368,11 @@ def test_arker_shim_config_customizes_source_without_forwarding_to_client(
     assert body["name"] == "custom-name"
 
 
-def test_python_shims_translate_or_reject_arker_create_options(arker_env) -> None:
+def test_python_shims_translate_or_reject_arker_create_options(arker_env, monkeypatch) -> None:
     t = FakeTransport()
+    monkeypatch.setattr("arker._compat_blaxel_bootstrap.bootstrap_blaxel", lambda *args: None)
+    monkeypatch.setattr("arker._compat_blaxel_data_plane.validate_native", lambda: None)
+    monkeypatch.setattr("arker._compat_blaxel_data_plane.BlaxelDataPlane", lambda *args: object())
     for vm_id in ("vm_daytona_image", "vm_blaxel_image"):
         t.add_json(
             lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/fork",
@@ -527,36 +486,6 @@ def test_modal_official_surface(monkeypatch, arker_env) -> None:
     assert run["timeout"] == 2
 
 
-def test_blaxel_official_surface(arker_env) -> None:
-    t = FakeTransport()
-    add_create_run_delete(t, "vm_blaxel", "hello from blaxel\n")
-
-    with use_transport(t):
-        sandbox = BlaxelSandbox.create()
-        result = sandbox.process.exec("echo 'hello from blaxel'")
-        assert result.stdout == "hello from blaxel\n"
-        assert result.exit_code == 0
-        sandbox.delete()
-
-
-@pytest.mark.parametrize("transport_failure", [False, True])
-def test_blaxel_initialization_failure_deletes_created_vm(monkeypatch, transport_failure) -> None:
-    module = importlib.import_module("arker.blaxel")
-    deleted = []
-    vm = types.SimpleNamespace(delete=lambda: deleted.append(True))
-    monkeypatch.setattr(module, "routed_create", lambda *args: ("arker", vm))
-
-    def initialize(*args):
-        if transport_failure:
-            raise RuntimeError("initialization failed")
-        return module.CommandResult(stdout="", stderr="initialization failed", exit_code=1)
-
-    monkeypatch.setattr(module, "run_command", initialize)
-    with pytest.raises(RuntimeError, match="initialization failed"):
-        module.SyncSandboxInstance.create()
-    assert deleted == [True]
-
-
 def test_blaxel_native_surface_delegates_without_losing_provider_features() -> None:
     class NativeFileSystem:
         def find(self, path: str, options: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -582,291 +511,11 @@ def test_blaxel_native_surface_delegates_without_losing_provider_features() -> N
     assert sandbox.snapshot("checkpoint") == "snapshot:checkpoint"
 
 
-def test_blaxel_typed_request_and_directory_attributes(monkeypatch, arker_env) -> None:
-    from arker._compat_process import GuestProcesses
-
-    class TypedRequest:
-        def to_dict(self):
-            return {"command": "printf typed", "workingDir": "/tmp", "waitForCompletion": True, "timeout": 1500}
-
-    captured = []
-
-    def execute(self, request):
-        captured.append(request)
-        return types.SimpleNamespace(stdout="typed")
-
-    monkeypatch.setattr(GuestProcesses, "exec", execute)
-    t = FakeTransport()
-    add_create_run_delete(t, "vm_blaxel_typed", "f\0probe.txt\0d\0nested\0complete\0")
-    with use_transport(t):
-        sandbox = BlaxelSandbox.create()
-        assert sandbox.process.exec(TypedRequest()).stdout == "typed"
-        listing = sandbox.fs.ls("/blaxel")
-        assert listing.path == "/blaxel"
-        assert listing.files[0].name == "probe.txt"
-        assert listing.files[0].path == "/blaxel/probe.txt"
-        assert listing.subdirectories[0].name == "nested"
-        sandbox.process.exec({"command": "sleep 10", "waitForCompletion": False})
-        sandbox.process.exec({"command": "true", "timeout": 0})
-        sandbox.delete()
-    assert captured[0] == {
-        "command": "printf typed",
-        "workingDir": "/tmp",
-        "waitForCompletion": True,
-        "timeout": 1500000,
-        "signalExitCode": -1,
-    }
-    assert captured[1]["waitForCompletion"] is False
-    assert "timeout" not in captured[1]
-    assert captured[2]["timeout"] == 0
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="Exercises the Linux guest directory command")
-@pytest.mark.parametrize("terminal", [False, True])
-def test_blaxel_listing_preserves_control_characters_in_names(monkeypatch, tmp_path, terminal):
-    import errno
-    import pty
-    import subprocess
-    import tty
-
-    from arker._compat import CommandResult
-    from arker.blaxel import FileSystem
-
-    names = ["line\nbreak", "tab\tfile", "-leading", ".hidden"]
-    for name in names:
-        (tmp_path / name).write_text("content")
-    (tmp_path / "directory\nname").mkdir()
-    (tmp_path / "dangling").symlink_to("missing")
-
-    def execute(_vm, command):
-        if not terminal:
-            return CommandResult(subprocess.check_output(["/bin/sh", "-c", command], text=True), "", 0)
-        master, slave = pty.openpty()
-        tty.setraw(slave)
-        output = bytearray()
-        try:
-            with subprocess.Popen(["/bin/sh", "-c", command], stdout=slave) as process:
-                os.close(slave)
-                while True:
-                    try:
-                        block = os.read(master, 65536)
-                    except OSError as error:
-                        if error.errno != errno.EIO:
-                            raise
-                        break
-                    if not block:
-                        break
-                    output.extend(block)
-            return CommandResult(output.decode(), "", process.returncode)
-        finally:
-            os.close(master)
-
-    monkeypatch.setattr("arker.blaxel.run_command", execute)
-    listing = FileSystem(vm=object()).ls(str(tmp_path))
-    assert sorted(entry.name for entry in listing.files) == sorted([*names, "dangling"])
-    assert [entry.name for entry in listing.subdirectories] == ["directory\nname"]
-
-
-@pytest.mark.parametrize("stdout", ["", "f\0name\0", "f\0complete\0", "f\0name\0complete\0truncated"])
-def test_blaxel_listing_rejects_incomplete_producer_output(monkeypatch, stdout):
-    from arker._compat import CommandResult
-    from arker.blaxel import FileSystem
-
-    monkeypatch.setattr("arker.blaxel.run_command", lambda *_: CommandResult(stdout, "", 0))
-    with pytest.raises(RuntimeError, match="Incomplete directory listing"):
-        FileSystem(vm=object()).ls("/missing")
-
-
 def test_blaxel_native_typed_requests_are_passed_through() -> None:
     request = object()
     native = types.SimpleNamespace(process=types.SimpleNamespace(exec=lambda value: value))
     sandbox = BlaxelSandbox(native=native)
     assert sandbox.process.exec(request) is request
-
-
-def test_blaxel_binary_files_preserve_every_byte_and_local_path_semantics(tmp_path) -> None:
-    from arker.blaxel import FileSystem
-
-    stored = {}
-
-    def sync(path, content=None):
-        if content is None:
-            return stored[path]
-        stored[path] = content
-        return None
-
-    fs = FileSystem(vm=types.SimpleNamespace(sync=sync))
-    payload = bytes(range(256))
-    fs.write_binary("binary", payload)
-    assert fs.read_binary("binary") == payload
-    source = tmp_path / "input"
-    source.write_bytes(payload[::-1])
-    fs.write_binary("binary", str(source))
-    assert fs.read_binary("binary") == payload[::-1]
-    destination = tmp_path / "output"
-    fs.download("binary", str(destination), mode=0o600)
-    assert destination.read_bytes() == payload[::-1]
-    assert destination.stat().st_mode & 0o777 == 0o600
-    fs.write_binary("empty", bytearray())
-    assert fs.read_binary("empty") == b""
-
-
-def test_blaxel_relative_file_paths_match_native_operation_encoding() -> None:
-    from arker.blaxel import FileSystem
-
-    calls = []
-    vm = types.SimpleNamespace(sync=lambda path, content=None: calls.append((path, content)) or b"read")
-    filesystem = FileSystem(vm=vm)
-
-    filesystem.write("bare", "one")
-    filesystem.write("nested/file", "two")
-    assert filesystem.read("nested/file") == "read"
-    assert calls == [
-        ("/blaxel/bare", "one"),
-        ("/nested/file", "two"),
-        ("/nested/file", None),
-    ]
-
-
-def test_blaxel_find_grep_copy_and_tree_have_native_shaped_results(monkeypatch) -> None:
-    from arker._compat import CommandResult
-    from arker.blaxel import FileSystem
-
-    commands = []
-
-    def run(_vm, command, **options):
-        commands.append((command, options))
-        if command.startswith("find "):
-            return CommandResult(stdout="f\0/work/a.txt\0d\0/work/sub\0", stderr="", exit_code=0)
-        if "grep " in command:
-            return CommandResult(stdout="\0".join(["/work/a.txt", "2:hello world\n"]), stderr="", exit_code=0)
-        return CommandResult(stdout="", stderr="", exit_code=0)
-
-    writes = []
-    vm = types.SimpleNamespace(sync=lambda path, content=None: writes.append((path, content)) or b"")
-    monkeypatch.setattr("arker.blaxel.run_command", run)
-    filesystem = FileSystem(vm=vm)
-
-    found = filesystem.find("/work", type="file", patterns=["*.txt"], max_results=1)
-    assert [(match.path, match.type_) for match in found.matches] == [("/work/a.txt", "file")]
-    searched = filesystem.grep("hello", "/work", max_results=1)
-    assert [(match.path, match.line, match.column, match.text) for match in searched.matches] == [
-        ("a.txt", 2, 1, "hello world")
-    ]
-    copied = filesystem.cp("nested/source file", "nested/destination", max_wait=2500)
-    assert (copied.message, copied.source, copied.destination) == (
-        "Files copied",
-        "nested/source file",
-        "nested/destination",
-    )
-    monkeypatch.setattr(filesystem, "ls", lambda path: path)
-    assert filesystem.write_tree([{"path": "a.txt", "content": "a"}], "/tree") == "/tree"
-    assert writes == [("/tree/a.txt", "a")]
-    assert "'/nested/source file'" in commands[2][0]
-    assert commands[2][1] == {"timeout": 3}
-
-
-def test_blaxel_arker_watcher_fails_explicitly_before_io() -> None:
-    from arker._compat import UnsupportedCompatibilityOption
-    from arker.blaxel import FileSystem
-
-    with pytest.raises(UnsupportedCompatibilityOption, match="ordered filesystem event stream"):
-        FileSystem(vm=object()).watch("/work", lambda _event: None)
-    with pytest.raises(UnsupportedCompatibilityOption, match="fuzzy scoring"):
-        FileSystem(vm=object()).search("needle", "/work")
-
-
-def test_blaxel_listing_preserves_native_file_metadata(monkeypatch) -> None:
-    from arker._compat import CommandResult
-    from arker.blaxel import FileSystem
-
-    stdout = "\0".join(
-        ["f", "probe", "7", "644", "runner", "runner", "2026-10-22T01:02:03.000000000+0000", "complete", ""]
-    )
-    monkeypatch.setattr("arker.blaxel.run_command", lambda *_args, **_kwargs: CommandResult(stdout, "", 0))
-
-    entry = FileSystem(vm=object()).ls("/work").files[0]
-    assert (entry.size, entry.permissions, entry.owner, entry.group, entry.last_modified) == (
-        7,
-        "644",
-        "runner",
-        "runner",
-        "2026-10-22T01:02:03.000000000+0000",
-    )
-
-
-def test_blaxel_mkdir_returns_native_success_on_both_routes(monkeypatch) -> None:
-    from arker._compat import CommandResult
-    from arker.blaxel import FileSystem
-
-    native_response = object()
-    calls = []
-
-    def native_mkdir(path, permissions="0755"):
-        calls.append((path, permissions))
-        return native_response
-
-    native = types.SimpleNamespace(mkdir=native_mkdir)
-    assert FileSystem(native=native).mkdir("relative") is native_response
-    assert FileSystem(native=native).mkdir("private", "0700") is native_response
-    assert calls == [("relative", "0755"), ("private", "0700")]
-    monkeypatch.setattr("arker.blaxel.run_command", lambda *_: CommandResult(stdout="", stderr="", exit_code=0))
-    assert FileSystem(vm=object()).mkdir("relative").to_dict() == {
-        "message": "Directory created successfully",
-        "path": "/blaxel/relative",
-    }
-
-
-def test_blaxel_success_serialization_without_optional_sdk(monkeypatch) -> None:
-    from arker._compat_process import success
-
-    monkeypatch.setattr("arker._compat_process.import_optional", lambda _: None)
-    assert success({"message": "done", "path": "/blaxel/test"}).to_dict() == {
-        "message": "done",
-        "path": "/blaxel/test",
-    }
-    assert success({"message": "done"}).to_dict() == {"message": "done"}
-
-
-def test_blaxel_remove_is_nonrecursive_unless_requested(monkeypatch) -> None:
-    from arker._compat import CommandResult
-    from arker.blaxel import FileSystem
-
-    calls = []
-
-    def command(vm, script):
-        calls.append(script)
-        return CommandResult(stdout="file", stderr="", exit_code=0)
-
-    monkeypatch.setattr("arker.blaxel.run_command", command)
-    fs = FileSystem(vm=object())
-    fs.rm("/blaxel/directory")
-    assert "rm -rf" not in calls[-1]
-    assert "rmdir --" in calls[-1]
-    fs.rm("/blaxel/directory", recursive=True)
-    assert "rm -r --" in calls[-1]
-
-
-def test_blaxel_async_surface_uses_shared_router(monkeypatch, arker_env) -> None:
-    from arker._compat_process import GuestProcesses
-    from arker.blaxel import SandboxInstance
-
-    t = FakeTransport()
-    add_create_run_delete(t, "vm_blaxel_async", "async")
-    monkeypatch.setattr(GuestProcesses, "exec", lambda self, request: types.SimpleNamespace(stdout="async"))
-
-    async def program():
-        sandbox = await SandboxInstance.create()
-        try:
-            assert (
-                await sandbox.process.exec({"command": "printf async", "wait_for_completion": False})
-            ).stdout == "async"
-            assert sandbox.metadata.name == "vm_blaxel_async"
-        finally:
-            await sandbox.delete()
-
-    with use_transport(t):
-        asyncio.run(program())
 
 
 @pytest.mark.parametrize(

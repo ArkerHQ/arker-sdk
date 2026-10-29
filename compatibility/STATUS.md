@@ -22,12 +22,16 @@ must pass with fresh evidence before claiming parity.
 - Blaxel strict duplicate-name creation and atomic get-or-create are not
   equivalent on Arker. A local lock cannot enforce distributed uniqueness.
 - Blaxel private HTTP fetch, sessions, redirect/cookie/timeout behavior and
-  network configuration need complete differential validation.
+  network configuration need complete differential validation. Async strict-create
+  cancellation drains creation and removes the newly owned sandbox; native Blaxel
+  can leave that sandbox running. This cleanup difference is not parity credit.
+  Cancellation of get-or-create preserves resources whose ownership is unknown.
 - E2B sandbox expiry, request timeouts, cancellation, streamed reads, process
   enumeration and native error identities have unverified or unsupported cases.
 - Daytona custom users, image working-directory/shell selection, streaming,
   search/watch and timeout/error combinations remain incomplete. See the
-  [filesystem contract](daytona-filesystem.md) for source prerequisites.
+  [filesystem contract](daytona-filesystem.md) for source prerequisites and
+  [volume contract](daytona-volumes.md) for mount and deletion limits.
 - Modal native Image/Secret/Volume handles are forwarded on native routes but
   are not fully translated for Arker creation. Remote secrets, PTYs and broader
   async/lifecycle behavior remain incomplete.

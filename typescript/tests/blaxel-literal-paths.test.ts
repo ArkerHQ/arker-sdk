@@ -1,30 +1,33 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SandboxInstance } from "../src/blaxel.js";
+import { createServer } from "node:http";
+import { connect } from "node:net";
+import { createBlaxelDataPlane } from "../src/compat/blaxel-data-plane.js";
+import { listen, closeServer } from "./provider-fixtures.js";
 
-test("Blaxel generated filesystem paths preserve literal tilde prefixes", async () => {
-  const paths: string[] = [];
-  const commands: string[] = [];
-  const box = {
-    provider: "arker", sandboxId: "vm-test",
-    getInstance: () => ({ sync: async (path: string) => { paths.push(path); return new Uint8Array([1]); } }),
-    filesystem: {
-      readFile: async (path: string) => { paths.push(path); return "text"; },
-      writeFile: async (path: string) => { paths.push(path); },
-      readdir: async (path: string) => { paths.push(path); return []; },
-    },
-    runCommand: async (command: string) => { commands.push(command); return { exitCode: 0, stdout: "file", stderr: "" }; },
-  };
-  const fs = (Reflect.construct(SandboxInstance, [box]) as SandboxInstance).fs;
+// Assert the native encoded requests, including operations whose path rules differ.
+test("native Blaxel preserves literal filesystem paths and options", async t => {
+  const calls: Array<{url: string; method: string; body: string}> = [];
+  const server = createServer(async (req, res) => {
+    let body = "";
+    for await (const part of req) body += part;
+    calls.push({ url: req.url!, method: req.method!, body });
+    res.writeHead(200, {"content-type": "application/json"});
+    res.end(JSON.stringify({name: "tree", path: "/~/tree", files: [], subdirectories: [], message: "success", content: "value"}));
+  });
+  t.after(() => closeServer(server));
+  const address = await listen(server);
+  const plane = createBlaxelDataPlane({connectPort: async () => connect(address.port, "127.0.0.1")});
+  t.after(() => plane.close());
   for (const path of ["~", "~/a", "~root/a", "~//a", "~/../a"])
-    await fs.readBinary(path);
-  assert.deepEqual(paths.splice(0), ["/~", "/~/a", "/~root/a", "/~/a", "/a"]);
-  assert.equal(await fs.read("~/a"), "text");
-  assert.equal((await fs.write("~/b", "text")).path, "/~/b");
-  assert.equal((await fs.ls("~/dir")).path, "/~/dir");
-  await fs.writeTree([{ path: "a", content: "tree" }], "~/tree");
-  assert.deepEqual(paths, ["/~/a", "/~/b", "/~/dir", "/~/tree/a", "/~/tree"]);
-  await fs.mkdir("~/dir");
-  await fs.rm("~/a");
-  assert(commands.every(command => command.includes("/~")));
+    await plane.fs.read(path);
+  assert.deepEqual(calls.splice(0).map(call => call.url), ["/filesystem/~", "/filesystem/~%2Fa", "/filesystem/~root%2Fa", "/filesystem/~%2F%2Fa", "/filesystem/~%2F..%2Fa"]);
+  await plane.fs.mkdir("private", "0700");
+  assert.equal(JSON.parse(calls.at(-1)!.body).permissions, "0700");
+  await plane.fs.rm("private");
+  assert(!calls.at(-1)!.url.includes("recursive=true"));
+  await plane.fs.rm("private", true);
+  assert(calls.at(-1)!.url.includes("recursive=true"));
+  await plane.fs.writeTree([{ path: "file", content: "value" }], "~/tree");
+  assert.deepEqual(JSON.parse(calls.at(-1)!.body), {files: {file: "value"}});
 });

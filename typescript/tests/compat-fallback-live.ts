@@ -90,7 +90,7 @@ async function testBlaxelFallback(): Promise<void> {
     const shim = new Blaxel({ apiKey, workspace, arker: { apiKey: arkerApiKey } });
     const fetched = await shim.get(nativeSandbox.sandboxId);
     assert.equal(fetched.id, nativeSandbox.sandboxId);
-    const result = await fetched.process.exec("printf blaxel-fallback");
+    const result = await fetched.process.exec({ command: "printf blaxel-fallback", waitForCompletion: true });
     assert.equal(result.stdout, "blaxel-fallback");
   } finally {
     await nativeSandbox.destroy();

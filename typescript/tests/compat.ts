@@ -792,7 +792,7 @@ async function testOrderedPolicyControlsSurviveNativeNetworkRestrictions(): Prom
 }
 
 async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
-  const created = new FakeSandbox("new-box");
+  const created = new FakeSandbox("new-box", "blaxel", { metadata: { name: "new-box" }, fs: {}, process: {} });
   await withFakeCompute(created, async (fake) => {
     await BlaxelSandbox.createIfNotExists({ name: "named-box" }, { timeout: 30 });
     await BlaxelSandbox.create({
@@ -824,8 +824,7 @@ async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
 }
 
 async function testBlaxelInitializationFailureDeletesCreatedVm(): Promise<void> {
-  const created = new FakeSandbox("failed-initialization");
-  created.filesystem.mkdir = async () => { throw new Error("initialization failed"); };
+  const created = new FakeSandbox("failed-initialization", "arker", { id: "vm-test", _client: { _request: async () => { throw new Error("initialization failed"); } } });
   const fake = installFakeCompute(created);
   try {
     await assert.rejects(BlaxelSandbox.create(), /initialization failed/);
@@ -834,146 +833,10 @@ async function testBlaxelInitializationFailureDeletesCreatedVm(): Promise<void> 
   } finally { fake.cleanup(); }
 }
 
-async function testBlaxelBinaryFiles(): Promise<void> {
-  const files = new Map<string, Uint8Array>();
-  const vm = {
-    sync: async (path: string, content?: Uint8Array) => {
-      if (content === undefined) return files.get(path)!;
-      files.set(path, new Uint8Array(content));
-    },
-  };
-  const box = new FakeSandbox("binary-vm", "arker", vm);
-  box.runCommand = async (command, options) => {
-    box.runCalls.push({ command, options });
-    return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
-  };
-  await withFakeCompute(box, async () => {
-    const sandbox = await BlaxelSandbox.create();
-    const payload = Uint8Array.from({ length: 256 }, (_, i) => i);
-    assert.deepEqual(await sandbox.fs.mkdir("relative"), {
-      message: "Directory created successfully", path: "/blaxel/relative",
-    });
-    assert.deepEqual(await sandbox.fs.mkdir("private", "0700"), {
-      message: "Directory created successfully", path: "/blaxel/private",
-    });
-    assert.match(box.runCalls.at(-1)!.command, /chmod -- 0700 \/blaxel\/private/);
-    await assert.rejects(() => sandbox.fs.mkdir("invalid", "u+rwx"), /octal/);
-    await sandbox.fs.writeBinary("binary", payload);
-    assert.deepEqual(new Uint8Array(await (await sandbox.fs.readBinary("binary")).arrayBuffer()), payload);
-    await sandbox.fs.writeBinary("binary", new Blob([payload]));
-    assert.deepEqual(files.get("/blaxel/binary"), payload);
-    await sandbox.fs.writeBinary("empty", new Uint8Array());
-    assert.equal((await sandbox.fs.readBinary("empty")).size, 0);
-  });
-}
 
-async function testBlaxelFilesystemOperationsAndRelativePaths(): Promise<void> {
-  const files = new Map<string, string>();
-  const vm = {
-    sync: async (path: string, content?: Uint8Array) => {
-      if (content === undefined) return new TextEncoder().encode(files.get(path) ?? "");
-      files.set(path, new TextDecoder().decode(content));
-    },
-  };
-  const box = new FakeSandbox("filesystem-vm", "arker", vm);
-  box.filesystem.writeFile = async (path, content) => {
-    files.set(path, content);
-  };
-  box.filesystem.readFile = async (path) => files.get(path) ?? "";
-  box.filesystem.readdir = async () => [];
-  box.runCommand = async (command, options) => {
-    box.runCalls.push({ command, options });
-    if (command.startsWith("find ")) {
-      return { stdout: "f\0/work/a.txt\0d\0/work/sub\0", stderr: "", exitCode: 0, durationMs: 0 };
-    }
-    if (command.startsWith("grep ")) {
-      return { stdout: "/work/a.txt\0" + "2:hello world\n", stderr: "", exitCode: 0, durationMs: 0 };
-    }
-    return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
-  };
-  await withFakeCompute(box, async () => {
-    const sandbox = await BlaxelSandbox.create();
-    await sandbox.fs.write("bare", "one");
-    await sandbox.fs.write("nested/file", "two");
-    assert.equal(files.get("/blaxel/bare"), "one");
-    assert.equal(files.get("/nested/file"), "two");
 
-    const found = await sandbox.fs.find("/work", { type: "file", patterns: ["*.txt"], maxResults: 1 });
-    assert.deepEqual(found, { matches: [{ path: "/work/a.txt", type: "file" }], total: 1 });
-    const searched = await sandbox.fs.grep("hello", "/work", { maxResults: 1 });
-    assert.deepEqual(searched, {
-      matches: [{ path: "/work/a.txt", line: 2, column: 1, text: "hello world" }],
-      query: "hello",
-      total: 1,
-    });
-    assert.deepEqual(await sandbox.fs.cp("nested/source file", "nested/destination", { maxWait: 2500 }), {
-      message: "Files copied",
-      source: "nested/source file",
-      destination: "nested/destination",
-    });
-    await sandbox.fs.writeTree([{ path: "a.txt", content: "tree" }], "/tree");
-    assert.equal(files.get("/tree/a.txt"), "tree");
-    assert.match(box.runCalls[2]!.command, /'\/nested\/source file'/);
-    assert.deepEqual(box.runCalls[2]!.options, { timeout: 3000 });
-    await assert.rejects(() => sandbox.fs.grep("hello", "/work", { contextLines: 2 }), /contextLines/);
-    assert.throws(() => sandbox.fs.watch("/work", () => undefined), /ordered filesystem event stream/);
-    await assert.rejects(() => sandbox.fs.search("needle", "/work"), /fuzzy scoring/);
-  });
-}
 
-async function testBlaxelNonrecursiveRemoval(): Promise<void> {
-  const box = new FakeSandbox();
-  const fake = installFakeCompute(box);
-  box.runCommand = async (command, options) => {
-    box.runCalls.push({ command, options });
-    return { stdout: "file", stderr: "", exitCode: 0, durationMs: 0 };
-  };
-  try {
-    const sandbox = await BlaxelSandbox.create();
-    await sandbox.fs.rm("/blaxel/directory");
-    assert.ok(box.runCalls.at(-1)?.command.includes("rmdir --"));
-    await sandbox.fs.rm("/blaxel/directory", true);
-    assert.ok(box.runCalls.at(-1)?.command.includes("rm -r --"));
-  } finally { fake.cleanup(); }
-}
 
-async function testBlaxelDirectoryPaths(): Promise<void> {
-  const box = new FakeSandbox();
-  box.filesystem.readdir = async (path) => {
-    assert.equal(path, "/blaxel/nested");
-    return [
-      { name: "line\nbreak", type: "file", size: 7 },
-      { name: "child", type: "directory" },
-    ];
-  };
-  await withFakeCompute(box, async () => {
-    const sandbox = await BlaxelSandbox.create();
-    const listing = await sandbox.fs.ls("nested/");
-    assert.equal(listing.name, "nested");
-    assert.equal(listing.path, "/blaxel/nested");
-    assert.equal(listing.files[0]?.path, "/blaxel/nested/line\nbreak");
-    assert.equal(listing.files[0]?.size, 7);
-    assert.equal(listing.subdirectories[0]?.path, "/blaxel/nested/child");
-  });
-}
-
-async function testBlaxelAbsoluteDirectoryDisplayPaths(): Promise<void> {
-  for (const [path, name, display, entryPath] of [
-    ["/", "/", "/", "/probe"],
-    ["/blaxel///nested/", "nested", "/blaxel/nested/", "/blaxel/nested/probe"],
-    ["/blaxel/nested/../", "..", "/blaxel/nested/../", "/blaxel/probe"],
-  ] as const) {
-    const box = new FakeSandbox();
-    box.filesystem.readdir = async () => [{ name: "probe", type: "file", size: 1 }];
-    await withFakeCompute(box, async () => {
-      const sandbox = await BlaxelSandbox.create();
-      const listing = await sandbox.fs.ls(path);
-      assert.equal(listing.name, name);
-      assert.equal(listing.path, display);
-      assert.equal(listing.files[0]?.path, entryPath);
-    });
-  }
-}
 
 async function testBackgroundProcessOwnsAnArkerRun(): Promise<void> {
   const calls: any[] = [];
@@ -1059,11 +922,6 @@ await testOrderedPolicyControlsSurviveNativeNetworkRestrictions();
 await testInternalArkerProviderRequiresSource();
 await testBlaxelCreateIfNotExistsAndTtl();
 await testBlaxelInitializationFailureDeletesCreatedVm();
-await testBlaxelBinaryFiles();
-await testBlaxelFilesystemOperationsAndRelativePaths();
-await testBlaxelNonrecursiveRemoval();
-await testBlaxelDirectoryPaths();
-await testBlaxelAbsoluteDirectoryDisplayPaths();
 await testBackgroundProcessOwnsAnArkerRun();
 await testProcessControlHasAnIsolatedSerializedSession();
 

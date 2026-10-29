@@ -280,6 +280,7 @@ dependencies = [
 
 [package.optional-dependencies]
 blaxel = [
+    { name = "blaxel", marker = "python_full_version < '3.15'" },
     { name = "httpcore" },
     { name = "httpx" },
 ]
@@ -311,6 +312,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "blaxel", marker = "python_full_version < '3.15' and extra == 'blaxel'", specifier = "==0.4.19" },
     { name = "blaxel", marker = "python_full_version < '3.15' and extra == 'compat'", specifier = "==0.4.19" },
     { name = "daytona", marker = "python_full_version < '4' and extra == 'compat'", specifier = "==0.226.0" },
     { name = "dockerfile-parse", specifier = ">=2.0.1" },

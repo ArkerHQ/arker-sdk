@@ -1,0 +1,14 @@
+{
+  "version": "0.2.74",
+  "artifacts": {
+    "amd64": {
+      "url": "https://github.com/blaxel-ai/sandbox/releases/download/v0.2.74/sandbox-api-linux-amd64",
+      "sha256": "ff1efa41b1d70d8c2613b0acdf3a2f60eeeb90035c4e0b48b39eb71b358e9dd5"
+    },
+    "arm64": {
+      "url": "https://github.com/blaxel-ai/sandbox/releases/download/v0.2.74/sandbox-api-linux-arm64",
+      "sha256": "32258d9d01ce5f6c5ca78efb50c31ff34b89d96300e9f4e69f52d3c9451726c7"
+    }
+  },
+  "license": "MIT License\n\nCopyright (c) 2025 Beamlit, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE."
+}

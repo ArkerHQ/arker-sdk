@@ -5,11 +5,21 @@ import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 
 import httpx
 import pytest
 
 from arker.blaxel import SandboxInstance, SyncSandboxInstance
+
+
+@pytest.fixture(autouse=True)
+def native_components(monkeypatch):
+    # These tests exercise application HTTP transport independently of the daemon client.
+    monkeypatch.setattr(
+        "arker._compat_blaxel_data_plane.BlaxelDataPlane",
+        lambda *args, **kwargs: SimpleNamespace(fs=object(), process=object()),
+    )
 
 
 @pytest.fixture

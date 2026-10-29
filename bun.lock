@@ -60,7 +60,7 @@
         "@connectrpc/connect-node": "2.0.2",
       },
       "peerDependencies": {
-        "@blaxel/core": "^0.3.30",
+        "@blaxel/core": "0.3.31",
         "@daytona/sdk": "^0.224.1 || ^0.226.0",
         "e2b": "2.58.0",
         "modal": "^0.11.1",

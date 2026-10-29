@@ -63,7 +63,7 @@ async function testBlaxelLive(): Promise<void> {
   const sandbox = await BlaxelSandbox.create({}, { arker: { apiKey } });
   try {
     await expectArkerVm(sandbox.id);
-    const result = await sandbox.process.exec("printf blaxel-live");
+    const result = await sandbox.process.exec({ command: "printf blaxel-live", waitForCompletion: true });
     assert.equal(result.stdout, "blaxel-live");
     await sandbox.fs.write("/tmp/arker-blaxel-live.txt", "ok");
     assert.equal(await sandbox.fs.read("/tmp/arker-blaxel-live.txt"), "ok");

@@ -112,7 +112,7 @@ async function arkerBlaxel(): Promise<Box> {
     id: value.id,
     run: (command, options) => value.process.exec({ command, workingDir: options?.cwd, env: options?.env, timeout: options?.timeout, waitForCompletion: true }),
     read: (path) => value.fs.read(path),
-    write: (path, content) => value.fs.write(path, content),
+    write: async (path, content) => { await value.fs.write(path, content); },
     reconnect: async () => wrap(await BlaxelSandbox.get(value.id, config)),
     destroy: () => value.delete(),
   });

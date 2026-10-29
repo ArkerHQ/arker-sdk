@@ -34,6 +34,10 @@ def stage_envd_artifact(vm: Any, root_path: str, arch: str, cache_directory: Pat
     entry = manifest["artifacts"][arch]
     if root_path != "/root/.arker/e2b-envd":
         raise ValueError("Unexpected envd installation directory")
+    return stage_pinned_artifact(vm, root_path, entry, cache_directory)
+
+
+def stage_pinned_artifact(vm: Any, root_path: str, entry: dict, cache_directory: Path) -> str:
     digest = entry["sha256"]
     cache_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     cached = cache_directory / digest

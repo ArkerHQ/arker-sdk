@@ -5,7 +5,7 @@ import { connect } from "node:net";
 import { SandboxInstance as Native, settings } from "@blaxel/core";
 import { SandboxInstance as Shim } from "../src/blaxel.js";
 import { createNativeBlaxelProvider } from "../src/compat/blaxel-provider.js";
-import { GuestProcesses } from "../src/compat/guest-process.js";
+import { createBlaxelDataPlane } from "../src/compat/blaxel-data-plane.js";
 import {
   preserveProperties,
   preserveEnvironment,
@@ -28,27 +28,33 @@ function stubNativeServer(t: TestContext, port: number) {
     });
 }
 
-test("Arker Blaxel process converts execution timeout seconds to internal milliseconds", async (t) => {
-  const original = GuestProcesses.prototype.exec;
-  preserveProperties(t, GuestProcesses.prototype, "exec");
+test("Arker Blaxel process preserves native timeout seconds on the wire", async (t) => {
   const captured: unknown[] = [];
-  GuestProcesses.prototype.exec = async function (request) {
-    captured.push(request.timeout);
-    return {} as Awaited<ReturnType<typeof original>>;
-  };
+  const server = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    captured.push(JSON.parse(body).timeout);
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ stdout: "", stderr: "", exitCode: 0 }));
+  });
+  t.after(() => closeServer(server));
+  const address = await listen(server);
+  const vm = { connectPort: async () => connect(address.port, "127.0.0.1") };
+  const plane = createBlaxelDataPlane(vm);
+  t.after(() => plane.close());
   const box = {
     provider: "arker",
     sandboxId: "vm-test",
-    getInstance: () => ({}),
+    getInstance: () => vm,
   };
-  const sandbox = Reflect.construct(Shim, [box]) as Shim;
+  const sandbox = Reflect.construct(Shim, [box, undefined, undefined, plane]) as Shim;
   for (const timeout of [1, 0, undefined]) {
     await sandbox.process.exec({
       command: "true",
       ...(timeout === undefined ? {} : { timeout }),
     });
   }
-  assert.deepEqual(captured, [1000, 0, undefined]);
+  assert.deepEqual(captured, [1, 0, undefined]);
 });
 
 test("native Blaxel adapter converts ComputeSDK command milliseconds to seconds", async (t) => {
@@ -103,6 +109,7 @@ test("Arker Blaxel fetch preserves regionless and creation-time transport select
         box,
         undefined,
         { region, disableH2: initiallyDisabled },
+        createBlaxelDataPlane(vm),
       ]) as Shim;
       settings.config.disableH2 = finallyDisabled;
       const response = await sandbox.fetch(8080, "/head", { method: "HEAD" });
