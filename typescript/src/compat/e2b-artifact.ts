@@ -23,7 +23,7 @@ export async function stagePinnedArtifact(vm: Pick<VM, "sync" | "run">, rootPath
   try { content = await readBoundedCache(cached); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    const response = await fetch(artifact.url, { signal: AbortSignal.timeout(60_000), redirect: "error" });
+    const response = await downloadArtifact(artifact.url);
     if (!response.ok || !response.body) throw new Error("Envd artifact download failed");
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = []; let size = 0;
@@ -51,10 +51,33 @@ export async function stagePinnedArtifact(vm: Pick<VM, "sync" | "run">, rootPath
     return destination;
   } catch (error) {
     // Until the candidate is returned, the caller cannot hand cleanup to ensure.
-    await vm.run(`rm -f -- ${destination}`).catch(() => undefined);
+    try {
+      const cleanup = await vm.run(`rm -f -- ${destination}`);
+      if (cleanup.exitCode !== 0) throw new Error("Artifact staging cleanup failed");
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Artifact staging and cleanup failed");
+    }
     throw error;
   }
 }
+async function downloadArtifact(source: string): Promise<Response> {
+  const signal = AbortSignal.timeout(60_000);
+  const release = /^https:\/\/github\.com\/blaxel-ai\/sandbox\/releases\/download\/v0\.2\.74\/sandbox-api-linux-(amd64|arm64)$/.test(source);
+  let url = source;
+  for (let redirects = 0; ; redirects++) {
+    // Artifact downloads carry no platform or vendor credentials.
+    const response = await fetch(url, { signal, redirect: "manual", credentials: "omit" });
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    await response.body?.cancel();
+    const location = response.headers.get("location");
+    if (!release || redirects >= 3 || !location) throw new Error("Pinned artifact redirect rejected");
+    const next = new URL(location, url);
+    if (next.protocol !== "https:" || next.hostname !== "release-assets.githubusercontent.com" ||
+        next.port || next.username || next.password) throw new Error("Pinned artifact redirect rejected");
+    url = next.href;
+  }
+}
+
 function verify(content: Uint8Array, digest: string): void {
   if (content.length > maxBytes || createHash("sha256").update(content).digest("hex") !== digest) {
     throw new Error("Envd artifact checksum mismatch");

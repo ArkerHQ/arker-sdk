@@ -37,7 +37,7 @@ test("oversized sparse cache is rejected by bounded descriptor reads before gues
   } finally { await rm(cache, { recursive: true }); }
 });
 
-for (const failure of ["sync", "chmod-exit", "chmod-error", "cleanup-error"] as const) {
+for (const failure of ["sync", "chmod-exit", "chmod-error", "cleanup-error", "cleanup-exit"] as const) {
   test(`staging cleans only its candidate after ${failure} and preserves the original error`, async () => {
     const cache = await mkdtemp(join(tmpdir(), "envd-artifact-failure-"));
     const content = Buffer.from("fixture binary"), sha256 = createHash("sha256").update(content).digest("hex");
@@ -46,6 +46,7 @@ for (const failure of ["sync", "chmod-exit", "chmod-error", "cleanup-error"] as 
     const unrelated = "/root/.arker/e2b-envd/bin/.candidate-unrelated";
     const guestFiles = new Set([installed, unrelated]);
     const originalError = new Error("staging failed");
+    const cleanupError = new Error("guest unavailable during cleanup");
     let candidate = "";
     const cleanup: string[] = [];
     const vm = {
@@ -57,7 +58,8 @@ for (const failure of ["sync", "chmod-exit", "chmod-error", "cleanup-error"] as 
       run: async (command: string) => {
         if (command === `rm -f -- ${candidate}`) {
           cleanup.push(command);
-          if (failure === "cleanup-error") throw new Error("guest unavailable during cleanup");
+          if (failure === "cleanup-error") throw cleanupError;
+          if (failure === "cleanup-exit") return { exitCode: 1 };
           guestFiles.delete(candidate);
           return { exitCode: 0 };
         }
@@ -69,10 +71,56 @@ for (const failure of ["sync", "chmod-exit", "chmod-error", "cleanup-error"] as 
     try {
       await writeFile(join(cache, sha256), content);
       await assert.rejects(stageEnvdArtifact(vm as any, "/root/.arker/e2b-envd", artifact, cache),
-        error => failure === "chmod-exit" ? /permissions/.test(String(error)) : error === originalError);
+        error => failure.startsWith("cleanup-")
+          ? error instanceof AggregateError && error.errors[0] === originalError &&
+            (failure === "cleanup-error" ? error.errors[1] === cleanupError : /cleanup failed/.test(String(error.errors[1])))
+          : failure === "chmod-exit" ? /permissions/.test(String(error)) : error === originalError);
       assert.deepEqual(cleanup, [`rm -f -- ${candidate}`]);
-      assert.equal(guestFiles.has(candidate), failure === "cleanup-error");
+      assert.equal(guestFiles.has(candidate), failure.startsWith("cleanup-"));
       assert.ok(guestFiles.has(installed) && guestFiles.has(unrelated));
     } finally { await rm(cache, { recursive: true }); }
+  });
+}
+
+for (const target of [
+  "https://release-assets.githubusercontent.com/github-production-release-asset/123/binary?signature=public",
+  "https://example.com/binary",
+  "http://release-assets.githubusercontent.com/binary",
+  "https://release-assets.githubusercontent.com.evil.example/binary",
+  "https://user:password@release-assets.githubusercontent.com/binary",
+  "https://release-assets.githubusercontent.com:444/binary",
+  "missing", "loop", "corrupt",
+]) {
+  test(`cold pinned release download confines redirects: ${target}`, async () => {
+    const { stagePinnedArtifact } = await import("../src/compat/e2b-artifact.js");
+    const cache = await mkdtemp(join(tmpdir(), "artifact-redirect-"));
+    const content = Buffer.from("public fixture artifact");
+    const artifact = { url: "https://github.com/blaxel-ai/sandbox/releases/download/v0.2.74/sandbox-api-linux-amd64",
+      sha256: createHash("sha256").update(content).digest("hex") };
+    const original = globalThis.fetch;
+    const requests: string[] = []; const writes: unknown[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, options?: RequestInit) => {
+      requests.push(String(input));
+      assert.equal(options?.redirect, "manual");
+      assert.equal(options?.credentials, "omit");
+      const headers: string[] = [];
+      new Headers(options?.headers).forEach((_value, name) => headers.push(name));
+      assert.deepEqual(headers, []);
+      if (requests.length === 1 || target === "loop") return new Response(null, {
+        status: 302, headers: target === "missing" ? {} : { location: target === "loop" || target === "corrupt"
+          ? "https://release-assets.githubusercontent.com/binary" : target },
+      });
+      return new Response(target === "corrupt" ? "wrong bytes" : content);
+    }) as typeof fetch;
+    try {
+      const promise = stagePinnedArtifact({ sync: async (...args: unknown[]) => { writes.push(args); },
+        run: async () => ({ exitCode: 0 }) } as any, "/root/.arker/blaxel", artifact, cache);
+      if (target.includes("github-production-release-asset")) {
+        await promise; assert.equal(requests.length, 2); assert.equal(writes.length, 1);
+      } else {
+        await assert.rejects(promise, target === "corrupt" ? /checksum/ : /redirect rejected/); assert.equal(writes.length, 0);
+        assert.equal(requests.length, target === "loop" ? 4 : target === "corrupt" ? 2 : 1);
+      }
+    } finally { globalThis.fetch = original; await rm(cache, { recursive: true }); }
   });
 }

@@ -9,7 +9,6 @@ import shlex
 import tempfile
 import time
 import urllib.request
-from contextlib import suppress
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -69,8 +68,12 @@ def stage_pinned_artifact(vm: Any, root_path: str, entry: dict, cache_directory:
         result = vm.run(f"chmod 0700 -- {shlex.quote(destination)}")
         if result.exit_code != 0:
             raise RuntimeError("Cannot set envd artifact permissions")
-    except BaseException:
-        with suppress(Exception):
-            vm.run(f"rm -f -- {shlex.quote(destination)}")
+    except BaseException as error:
+        try:
+            cleanup = vm.run(f"rm -f -- {shlex.quote(destination)}")
+            if cleanup.exit_code != 0:
+                raise RuntimeError("Artifact staging cleanup failed")
+        except Exception as cleanup_error:
+            error.cleanup_error = cleanup_error
         raise
     return destination

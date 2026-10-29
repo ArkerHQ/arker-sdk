@@ -90,3 +90,33 @@ def test_stage_removes_candidate_on_failure(tmp_path, monkeypatch, failure):
     with pytest.raises(RuntimeError):
         artifact.stage_envd_artifact(SimpleNamespace(sync=sync, run=run), "/root/.arker/e2b-envd", "arm64", tmp_path)
     assert commands[-1] == "rm -f -- " + writes[0]
+
+
+@pytest.mark.parametrize("cleanup", ["exception", "exit"])
+def test_stage_preserves_primary_and_cleanup_failure(tmp_path, cleanup):
+    content = b"artifact"
+    digest = hashlib.sha256(content).hexdigest()
+    (tmp_path / digest).write_bytes(content)
+    primary = RuntimeError("sync failed")
+    secondary = RuntimeError("cleanup unavailable")
+    paths = []
+
+    def sync(path, data):
+        paths.append(path)
+        raise primary
+
+    def run(command):
+        assert command == "rm -f -- " + paths[0]
+        if cleanup == "exception":
+            raise secondary
+        return SimpleNamespace(exit_code=1)
+
+    with pytest.raises(RuntimeError) as caught:
+        artifact.stage_pinned_artifact(
+            SimpleNamespace(sync=sync, run=run), "/root/.arker/e2b-envd", {"sha256": digest, "url": "unused"}, tmp_path
+        )
+    assert caught.value is primary
+    if cleanup == "exception":
+        assert caught.value.cleanup_error is secondary
+    else:
+        assert "cleanup failed" in str(caught.value.cleanup_error)
