@@ -19,6 +19,7 @@ from ._compat import (
 )
 from ._compat_async import NativeBridge, RoutingCancelled, call, route
 from ._compat_blaxel_errors import control_call, not_found
+from ._compat_blaxel_network import validate_network
 from .computer import VM
 
 if TYPE_CHECKING:
@@ -172,7 +173,7 @@ class SyncSandboxInstance(UnsupportedMixin):
 
             options = dict(kwargs)
             get_or_create = options.pop("create_if_not_exist", False)
-            supported = {"name", "image", "memory", "ttl", "envs", "runtime"}
+            supported = {"name", "image", "memory", "ttl", "envs", "runtime", "network"}
             unknown = sorted(set(values) - supported)
             if options or unknown:
                 names = [*sorted(options), *unknown]
@@ -186,6 +187,7 @@ class SyncSandboxInstance(UnsupportedMixin):
                     f"SandboxInstance.create option(s) are not supported by Arker: {names}"
                 )
             validate_name(values.get("name"))
+            validate_network(values.get("network"))
             validate_native()
             if cls._creation_cancelled():
                 raise RoutingCancelled("Async routing was cancelled")

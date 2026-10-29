@@ -1,3 +1,4 @@
+import { validateBlaxelNetwork } from "./compat/blaxel-network.js";
 import { SandboxInstance as NativeBlaxelSandbox, settings as blaxelSettings } from "@blaxel/core";
 import type { VM } from "./index.js";
 
@@ -54,8 +55,9 @@ function makeSdk(config: BlaxelCompatConfig = {}, getOrCreate = false): CompatSd
     arkerFork: (client, request) => blaxelControlCall("create", () => namedBlaxelFork(config.arker, getOrCreate)(client, request)),
     mapArkerCreateOptions: options => {
       validateBlaxelName(options.name);
+      const { createIfNotExist: _, network, ...rest } = options;
+      validateBlaxelNetwork(network);
       validateBlaxelNative();
-      const { createIfNotExist: _, ...rest } = options;
       return rest;
     },
     fallbackProvider: createNativeBlaxelProvider({

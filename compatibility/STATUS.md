@@ -32,7 +32,10 @@ must pass with fresh evidence before claiming parity.
   and authentication documentation are not copied from Blaxel. Network outcomes
   and timeouts remain explicit; they do not imply native creation cancellation.
 - Blaxel private HTTP fetch, sessions, redirect/cookie/timeout behavior and
-  network configuration need complete differential validation. Async strict-create
+  network configuration need complete differential validation. Empty network
+  settings and the native no-op `default` firewall ruleset preserve existing
+  policies. Proxy filters, dedicated egress and subnet controls remain unsupported;
+  they are not approximated with broader outbound rules. Async strict-create
   cancellation stops waiting without deleting an accepted or uncertain remote
   creation. Local clients are closed even when the originating event loop shuts
   down; cancellation also prevents a later busy-response retry. Fresh live
