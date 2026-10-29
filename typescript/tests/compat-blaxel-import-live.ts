@@ -70,6 +70,16 @@ async function program(SandboxInstance: typeof Native | typeof Shim, directory: 
       assert.equal(absolute.files.find((entry) => entry.name === "probe.txt")?.path,
         "/blaxel/import-only/probe.txt");
     }
+    const literalPath = `~/${sandboxName}`;
+    assert.equal((await sandbox.fs.mkdir(literalPath)).path, `/${literalPath}`);
+    assert.equal((await sandbox.fs.write(`${literalPath}/a`, "literal")).path, `/${literalPath}/a`);
+    assert.equal(await sandbox.fs.read(`${literalPath}/a`), "literal");
+    assert.equal(await (await sandbox.fs.readBinary(`${literalPath}/a`)).text(), "literal");
+    assert.equal((await sandbox.fs.ls(literalPath)).path, `/${literalPath}`);
+    assert.equal((await sandbox.fs.writeTree([{ path: "b", content: "tree" }], literalPath))?.path, `/${literalPath}`);
+    assert.equal(await sandbox.fs.read(`/${literalPath}/b`), "tree");
+    await sandbox.fs.rm(`${literalPath}/a`);
+    await sandbox.fs.rm(literalPath, true);
     const root = await sandbox.fs.ls("/");
     assert.equal(root.name, "/");
     assert.equal(root.path, "/");

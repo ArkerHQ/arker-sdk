@@ -14,7 +14,7 @@ from compat_program import async_program
 PROGRAM = """
 from blaxel.core.sandbox import SyncSandboxInstance
 from blaxel.core.sandbox import ProcessRequestWithLog
-from blaxel.core.sandbox.types import SandboxCreateConfiguration
+from blaxel.core.sandbox.types import SandboxCreateConfiguration, SandboxFilesystemFile
 from blaxel.core.sandbox.client.models import ProcessRequestEnv
 
 sandbox = SyncSandboxInstance.create_if_not_exists(SandboxCreateConfiguration(name=sandbox_name))
@@ -70,6 +70,10 @@ try:
         assert (absolute.name, absolute.path) == ("import-only", display)
         probe = next(entry for entry in absolute.files if entry.name == "probe.txt")
         assert probe.path == "/blaxel/import-only/probe.txt"
+    literal_tree = "~/" + sandbox_name
+    tree = sandbox.fs.write_tree([SandboxFilesystemFile(path="a", content="tree")], literal_tree)
+    assert tree.path == "/" + literal_tree
+    assert sandbox.fs.read("/" + literal_tree + "/a") == "tree"
     root = sandbox.fs.ls("/")
     assert (root.name, root.path) == ("/", "/")
     odd_names = ["line" + chr(10) + "break", "tab" + chr(9) + "file", "-leading", ".hidden"]
@@ -190,13 +194,14 @@ def _trace_program(source: str) -> str:
     return ast.unparse(ast.fix_missing_locations(TraceCalls().visit(ast.parse(source))))
 
 
+@pytest.mark.parametrize("create_method", ["create_if_not_exists", "create"], ids=["atomic-create", "create"])
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize("provider,shim", [("blaxel", False), ("blaxel", True), ("arker", True)])
-def test_import_only(provider, shim, asynchronous, live_router, monkeypatch) -> None:
+def test_import_only(provider, shim, asynchronous, create_method, live_router, monkeypatch) -> None:
     pytest.importorskip("blaxel")
     if not os.environ.get("BL_API_KEY") or (provider == "arker" and not os.environ.get("ARKER_API_KEY")):
         pytest.skip("live Blaxel and Arker credentials are required")
-    source = PROGRAM
+    source = PROGRAM.replace("SyncSandboxInstance.create_if_not_exists(", f"SyncSandboxInstance.{create_method}(")
     if shim:
         source = source.replace(
             "from blaxel.core.sandbox import SyncSandboxInstance",
@@ -214,7 +219,12 @@ def test_import_only(provider, shim, asynchronous, live_router, monkeypatch) -> 
     if asynchronous:
         source = _async_program(source)
     with record_scenario(
-        "blaxel", "async" if asynchronous else "sync", provider, shim, "import-only-files-and-command-isolation", called
+        "blaxel",
+        "async" if asynchronous else "sync",
+        provider,
+        shim,
+        f"import-only-{create_method}-files-and-command-isolation",
+        called,
     ):
         exec(compile(source, "blaxel_import_only.py", "exec"), namespace)
         if asynchronous:
