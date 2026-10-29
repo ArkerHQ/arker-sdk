@@ -168,14 +168,19 @@ def test_exported_async_volume_lifecycle_runs_off_loop(client, configure_router,
     client.delete_filesystem.assert_called_once_with("fs-one")
 
 
+@pytest.mark.parametrize("request_timeout", [0, 0.25, 60])
 @pytest.mark.parametrize("mount_fails", [False, True])
-def test_cancelled_exported_sandbox_cleans_up_after_mount_settles(client, monkeypatch, mount_fails):
+def test_cancelled_exported_sandbox_cleans_up_after_mount_settles(
+    client, monkeypatch, mount_fails, request_timeout
+):
     import arker.e2b as shim
     from arker import _compat_e2b_bootstrap as bootstrap
 
     started, release, deleted = threading.Event(), threading.Event(), threading.Event()
     events = []
     loop_thread = threading.get_ident()
+    # The stubbed arker_create bypasses real client transport configuration.
+    client._e2b_request_timeout = request_timeout
     vm = Mock(id="child", _client=client, base_url="https://worker.example")
 
     def request(method, path, body, **kwargs):
@@ -225,7 +230,11 @@ def test_cancelled_exported_sandbox_cleans_up_after_mount_settles(client, monkey
     asyncio.run(run())
     assert events == ["delegation", "settled", "deleted"]
     client._request.assert_called_once()
-    vm.delete.assert_called_once()
+    if mount_fails:
+        vm.delete.assert_called_once_with()
+    else:
+        vm.delete.assert_called_once_with(request_timeout=request_timeout or None)
+    assert client._e2b_request_timeout == request_timeout
     client.delete_filesystem.assert_not_called()
 
 
