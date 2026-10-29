@@ -418,7 +418,7 @@ def test_failed_mount_cleanup_is_reported(client, monkeypatch):
     vm.delete.side_effect = RuntimeError("delete failed")
     monkeypatch.setattr(shim, "routed_create", lambda *a, **kw: ("arker", vm))
     monkeypatch.setattr(shim.Sandbox, "_prepare_data_plane", lambda self: None)
-    with pytest.raises(RuntimeError, match="cleanup failed; delete VM child"):
+    with pytest.raises(RuntimeError, match=r"^Sandbox creation and cleanup failed for VM child$"):
         shim.Sandbox.create(volume_mounts={"/workspace/shared": "data"})
     client.delete_filesystem.assert_not_called()
 

@@ -84,7 +84,12 @@ class AsyncSandbox:
         try:
             await sandbox._prepare_data_plane()
         except BaseException:
-            await sandbox.kill()
+            try:
+                await sandbox.kill()
+            except BaseException as cleanup_error:
+                raise RuntimeError(
+                    f"Sandbox creation and cleanup failed for VM {sandbox.sandbox_id}"
+                ) from cleanup_error
             raise
         return sandbox
 
@@ -170,9 +175,12 @@ class AsyncSandbox:
     async def kill(self, **kwargs):
         if self._sandbox._native is not None:
             return await self._sandbox._native.kill(**kwargs)
-        if self._data_plane is not None:
-            await self._data_plane.aclose()
-        return await _call(self._sandbox.kill, **kwargs)
+        try:
+            if self._data_plane is not None:
+                await self._data_plane.aclose()
+        finally:
+            deleted = await _call(self._sandbox.kill, **kwargs)
+        return deleted
 
     @classmethod
     async def _class_kill(cls, sandbox_id: str | AsyncSandbox, **kwargs):

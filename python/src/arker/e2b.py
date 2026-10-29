@@ -193,15 +193,14 @@ class Sandbox(UnsupportedMixin):
                         raise RuntimeError("Volume mount readiness failed; sandbox was not returned")
                 return sandbox
             except BaseException:
-                if sandbox is not None and sandbox._data_plane is not None:
-                    sandbox._data_plane.close()
                 try:
-                    result.delete()
+                    try:
+                        if sandbox is not None and sandbox._data_plane is not None:
+                            sandbox._data_plane.close()
+                    finally:
+                        result.delete()
                 except BaseException as cleanup_error:
-                    if kwargs.get("volume_mounts"):
-                        raise RuntimeError(
-                            f"Sandbox creation failed and VM cleanup failed; delete VM {result.id} explicitly"
-                        ) from cleanup_error
+                    raise RuntimeError(f"Sandbox creation and cleanup failed for VM {result.id}") from cleanup_error
                 raise
         return cls(vm=result if provider == "arker" else None, native=result if provider == "e2b" else None)
 
@@ -429,14 +428,17 @@ class Sandbox(UnsupportedMixin):
     def kill(self, **opts) -> bool:
         if self._vm is not None:
             request = _options(opts)
-            if self._data_plane is not None:
-                self._data_plane.close()
             try:
-                return _control(self._vm.delete, **request).deleted
-            except ArkerError as error:
-                if error.status == 404:
-                    return False
-                raise
+                if self._data_plane is not None:
+                    self._data_plane.close()
+            finally:
+                try:
+                    deleted = _control(self._vm.delete, **request).deleted
+                except ArkerError as error:
+                    if error.status != 404:
+                        raise
+                    deleted = False
+            return deleted
         if hasattr(self._native, "kill"):
             return self._native.kill(**opts)
         raise AttributeError("Native E2B sandbox does not expose kill().")
