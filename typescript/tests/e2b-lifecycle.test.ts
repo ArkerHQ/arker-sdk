@@ -218,7 +218,7 @@ test("Arker-only creation restrictions reject unsupported options before any req
   process.env.ARKER_API_KEY = "arker-test";
   process.env.ARKER_SOURCE_VM_ID = "00000000000000000000000000";
   delete process.env.COMPUTESDK_ROUTER_CONFIG;
-  for (const options of [{ headers: {} }, { requestTimeoutMs: 0 }, { network: { maskRequestHost: true } }]) {
+  for (const options of [{ headers: {} }, { proxy: "unsupported" }, { network: { maskRequestHost: true } }]) {
     await assert.rejects(Sandbox.create(options as any), /unsupported .*option/i);
   }
 });
@@ -328,4 +328,64 @@ test("native object template and credentials remain native without Arker authent
     return { sandboxId: "native" } as Native;
   }) as typeof Native.create;
   assert.equal((await Sandbox.create(options)).sandboxId, "native");
+});
+
+test("cancelled Arker creation deletes the known VM with an uncancelled cleanup request", async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "ARKER_BASE_URL", "COMPUTESDK_ROUTER_CONFIG");
+  process.env.ARKER_API_KEY = "arker-only";
+  process.env.ARKER_BASE_URL = "https://example.invalid";
+  delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  preserveProperties(t, Arker.prototype, "getVm", "fork", "_request");
+  const factory = Sandbox as unknown as { dataPlane: (box: { getInstance(): VM }) => Promise<unknown> };
+  preserveProperties(t, factory, "dataPlane");
+  const calls: string[] = [];
+  Arker.prototype.getVm = (async () => ({ policies: undefined })) as unknown as typeof Arker.prototype.getVm;
+  Arker.prototype.fork = async function () { calls.push("fork"); return this.vm("child"); };
+  Arker.prototype._request = async function <T>(method: any, path: string, _body?: unknown, _base?: string, _headers?: unknown, _queue?: unknown, _retry?: unknown, transport?: { signal?: AbortSignal }): Promise<T> {
+    transport?.signal?.throwIfAborted();
+    assert.equal(method, "DELETE");
+    assert.equal(path, "/v1/vms/child");
+    calls.push("delete");
+    return { deleted: true } as T;
+  };
+  const controller = new AbortController();
+  const cancellation = new Error("caller cancelled");
+  factory.dataPlane = async box => {
+    controller.abort(cancellation);
+    await box.getInstance()._client._request("POST", "/prepare");
+    assert.fail("cancelled preparation must fail");
+  };
+  await assert.rejects(Sandbox.create("source", { requestTimeoutMs: 0, signal: controller.signal }), error => error === cancellation);
+  assert.deepEqual(calls, ["fork", "delete"]);
+});
+
+
+test("late creation cancellation still deletes when native component close fails", async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "ARKER_BASE_URL", "COMPUTESDK_ROUTER_CONFIG");
+  process.env.ARKER_API_KEY = "arker-only";
+  process.env.ARKER_BASE_URL = "https://example.invalid";
+  delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  preserveProperties(t, Arker.prototype, "getVm", "fork", "_request");
+  const factory = Sandbox as unknown as { dataPlane: () => Promise<unknown> };
+  preserveProperties(t, factory, "dataPlane");
+  Arker.prototype.getVm = (async () => ({ policies: undefined })) as unknown as typeof Arker.prototype.getVm;
+  Arker.prototype.fork = async function () { return this.vm("child"); };
+  let deleted = 0;
+  Arker.prototype._request = async function <T>(method: any): Promise<T> {
+    if (method === "DELETE") { deleted++; return { deleted: true } as T; }
+    throw new Error("no hostname");
+  };
+  const controller = new AbortController();
+  const cancellation = new Error("caller cancelled");
+  const closeError = new Error("close failed");
+  factory.dataPlane = async () => {
+    controller.abort(cancellation);
+    return { close() { throw closeError; } };
+  };
+  await assert.rejects(Sandbox.create("source", { requestTimeoutMs: 0, signal: controller.signal }), error => {
+    assert.ok(error instanceof AggregateError);
+    assert.deepEqual(error.errors, [cancellation, closeError]);
+    return true;
+  });
+  assert.equal(deleted, 1);
 });

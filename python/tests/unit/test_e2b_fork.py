@@ -31,6 +31,8 @@ def fixture():
     children = [Mock(id=f"child-{i}") for i in range(2)]
     source.fork.return_value = checkpoint
     checkpoint.fork.side_effect = children
+    for vm in [source, checkpoint, *children]:
+        vm._client._e2b_request_timeout = 60
     prepare = lambda vm: SimpleNamespace(_vm=vm, _data_plane=None)
     return source, checkpoint, children, prepare
 
@@ -204,9 +206,11 @@ def test_async_facade_child_descriptors_and_urls(monkeypatch):
             async def aclose(self):
                 planes.append(self.vm_id)
 
-        monkeypatch.setattr(
-            data_plane, "create_data_plane", lambda descriptor, key, asynchronous: Plane(descriptor.vm_id)
-        )
+        def components(descriptor, key, asynchronous, request_timeout):
+            assert request_timeout == 60
+            return Plane(descriptor.vm_id)
+
+        monkeypatch.setattr(data_plane, "create_data_plane", components)
         values = await AsyncSandbox(Sandbox(vm=parent)).fork(count=2)
         assert all(isinstance(value, AsyncSandbox) for value in values)
         for value, child in zip(values, children, strict=True):
@@ -435,3 +439,39 @@ def test_inventory_during_fanout_excludes_checkpoint_and_keeps_child_metadata(as
         assert all(child.metadata == parent.metadata for child in children)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("override", [None, 0, 11])
+def test_fork_inherits_parent_request_budget_without_mutation(monkeypatch, asynchronous, override):
+    import arker._compat_e2b_fork as helper
+
+    monkeypatch.setattr(helper.time, "monotonic", lambda: 10)
+    parent, checkpoint, _, prepare = fixture()
+    parent._client._e2b_request_timeout = 7
+    opts = {} if override is None else {"request_timeout": override}
+
+    def invoke():
+        if asynchronous:
+            return asyncio.run(fork_arker_async(parent, prepare, **opts))
+        return fork_arker(parent, prepare, **opts)
+
+    if override == 0:
+        with pytest.raises(TypeError, match="finite request_timeout"):
+            invoke()
+        parent.fork.assert_not_called()
+    else:
+        invoke()
+        expected = 7 if override is None else override
+        assert parent.refresh.call_args.kwargs["request_timeout"] == expected
+        assert checkpoint.fork.call_args.kwargs["request_timeout"] == expected
+        assert parent.fork.call_args.kwargs["policies"]["rules"][LIFETIME_POLICY_ID]["after_created"] == expected
+    assert parent._client._e2b_request_timeout == 7
+
+
+def test_fork_inherited_unlimited_budget_is_rejected_before_capture():
+    parent, _, _, prepare = fixture()
+    parent._client._e2b_request_timeout = 0
+    with pytest.raises(TypeError, match="finite request_timeout"):
+        fork_arker(parent, prepare)
+    parent.refresh.assert_not_called()

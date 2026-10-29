@@ -1,8 +1,9 @@
-import { ConnectionConfig, InvalidArgumentError, RateLimitError, SandboxError, SandboxNotFoundError, type SandboxForkOpts } from "e2b";
+import { requestTimeout, requestTransport, validateRequestTimeout } from "./e2b-transport.js";
+import { InvalidArgumentError, RateLimitError, SandboxError, SandboxNotFoundError, type SandboxForkOpts } from "e2b";
 import { ArkerError, type VM } from "../index.js";
 import { assertSupportedObjectKeys } from "./common.js";
 import { e2bAdmissionError } from "./e2b-errors.js";
-import { E2B_LIFETIME_POLICY_ID, e2bTimeoutDuration, lifecycleTransport } from "./e2b-lifecycle.js";
+import { E2B_LIFETIME_POLICY_ID, e2bTimeoutDuration } from "./e2b-lifecycle.js";
 import { trafficPolicies, rememberTrafficToken, managed } from "./e2b-network.js";
 
 function forkError(error: unknown): Error {
@@ -24,10 +25,10 @@ export async function forkArker<T>(vm: VM, prepare: (vm: VM) => Promise<T>, disp
   const count = opts.count ?? 1;
   if (!Number.isInteger(count) || count < 1 || count > 20) throw new InvalidArgumentError("count must be an integer between 1 and 20");
   const seconds = e2bTimeoutDuration(opts.timeoutMs ?? 300_000) / 1000;
-  const budget = new ConnectionConfig(opts).requestTimeoutMs;
+  const budget = validateRequestTimeout(opts.requestTimeoutMs ?? requestTimeout(vm));
   if (!Number.isFinite(budget) || budget <= 0) throw new InvalidArgumentError("Fork requires a finite requestTimeoutMs for checkpoint reclamation");
   const deadline = performance.now() + budget;
-  const transport = lifecycleTransport(opts);
+  const transport = requestTransport(opts, requestTimeout(vm));
   const source = await vm.refresh(transport);
   const metadata = structuredClone(source.metadata ?? null);
   const policies = source.policies ?? undefined;

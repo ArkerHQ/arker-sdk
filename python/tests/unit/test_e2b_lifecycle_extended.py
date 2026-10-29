@@ -53,7 +53,7 @@ def vm(monkeypatch):
             "already_paused": False,
         }
 
-    vm._client = SimpleNamespace(_request=request)
+    vm._client = SimpleNamespace(_request=request, _download=lambda *a, **k: pytest.fail("unexpected download"))
     vm.update = update
     vm.delete = lambda: pytest.fail("lifecycle must not delete")
     vm.run = lambda *a, **k: pytest.fail("inspection must not wake a VM")
@@ -329,7 +329,7 @@ def test_ten_async_sandbox_timeouts_execute_off_loop_without_shared_state():
                     "deadline_at": (NOW + timedelta(seconds=args[2]["timeout_seconds"])).isoformat(),
                 }
 
-            vm._client = SimpleNamespace(_request=request)
+            vm._client = SimpleNamespace(_request=request, _download=lambda *a, **k: pytest.fail("unexpected download"))
             vm.refresh = lambda **kwargs: vm
             return lifecycle.AsyncLifecycle(vm=vm)
 

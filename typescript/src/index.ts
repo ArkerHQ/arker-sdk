@@ -961,6 +961,11 @@ export class Arker {
     );
   }
 
+  /** @internal Unauthenticated presigned sync download. */
+  async _download(url: string, transport?: RequestTransportOptions): Promise<Response> {
+    return this._fetch(url, transport ? { signal: transport.signal } : undefined);
+  }
+
   /** @internal */
   async _fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     return this.fetchImpl(input, init);
@@ -1596,7 +1601,7 @@ export class VM {
       true,
     );
     if ("content" in response) return decodeBytes(response.content, response.encoding);
-    const signed = await this._client._fetch(response.presigned_url);
+    const signed = await this._client._download(response.presigned_url);
     if (!signed.ok) throw new ArkerError("internal", `signed GET failed: ${signed.status}`, signed.status);
     return new Uint8Array(await signed.arrayBuffer());
   }

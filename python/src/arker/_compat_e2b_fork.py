@@ -15,7 +15,7 @@ from contextlib import suppress
 from copy import deepcopy
 
 from ._compat_e2b_errors import translate_error
-from ._compat_e2b_lifecycle import LIFETIME_POLICY_ID, _control, _options, _timeout
+from ._compat_e2b_lifecycle import LIFETIME_POLICY_ID, _control, _options, _timeout, transport_timeout
 from ._compat_e2b_network import _dict, _managed, remember_traffic_token, traffic_policies
 from .computer import ArkerError
 
@@ -56,7 +56,7 @@ def fork_arker(vm, prepare, *, timeout=None, count=None, cancelled=None, **opts)
     validate_fork_count(count)
     seconds = 300 if timeout is None else timeout
     _timeout(seconds)
-    transport = _options(opts)
+    transport = _options(opts, transport_timeout(vm))
     budget = transport["request_timeout"]
     if budget is None:
         from ._compat import UnsupportedCompatibilityOption

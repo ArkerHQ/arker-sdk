@@ -177,7 +177,9 @@ class _AsyncPool:
             await self.transport.aclose()
 
 
-def create_data_plane(descriptor: EnvdDescriptor, platform_key: str, *, asynchronous: bool = False) -> DataPlane:
+def create_data_plane(
+    descriptor: EnvdDescriptor, platform_key: str, *, asynchronous: bool = False, request_timeout: float | None = None
+) -> DataPlane:
     """Construct components only; never bootstrap, activate, or call vendor APIs.
 
     Async components must be constructed on their caller's event loop. Imports
@@ -194,6 +196,7 @@ def create_data_plane(descriptor: EnvdDescriptor, platform_key: str, *, asynchro
     _scope(descriptor.endpoint, descriptor.endpoint.rstrip("/") + "/health")
     config = ConnectionConfig(
         api_key="arker-data-plane-only",
+        request_timeout=request_timeout,
         sandbox_url=descriptor.endpoint,
         extra_sandbox_headers={"X-Access-Token": descriptor.envd_access_token},
     )

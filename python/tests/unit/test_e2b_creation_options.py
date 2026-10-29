@@ -23,11 +23,13 @@ def test_arker_creation_keeps_native_credentials_out_of_requests(monkeypatch, as
 
     def get_vm(client, source):
         assert client._api_key == "arker-only"
+        assert client._e2b_request_timeout == 0
         calls.append(("get", source))
         return SimpleNamespace(policies=None)
 
     def fork(client, **request):
         assert client._api_key == "arker-only"
+        assert client._e2b_request_timeout == 0
         calls.append(("fork", request))
         return child
 
@@ -46,6 +48,7 @@ def test_arker_creation_keeps_native_credentials_out_of_requests(monkeypatch, as
         "validate_api_key": False,
         "debug": False,
         "lifecycle": lifecycle,
+        "request_timeout": 0,
     }
     original = copy.deepcopy(options)
     with pytest.raises(RuntimeError) as caught:
@@ -76,7 +79,7 @@ def test_arker_creation_keeps_native_credentials_out_of_requests(monkeypatch, as
         {"lifecycle": {"auto_resume": 0}},
         {"lifecycle": {"on_timeout": {"action": "kill", "mode": "full"}}},
         {"lifecycle": {"unknown": False}},
-        {"request_timeout": 0},
+        {"proxy": "unsupported"},
         {"headers": {}},
     ],
 )

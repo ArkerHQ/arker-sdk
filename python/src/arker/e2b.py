@@ -22,7 +22,7 @@ from ._compat import (
     run_command,
 )
 from ._compat_e2b_async import AsyncSandbox as AsyncSandbox
-from ._compat_e2b_lifecycle import Lifecycle, _control, _options, _timeout
+from ._compat_e2b_lifecycle import Lifecycle, _control, _options, _timeout, configure_transport, transport_timeout
 from ._compat_e2b_mounts import (
     AsyncVolume as AsyncVolume,
 )
@@ -75,7 +75,9 @@ class Sandbox(UnsupportedMixin):
 
         descriptor, _ = bootstrap_envd(self._vm, **({"envs": envs} if envs is not None else {}))
         prepare_file_urls(self._vm)
-        replacement = create_data_plane(descriptor, self._vm._client._api_key)
+        replacement = create_data_plane(
+            descriptor, self._vm._client._api_key, request_timeout=transport_timeout(self._vm)
+        )
         previous = self._data_plane
         self._data_plane = replacement
         self._envd_descriptor = descriptor
@@ -229,6 +231,7 @@ class Sandbox(UnsupportedMixin):
                 "api_key",
                 "secure",
                 "validate_api_key",
+                "request_timeout",
                 "debug",
                 "lifecycle",
             }
@@ -248,6 +251,7 @@ class Sandbox(UnsupportedMixin):
                 raise UnsupportedCompatibilityOption("Arker Sandbox.create supports only kill lifecycle")
             if lifecycle.get("auto_resume", False) is not False:
                 raise UnsupportedCompatibilityOption("Arker Sandbox.create supports only auto_resume=False")
+        _options({"request_timeout": native_options.get("request_timeout")})
         metadata = native_options.get("metadata")
         if metadata is None:
             metadata = {}
@@ -292,11 +296,16 @@ class Sandbox(UnsupportedMixin):
             if source_id and not template_id
             else {"kind": "vm_name", "value": template_id or arker_source(arker_config)}
         )
+
+        def fork(client, request):
+            configure_transport(client, native_options.get("request_timeout"))
+            return fork_with_traffic(client, request, public)
+
         return arker_create(
             arker_config,
             template_id=template_id,
             policies=policies,
-            fork=lambda client, request: fork_with_traffic(client, request, public),
+            fork=fork,
             metadata={
                 "arker_e2b": {
                     "version": 1,
@@ -378,6 +387,7 @@ class Sandbox(UnsupportedMixin):
         provider, result = found
         if provider == "e2b":
             return cls(native=native.connect(sandbox_id, **kwargs))
+        configure_transport(result._client, kwargs.get("request_timeout"))
         current = Lifecycle(vm=result).connect(**kwargs)
         sandbox = cls(vm=current)
         sandbox._prepare_data_plane()
@@ -487,7 +497,7 @@ class Sandbox(UnsupportedMixin):
     @_InstanceOrClassMethod
     def kill(self, **opts) -> bool:
         if self._vm is not None:
-            request = _options(opts)
+            request = _options(opts, transport_timeout(self._vm))
             try:
                 if self._data_plane is not None:
                     self._data_plane.close()

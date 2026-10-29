@@ -163,3 +163,16 @@ test("already-aborted REST signals reach the transport", async () => {
   await scoped("https://envd.test/files", { signal: controller.signal });
   assert.equal(signal?.aborted, true);
 });
+
+test("native file requests inherit connection timeout and allow a zero per-call override", async () => {
+  const server = createServer((_request, response) => {
+    setTimeout(() => { response.writeHead(200); response.end("content"); }, 80);
+  });
+  const endpoint = await listen(server);
+  const plane = await createE2BDataPlane({ endpoint, envd_version: "0.10.2", envd_access_token: "guest" }, "platform", 20);
+  try {
+    await assert.rejects(plane.files.read("/file"), /timeout|timed out/i);
+    assert.equal(await plane.files.read("/file", { requestTimeoutMs: 0 }), "content");
+    await assert.rejects(plane.files.read("/file"), /timeout|timed out/i);
+  } finally { plane.close(); await close(server); }
+});

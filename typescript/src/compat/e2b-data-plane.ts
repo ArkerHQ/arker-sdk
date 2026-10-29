@@ -110,7 +110,7 @@ export function scopedEnvdFetch(descriptor: EnvdDescriptor, platformKey: string,
   };
 }
 
-export async function createE2BDataPlane(descriptor: EnvdDescriptor, platformKey: string): Promise<E2BDataPlane> {
+export async function createE2BDataPlane(descriptor: EnvdDescriptor, platformKey: string, requestTimeoutMs?: number): Promise<E2BDataPlane> {
   descriptor = Object.freeze({ ...descriptor });
   assertEndpoint(descriptor.endpoint, descriptor.endpoint.replace(/\/$/, "") + "/health");
   // These constructors are private native ABI: validate before exposing any component.
@@ -127,7 +127,7 @@ export async function createE2BDataPlane(descriptor: EnvdDescriptor, platformKey
   const { createTransport } = await connectModule("@connectrpc/connect/protocol-connect");
   const { ConnectError, Code } = await connectModule("@connectrpc/connect");
   const sandbox = new Sandbox({ sandboxId: "arker-data-plane", apiKey: "arker-data-plane-only",
-    sandboxUrl: descriptor.endpoint, envdVersion: descriptor.envd_version });
+    sandboxUrl: descriptor.endpoint, envdVersion: descriptor.envd_version, requestTimeoutMs });
   if (typeof sandbox.files?.rpc?.stat !== "function" ||
       typeof sandbox.commands?.streamingRpc?.streamInput !== "function" ||
       typeof sandbox.pty?.rpc?.start !== "function" || typeof sandbox.envdApi?.api?.use !== "function") {

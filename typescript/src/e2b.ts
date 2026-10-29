@@ -4,6 +4,7 @@ import { listSandboxes, type E2BListOptions, type E2BPaginator } from "./compat/
 import { e2bForkMetadata } from "./compat/e2b-metadata.js";
 import { forkWithTraffic, trafficToken, validateE2BNetwork, type E2BNetworkOptions } from "./compat/e2b-network.js";
 import { E2BLifecycle, lifecycleTransport, e2bTimeoutDuration } from "./compat/e2b-lifecycle.js";
+import { configureTransport, finishInitialization, requestTimeout, validateRequestTimeout } from "./compat/e2b-transport.js";
 import { E2BFileURLs, prepareFileURLs, type E2BFileURLOptions } from "./compat/e2b-urls.js";
 import { bootstrapEnvd, validateEnvdEnvs } from "./compat/e2b-bootstrap.js";
 import { createE2BDataPlane, type E2BDataPlane, type EnvdDescriptor } from "./compat/e2b-data-plane.js";
@@ -25,12 +26,13 @@ export type { CommandResult as CommandExitResult, SandboxForkOpts } from "e2b";
 const descriptors = new WeakMap<E2BDataPlane, EnvdDescriptor>();
 
 type NativeSandbox = Pick<VendorSandbox, "fork" | "kill" | "getHost" | "commands" | "files" | "git" | "pty" | "trafficAccessToken">;
-const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess", "volumeMounts", "network", "template", "apiKey", "secure", "validateApiKey", "debug", "lifecycle"] as const;
+const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess", "volumeMounts", "network", "template", "apiKey", "secure", "validateApiKey", "debug", "lifecycle", "requestTimeoutMs", "signal"] as const;
 
 function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMounts, lookupOptions?: SandboxApiOpts) {
   const { mode: _mode, keepMemory: _keepMemory, onResume: _onResume, timeoutMs: _timeout, ...apiOptions } =
     (lookupOptions ?? {}) as SandboxPauseOpts & SandboxConnectOpts;
   let network: E2BNetworkOptions | undefined;
+  let transport: { requestTimeoutMs?: number; signal?: AbortSignal } = {};
   const fallbackProvider = createNativeE2BProvider(apiOptions);
   if (volumeMounts !== undefined) {
     const create = fallbackProvider.sandbox.create.bind(fallbackProvider.sandbox);
@@ -44,7 +46,10 @@ function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMount
     routerConfigPath,
     arkerLookupTransport: lookupOptions ? lifecycleTransport(lookupOptions) : undefined,
     mapArkerForkMetadata: (request: import("./index.js").ForkOptions, metadata: unknown) => e2bForkMetadata(request, metadata, network),
-    arkerFork: (client: import("./index.js").Arker, request: import("./index.js").ForkOptions) => forkWithTraffic(client, request, network?.allowPublicTraffic ?? true),
+    arkerFork: (client: import("./index.js").Arker, request: import("./index.js").ForkOptions) => {
+      configureTransport(client, transport.requestTimeoutMs, transport.signal);
+      return forkWithTraffic(client, request, network?.allowPublicTraffic ?? true);
+    },
     mapArkerCreateOptions: (values: Record<string, unknown>) => {
       assertSupportedObjectKeys(values, [...E2B_CREATE_OPTION_KEYS, "templateId"], "e2b", "Sandbox.create");
       if (values.debug !== undefined && values.debug !== false) throw new Error("Arker Sandbox.create supports only debug=false");
@@ -58,12 +63,14 @@ function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMount
         }
         if (lifecycle.autoResume !== undefined && lifecycle.autoResume !== false) throw new Error("Arker Sandbox.create supports only autoResume=false");
       }
+      transport = { requestTimeoutMs: validateRequestTimeout(values.requestTimeoutMs as number | undefined), signal: values.signal as AbortSignal | undefined };
+      transport.signal?.throwIfAborted();
       validateEnvdEnvs(values.envs as Record<string, string> | undefined);
       validateE2BNetwork(values.network as E2BNetworkOptions | undefined);
       network = values.network as E2BNetworkOptions | undefined;
       if (volumeMounts !== undefined) checkMountBackend(volumeMounts, "arker");
       const { volumeMounts: _mounts, network: _network, envs: _envs, timeoutMs: _timeoutMs,
-        apiKey: _apiKey, secure: _secure, validateApiKey: _validateApiKey, debug: _debug, lifecycle: _lifecycle, template, ...rest } = values;
+        apiKey: _apiKey, secure: _secure, validateApiKey: _validateApiKey, debug: _debug, lifecycle: _lifecycle, requestTimeoutMs: _requestTimeoutMs, signal: _signal, template, ...rest } = values;
       return { ...rest, ...(template !== undefined && rest.templateId === undefined ? { templateId: template } : {}), timeout: e2bTimeoutDuration(resolveTimeout(values as CreateOptions) ?? 300_000) };
     },
   };
@@ -112,14 +119,14 @@ export class Sandbox {
     if (!authorization?.startsWith("Bearer ")) throw new Error("Missing Arker transport credentials");
     const [descriptor] = await bootstrapEnvd(vm, { envs });
     await prepareFileURLs(vm);
-    const plane = await createE2BDataPlane(descriptor, authorization.slice(7));
+    const plane = await createE2BDataPlane(descriptor, authorization.slice(7), requestTimeout(vm));
     descriptors.set(plane, descriptor);
     return plane;
   }
 
   private static async wrap(
     box: UniversalSandbox,
-    options: { deleteOnValidationFailure?: boolean; envs?: Record<string, string> } = {},
+    options: { deleteOnValidationFailure?: boolean; envs?: Record<string, string>; signal?: AbortSignal } = {},
   ): Promise<Sandbox> {
     const native = nativeInstance(box);
     let dataPlane: E2BDataPlane | undefined;
@@ -130,15 +137,12 @@ export class Sandbox {
       const arkerHostname = box.provider === "arker"
         ? await box.getUrl({ port: 8080 }).then((url) => new URL(url).hostname).catch(() => undefined)
         : undefined;
+      if (box.provider === "arker") options.signal?.throwIfAborted();
       return guardUnsupported(new Sandbox(box, native, arkerHostname, dataPlane), "e2b", native);
     } catch (error) {
-      dataPlane?.close();
-      if (options.deleteOnValidationFailure && box.provider === "arker") {
-        const vm = (box as UniversalSandbox & { getInstance(): VM }).getInstance();
-        try { await vm.delete(); }
-        catch (cleanupError) { throw new AggregateError([error, cleanupError], "Sandbox initialization and cleanup failed"); }
-      }
-      throw error;
+      const vm = options.deleteOnValidationFailure && box.provider === "arker"
+        ? (box as UniversalSandbox & { getInstance(): VM }).getInstance() : undefined;
+      return Sandbox.discard(error, dataPlane, vm);
     }
   }
 
@@ -153,26 +157,25 @@ export class Sandbox {
       ...nativeOptions,
       ...(templateId !== undefined ? { templateId } : {}),
     });
-    if (box.provider !== "arker" || !opts?.volumeMounts || !Object.keys(opts.volumeMounts).length) {
-      return Sandbox.wrap(box, { deleteOnValidationFailure: true, envs: opts?.envs });
-    }
-    const vm = (box as UniversalSandbox & { getInstance(): VM }).getInstance();
-    let sandbox: Sandbox | undefined;
     try {
-      sandbox = await Sandbox.wrap(box, { envs: opts?.envs });
-      checkMountBackend(opts.volumeMounts, "arker");
-      await mountStore(vm._client, opts.volumeMounts).attach(vm, opts.volumeMounts as VolumeMounts);
-      const ready = await sandbox.commands.run(mountReadyCommand(Object.keys(opts.volumeMounts), timeout / 1000), { timeoutMs: timeout });
-      if (ready.exitCode !== 0) throw new Error("Volume mount readiness failed; sandbox was not returned");
-      return sandbox;
-    } catch (error) {
-      sandbox?.closeDataPlane();
-      try {
-        await vm.delete();
-      } catch (cleanupError) {
-        throw new AggregateError([error, cleanupError], `Sandbox creation and VM cleanup failed; delete VM ${vm.id} explicitly`);
+      if (box.provider !== "arker" || !opts?.volumeMounts || !Object.keys(opts.volumeMounts).length) {
+        return await Sandbox.wrap(box, { deleteOnValidationFailure: true, envs: opts?.envs, signal: opts?.signal });
       }
-      throw error;
+      const vm = (box as UniversalSandbox & { getInstance(): VM }).getInstance();
+      let sandbox: Sandbox | undefined;
+      try {
+        sandbox = await Sandbox.wrap(box, { envs: opts?.envs, signal: opts?.signal });
+        checkMountBackend(opts.volumeMounts, "arker");
+        await mountStore(vm._client, opts.volumeMounts).attach(vm, opts.volumeMounts as VolumeMounts);
+        const ready = await sandbox.commands.run(mountReadyCommand(Object.keys(opts.volumeMounts), timeout / 1000), { timeoutMs: timeout, signal: opts?.signal });
+        if (ready.exitCode !== 0) throw new Error("Volume mount readiness failed; sandbox was not returned");
+        opts?.signal?.throwIfAborted();
+        return sandbox;
+      } catch (error) {
+        return Sandbox.discard(error, sandbox ? sandbox.#dataPlane : undefined, vm);
+      }
+    } finally {
+      if (box.provider === "arker") finishInitialization((box as UniversalSandbox & { getInstance(): VM }).getInstance());
     }
   }
 
@@ -213,8 +216,23 @@ export class Sandbox {
       return Sandbox.wrap(box);
     }
     const box = owner.instance as UniversalSandbox;
-    await new E2BLifecycle(box).connect(options);
-    return Sandbox.wrap(box);
+    const vm = (box as UniversalSandbox & { getInstance(): VM }).getInstance();
+    configureTransport(vm._client, options.requestTimeoutMs, options.signal);
+    try {
+      await new E2BLifecycle(box).connect(options);
+      return await Sandbox.wrap(box, { signal: options.signal });
+    } finally { finishInitialization(vm); }
+  }
+
+  private static async discard(error: unknown, plane?: E2BDataPlane, vm?: VM): Promise<never> {
+    const errors = [error];
+    try { plane?.close(); } catch (cleanupError) { errors.push(cleanupError); }
+    if (vm) {
+      finishInitialization(vm);
+      try { await vm.delete(); } catch (cleanupError) { errors.push(cleanupError); }
+    }
+    if (errors.length > 1) throw new AggregateError(errors, "Sandbox initialization and cleanup failed");
+    throw error;
   }
 
   private closeDataPlane(): void {

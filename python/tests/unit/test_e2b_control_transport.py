@@ -118,7 +118,7 @@ def test_static_lifecycle_routes_owner_without_bootstrap(monkeypatch, asynchrono
             return {"vm_id": vm.id, "deadline_at": "2026-01-01T00:00:00Z"}
         return {"vm_id": vm.id, "state": "paused", "mode": "full", "already_paused": False}
 
-    vm._client = SimpleNamespace(_request=request)
+    vm._client = SimpleNamespace(_request=request, _download=lambda *a, **k: pytest.fail("unexpected download"))
     monkeypatch.setattr(shim.Sandbox, "_lookup", classmethod(lambda cls, identifier, opts: (("arker", vm), None)))
     monkeypatch.setattr(shim.Sandbox, "_prepare_data_plane", lambda *a, **k: pytest.fail("must not bootstrap"))
     value = getattr(shim.AsyncSandbox if asynchronous else shim.Sandbox, method)(vm.id, *args, request_timeout=0.5)
@@ -246,3 +246,146 @@ def test_repeated_kill_preserves_authoritative_backend_deleted_boolean(asynchron
         assert sandbox.kill() is True
         assert sandbox.kill() is False
     assert calls == ["delete", "delete"]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_created_client_default_is_inherited_but_overrides_do_not_mutate_it(delayed_server, asynchronous):
+    from arker._compat_e2b_lifecycle import configure_transport
+
+    vm, calls = delayed_server
+    configure_transport(vm._client, 0)
+    helper = (AsyncLifecycle if asynchronous else Lifecycle)(vm=vm)
+
+    def running(**opts):
+        result = helper.is_running(**opts)
+        return asyncio.run(result) if asynchronous else result
+
+    assert running() is True
+    with pytest.raises(TimeoutException):
+        running(request_timeout=0.02)
+    assert running() is True
+    assert vm._client._e2b_request_timeout == 0
+    assert len(calls) == 3
+
+
+def test_client_defaults_are_fresh_per_request_and_do_not_change_auth(monkeypatch):
+    from arker._compat_e2b_lifecycle import configure_transport
+
+    calls = []
+    monkeypatch.setattr("arker.computer._request_json", lambda *a, **kw: calls.append(kw) or {})
+    first = Arker(api_key="arker-only", base_url="https://example.invalid", retry=False)
+    second = Arker(api_key="second", base_url="https://example.invalid", retry=False)
+    configure_transport(first, 0.25)
+    for _ in range(2):
+        first._request("POST", "/probe")
+    first._request("POST", "/probe", request_timeout=None)
+    second._request("POST", "/probe", request_timeout=5)
+    assert [call["request_timeout"] for call in calls] == [0.25, 0.25, None, 5]
+    assert [call["api_key"] for call in calls] == ["arker-only"] * 3 + ["second"]
+    configure_transport(first, 0)
+    first._request("POST", "/probe")
+    assert calls[-1]["request_timeout"] is None
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_native_components_inherit_request_timeout_and_zero(asynchronous):
+    from arker._compat_e2b_data_plane import EnvdDescriptor, create_data_plane
+
+    async def check_async(timeout):
+        plane = create_data_plane(
+            EnvdDescriptor("https://envd.invalid", "0.10.2", "guest-only"),
+            "platform-only",
+            asynchronous=True,
+            request_timeout=timeout,
+        )
+        try:
+            assert plane.files._connection_config.request_timeout == (None if timeout == 0 else timeout)
+        finally:
+            await plane.aclose()
+
+    for timeout in (0, 0.25):
+        if asynchronous:
+            asyncio.run(check_async(timeout))
+        else:
+            plane = create_data_plane(
+                EnvdDescriptor("https://envd.invalid", "0.10.2", "guest-only"),
+                "platform-only",
+                request_timeout=timeout,
+            )
+            try:
+                assert plane.files._connection_config.request_timeout == (None if timeout == 0 else timeout)
+            finally:
+                plane.close()
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("timeout", [0, 0.25])
+def test_connect_installs_timeout_default_before_bootstrap(monkeypatch, asynchronous, timeout):
+    import arker.e2b as shim
+
+    vm = SimpleNamespace(id="vm-a", base_url="https://example.invalid")
+    seen = []
+
+    def request(*args, **opts):
+        seen.append(opts["request_timeout"])
+        return {"vm_id": vm.id, "state": "running", "mode": "full"}
+
+    vm._client = SimpleNamespace(_request=request, _download=lambda *a, **k: pytest.fail("unexpected download"))
+    vm.refresh = lambda **opts: vm
+    monkeypatch.setattr(shim.Sandbox, "_lookup", classmethod(lambda cls, *a: (("arker", vm), None)))
+    marker = RuntimeError("stop before native client allocation")
+
+    def bootstrap(current):
+        assert current is vm
+        assert current._client._e2b_request_timeout == timeout
+        raise marker
+
+    monkeypatch.setattr("arker._compat_e2b_bootstrap.bootstrap_envd", bootstrap)
+    with pytest.raises(RuntimeError) as caught:
+        if asynchronous:
+            asyncio.run(shim.AsyncSandbox.connect(vm.id, request_timeout=timeout))
+        else:
+            shim.Sandbox.connect(vm.id, request_timeout=timeout)
+    assert caught.value is marker
+    assert seen == [None if timeout == 0 else timeout]
+
+
+def test_presigned_download_default_is_scoped_and_never_sends_credentials(monkeypatch):
+    from arker._compat_e2b_lifecycle import configure_transport
+
+    calls = []
+    response = object()
+    monkeypatch.setattr(
+        "arker.computer._http_client", SimpleNamespace(get=lambda *a, **kw: calls.append((a, kw)) or response)
+    )
+    client = Arker(api_key="arker-only", base_url="https://example.invalid", retry=False)
+    configure_transport(client, 0)
+    assert client._download("https://presigned.invalid/file") is response
+    configure_transport(client, 0.25)
+    client._download("https://presigned.invalid/file")
+    assert calls == [
+        (("https://presigned.invalid/file",), {"timeout": None}),
+        (("https://presigned.invalid/file",), {"timeout": 0.25}),
+    ]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("default", [0, 0.25])
+def test_kill_inherits_timeout_and_preserves_per_call_override(asynchronous, default):
+    from arker._compat_e2b_lifecycle import configure_transport
+    from arker.e2b import AsyncSandbox, Sandbox
+
+    client = Arker(api_key="arker-only", base_url="https://example.invalid", retry=False)
+    configure_transport(client, default)
+    seen = []
+    vm = SimpleNamespace(
+        id="vm", _client=client, delete=lambda **opts: seen.append(opts) or SimpleNamespace(deleted=True)
+    )
+    sandbox = Sandbox(vm=vm)
+    box = AsyncSandbox(sandbox) if asynchronous else sandbox
+    for opts in ({}, {"request_timeout": 0.5}, {"request_timeout": 0}, {}):
+        result = box.kill(**opts)
+        assert (asyncio.run(result) if asynchronous else result) is True
+    expected = None if default == 0 else default
+    assert [call["request_timeout"] for call in seen] == [expected, 0.5, None, expected]
+    assert client._e2b_request_timeout == default

@@ -6,7 +6,7 @@ import builtins
 from ._compat import _InstanceOrClassMethod, import_optional
 from ._compat_async import NativeBridge, route
 from ._compat_async import call as _call
-from ._compat_e2b_lifecycle import AsyncLifecycle
+from ._compat_e2b_lifecycle import AsyncLifecycle, transport_timeout
 
 
 async def _route(method, *args, **kwargs):
@@ -76,7 +76,9 @@ class AsyncSandbox:
             await prepare_file_urls_async(vm)
         else:
             del self._sandbox._prepared_descriptor
-        replacement = create_data_plane(descriptor, vm._client._api_key, asynchronous=True)
+        replacement = create_data_plane(
+            descriptor, vm._client._api_key, asynchronous=True, request_timeout=transport_timeout(vm)
+        )
         previous = self._data_plane
         self._data_plane = replacement
         self._sandbox._envd_descriptor = descriptor

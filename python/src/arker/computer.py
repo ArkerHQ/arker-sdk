@@ -715,6 +715,9 @@ class Arker:
             request_timeout=request_timeout,
         )
 
+    def _download(self, url: str, *, request_timeout: float | None = 300):
+        return _http_client.get(url, timeout=request_timeout)
+
     def _retry_delay(self, attempt: int, error: ArkerError | None = None) -> float:
         return _retry_delay(self._retry, attempt, error)
 
@@ -1079,7 +1082,7 @@ class VM:
             return _decode_bytes(response.content, response.encoding)
         if not isinstance(response, SyncReadPresignedResponse):
             raise ArkerError("internal", "unrecognized sync read response", 200)
-        signed = _http_client.get(response.presigned_url, timeout=300)
+        signed = self._client._download(response.presigned_url)
         signed.raise_for_status()
         return signed.content
 

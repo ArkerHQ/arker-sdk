@@ -1,9 +1,10 @@
+import { configureTransport, requestTimeout } from "../src/compat/e2b-transport.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { InvalidArgumentError, RateLimitError } from "e2b";
 import { forkArker } from "../src/compat/e2b-fork.js";
 import { trafficPolicies, trafficToken } from "../src/compat/e2b-network.js";
-import { ArkerError, type VM } from "../src/index.js";
+import { Arker, ArkerError, type VM } from "../src/index.js";
 import { Sandbox } from "../src/e2b.js";
 
 function fixture() {
@@ -176,4 +177,30 @@ test("concurrent inventory excludes the checkpoint and keeps child provenance", 
   }
   assert.ok(!rows.includes(checkpoint as unknown as VM));
   assert.ok(children.every(child => JSON.stringify(child.metadata) === JSON.stringify(parent.metadata)));
+});
+
+
+test("fork inherits the parent budget and an explicit override does not mutate it", async () => {
+  for (const override of [undefined, 11000, 0]) {
+    const { parent, calls } = fixture();
+    const client = new Arker({ apiKey: "arker-only", baseUrl: "https://example.invalid" });
+    configureTransport(client, 7000);
+    Object.defineProperty(parent, "_client", { value: client });
+    const opts = override === undefined ? {} : { requestTimeoutMs: override };
+    if (override === 0) {
+      await assert.rejects(forkArker(parent, async vm => vm, vm => vm.delete(), opts), /finite requestTimeoutMs/);
+      assert.deepEqual(calls, []);
+    } else {
+      await forkArker(parent, async vm => vm, vm => vm.delete(), opts);
+      const retention = calls[0][1].policies.rules["computesdk-e2b-lifetime"].after_created;
+      assert.equal(retention, (override ?? 7000) / 1000);
+    }
+    assert.equal(requestTimeout(parent), 7000);
+  }
+  const { parent, calls } = fixture();
+  const client = new Arker({ apiKey: "arker-only", baseUrl: "https://example.invalid" });
+  configureTransport(client, 0);
+  Object.defineProperty(parent, "_client", { value: client });
+  await assert.rejects(forkArker(parent, async vm => vm, vm => vm.delete()), /finite requestTimeoutMs/);
+  assert.deepEqual(calls, []);
 });

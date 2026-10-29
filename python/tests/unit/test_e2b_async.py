@@ -56,7 +56,9 @@ def test_async_create_obeys_arker_only_routing_instead_of_bypassing_it(configure
         return delegation_response()
 
     vm = types.SimpleNamespace(
-        id="arker", base_url="https://worker.example", _client=types.SimpleNamespace(_request=request)
+        id="arker",
+        base_url="https://worker.example",
+        _client=types.SimpleNamespace(_request=request, _download=lambda *a, **k: pytest.fail("unexpected download")),
     )
     monkeypatch.setattr(shim, "arker_create", lambda *args, **kwargs: calls.append("arker") or vm)
     result = asyncio.run(shim.AsyncSandbox.create("ubuntu"))
@@ -126,9 +128,14 @@ async def test_cancelling_native_creation_does_not_fall_through(configure_router
     assert calls == []
 
 
-def test_cancelled_arker_creation_deletes_its_late_result(configure_router, late_arker_creation):
+@pytest.mark.parametrize("request_timeout", [0, 0.25])
+def test_cancelled_arker_creation_deletes_its_late_result(configure_router, late_arker_creation, request_timeout):
     configure_router(["arker"])
-    asyncio.run(late_arker_creation(shim, boolean_delete=True)(shim.AsyncSandbox.create("ubuntu")))
+    asyncio.run(
+        late_arker_creation(shim, boolean_delete=True)(
+            shim.AsyncSandbox.create("ubuntu", request_timeout=request_timeout)
+        )
+    )
 
 
 def test_async_race_checks_metadata_miss_without_connecting(configure_router, monkeypatch):
@@ -145,7 +152,9 @@ def test_async_race_checks_metadata_miss_without_connecting(configure_router, mo
         return {"vm_id": "arker", "state": "running", "mode": "full"}
 
     vm = types.SimpleNamespace(
-        id="arker", base_url="https://worker.example", _client=types.SimpleNamespace(_request=request)
+        id="arker",
+        base_url="https://worker.example",
+        _client=types.SimpleNamespace(_request=request, _download=lambda *a, **k: pytest.fail("unexpected download")),
     )
     vm.refresh = lambda **options: vm
     monkeypatch.setattr(shim, "arker_get", lambda *args, **kwargs: vm)

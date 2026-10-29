@@ -14,6 +14,8 @@ def fork_requests(monkeypatch):
     monkeypatch.setattr(
         "arker._compat.arker_client",
         lambda config: types.SimpleNamespace(
+            _request=lambda *a, **k: pytest.fail("unexpected transport request"),
+            _download=lambda *a, **k: pytest.fail("unexpected download"),
             get_vm=lambda source: types.SimpleNamespace(policies=None),
             fork=lambda **request: requests.append(request) or child,
         ),
@@ -199,7 +201,7 @@ def test_connect_probes_metadata_before_connecting_only_the_winner(monkeypatch, 
         calls.append(("bootstrap", vm.id))
 
     vm.refresh = refresh
-    vm._client = types.SimpleNamespace(_request=request)
+    vm._client = types.SimpleNamespace(_request=request, _download=lambda *a, **k: pytest.fail("unexpected download"))
     monkeypatch.setattr(shim.Sandbox, "_prepare_data_plane", prepare)
 
     def route(identifier, provider, config, getters):
@@ -331,6 +333,8 @@ def test_facade_fork_installs_child_ingress_and_token_in_single_request(monkeypa
     inherited, parent_token = traffic_policies(None, None, False)
     child, calls = types.SimpleNamespace(id="child"), []
     client = types.SimpleNamespace(
+        _request=lambda *a, **k: pytest.fail("unexpected transport request"),
+        _download=lambda *a, **k: pytest.fail("unexpected download"),
         get_vm=lambda source: types.SimpleNamespace(policies=inherited),
         fork=lambda **request: calls.append(request) or child,
     )

@@ -35,13 +35,13 @@ def _timeout(seconds: int, *, setting: bool = False) -> None:
         raise SandboxException("timeout is outside the supported range", status_code=400)
 
 
-def _options(options: dict[str, Any]) -> dict[str, Any]:
+def _options(options: dict[str, Any], default=60) -> dict[str, Any]:
     unsupported = sorted(key for key, value in options.items() if key != "request_timeout" and value is not None)
     if unsupported:
         raise UnsupportedCompatibilityOption(f"Arker lifecycle does not support option(s): {', '.join(unsupported)}")
     timeout = options.get("request_timeout")
     if timeout is None:
-        timeout = 60
+        timeout = default
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout < 0:
         from e2b import InvalidArgumentException
 
@@ -79,6 +79,35 @@ def _control(call, *args, **kwargs):
         raise native_type(str(error), request=request) from error
 
 
+def configure_transport(client, request_timeout=None):
+    """Install a private client's per-request default without changing its credentials."""
+    from .computer import _UNSET
+
+    normalized = _options({"request_timeout": request_timeout})["request_timeout"]
+    client._e2b_request_timeout = 0 if normalized is None else normalized
+    if hasattr(client, "_e2b_original_request"):
+        return
+    original = client._request
+    client._e2b_original_request = original
+
+    def request(*args, **kwargs):
+        if kwargs.get("request_timeout", _UNSET) is _UNSET:
+            kwargs["request_timeout"] = _options({}, client._e2b_request_timeout)["request_timeout"]
+        return _control(original, *args, **kwargs)
+
+    client._request = request
+    original_download = client._download
+
+    def download(url):
+        return _control(original_download, url, **_options({}, client._e2b_request_timeout))
+
+    client._download = download
+
+
+def transport_timeout(vm):
+    return getattr(getattr(vm, "_client", None), "_e2b_request_timeout", 60)
+
+
 class Lifecycle:
     """Instance operations after provider ownership has been resolved.
 
@@ -96,7 +125,7 @@ class Lifecycle:
     def set_timeout(self, timeout: int, **opts: Any) -> Any:
         if self.native is not None:
             return self.native.set_timeout(timeout, **opts)
-        request = _options(opts)
+        request = _options(opts, transport_timeout(self.vm))
         _timeout(timeout, setting=True)
         from e2b import SandboxNotFoundException
 
@@ -126,7 +155,7 @@ class Lifecycle:
     def connect(self, timeout: int | None = None, *, on_resume: str = "restore", **opts: Any) -> Any:
         if self.native is not None:
             return self.native.connect(timeout=timeout, on_resume=on_resume, **opts)
-        request = _options(opts)
+        request = _options(opts, transport_timeout(self.vm))
         if timeout is not None:
             _timeout(timeout)
         if on_resume not in ("restore", "reboot"):
@@ -167,7 +196,7 @@ class Lifecycle:
             return self.native.pause(keep_memory=keep_memory, mode=mode, **opts)
         from e2b import InvalidArgumentException
 
-        request = _options(opts)
+        request = _options(opts, transport_timeout(self.vm))
         if mode is not None and keep_memory is not None:
             raise InvalidArgumentException("Pass either mode or keep_memory, not both")
         if mode is not None and mode not in ("full", "filesystem"):
@@ -198,7 +227,7 @@ class Lifecycle:
         import httpx
         from e2b.exceptions import format_request_timeout_error
 
-        request = _options({"request_timeout": request_timeout})
+        request = _options({"request_timeout": request_timeout}, transport_timeout(self.vm))
         try:
             return self._state(**request) == "running"
         except httpx.TimeoutException as error:
@@ -233,7 +262,7 @@ class Lifecycle:
 
         from ._compat_e2b_inventory import sandbox_info
 
-        request = _options(opts)
+        request = _options(opts, transport_timeout(self.vm))
         try:
             current = _control(self.vm.refresh, **request)
             observed = Lifecycle(vm=current)._read_lifecycle(**request)
