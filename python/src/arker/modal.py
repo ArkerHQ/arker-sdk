@@ -24,6 +24,7 @@ from ._compat import (
     run_command,
     shell_command,
 )
+from ._modal_async import dualmethod
 from .computer import VM
 
 
@@ -103,6 +104,7 @@ class Sandbox(UnsupportedMixin):
         module = import_optional("modal")
         return getattr(module, "Sandbox", None) if module is not None else None
 
+    @dualmethod
     @classmethod
     def create(cls, *args: Any, **kwargs: Any) -> Sandbox:
         arker_config = pop_arker_config(kwargs)
@@ -152,6 +154,7 @@ class Sandbox(UnsupportedMixin):
         )
         return cls(vm=result if provider == "arker" else None, native=result if provider == "modal" else None)
 
+    @dualmethod
     @classmethod
     def from_id(cls, sandbox_id: str, client: Any | None = None, **kwargs: Any) -> Sandbox:
         arker_config = pop_arker_config(kwargs)
@@ -184,6 +187,7 @@ class Sandbox(UnsupportedMixin):
     def fromId(cls, sandbox_id: str, **kwargs: Any) -> Sandbox:
         return cls.from_id(sandbox_id, **kwargs)
 
+    @dualmethod
     def exec(self, *command: Any, **kwargs: Any) -> Any:
         if self._vm is None:
             return self._native.exec(*command, **kwargs)
@@ -267,6 +271,7 @@ class Sandbox(UnsupportedMixin):
             )
         return Process(run_command(self._vm, prefix + shell_command(command), timeout=arker_timeout))
 
+    @dualmethod
     def terminate(self, *, wait: bool = False) -> int | None:
         if self._vm is not None:
             if wait:
