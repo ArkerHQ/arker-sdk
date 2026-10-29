@@ -91,13 +91,14 @@ test("close aborts owned RPC requests and refuses reuse without network I/O", as
   let calls = 0;
   const server = createServer((req, _res) => { calls++; req.resume(); started(); });
   const endpoint = await listen(server);
-  const data = await createE2BDataPlane({ endpoint, envd_version: "0.10.2", envd_access_token: "guest" }, "platform");
+  let data: E2BDataPlane | undefined;
   try {
+    data = await createE2BDataPlane({ endpoint, envd_version: "0.10.2", envd_access_token: "guest" }, "platform");
     const failure = assert.rejects(data.commands.run("sleep 60"));
     await pendingRequest; data.close(); data.close(); await failure;
     await assert.rejects(data.files.read("/tmp/file"), /closed/);
     assert.equal(calls, 1);
-  } finally { data.close(); await close(server); }
+  } finally { data?.close(); await close(server); }
 });
 
 test("native command exit retains the plain e2b consumer's error class", async () => {
@@ -113,9 +114,11 @@ test("native command exit retains the plain e2b consumer's error class", async (
     res.end(frame({}, 2));
   });
   const endpoint = await listen(server);
-  const data = await createE2BDataPlane({ endpoint, envd_version: "0.10.2", envd_access_token: "guest" }, "platform");
-  try { await assert.rejects(data.commands.run("exit 7"), error => error instanceof CommandExitError && error.exitCode === 7); }
-  finally { data.close(); await close(server); }
+  let data: E2BDataPlane | undefined;
+  try {
+    data = await createE2BDataPlane({ endpoint, envd_version: "0.10.2", envd_access_token: "guest" }, "platform");
+    await assert.rejects(data.commands.run("exit 7"), error => error instanceof CommandExitError && error.exitCode === 7);
+  } finally { data?.close(); await close(server); }
 });
 
 test("RPC header failures release request ownership before the data plane closes", async () => {
