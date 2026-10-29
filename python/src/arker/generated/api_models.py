@@ -1782,6 +1782,9 @@ class ListVmsParameters:
     created_before: str | None = None
     pool_id: str | None = None
     metadata_filter: str | None = None
+    started_after: str | None = None
+    started_before: str | None = None
+    started_at_order: Literal['asc', 'desc'] | None = None
 
 
 @dataclass(frozen=True)

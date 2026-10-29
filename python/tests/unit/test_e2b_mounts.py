@@ -5,9 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from async_lifecycle_helpers import configure_router as configure_router
 from e2b import AsyncSandbox, AsyncVolume, Sandbox, Volume
 
-from arker._compat_e2b_mounts import ArkerVolume, AsyncVolumes, Volumes
+from arker._compat_e2b_mounts import ArkerVolume, Volumes
 from arker.computer import ArkerError
 
 
@@ -130,49 +131,92 @@ def test_create_conflict_and_delete_errors_propagate(client):
         Volumes(client).destroy("fs-one")
 
 
-def test_async_operations_use_sync_client_off_loop(client):
+def test_exported_async_volume_lifecycle_runs_off_loop(client, configure_router, monkeypatch):
+    import arker._compat_e2b_mounts as mounts
+    import arker.e2b as shim
+    from arker._compat import UnsupportedCompatibilityOption
+
+    configure_router(["arker"])
+    monkeypatch.setattr(mounts, "arker_client", lambda _config: client)
     loop_thread = threading.get_ident()
+    for name in ("create_filesystem", "get_filesystem", "list_filesystems", "delete_filesystem"):
+        method = getattr(client, name)
+        original = method.side_effect
+        result = method.return_value
 
-    def create(*, name):
-        assert threading.get_ident() != loop_thread
-        return filesystem(name=name)
+        def off_loop(*args, _original=original, _result=result, **kwargs):
+            assert threading.get_ident() != loop_thread
+            return _original(*args, **kwargs) if _original else _result
 
-    client.create_filesystem.side_effect = create
+        method.side_effect = off_loop
 
     async def run():
-        volumes = AsyncVolumes(client)
-        handle = await volumes.create("data")
-        assert await volumes.connect(handle.volume_id) == handle
-        assert await volumes.by_name("data") == handle
-        assert await volumes.list() == [handle]
-        vm = Mock()
-        await volumes.attach(vm, {"/shared": handle})
-        vm.create_mount.assert_called_once_with(filesystem_id="fs-one", path="/shared")
-        assert await volumes.destroy(handle.volume_id)
+        volume = await shim.AsyncVolume.create("data")
+        assert volume._client is client
+        reused = await shim.AsyncVolume.connect(volume.volume_id)
+        assert reused == volume and reused._client is client
+        assert await shim.AsyncVolume.get_info(volume.volume_id) == volume
+        assert await shim.AsyncVolume.list() == [volume]
+        for method in (volume.list, volume.get_info):
+            with pytest.raises(UnsupportedCompatibilityOption, match="content API"):
+                method("/")
+        assert await shim.AsyncVolume.destroy(volume.volume_id)
 
     asyncio.run(run())
+    client.create_filesystem.assert_called_once_with(name="data")
+    client.delete_filesystem.assert_called_once_with("fs-one")
 
 
-def test_async_cancel_waits_for_mount_settlement(client):
-    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+@pytest.mark.parametrize("mount_fails", [False, True])
+def test_cancelled_exported_sandbox_cleans_up_after_mount_settles(client, monkeypatch, mount_fails):
+    import arker.e2b as shim
+    from arker import _compat_e2b_bootstrap as bootstrap
+
+    started, release, deleted = threading.Event(), threading.Event(), threading.Event()
+    events = []
+    loop_thread = threading.get_ident()
+    vm = Mock(id="child", _client=client)
 
     def mount(**kwargs):
+        assert threading.get_ident() != loop_thread
+        assert kwargs == {"filesystem_id": "fs-one", "path": "/workspace/shared"}
         started.set()
-        release.wait(5)
-        finished.set()
+        assert release.wait(5)
+        events.append("settled")
+        if mount_fails:
+            raise RuntimeError("attach failed")
+        return {"mount_id": "mount-one"}
+
+    def delete(**options):
+        events.append("deleted")
+        deleted.set()
+        return SimpleNamespace(deleted=True)
+
+    vm.create_mount.side_effect = mount
+    vm.delete.side_effect = delete
+    monkeypatch.setattr(shim, "arker_create", lambda *a, **kw: vm)
+    monkeypatch.setattr(shim, "routed_create", lambda _name, _config, creators: ("arker", creators["arker"]()))
+    monkeypatch.setattr(bootstrap, "bootstrap_envd", lambda current: (object(), {}))
+    monkeypatch.setattr(shim, "run_command", lambda *a, **kw: SimpleNamespace(exit_code=0))
 
     async def run():
-        task = asyncio.create_task(AsyncVolumes(client).attach(Mock(create_mount=mount), {"/shared": "data"}))
-        assert await asyncio.to_thread(started.wait, 5)
-        task.cancel()
-        await asyncio.sleep(0)
-        assert not task.done()
-        release.set()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        assert finished.is_set()
+        task = asyncio.create_task(shim.AsyncSandbox.create("ubuntu", volume_mounts={"/workspace/shared": "data"}))
+        try:
+            if not await asyncio.to_thread(started.wait, 5):
+                await task
+                pytest.fail("Sandbox creation did not attach the mount")
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            vm.delete.assert_not_called()
+        finally:
+            release.set()
+        assert await asyncio.to_thread(deleted.wait, 5)
 
     asyncio.run(run())
+    assert events == ["settled", "deleted"]
+    vm.delete.assert_called_once()
+    client.delete_filesystem.assert_not_called()
 
 
 def test_backend_store_create_mount_reconnect_destroy(client):
@@ -217,13 +261,15 @@ def test_facade_never_uses_sandbox_routing_or_switches_client(client, monkeypatc
     forbidden.assert_not_called()
 
 
-def test_native_facade_preserves_vendor_classes_and_options_are_not_swallowed(client, tmp_path, monkeypatch):
+def test_native_facade_preserves_vendor_classes_and_options_are_not_swallowed(
+    client, tmp_path, configure_router, monkeypatch
+):
     import arker._compat_e2b_mounts as mounts
     from arker._compat import UnsupportedCompatibilityOption
 
     assert mounts._native_volume() is Volume
     assert mounts._native_volume(True) is AsyncVolume
-    volume_router(tmp_path, monkeypatch, order=["arker"])
+    configure_router(cache_path=tmp_path / "routes.json", order=["arker"])
     monkeypatch.setattr(mounts, "arker_client", lambda _config: client)
     BoundVolume = mounts.Volume
     with pytest.raises(UnsupportedCompatibilityOption, match="per-call"):
@@ -239,27 +285,6 @@ def test_native_facade_preserves_vendor_classes_and_options_are_not_swallowed(cl
             method("/")
     with pytest.raises(UnsupportedCompatibilityOption, match="content API"):
         volume.read("/file")
-
-
-def test_async_backend_store_create_mount_reconnect_destroy(client):
-    from arker._compat import UnsupportedCompatibilityOption
-
-    async def run():
-        AsyncVolume = AsyncVolumes(client)
-        volume = await AsyncVolume.create("data")
-        assert isinstance(volume, ArkerVolume)
-        assert (await AsyncVolume.connect(volume.volume_id)).name == volume.name
-        assert (await AsyncVolume.get_info(volume.volume_id)).volume_id == volume.volume_id
-        assert len(await AsyncVolume.list()) == 1
-        vm = Mock()
-        await AsyncVolumes(client).attach(vm, {"/workspace/shared": volume})
-        vm.create_mount.assert_called_once_with(filesystem_id="fs-one", path="/workspace/shared")
-        for method in (volume.list, volume.get_info):
-            with pytest.raises(UnsupportedCompatibilityOption, match="content API"):
-                await method("/")
-        assert await AsyncVolume.destroy(volume.volume_id)
-
-    asyncio.run(run())
 
 
 @pytest.mark.parametrize("async_mode", [False, True])
@@ -373,31 +398,12 @@ def test_failed_mount_cleanup_is_reported(client, monkeypatch):
     client.delete_filesystem.assert_not_called()
 
 
-def volume_router(tmp_path, monkeypatch, *, order, create=None):
-    import json
-
-    path = tmp_path / "router.json"
-    cache = tmp_path / "routes.json"
-    path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "existing": {"strategy": "priority", "order": order},
-                "create": create or {"strategy": "priority", "order": order},
-                "cache": {"path": str(cache)},
-            }
-        )
-    )
-    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(path))
-    return cache
-
-
 @pytest.mark.parametrize("async_mode", [False, True])
-def test_import_only_volume_lifecycle_uses_arker_router(client, tmp_path, monkeypatch, async_mode):
+def test_import_only_volume_lifecycle_uses_arker_router(client, tmp_path, configure_router, monkeypatch, async_mode):
     import arker._compat_e2b_mounts as mounts
     import arker.e2b as shim
 
-    cache = volume_router(tmp_path, monkeypatch, order=["arker"])
+    cache = configure_router(cache_path=tmp_path / "routes.json", order=["arker"])
     monkeypatch.setattr(mounts, "arker_client", lambda _config: client)
 
     async def run():
@@ -425,7 +431,7 @@ def test_import_only_volume_lifecycle_uses_arker_router(client, tmp_path, monkey
 
 
 @pytest.mark.parametrize("async_mode", [False, True])
-def test_volume_native_route_ignores_vm_cache_and_grammar(client, tmp_path, monkeypatch, async_mode):
+def test_volume_native_route_ignores_vm_cache_and_grammar(client, tmp_path, configure_router, monkeypatch, async_mode):
     import json
     from unittest.mock import AsyncMock
 
@@ -433,7 +439,7 @@ def test_volume_native_route_ignores_vm_cache_and_grammar(client, tmp_path, monk
     import arker.e2b as shim
 
     identifier = "01h00000000000000000000000"
-    cache = volume_router(tmp_path, monkeypatch, order=["e2b", "arker"])
+    cache = configure_router(cache_path=tmp_path / "routes.json", order=["e2b", "arker"])
     cache.write_text(json.dumps({"version": 1, "entries": {identifier: {"provider": "arker", "accessedAt": 1}}}))
     native_class = AsyncVolume if async_mode else Volume
     handle = native_class(identifier, "data")
@@ -462,13 +468,13 @@ def test_volume_native_route_ignores_vm_cache_and_grammar(client, tmp_path, monk
     assert json.loads(cache.read_text())["entries"]["e2b-volume:" + identifier]["provider"] == "e2b"
 
 
-def test_volume_only_404_allows_next_lookup_provider(client, tmp_path, monkeypatch):
+def test_volume_only_404_allows_next_lookup_provider(client, tmp_path, configure_router, monkeypatch):
     from e2b.exceptions import AuthenticationException, VolumeNotFoundException
 
     import arker._compat_e2b_mounts as mounts
     import arker.e2b as shim
 
-    volume_router(tmp_path, monkeypatch, order=["e2b", "arker"])
+    configure_router(cache_path=tmp_path / "routes.json", order=["e2b", "arker"])
     make_client = Mock(return_value=client)
     monkeypatch.setattr(mounts, "arker_client", make_client)
     denied = AuthenticationException("denied")
@@ -482,13 +488,14 @@ def test_volume_only_404_allows_next_lookup_provider(client, tmp_path, monkeypat
     assert isinstance(shim.Volume.connect("shared-id"), ArkerVolume)
 
 
-def test_weighted_volume_create_uses_policy_without_retrying_remote_failure(client, tmp_path, monkeypatch):
+def test_weighted_volume_create_uses_policy_without_retrying_remote_failure(
+    client, tmp_path, configure_router, monkeypatch
+):
     import arker._compat_e2b_mounts as mounts
     import arker.e2b as shim
 
-    volume_router(
-        tmp_path,
-        monkeypatch,
+    configure_router(
+        cache_path=tmp_path / "routes.json",
         order=["arker", "e2b"],
         create={
             "strategy": "weighted",
@@ -516,11 +523,11 @@ def test_mount_readiness_generated_source_matches_python():
     assert json.loads(generated.split("export default ", 1)[1].strip().removesuffix(";")) == _MOUNT_READY
 
 
-def test_volume_list_uses_configured_backends_and_propagates_errors(client, tmp_path, monkeypatch):
+def test_volume_list_uses_configured_backends_and_propagates_errors(client, tmp_path, configure_router, monkeypatch):
     import arker._compat_e2b_mounts as mounts
     import arker.e2b as shim
 
-    volume_router(tmp_path, monkeypatch, order=["arker", "e2b"])
+    configure_router(cache_path=tmp_path / "routes.json", order=["arker", "e2b"])
     monkeypatch.setattr(mounts, "arker_client", lambda _config: client)
     native = Volume("native-id", "data")
     monkeypatch.setattr(Volume, "list", Mock(return_value=[native]))

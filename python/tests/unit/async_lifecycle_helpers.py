@@ -21,19 +21,19 @@ def run_async(test):
 
 @pytest.fixture
 def configure_router(tmp_path, monkeypatch):
-    def configure(order, *, existing_strategy="priority", create_order=None):
+    def configure(order, *, existing_strategy="priority", create_order=None, create=None, cache_path=None):
         path = tmp_path / "router.json"
-        path.write_text(
-            json.dumps(
-                {
-                    "version": 1,
-                    "existing": {"strategy": existing_strategy, "order": order},
-                    "create": {"strategy": "priority", "order": create_order or order},
-                }
-            )
-        )
+        config = {
+            "version": 1,
+            "existing": {"strategy": existing_strategy, "order": order},
+            "create": create if create is not None else {"strategy": "priority", "order": create_order or order},
+        }
+        if cache_path is not None:
+            config["cache"] = {"path": str(cache_path)}
+        path.write_text(json.dumps(config))
         monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(path))
         monkeypatch.setenv("ARKER_API_KEY", "ark_test")
+        return cache_path
 
     return configure
 
@@ -52,7 +52,7 @@ def late_arker_creation(monkeypatch):
     def install(shim, *, boolean_delete=False):
         entered, release, deleted = threading.Event(), threading.Event(), threading.Event()
 
-        def delete():
+        def delete(**options):
             deleted.set()
             if boolean_delete:
                 return types.SimpleNamespace(deleted=True)
@@ -61,7 +61,7 @@ def late_arker_creation(monkeypatch):
         def create(*args, **kwargs):
             entered.set()
             assert release.wait(2)
-            return types.SimpleNamespace(id="late", refresh=lambda: None, delete=delete)
+            return types.SimpleNamespace(id="late", refresh=lambda **options: None, delete=delete)
 
         monkeypatch.setattr(shim, "arker_create", create)
 

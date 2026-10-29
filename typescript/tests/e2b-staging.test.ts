@@ -9,8 +9,8 @@ for (const outcome of ["deleted", "missing", "failure"] as const) {
     const events: string[] = [];
     const failure = new Error("delete failed");
     const vm = {
-      async refresh() { events.push("refresh"); if (outcome === "missing") throw new ArkerError("not_found", "missing", 404); return vm; },
-      async delete() { events.push("delete"); if (outcome === "failure") throw failure; return { deleted: true }; },
+      async refresh() { throw new Error("delete must not issue a preliminary read"); },
+      async delete() { events.push("delete"); if (outcome === "missing") throw new ArkerError("not_found", "missing", 404); if (outcome === "failure") throw failure; return { deleted: true }; },
     };
     const plane = { commands: {}, files: {}, pty: {}, git: {}, close() { events.push("close"); } };
     const sandbox = Reflect.construct(Sandbox, [{ provider: "arker", sandboxId: "sandbox", getInstance: () => vm }, undefined, undefined, plane]) as Sandbox;

@@ -1,12 +1,12 @@
 import { listSandboxes, type E2BListOptions, type E2BPaginator } from "./compat/e2b-list.js";
 import { e2bForkMetadata } from "./compat/e2b-metadata.js";
 import { configureE2BIngress, validateE2BNetwork, type E2BNetworkOptions } from "./compat/e2b-network.js";
-import { E2BLifecycle } from "./compat/e2b-lifecycle.js";
+import { E2BLifecycle, lifecycleTransport } from "./compat/e2b-lifecycle.js";
 import { E2BFileURLs, type E2BFileURLOptions } from "./compat/e2b-urls.js";
 import { bootstrapEnvd, validateEnvdEnvs } from "./compat/e2b-bootstrap.js";
 import { createE2BDataPlane, type E2BDataPlane, type EnvdDescriptor } from "./compat/e2b-data-plane.js";
-import { ArkerError, type VM } from "./index.js";
-import { Sandbox as VendorSandbox, SandboxNotFoundError, type Commands, type Filesystem, type Pty, type Git, type SandboxConnectOpts, type SandboxPauseOpts } from "e2b";
+import type { VM } from "./index.js";
+import { Sandbox as VendorSandbox, SandboxNotFoundError, type Commands, type Filesystem, type Pty, type Git, type SandboxConnectOpts, type SandboxPauseOpts, type SandboxOpts, type SandboxApiOpts } from "e2b";
 import {
   assertSupportedObjectKeys, guardUnsupported, nativeInstance, resolveTimeout,
   type CreateOptions, type UniversalSandbox,
@@ -16,7 +16,7 @@ import { createNativeE2BProvider } from "./compat/e2b-provider.js";
 import { checkMountBackend, mountReadyCommand, mountStore, type E2BVolumeMounts, type VolumeMounts } from "./compat/e2b-mounts.js";
 export { Volume } from "./compat/e2b-mounts.js";
 export type { E2BVolumeMounts } from "./compat/e2b-mounts.js";
-export type E2BCreateOptions = CreateOptions & { volumeMounts?: E2BVolumeMounts; network?: E2BNetworkOptions };
+export type E2BCreateOptions = Omit<SandboxOpts, "volumeMounts"> & CreateOptions & { volumeMounts?: E2BVolumeMounts };
 
 export type { CommandResult as CommandExitResult } from "e2b";
 
@@ -25,8 +25,10 @@ const descriptors = new WeakMap<E2BDataPlane, EnvdDescriptor>();
 type NativeSandbox = Pick<VendorSandbox, "kill" | "getHost" | "commands" | "files" | "git" | "pty">;
 const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess", "volumeMounts", "network"] as const;
 
-function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMounts) {
-  const fallbackProvider = createNativeE2BProvider();
+function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMounts, lookupOptions?: SandboxApiOpts) {
+  const { mode: _mode, keepMemory: _keepMemory, onResume: _onResume, timeoutMs: _timeout, ...apiOptions } =
+    (lookupOptions ?? {}) as SandboxPauseOpts & SandboxConnectOpts;
+  const fallbackProvider = createNativeE2BProvider(apiOptions);
   if (volumeMounts !== undefined) {
     const create = fallbackProvider.sandbox.create.bind(fallbackProvider.sandbox);
     fallbackProvider.sandbox.create = (options) => {
@@ -37,13 +39,15 @@ function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMount
   return {
     fallbackProvider,
     routerConfigPath,
+    arkerLookupTransport: lookupOptions ? lifecycleTransport(lookupOptions) : undefined,
     mapArkerForkMetadata: e2bForkMetadata,
     mapArkerCreateOptions: (values: Record<string, unknown>) => {
+      assertSupportedObjectKeys(values, [...E2B_CREATE_OPTION_KEYS, "templateId"], "e2b", "Sandbox.create");
       validateEnvdEnvs(values.envs as Record<string, string> | undefined);
       validateE2BNetwork(values.network as E2BNetworkOptions | undefined);
       if (volumeMounts !== undefined) checkMountBackend(volumeMounts, "arker");
-      const { volumeMounts: _mounts, network: _network, envs: _envs, ...rest } = values;
-      return rest;
+      const { volumeMounts: _mounts, network: _network, envs: _envs, timeoutMs: _timeoutMs, ...rest } = values;
+      return { ...rest, timeout: resolveTimeout(values as CreateOptions) ?? 300_000 };
     },
   };
 }
@@ -92,13 +96,13 @@ export class Sandbox {
 
   private static async wrap(
     box: UniversalSandbox,
-    options: { deleteOnValidationFailure?: boolean; initializeDataPlane?: boolean; envs?: Record<string, string> } = {},
+    options: { deleteOnValidationFailure?: boolean; envs?: Record<string, string> } = {},
   ): Promise<Sandbox> {
     const native = nativeInstance(box);
     let dataPlane: E2BDataPlane | undefined;
     try {
       if (!native && box.provider === "arker") {
-        if (options.initializeDataPlane !== false) dataPlane = await Sandbox.dataPlane(box, options.envs);
+        dataPlane = await Sandbox.dataPlane(box, options.envs);
       }
       const arkerHostname = box.provider === "arker"
         ? await box.getUrl({ port: 8080 }).then((url) => new URL(url).hostname).catch(() => undefined)
@@ -120,16 +124,11 @@ export class Sandbox {
   static async create(templateOrOptions?: string | E2BCreateOptions, options?: E2BCreateOptions): Promise<Sandbox> {
     const templateId = typeof templateOrOptions === "string" ? templateOrOptions : undefined;
     const opts = typeof templateOrOptions === "string" ? options : templateOrOptions ?? options;
-    assertSupportedObjectKeys(opts, E2B_CREATE_OPTION_KEYS, "e2b", "Sandbox.create");
     const timeout = resolveTimeout(opts) ?? 300_000;
-    const box = await sdk(opts?.routerConfigPath, opts?.volumeMounts).sandbox.create({
-      ...(opts?.volumeMounts !== undefined ? { volumeMounts: opts.volumeMounts } : {}),
-      ...(templateId ? { templateId } : {}),
-      timeout,
-      ...(opts?.network !== undefined ? { network: opts.network } : {}),
-      ...((opts as any)?.envs ? { envs: (opts as any).envs } : {}),
-      metadata: (opts as any)?.metadata === undefined ? {} : (opts as any).metadata,
-      ...((opts as any)?.allowInternetAccess !== undefined ? { allowInternetAccess: (opts as any).allowInternetAccess } : {}),
+    const { routerConfigPath, ...nativeOptions } = opts ?? {};
+    const box = await sdk(routerConfigPath, opts?.volumeMounts).sandbox.create({
+      ...nativeOptions,
+      ...(templateId !== undefined ? { templateId } : {}),
     });
     if (box.provider === "arker") {
       const vm = (box as UniversalSandbox & { getInstance(): VM }).getInstance();
@@ -141,12 +140,12 @@ export class Sandbox {
       }
     }
     if (box.provider !== "arker" || !opts?.volumeMounts || !Object.keys(opts.volumeMounts).length) {
-      return Sandbox.wrap(box, { deleteOnValidationFailure: true, envs: (opts as any)?.envs });
+      return Sandbox.wrap(box, { deleteOnValidationFailure: true, envs: opts?.envs });
     }
     const vm = (box as UniversalSandbox & { getInstance(): VM }).getInstance();
     let sandbox: Sandbox | undefined;
     try {
-      sandbox = await Sandbox.wrap(box, { envs: (opts as any)?.envs });
+      sandbox = await Sandbox.wrap(box, { envs: opts?.envs });
       checkMountBackend(opts.volumeMounts, "arker");
       await mountStore(vm._client, opts.volumeMounts).attach(vm, opts.volumeMounts as VolumeMounts);
       const ready = await sandbox.commands.run(mountReadyCommand(Object.keys(opts.volumeMounts), timeout / 1000), { timeoutMs: timeout });
@@ -165,7 +164,7 @@ export class Sandbox {
 
   static async connect(sandboxId: string, opts?: SandboxConnectOpts & Pick<CreateOptions, "routerConfigPath">): Promise<Sandbox> {
     const { routerConfigPath, ...options } = opts ?? {};
-    const owner = await createCompatRouter(routingOptions(routerConfigPath)).getOwner(sandboxId);
+    const owner = await createCompatRouter(routingOptions(routerConfigPath, undefined, options)).getOwner(sandboxId);
     if (!owner) throw new Error(`Sandbox ${sandboxId} not found`);
     if (owner.provider === "e2b") {
       const native = await VendorSandbox.connect(sandboxId, options);
@@ -220,20 +219,39 @@ export class Sandbox {
     return listSandboxes(opts);
   }
 
-  static async getInfo(sandboxId: string, opts?: Parameters<typeof VendorSandbox.getInfo>[1] & Pick<CreateOptions, "routerConfigPath">): ReturnType<VendorSandbox["getInfo"]> {
-    const owner = await createCompatRouter(routingOptions(opts?.routerConfigPath)).getOwner(sandboxId);
-    if (!owner) throw new SandboxNotFoundError(`Sandbox ${sandboxId} not found`);
-    const { routerConfigPath: _router, ...options } = opts ?? {};
-    if (owner.provider === "e2b") return VendorSandbox.getInfo(sandboxId, options);
-    return new E2BLifecycle(owner.instance as UniversalSandbox).getInfo(options);
+  private static async control<T>(
+    sandboxId: string, opts: (SandboxApiOpts & Pick<CreateOptions, "routerConfigPath">) | undefined,
+    native: (options: SandboxApiOpts) => Promise<T>,
+    arker: (lifecycle: E2BLifecycle, options: SandboxApiOpts) => Promise<T>,
+    missing?: () => T,
+  ): Promise<T> {
+    const { routerConfigPath, ...options } = opts ?? {};
+    const owner = await createCompatRouter(routingOptions(routerConfigPath, undefined, options)).getOwner(sandboxId);
+    if (!owner) {
+      if (missing) return missing();
+      throw new SandboxNotFoundError(`Sandbox ${sandboxId} not found`);
+    }
+    return owner.provider === "e2b" ? native(options) : arker(new E2BLifecycle(owner.instance as UniversalSandbox), options);
   }
 
-  static async kill(sandboxId: string, opts?: Pick<CreateOptions, "routerConfigPath">): Promise<boolean> {
-    assertSupportedObjectKeys(opts, ["routerConfigPath"], "e2b", "Sandbox.kill");
-    const owner = await createCompatRouter(routingOptions(opts?.routerConfigPath)).getOwner(sandboxId);
-    if (!owner) return false;
-    if (owner.provider === "e2b") return VendorSandbox.kill(sandboxId);
-    return (await Sandbox.wrap(owner.instance, { initializeDataPlane: false })).kill();
+  static getInfo(sandboxId: string, opts?: SandboxApiOpts & Pick<CreateOptions, "routerConfigPath">): ReturnType<VendorSandbox["getInfo"]> {
+    return this.control(sandboxId, opts, options => VendorSandbox.getInfo(sandboxId, options), (lifecycle, options) => lifecycle.getInfo(options));
+  }
+
+  static setTimeout(sandboxId: string, timeoutMs: number, opts?: SandboxApiOpts & Pick<CreateOptions, "routerConfigPath">): Promise<void> {
+    return this.control(sandboxId, opts, options => VendorSandbox.setTimeout(sandboxId, timeoutMs, options), (lifecycle, options) => lifecycle.setTimeout(timeoutMs, options));
+  }
+
+  static pause(sandboxId: string, opts?: SandboxPauseOpts & Pick<CreateOptions, "routerConfigPath">): Promise<boolean> {
+    return this.control(sandboxId, opts, options => VendorSandbox.pause(sandboxId, options), (lifecycle, options) => lifecycle.pause(options));
+  }
+
+  static betaPause(sandboxId: string, opts?: SandboxPauseOpts & Pick<CreateOptions, "routerConfigPath">): Promise<boolean> {
+    return this.pause(sandboxId, opts);
+  }
+
+  static kill(sandboxId: string, opts?: SandboxApiOpts & Pick<CreateOptions, "routerConfigPath">): Promise<boolean> {
+    return this.control(sandboxId, opts, options => VendorSandbox.kill(sandboxId, options), (lifecycle, options) => lifecycle.kill(options), () => false);
   }
 
   downloadUrl(path: string, options?: E2BFileURLOptions): Promise<string> {
@@ -255,19 +273,10 @@ export class Sandbox {
     return port === 8080 ? this.#arkerHostname : this.#arkerHostname.replace(/^([^.]+)/, `$1-${port}`);
   }
 
-  async kill(): Promise<boolean> {
-    if (this.#native) return this.#native.kill();
-    const vm = (this.#box as UniversalSandbox & { getInstance(): VM }).getInstance();
-    try {
-      await vm.refresh();
-      const deleted = (await vm.delete()).deleted;
-      return deleted;
-    } catch (error) {
-      if (error instanceof ArkerError && error.status === 404) return false;
-      throw error;
-    } finally {
-      this.#dataPlane?.close();
-    }
+  async kill(opts?: Parameters<VendorSandbox["kill"]>[0]): Promise<boolean> {
+    if (this.#native) return this.#native.kill(opts);
+    try { return await this.lifecycle().kill(opts); }
+    finally { this.closeDataPlane(); }
   }
 }
 export * from "e2b";

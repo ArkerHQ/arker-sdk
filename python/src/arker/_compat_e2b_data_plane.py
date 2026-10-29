@@ -45,14 +45,9 @@ def _paused(status: int, body: bytes) -> bool:
     error = value.get("error", value) if isinstance(value, dict) else {}
     if not isinstance(error, dict):
         return False
-    details = error.get("details")
-    return (
-        error.get("code") == "invalid_state"
-        and isinstance(details, dict)
-        and details.get("requirement") == "explicit_resume"
-        and isinstance(details.get("resource"), dict)
-        and details["resource"].get("kind") == "vm"
-    )
+    from ._compat_e2b_errors import is_explicit_resume
+
+    return is_explicit_resume(status, error.get("code"), error.get("details"))
 
 
 # Native envd recognizes this proxy response in REST, RPC, and health checks.

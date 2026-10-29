@@ -482,6 +482,10 @@ class Arker:
         public: bool | None = None,
         state: str | None = None,
         metadata_filter: dict[str, Any] | None = None,
+        started_after: str | None = None,
+        started_before: str | None = None,
+        started_at_order: Literal["asc", "desc"] | None = None,
+        request_timeout: float | _UnsetType | None = _UNSET,
     ) -> VmList:
         """Admin call - goes through the control plane so it can
         aggregate across providers and regions.
@@ -496,8 +500,16 @@ class Arker:
             state=state,
             metadata_filter=json.dumps(metadata_filter) if metadata_filter is not None else None,
         )
-        path = _build_query("/v1/vms", parameters)
-        payload = self._request("GET", path, base_url=self._control_base_url)
+        path = _build_query(
+            "/v1/vms",
+            {
+                **_drop_none(parameters),
+                "started_after": started_after,
+                "started_before": started_before,
+                "started_at_order": started_at_order,
+            },
+        )
+        payload = self._request("GET", path, base_url=self._control_base_url, request_timeout=request_timeout)
         vms = []
         for item in payload.get("vms", []):
             info = _vm_info(item)
@@ -563,9 +575,9 @@ class Arker:
         payload = self._request("GET", "/v1/whoami", base_url=self._control_base_url)
         return _decode_model(WhoamiResponse, payload)
 
-    def get_vm(self, vm_id: str) -> VM:
+    def get_vm(self, vm_id: str, *, request_timeout: float | _UnsetType | None = _UNSET) -> VM:
         base_url = self.base_url
-        info = _vm_info(self._request("GET", _vm_path(vm_id), base_url=base_url))
+        info = _vm_info(self._request("GET", _vm_path(vm_id), base_url=base_url, request_timeout=request_timeout))
         return VM(self, vm_id, base_url, info)
 
     # ── Filesystems (org-scoped, control-plane) ─────────────────────────
@@ -685,6 +697,7 @@ class Arker:
         max_queueing_s: int | None = None,
         preserve_nulls: bool = False,
         retry_network_failures: bool | None = None,
+        request_timeout: float | _UnsetType | None = _UNSET,
     ) -> dict[str, Any]:
         return _request_json(
             method,
@@ -697,6 +710,7 @@ class Arker:
             max_queueing_s=max_queueing_s,
             preserve_nulls=preserve_nulls,
             retry_network_failures=retry_network_failures,
+            request_timeout=request_timeout,
         )
 
     def _retry_delay(self, attempt: int, error: ArkerError | None = None) -> float:
@@ -751,9 +765,11 @@ class VM:
     def __repr__(self) -> str:
         return f"VM(id={self.id!r}, name={self.name!r}, state={self.state!r})"
 
-    def refresh(self) -> VM:
+    def refresh(self, *, request_timeout: float | _UnsetType | None = _UNSET) -> VM:
         """Re-fetch this VM and return a fresh, fully-populated handle."""
-        info = _vm_info(self._client._request("GET", _vm_path(self.id), base_url=self.base_url))
+        info = _vm_info(
+            self._client._request("GET", _vm_path(self.id), base_url=self.base_url, request_timeout=request_timeout)
+        )
         return VM(self._client, self.id, self.base_url, info)
 
     def fork(self, **options: Any) -> VM:
@@ -1001,8 +1017,10 @@ class VM:
         payload = self._client._request("PATCH", _vm_path(self.id), body, base_url=self.base_url)
         return _vm_info(payload)
 
-    def delete(self) -> DeleteVmResponse:
-        payload = self._client._request("DELETE", _vm_path(self.id), base_url=self.base_url)
+    def delete(self, *, request_timeout: float | _UnsetType | None = _UNSET) -> DeleteVmResponse:
+        payload = self._client._request(
+            "DELETE", _vm_path(self.id), base_url=self.base_url, request_timeout=request_timeout
+        )
         return _decode_model(DeleteVmResponse, payload)
 
     def get_policies(self) -> PolicyDoc:
@@ -1736,8 +1754,10 @@ _http_client = httpx.Client(
 atexit.register(_http_client.close)
 
 
-def _http(method: str, url: str, headers: dict[str, str], data: bytes | None) -> tuple[int, bytes]:
-    with _http_client.stream(method, url, headers=headers, content=data, timeout=REQUEST_TIMEOUT_S) as response:
+def _http(
+    method: str, url: str, headers: dict[str, str], data: bytes | None, *, timeout: float | None = REQUEST_TIMEOUT_S
+) -> tuple[int, bytes]:
+    with _http_client.stream(method, url, headers=headers, content=data, timeout=timeout) as response:
         try:
             content = response.read()
         except httpx.RequestError:
@@ -1759,6 +1779,7 @@ def _request_json(
     max_queueing_s: int | None = None,
     preserve_nulls: bool = False,
     retry_network_failures: bool | None = None,
+    request_timeout: float | _UnsetType | None = _UNSET,
 ) -> dict[str, Any]:
     url = base_url + path
     headers = {"authorization": f"Bearer {api_key}"} if api_key else {}
@@ -1777,23 +1798,36 @@ def _request_json(
     # queueing_timeout swaps the retry budget from attempt count to wall-clock
     # window; retry=False (attempts = 1) still means exactly one request.
     deadline = time.monotonic() + max_queueing_s if max_queueing_s and retry.attempts > 1 else None
+    request_deadline = time.monotonic() + request_timeout if isinstance(request_timeout, (int, float)) else None
+    if request_deadline is not None:
+        deadline = min(deadline, request_deadline) if deadline is not None else request_deadline
     should_retry_network_failures = (
         method.upper() == "GET" if retry_network_failures is None else retry_network_failures
     )
 
     attempt = 0
     while True:
-        if deadline is not None and attempt > 0 and isinstance(payload_dict, dict):
+        if max_queueing_s and deadline is not None and attempt > 0 and isinstance(payload_dict, dict):
             # Retries re-send the remaining window.
             remaining = max(1, math.ceil(deadline - time.monotonic()))
             data = json.dumps({**payload_dict, "queueing_timeout": remaining}).encode("utf-8")
         try:
-            status, raw = _http(method, url, headers, data)
+            if request_timeout is _UNSET:
+                status, raw = _http(method, url, headers, data)
+            else:
+                remaining_timeout = (
+                    max(0, request_deadline - time.monotonic()) if request_deadline is not None else None
+                )
+                status, raw = _http(method, url, headers, data, timeout=remaining_timeout)
         except httpx.RequestError as error:
+            if isinstance(error, httpx.TimeoutException) and request_timeout is not _UNSET:
+                raise
             if not should_retry_network_failures:
                 raise _unknown_outcome_error(method, path, error) from error
             delay = _retry_delay(retry, attempt)
-            if _can_retry_again(retry, attempt, deadline, delay):
+            if _can_retry_again(retry, attempt, deadline, delay) and (
+                (max_queueing_s and retry.attempts > 1) or attempt < retry.attempts - 1
+            ):
                 time.sleep(delay)
                 attempt += 1
                 continue
@@ -1806,7 +1840,9 @@ def _request_json(
             status, parsed_error, replay_safe=should_retry_network_failures or bool(headers.get("Idempotency-Key"))
         ):
             delay = _retry_delay(retry, attempt, parsed_error)
-            if _can_retry_again(retry, attempt, deadline, delay):
+            if _can_retry_again(retry, attempt, deadline, delay) and (
+                (max_queueing_s and retry.attempts > 1) or attempt < retry.attempts - 1
+            ):
                 time.sleep(delay)
                 attempt += 1
                 continue

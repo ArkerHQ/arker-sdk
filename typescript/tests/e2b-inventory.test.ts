@@ -60,7 +60,7 @@ test("Arker paginator forwards metadata filters and opaque cursors without chang
   assert.equal((await pages.nextItems())[0].sandboxId, "sandbox");
   assert.equal(pages.nextToken, "opaque-next");
   await pages.nextItems(); assert.equal(pages.hasNext, false); assert.equal(pages.nextToken, undefined);
-  assert.deepEqual(requests, [undefined, "opaque-next"].map(cursor => ({ cursor, limit: 2,
+  assert.deepEqual(requests, [undefined, "opaque-next"].map(cursor => ({ cursor, limit: 2, started_at_order: "desc",
     metadata_filter: JSON.stringify({ arker_e2b: { version: 1, metadata: { purpose: "test" } } }),
   })));
   await assert.rejects(pages.nextItems(), /No more/);
@@ -100,3 +100,64 @@ test("paused expiration requires the persisted pause clock, never the removed ti
   f.lifecycle.state = "running"; f.lifecycle.customer_paused = false;
   assert.throws(() => sandboxInfo(f.vm, f.lifecycle), /lifetime delete schedule/);
 });
+
+test("pagination merges per-page timeouts and propagates cancellation without advancing the cursor", async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "E2B_API_KEY", "COMPUTESDK_ROUTER_CONFIG");
+  preserveProperties(t, Arker.prototype, "listVms");
+  process.env.ARKER_API_KEY = "test"; delete process.env.E2B_API_KEY; delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  const controller = new AbortController();
+  const failure = new Error("cancelled page");
+  const signals: Array<AbortSignal | undefined> = [];
+  Arker.prototype.listVms = async (_options, transport) => {
+    signals.push(transport?.signal);
+    transport?.signal?.throwIfAborted();
+    return { vms: [], nextCursor: null };
+  };
+  const pages = listSandboxes({ requestTimeoutMs: 1, nextToken: "original" });
+  controller.abort(failure);
+  await assert.rejects(pages.nextItems({ requestTimeoutMs: 0, signal: controller.signal }), error => error === failure);
+  assert.equal(pages.nextToken, "original"); assert.equal(pages.hasNext, true);
+  assert.equal(signals[0], controller.signal);
+  await pages.nextItems({ requestTimeoutMs: 0 });
+  assert.equal(signals[1], undefined);
+  assert.equal(pages.hasNext, false);
+});
+
+for (const order of ["asc", "desc"] as const) test(`inventory ${order} order and inclusive start filter are server queries before pagination`, async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "E2B_API_KEY", "COMPUTESDK_ROUTER_CONFIG");
+  preserveProperties(t, Arker.prototype, "listVms");
+  process.env.ARKER_API_KEY = "test"; delete process.env.E2B_API_KEY; delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  const records = [fixture("older-birth"), fixture("newer-birth")];
+  records[0].lifecycle.started_at = "2026-01-03T03:04:05Z";
+  records[1].lifecycle.started_at = "2026-01-02T03:04:05Z";
+  const startedAfter = new Date("2026-01-02T04:04:05+01:00");
+  let calls = 0;
+  Arker.prototype.listVms = async parameters => {
+    assert.deepEqual(parameters, { cursor: calls ? "opaque-next" : undefined, limit: 1,
+      started_at_order: order, started_after: "2026-01-02T03:04:05.000Z",
+      metadata_filter: JSON.stringify({ arker_e2b: { version: 1 } }),
+    });
+    const index = order === "desc" ? calls : 1 - calls;
+    calls++;
+    return { vms: [records[index].vm], nextCursor: calls === 1 ? "opaque-next" : null };
+  };
+  const pages = listSandboxes({ order, query: { startedAfter }, limit: 1 });
+  const results = [...await pages.nextItems(), ...await pages.nextItems()];
+  assert.deepEqual(results.map(item => item.sandboxId), order === "desc" ? ["older-birth", "newer-birth"] : ["newer-birth", "older-birth"]);
+  assert.equal(pages.hasNext, false);
+});
+
+for (const expiry of ["2000-01-01T00:00:00Z", "2999-01-01T00:00:00Z"]) {
+  for (const expiring of ["apps", "control"]) test(`inventory omits public traffic for ${expiring} expiring at ${expiry}`, () => {
+    for (const auth of ["open", "arker"]) {
+      const f = fixture();
+      const rules = {
+        apps: { type: "inbound", priority: 0, action: "allow", auth, match: { ports: [[1, 49982], [49984, 65535]] } },
+        control: { type: "inbound", priority: 1, action: "allow", auth: "arker", match: { ports: [49983] } },
+      };
+      Object.assign(rules[expiring as keyof typeof rules], { expires_at: expiry });
+      Object.assign(f.raw.policies.rules, rules);
+      assert.equal(sandboxInfo(f.vm, f.lifecycle).network, undefined);
+    }
+  });
+}

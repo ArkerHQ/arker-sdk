@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Mapping
-from contextlib import suppress
 from dataclasses import dataclass, field
 from importlib.resources import files
 from typing import Any
@@ -176,45 +175,6 @@ class Volumes:
         """
         resolved = self.resolve(volume_mounts)
         return [vm.create_mount(filesystem_id=volume.volume_id, path=path) for path, volume in resolved.items()]
-
-
-class AsyncVolumes:
-    """Async facade over the synchronous Arker client, without blocking the loop."""
-
-    def __init__(self, client: Any):
-        self._sync = Volumes(client)
-
-    async def create(self, name: str) -> ArkerVolume:
-        return await asyncio.to_thread(self._sync.create, name)
-
-    async def connect(self, volume_id: str) -> ArkerVolume:
-        return await asyncio.to_thread(self._sync.connect, volume_id)
-
-    async def get_info(self, volume_id: str) -> ArkerVolume:
-        return await asyncio.to_thread(self._sync.get_info, volume_id)
-
-    async def list(self) -> list[ArkerVolume]:
-        return await asyncio.to_thread(self._sync.list)
-
-    async def by_name(self, name: str) -> ArkerVolume:
-        return await asyncio.to_thread(self._sync.by_name, name)
-
-    async def destroy(self, volume_id: str) -> bool:
-        return await asyncio.to_thread(self._sync.destroy, volume_id)
-
-    async def resolve(self, volume_mounts: Mapping[str, ArkerVolume | str]) -> dict[str, ArkerVolume]:
-        return await asyncio.to_thread(self._sync.resolve, volume_mounts)
-
-    async def attach(self, vm: Any, volume_mounts: Mapping[str, ArkerVolume | str]) -> list[Any]:
-        # Cancellation cannot stop an in-flight HTTP call; wait for settlement so
-        # the caller can safely delete its newly-created VM after cancellation.
-        task = asyncio.create_task(asyncio.to_thread(self._sync.attach, vm, volume_mounts))
-        try:
-            return await asyncio.shield(task)
-        except asyncio.CancelledError:
-            with suppress(Exception):
-                await task
-            raise
 
 
 def _volume_options(options: dict[str, Any]) -> None:

@@ -174,3 +174,47 @@ test("static Arker deletion translates idempotent DELETE without probing incompa
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("native creation forwards vendor options after routing", async t => {
+  preserveProperties(t, Native, "create");
+  preserveEnvironment(t, "ARKER_API_KEY", "COMPUTESDK_ROUTER_CONFIG");
+  delete process.env.ARKER_API_KEY; delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  const options = { apiKey: "native-test-key", domain: "example.invalid", secure: true,
+    lifecycle: { onTimeout: "pause" as const, autoResume: true }, requestTimeoutMs: 19,
+    headers: { "x-test": "native" }, signal: new AbortController().signal, timeoutMs: 1234 };
+  Native.create = (async (template: unknown, actual: unknown) => {
+    assert.equal(template, "native-template"); assert.deepEqual(actual, options);
+    return { sandboxId: "native-created" } as Native;
+  }) as typeof Native.create;
+  assert.equal((await Sandbox.create("native-template", options)).sandboxId, "native-created");
+  Native.create = (async (actual: unknown) => { assert.deepEqual(actual, {}); return { sandboxId: "native-default" } as Native; }) as typeof Native.create;
+  await Sandbox.create();
+});
+
+test("static lifecycle aliases forward native options without connecting", async t => {
+  preserveProperties(t, Native, "getInfo", "pause", "setTimeout", "connect", "kill");
+  preserveEnvironment(t, "ARKER_API_KEY", "COMPUTESDK_ROUTER_CONFIG");
+  delete process.env.ARKER_API_KEY; delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  Native.getInfo = async (_id, actual) => { assert.deepEqual(actual, options); return {} as Awaited<ReturnType<typeof Native.getInfo>>; };
+  Native.connect = async () => { throw new Error("must not resume"); };
+  const options = { apiKey: "native-test", requestTimeoutMs: 0, signal: new AbortController().signal };
+  let pauses = 0;
+  Native.pause = async (id, actual) => { assert.equal(id, "native"); assert.deepEqual(actual, { ...options, mode: "filesystem" }); pauses++; return true; };
+  Native.setTimeout = async (id, duration, actual) => { assert.equal(id, "native"); assert.equal(duration, 1234); assert.deepEqual(actual, options); };
+  Native.kill = async (_id, actual) => { assert.deepEqual(actual, options); return true; };
+  assert.equal(await Sandbox.pause("native", { ...options, mode: "filesystem" }), true);
+  assert.equal(await Sandbox.betaPause("native", { ...options, mode: "filesystem" }), true);
+  await Sandbox.setTimeout("native", 1234, options);
+  assert.equal(await Sandbox.kill("native", options), true);
+  assert.equal(pauses, 2);
+});
+
+test("Arker-only creation restrictions reject vendor credentials before any request", async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "COMPUTESDK_ROUTER_CONFIG", "ARKER_SOURCE_VM_ID");
+  process.env.ARKER_API_KEY = "arker-test";
+  process.env.ARKER_SOURCE_VM_ID = "00000000000000000000000000";
+  delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  for (const options of [{ apiKey: "native-test" }, { secure: true }, { network: { maskRequestHost: true } }]) {
+    await assert.rejects(Sandbox.create(options as any), /unsupported .*option/i);
+  }
+});

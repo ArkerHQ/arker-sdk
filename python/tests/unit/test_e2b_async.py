@@ -135,7 +135,7 @@ def test_async_race_checks_metadata_miss_without_connecting(configure_router, mo
     vm = types.SimpleNamespace(
         id="arker", base_url="https://worker.example", _client=types.SimpleNamespace(_request=request)
     )
-    vm.refresh = lambda: vm
+    vm.refresh = lambda **options: vm
     monkeypatch.setattr(shim, "arker_get", lambda *args, **kwargs: vm)
     calls = []
 

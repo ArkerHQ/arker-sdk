@@ -343,6 +343,39 @@
             },
             "description": "JSON-encoded object used to filter metadata before pagination. Objects match recursively by subset; scalar values and arrays match by exact JSON equality. Required keys must exist, so null does not match a missing key. An empty object matches existing object metadata, not null. The decoded query value is limited to 16384 UTF-8 bytes, nesting depth 4 with the root at depth 0, and 128 object keys total. Malformed or over-limit filters return 400.",
             "example": "{\"e2b\":{\"metadata\":{\"project\":\"example\"}}}"
+          },
+          {
+            "name": "started_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Include VMs whose authoritative started_at is at or after this timestamp (inclusive)."
+          },
+          {
+            "name": "started_before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Include VMs whose authoritative started_at is at or before this timestamp (inclusive). Equal bounds are valid; reversed bounds return 400 bad_request."
+          },
+          {
+            "name": "started_at_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "description": "Order by authoritative started_at; ties use vm_id ascending in either direction. Filter and sort before pagination. Omission preserves existing ordering."
           }
         ],
         "responses": {

@@ -16,8 +16,8 @@ def facade_vm(monkeypatch, servers):
     endpoint, _behavior, received, _redirected = servers
     calls = []
     vm = SimpleNamespace(id="owned", _client=SimpleNamespace(_api_key="platform-test-key"))
-    vm.refresh = lambda: vm
-    vm.delete = lambda: calls.append("delete") or SimpleNamespace(deleted=True)
+    vm.refresh = lambda **options: vm
+    vm.delete = lambda **options: calls.append("delete") or SimpleNamespace(deleted=True)
     descriptor = EnvdDescriptor(endpoint, "0.10.2", "guest-test-token")
 
     def prepare(current):

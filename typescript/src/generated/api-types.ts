@@ -4503,6 +4503,12 @@ export interface operations {
                  * @example {"e2b":{"metadata":{"project":"example"}}}
                  */
                 metadata_filter?: string;
+                /** @description Include VMs whose authoritative started_at is at or after this timestamp (inclusive). */
+                started_after?: string;
+                /** @description Include VMs whose authoritative started_at is at or before this timestamp (inclusive). Equal bounds are valid; reversed bounds return 400 bad_request. */
+                started_before?: string;
+                /** @description Order by authoritative started_at; ties use vm_id ascending in either direction. Filter and sort before pagination. Omission preserves existing ordering. */
+                started_at_order?: "asc" | "desc";
             };
             header?: never;
             path?: never;

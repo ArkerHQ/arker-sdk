@@ -1,3 +1,4 @@
+import type { RequestTransportOptions } from "../index.js";
 import { compute } from "computesdk";
 
 import { createArkerComputeProvider, type ArkerComputeProviderConfig, type ForkMetadataMapper } from "./arker-provider.js";
@@ -14,6 +15,7 @@ export type CompatSdk = ReturnType<typeof compute>;
 
 export interface CreateCompatSdkOptions {
   arker?: ArkerComputeProviderConfig;
+  arkerLookupTransport?: RequestTransportOptions;
   fallbackProvider: unknown;
   routerConfigPath?: string;
   mapArkerForkMetadata?: ForkMetadataMapper;
@@ -22,7 +24,7 @@ export interface CreateCompatSdkOptions {
 
 export function createCompatRouter(options: CreateCompatSdkOptions) {
   const hasArker = !!(options.arker?.apiKey || globalThis.process?.env?.ARKER_API_KEY?.trim());
-  const arker = hasArker ? createArkerComputeProvider(options.arker, options.mapArkerForkMetadata) : undefined;
+  const arker = hasArker ? createArkerComputeProvider(options.arker, options.mapArkerForkMetadata, options.arkerLookupTransport) : undefined;
   if (arker && options.mapArkerCreateOptions) {
     const create = arker.sandbox.create.bind(arker.sandbox);
     arker.sandbox.create = (values) => create(options.mapArkerCreateOptions!(values ?? {}));

@@ -6,7 +6,7 @@ import { recordEvidence } from "../scripts/compat-evidence.js";
 import { withLiveRouter } from "./compat-live-router.js";
 import { traceVendor } from "./compat-trace.js";
 
-const cases = ["home-reconnect-user", "stream-read", "stream-cancel", "file-overwrite", "file-batch-rename", "public-app", "private-app", "pty", "pty-reconnect", "pty-kill", "pause-full", "pause-filesystem", "volume-mount"] as const;
+const cases = ["watch-directory", "watch-recursive", "home-reconnect-user", "stream-read", "stream-cancel", "file-overwrite", "file-batch-rename", "public-app", "private-app", "pty", "pty-reconnect", "pty-kill", "pause-full", "pause-filesystem", "volume-mount"] as const;
 type Case = (typeof cases)[number];
 const selectedCases = process.env.COMPAT_E2B_CASES?.split(",") ?? [...cases];
 for (const name of selectedCases) assert.ok(cases.includes(name as Case), `Unknown E2B scenario: ${name}`);
@@ -32,7 +32,43 @@ async function program({ Sandbox, Volume, CommandExitError, SandboxError }: type
   }
   const sandbox = await Sandbox.create(scenario === "private-app" ? { network: { allowPublicTraffic: false } } : {});
   try {
-    if (scenario === "public-app" || scenario === "private-app") {
+    if (scenario === "watch-directory" || scenario === "watch-recursive") {
+      const root = `/home/user/watch-${randomUUID()}`;
+      const recursive = scenario === "watch-recursive";
+      const name = recursive ? "nested/event.txt" : "event.txt";
+      await sandbox.files.makeDir(`${root}/nested`);
+      const events: Native.FilesystemEvent[] = [];
+      const exits: (Error | undefined)[] = [];
+      let exit!: () => void;
+      const exited = new Promise<void>(resolve => { exit = resolve; });
+      const watcher = await sandbox.files.watchDir(root, event => { events.push(event); }, {
+        recursive, includeEntry: true, timeoutMs: 0,
+        onExit: error => { exits.push(error); exit(); },
+      });
+      const until = async (check: () => boolean) => {
+        const deadline = Date.now() + 30000;
+        while (!check()) {
+          assert.ok(Date.now() < deadline, "Watch event was not delivered");
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      };
+      try {
+        await sandbox.files.write(`${root}/${name}`, "watch-data");
+        await until(() => events.some(event => event.name === name && event.type === "create"));
+        const created = events.find(event => event.name === name && event.type === "create")!;
+        assert.equal(created.entry?.path, `${root}/${name}`);
+        assert.equal(created.entry?.name, "event.txt");
+        await sandbox.files.remove(`${root}/${name}`);
+        await until(() => events.some(event => event.name === name && event.type === "remove"));
+      } finally {
+        await watcher.stop();
+      }
+      await until(() => exits.length > 0);
+      await exited;
+      assert.deepEqual(exits, [undefined]);
+      await watcher.stop();
+      assert.deepEqual(exits, [undefined]);
+    } else if (scenario === "public-app" || scenario === "private-app") {
       await sandbox.commands.run("python3 -m http.server 8080 --bind 0.0.0.0", { background: true, timeoutMs: 0 });
       await sandbox.commands.run(`python3 - <<'PY'
 import time, urllib.request

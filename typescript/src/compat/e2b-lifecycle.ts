@@ -1,6 +1,7 @@
 import { e2bAdmissionError } from "./e2b-errors.js";
 import { sandboxInfo, E2B_LIFETIME_POLICY_ID } from "./e2b-inventory.js";
 import {
+  ConnectionConfig,
   InvalidArgumentError,
   SandboxNotFoundError,
   SandboxNotRunningError,
@@ -9,13 +10,18 @@ import {
   type SandboxLifecycle,
   type SandboxPauseOpts,
 } from "e2b";
-import { ArkerError, type VM } from "../index.js";
+import { ArkerError, type VM, type RequestTransportOptions } from "../index.js";
 import { assertSupportedObjectKeys, type UniversalSandbox } from "./common.js";
 
 export { E2B_LIFETIME_POLICY_ID } from "./e2b-inventory.js";
 
-type NativeLifecycle = Pick<NativeSandbox, "pause" | "connect" | "setTimeout" | "isRunning" | "getInfo">;
+type NativeLifecycle = Pick<NativeSandbox, "pause" | "connect" | "setTimeout" | "isRunning" | "getInfo" | "kill">;
 type RequestOptions = Parameters<NativeSandbox["getInfo"]>[0];
+
+export function lifecycleTransport(opts?: RequestOptions): RequestTransportOptions {
+  const config = new ConnectionConfig({ requestTimeoutMs: opts?.requestTimeoutMs });
+  return { signal: config.getSignal(undefined, opts?.signal) };
+}
 
 function unsupported(message: string): never {
   throw new ArkerError("unsupported_operation", message, 422);
@@ -66,9 +72,9 @@ export class E2BLifecycle {
     return (this.box as UniversalSandbox & { getInstance(): VM }).getInstance();
   }
 
-  private async current(): Promise<VM> {
+  private async current(transport: RequestTransportOptions): Promise<VM> {
     try {
-      return await this.vm().refresh();
+      return await this.vm().refresh(transport);
     } catch (error) {
       throw lifecycleError(error, this.box.sandboxId);
     }
@@ -76,12 +82,12 @@ export class E2BLifecycle {
 
   async pause(opts?: SandboxPauseOpts): Promise<boolean> {
     if (this.native) return this.native.pause(opts);
-    assertSupportedObjectKeys(opts, ["mode", "keepMemory"], "e2b", "Sandbox.pause");
+    assertSupportedObjectKeys(opts, ["mode", "keepMemory", "requestTimeoutMs", "signal"], "e2b", "Sandbox.pause");
     if (opts?.mode !== undefined && opts.keepMemory !== undefined) throw new InvalidArgumentError("Pass either mode or keepMemory, not both");
     if (opts?.mode !== undefined && opts.mode !== "full" && opts.mode !== "filesystem") throw new InvalidArgumentError("mode must be 'full' or 'filesystem'");
     if (opts?.keepMemory !== undefined && typeof opts.keepMemory !== "boolean") throw new InvalidArgumentError("keepMemory must be a boolean");
     const mode = opts?.mode ?? (opts?.keepMemory === false ? "filesystem" : "full");
-    const response = await this.request("POST", "pause", { mode, deadline: { policy_id: E2B_LIFETIME_POLICY_ID } });
+    const response = await this.request("POST", "pause", { mode, deadline: { policy_id: E2B_LIFETIME_POLICY_ID } }, lifecycleTransport(opts));
     this.checkResponse(response, "paused");
     if (typeof response.already_paused !== "boolean" || (!response.already_paused && response.mode !== mode)) {
       throw new Error("Invalid Arker pause response");
@@ -99,7 +105,7 @@ export class E2BLifecycle {
       await this.native.connect(opts);
       return this;
     }
-    assertSupportedObjectKeys(opts, ["timeoutMs", "onResume"], "e2b", "Sandbox.connect");
+    assertSupportedObjectKeys(opts, ["timeoutMs", "onResume", "requestTimeoutMs", "signal"], "e2b", "Sandbox.connect");
     if (opts?.onResume !== undefined && opts.onResume !== "restore" && opts.onResume !== "reboot") {
       throw new InvalidArgumentError("onResume must be 'restore' or 'reboot'");
     }
@@ -108,7 +114,7 @@ export class E2BLifecycle {
       deadline: { policy_id: E2B_LIFETIME_POLICY_ID, timeout_seconds: duration / 1000 },
       ...(opts?.onResume === "reboot" ? { mode: "filesystem" } : {}),
     };
-    const response = await this.request("POST", "resume", body);
+    const response = await this.request("POST", "resume", body, lifecycleTransport(opts));
     this.checkResponse(response, "running");
     if (opts?.onResume === "reboot" && response.mode !== "filesystem") throw new Error("Invalid Arker resume mode");
     return this;
@@ -116,11 +122,11 @@ export class E2BLifecycle {
 
   async setTimeout(timeoutMs: number, opts?: RequestOptions): Promise<void> {
     if (this.native) return this.native.setTimeout(timeoutMs, opts);
-    assertSupportedObjectKeys(opts, [], "e2b", "Sandbox.setTimeout");
+    assertSupportedObjectKeys(opts, ["requestTimeoutMs", "signal"], "e2b", "Sandbox.setTimeout");
     const duration = timeoutDuration(timeoutMs);
     let response: Record<string, unknown>;
     try {
-      response = await this.request("POST", "deadline", { policy_id: E2B_LIFETIME_POLICY_ID, timeout_seconds: duration / 1000 });
+      response = await this.request("POST", "deadline", { policy_id: E2B_LIFETIME_POLICY_ID, timeout_seconds: duration / 1000 }, lifecycleTransport(opts));
     } catch (error) {
       if (error instanceof ArkerError && e2bAdmissionError(error) instanceof SandboxNotRunningError) throw new SandboxNotFoundError(`Sandbox ${this.box.sandboxId} not found`);
       throw error;
@@ -132,9 +138,9 @@ export class E2BLifecycle {
 
   async isRunning(opts?: RequestOptions): Promise<boolean> {
     if (this.native) return this.native.isRunning(opts);
-    assertSupportedObjectKeys(opts, [], "e2b", "Sandbox.isRunning");
+    assertSupportedObjectKeys(opts, ["requestTimeoutMs", "signal"], "e2b", "Sandbox.isRunning");
     let response: Record<string, unknown>;
-    try { response = await this.request("GET", "lifecycle"); }
+    try { response = await this.request("GET", "lifecycle", undefined, lifecycleTransport(opts)); }
     catch (error) {
       if (error instanceof SandboxNotFoundError) return false;
       throw error;
@@ -150,10 +156,10 @@ export class E2BLifecycle {
     throw new Error("Inconsistent Arker lifecycle state");
   }
 
-  private async request(method: "GET" | "POST", operation: string, body?: unknown): Promise<Record<string, unknown>> {
+  private async request(method: "GET" | "POST", operation: string, body?: unknown, transport?: RequestTransportOptions): Promise<Record<string, unknown>> {
     const vm = this.vm();
     try {
-      return await vm._client._request(method, `/v1/vms/${encodeURIComponent(vm.id)}/${operation}`, body, vm.baseUrl);
+      return await vm._client._request(method, `/v1/vms/${encodeURIComponent(vm.id)}/${operation}`, body, vm.baseUrl, undefined, undefined, undefined, transport);
     } catch (error) { throw lifecycleError(error, this.box.sandboxId); }
   }
 
@@ -164,11 +170,23 @@ export class E2BLifecycle {
     }
   }
 
+  async kill(opts?: RequestOptions): Promise<boolean> {
+    if (this.native) return this.native.kill(opts);
+    assertSupportedObjectKeys(opts, ["requestTimeoutMs", "signal"], "e2b", "Sandbox.kill");
+    try {
+      const response = await this.vm().delete(lifecycleTransport(opts));
+      if (typeof response.deleted !== "boolean") throw new Error("Invalid Arker delete response");
+      return response.deleted;
+    }
+    catch (error) { if (lifecycleError(error, this.box.sandboxId) instanceof SandboxNotFoundError) return false; throw error; }
+  }
+
   async getInfo(opts?: RequestOptions): Promise<Awaited<ReturnType<NativeSandbox["getInfo"]>>> {
     if (this.native) return this.native.getInfo(opts);
-    assertSupportedObjectKeys(opts, [], "e2b", "Sandbox.getInfo");
-    const vm = await this.current();
-    const lifecycle = await this.request("GET", "lifecycle");
+    assertSupportedObjectKeys(opts, ["requestTimeoutMs", "signal"], "e2b", "Sandbox.getInfo");
+    const transport = lifecycleTransport(opts);
+    const vm = await this.current(transport);
+    const lifecycle = await this.request("GET", "lifecycle", undefined, transport);
     return sandboxInfo(vm, lifecycle);
   }
 }

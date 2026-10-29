@@ -15,6 +15,7 @@ import {
   Arker,
   ArkerError,
   type ArkerOptions,
+  type RequestTransportOptions,
   type ForkOptions,
   type RunOptions,
   type VM,
@@ -316,7 +317,7 @@ class ArkerComputeSandbox implements SandboxInterface {
 
 export type ForkMetadataMapper = (source: Readonly<ForkOptions>, metadata: unknown) => ForkOptions["metadata"];
 
-export function createArkerComputeProvider(config: ArkerComputeProviderConfig = {}, mapMetadata?: ForkMetadataMapper): DirectProvider {
+export function createArkerComputeProvider(config: ArkerComputeProviderConfig = {}, mapMetadata?: ForkMetadataMapper, lookupTransport?: RequestTransportOptions): DirectProvider {
   async function destroy(sandboxId: string): Promise<void> {
     const client = makeClient(config);
     try {
@@ -408,7 +409,7 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
       getById: async (sandboxId: string): Promise<SandboxInterface | null> => {
         const client = makeClient(config);
         try {
-          return wrap(await client.getVm(sandboxId));
+          return wrap(await client.getVm(sandboxId, undefined, lookupTransport));
         } catch (error) {
           if (error instanceof ArkerError && error.status === 404) return null;
           throw error;

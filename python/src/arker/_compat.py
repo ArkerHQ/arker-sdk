@@ -174,9 +174,9 @@ def compat_network_policies(
     return {"rules": {f"computesdk-egress-{uuid.uuid4().hex}": {"type": "outbound_guard", "allow": allow}}}
 
 
-def arker_get(vm_id: str, config: dict[str, Any] | None = None) -> VM | None:
+def arker_get(vm_id: str, config: dict[str, Any] | None = None, **request_options: Any) -> VM | None:
     try:
-        return arker_client(config).get_vm(vm_id)
+        return arker_client(config).get_vm(vm_id, **request_options)
     except ArkerError as error:
         if error.status == 404:
             return None

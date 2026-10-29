@@ -68,3 +68,19 @@ def test_native_route_errors_keep_identity_even_if_they_resemble_arker_refusals(
         if asynchronous:
             asyncio.run(result)
     assert raised.value is error
+
+
+@pytest.mark.parametrize(
+    "details",
+    [
+        None,
+        [],
+        "explicit_resume",
+        {"requirement": "explicit_resume", "resource": "vm"},
+        {"requirement": "explicit_resume", "resource": []},
+    ],
+)
+def test_malformed_pause_details_never_translate(details):
+    error = refusal()
+    error.body = {"details": details}
+    assert translate_error(error) is error

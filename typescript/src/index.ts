@@ -793,9 +793,9 @@ export class Arker {
     return vm;
   }
 
-  async listVms(opts: ListVmsOptions = {}): Promise<{ vms: VM[]; nextCursor: string | null }> {
+  async listVms(opts: ListVmsOptions = {}, transport?: RequestTransportOptions): Promise<{ vms: VM[]; nextCursor: string | null }> {
     const query: ListVmsParameters = opts;
-    const resp = await this._request<ListVmsResponse>("GET", buildQuery("/v1/vms", query), undefined, this.controlBaseUrl);
+    const resp = await this._request<ListVmsResponse>("GET", buildQuery("/v1/vms", query), undefined, this.controlBaseUrl, undefined, undefined, undefined, transport);
     const vms = (resp.vms ?? []).map((v) => {
       const id = v.vm_id;
       return new VM(this, id, this._baseUrlFor(id, v), v);
@@ -840,9 +840,9 @@ export class Arker {
   }
 
   /** Fetch a VM from its regional endpoint. */
-  async getVm(vmId: string, placement?: VmPlacement): Promise<VM> {
+  async getVm(vmId: string, placement?: VmPlacement, transport?: RequestTransportOptions): Promise<VM> {
     const baseUrl = this._baseUrlFor(vmId, placement);
-    const data = await this._request<Vm>("GET", vmPath(vmId), undefined, baseUrl);
+    const data = await this._request<Vm>("GET", vmPath(vmId), undefined, baseUrl, undefined, undefined, undefined, transport);
     return new VM(this, vmId, baseUrl, data);
   }
 
@@ -934,6 +934,7 @@ export class Arker {
     extraHeaders?: Record<string, string | undefined>,
     maxQueueingSecs?: number | null,
     retryNetworkFailures?: boolean,
+    transport?: RequestTransportOptions,
   ): Promise<T> {
     const url = `${baseUrl}${path}`;
     const headers: Record<string, string> = {
@@ -954,6 +955,7 @@ export class Arker {
       this.retry,
       maxQueueingSecs ?? undefined,
       retryNetworkFailures,
+      transport,
     );
   }
 
@@ -1063,8 +1065,8 @@ export class VM {
   }
 
   /** Re-fetch this VM and return a fresh, fully-populated handle. */
-  async refresh(): Promise<VM> {
-    const data = await this._client._request<Vm>("GET", vmPath(this.id), undefined, this.baseUrl);
+  async refresh(transport?: RequestTransportOptions): Promise<VM> {
+    const data = await this._client._request<Vm>("GET", vmPath(this.id), undefined, this.baseUrl, undefined, undefined, undefined, transport);
     return new VM(this._client, this.id, this.baseUrl, data);
   }
 
@@ -1679,8 +1681,8 @@ export class VM {
     return this._client._request("PATCH", vmPath(this.id), body, this.baseUrl);
   }
 
-  async delete(): Promise<DeleteVmResponse> {
-    return this._client._request("DELETE", vmPath(this.id), undefined, this.baseUrl);
+  async delete(transport?: RequestTransportOptions): Promise<DeleteVmResponse> {
+    return this._client._request("DELETE", vmPath(this.id), undefined, this.baseUrl, undefined, undefined, undefined, transport);
   }
 
   /**
@@ -2257,6 +2259,11 @@ function runToCompletedResult(run: RunRecord): CompletedRunResult {
   };
 }
 
+/** Per-request cancellation; does not change shared client or connection settings. */
+export interface RequestTransportOptions {
+  signal?: AbortSignal;
+}
+
 async function requestJson<T>(
   method: HttpMethod,
   url: string,
@@ -2267,6 +2274,7 @@ async function requestJson<T>(
   retry: RetryConfig,
   maxQueueingSecs?: number,
   retryNetworkFailures?: boolean,
+  transport?: RequestTransportOptions,
 ): Promise<T> {
   const headers = { ...requestHeaders };
   let requestBody: string | undefined;
@@ -2284,6 +2292,7 @@ async function requestJson<T>(
   const shouldRetryNetworkFailures = retryNetworkFailures ?? (method === "GET");
 
   for (let attempt = 0; ; attempt++) {
+    transport?.signal?.throwIfAborted();
     if (queueingDeadline !== undefined && attempt > 0 && isObject(body)) {
       // Retries re-send the remaining window.
       const remainingSecs = Math.max(
@@ -2297,9 +2306,10 @@ async function requestJson<T>(
     try {
       const { status, ok, text } = await sendRequest(
         url,
-        { method, headers, body: requestBody },
+        { method, headers, body: requestBody, signal: transport?.signal },
         fetchImpl,
         http2,
+        transport ? 0 : undefined,
       );
       const payload = parseJson(text);
       const parsedError = extractError(payload, status);
@@ -2307,7 +2317,7 @@ async function requestJson<T>(
       if (isRetryable(status, parsedError, shouldRetryNetworkFailures || Boolean(headers["Idempotency-Key"]))) {
         const delay = retryDelay(retry, attempt, parsedError);
         if (canRetryAgain(retry, attempt, queueingDeadline, delay)) {
-          await sleep(delay);
+          await abortableDelay(delay, transport?.signal);
           continue;
         }
       }
@@ -2325,13 +2335,14 @@ async function requestJson<T>(
 
       return payload as T;
     } catch (error) {
+      transport?.signal?.throwIfAborted();
       if (error instanceof ArkerError) throw error;
       if (!shouldRetryNetworkFailures) {
         throw unknownOutcomeError(method, new URL(url).pathname, error);
       }
       const delay = retryDelay(retry, attempt);
       if (canRetryAgain(retry, attempt, queueingDeadline, delay)) {
-        await sleep(delay);
+        await abortableDelay(delay, transport?.signal);
         continue;
       }
       const message = error instanceof Error ? error.message : String(error);
@@ -2421,6 +2432,22 @@ function unknownOutcomeError(method: HttpMethod, path: string, error: unknown): 
 }
 
 function jitter(maxMs: number): number { return Math.floor(Math.random() * (maxMs + 1)); }
+
+function abortable<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return operation;
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => { signal.removeEventListener("abort", abort); reject(signal.reason); };
+    signal.addEventListener("abort", abort, { once: true });
+    operation.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    if (signal.aborted) abort();
+  });
+}
+
+async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try { await abortable(new Promise<void>(resolve => { timer = setTimeout(resolve, ms); }), signal); }
+  finally { clearTimeout(timer); }
+}
 
 async function sleep(ms: number): Promise<void> { await new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -2622,7 +2649,7 @@ class Http2Connection {
     return this.session.closed || this.session.destroyed;
   }
 
-  request(method: string, path: string, headers: Record<string, string>, body?: string): Promise<TransportResponse> {
+  request(method: string, path: string, headers: Record<string, string>, body?: string, signal?: AbortSignal, timeoutMs = HTTP2_REQUEST_TIMEOUT_MS): Promise<TransportResponse> {
     // Ref the socket only while requests are in flight, so a pending request keeps
     // the process alive but an idle connection still lets it exit.
     if (this.streams === 0) this.session.ref();
@@ -2634,19 +2661,23 @@ class Http2Connection {
         ":method": method,
         ":path": path,
       });
+      const abort = () => stream.destroy(signal?.reason instanceof Error ? signal.reason : new Error("Request aborted"));
+      signal?.addEventListener("abort", abort, { once: true });
+      stream.once("close", () => signal?.removeEventListener("abort", abort));
+      if (signal?.aborted) abort();
       let status = 0;
       let text = "";
       stream.setEncoding("utf8");
       let timeout: ReturnType<typeof setTimeout> | undefined;
-      if (BUN_RUNTIME) {
+      if (timeoutMs && BUN_RUNTIME) {
         // Bun attaches stream timeouts to the shared session socket.
         timeout = setTimeout(
           () => stream.destroy(new Error("HTTP/2 request timed out")),
-          HTTP2_REQUEST_TIMEOUT_MS,
+          timeoutMs,
         );
         timeout.unref();
-      } else {
-        stream.setTimeout(HTTP2_REQUEST_TIMEOUT_MS, () => stream.destroy(new Error("HTTP/2 request timed out")));
+      } else if (timeoutMs) {
+        stream.setTimeout(timeoutMs, () => stream.destroy(new Error("HTTP/2 request timed out")));
       }
       stream.on("response", (responseHeaders) => {
         timeout?.refresh();
@@ -2683,9 +2714,10 @@ const http2Connections = new Map<string, Http2Connection | null>();
 
 async function sendRequest(
   url: string,
-  init: { method: string; headers: Record<string, string>; body?: string },
+  init: { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal },
   fetchImpl: FetchLike,
   http2Enabled: boolean,
+  timeoutMs?: number,
 ): Promise<TransportResponse> {
   let failedNegotiation: Http2Connection | undefined;
   let origin: string | undefined;
@@ -2703,14 +2735,15 @@ async function sendRequest(
           http2Connections.set(origin, connection);
         }
         try {
-          await connection.ready;
+          await abortable(connection.ready, init.signal);
         } catch {
+          init.signal?.throwIfAborted();
           // No request stream exists yet, so switching transport cannot replay
           // an operation. Do not cache HTTP/1 until it returns a response.
           failedNegotiation = connection;
         }
         if (!failedNegotiation) {
-          return connection.request(init.method, `${pathname}${search}`, init.headers, init.body);
+          return connection.request(init.method, `${pathname}${search}`, init.headers, init.body, init.signal, timeoutMs);
         }
       }
     }

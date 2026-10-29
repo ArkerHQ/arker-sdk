@@ -22,7 +22,7 @@ def vm(monkeypatch):
     policies = {"rules": rules, "secrets": {"EXAMPLE": "test-value"}}
     calls = []
     vm = SimpleNamespace(id="sandbox", state="running", created_at=NOW.isoformat(), policies=policies, calls=calls)
-    vm.refresh = lambda: vm
+    vm.refresh = lambda **kwargs: vm
 
     def update(**kwargs):
         calls.append(copy.deepcopy(kwargs))
@@ -62,7 +62,7 @@ def vm(monkeypatch):
 @pytest.mark.parametrize("seconds", [1, 17, 300])
 def test_timeout_uses_atomic_endpoint_without_policy_patch_or_resume(vm, seconds):
     original = copy.deepcopy(vm.policies)
-    vm.refresh = lambda: pytest.fail("must not preflight or activate")
+    vm.refresh = lambda **kwargs: pytest.fail("must not preflight or activate")
     lifecycle.Lifecycle(vm=vm).set_timeout(seconds)
     assert vm.calls == [] and vm.policies == original
     assert [(method, path, body) for method, path, body, _ in vm.requests] == [
@@ -102,7 +102,7 @@ def test_connect_reads_fresh_handle_and_absolute_deadline(vm):
             }
         },
     )
-    vm.refresh = lambda: fresh
+    vm.refresh = lambda **kwargs: fresh
     assert lifecycle.Lifecycle(vm=vm).connect(400) is fresh
     assert vm.calls == []
 
@@ -132,9 +132,9 @@ def test_backend_deadline_rejection_does_not_patch_or_retry(vm, operation):
 @pytest.mark.parametrize(
     "method,kwargs",
     [
-        ("pause", {"request_timeout": 1}),
+        ("pause", {"unsupported": 1}),
         ("get_info", {}),
-        ("set_timeout", {"timeout": 10, "request_timeout": 1}),
+        ("set_timeout", {"timeout": 10, "unsupported": 1}),
     ],
 )
 def test_unsupported_operations_do_not_mutate(vm, method, kwargs):
@@ -201,12 +201,12 @@ def test_pause_uses_explicit_route_and_preserves_policy(vm, kwargs, mode, asynch
     result = helper.pause(**kwargs)
     assert (asyncio.run(result) if asynchronous else result) is True
     assert vm.requests == [
-        ("GET", "/v1/vms/sandbox/lifecycle", None, {"base_url": vm.base_url}),
+        ("GET", "/v1/vms/sandbox/lifecycle", None, {"base_url": vm.base_url, "request_timeout": 60}),
         (
             "POST",
             "/v1/vms/sandbox/pause",
             {"mode": mode, "deadline": {"policy_id": lifecycle.LIFETIME_POLICY_ID}},
-            {"base_url": vm.base_url},
+            {"base_url": vm.base_url, "request_timeout": 60},
         ),
     ]
     assert vm.calls == [] and vm.policies == before
@@ -321,7 +321,7 @@ def test_ten_async_sandbox_timeouts_execute_off_loop_without_shared_state():
                 }
 
             vm._client = SimpleNamespace(_request=request)
-            vm.refresh = lambda: vm
+            vm.refresh = lambda **kwargs: vm
             return lifecycle.AsyncLifecycle(vm=vm)
 
         results = await asyncio.gather(*(adapter(i).set_timeout(i + 1) for i in range(10)), return_exceptions=True)
@@ -411,7 +411,7 @@ def test_pause_with_reserved_lifetime_uses_atomic_backend_operation(vm, asynchro
 
 
 def test_pause_does_not_race_a_policy_read_with_separate_patch(vm):
-    vm.refresh = lambda: pytest.fail("atomic endpoint must own policy validation")
+    vm.refresh = lambda **kwargs: pytest.fail("atomic endpoint must own policy validation")
     assert lifecycle.Lifecycle(vm=vm).pause() is True
     assert [request[0] for request in vm.requests] == ["GET", "POST"] and vm.calls == []
 

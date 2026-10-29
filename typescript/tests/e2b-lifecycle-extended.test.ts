@@ -91,8 +91,8 @@ test("invalid timeout and unsupported transport options fail before I/O", async 
     await assert.rejects(f.helper.setTimeout(timeout), InvalidArgumentError);
     await assert.rejects(f.helper.connect({ timeoutMs: timeout }), InvalidArgumentError);
   }
-  await assert.rejects(f.helper.setTimeout(1000, { requestTimeoutMs: 1 }), /unsupported option/);
-  await assert.rejects(f.helper.isRunning({ signal: new AbortController().signal }), /unsupported option/);
+  await assert.rejects(f.helper.setTimeout(1000, { domain: "example.invalid" } as any), /unsupported option/);
+  await assert.rejects(f.helper.isRunning({ apiKey: "test" } as any), /unsupported option/);
   assert.equal(f.reads, 0);
   assert.equal(f.writes.length, 0);
 });
@@ -128,7 +128,7 @@ test("invalid pause options and responses cannot report success", async () => {
   const f = fixture();
   await assert.rejects(f.helper.pause({ mode: "full", keepMemory: true }), InvalidArgumentError);
   await assert.rejects(f.helper.pause({ mode: "invalid" } as any), InvalidArgumentError);
-  await assert.rejects(f.helper.pause({ requestTimeoutMs: 1 }), /unsupported option/);
+  await assert.rejects(f.helper.pause({ domain: "example.invalid" } as any), /unsupported option/);
   assert.equal(f.requests.length, 0);
   delete f.rules[lifetime];
   for (const response of [{}, { vm_id: "other", state: "paused", mode: "full" },
@@ -365,4 +365,64 @@ test("atomic timeout maps only VM explicit-resume refusal and validates success"
     await assert.rejects(f.helper.setTimeout(1000), /Invalid Arker deadline/);
   }
   assert.deepEqual(f.writes, []);
+});
+
+test("per-call transport cancels requests and retry waits without affecting concurrent calls", async () => {
+  const { Arker } = await import("../src/index.js");
+  let attempts = 0;
+  const client = new Arker({ apiKey: "test", baseUrl: "https://example.invalid",
+    fetch: async (_url, init) => {
+      attempts++;
+      if (attempts === 1) return new Response(JSON.stringify({ error: { code: "unavailable", message: "retry" } }), { status: 503 });
+      return await new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(new Response(JSON.stringify({ vm_id: "test", state: "running", mode: null, customer_paused: false }))), 40);
+        const abort = () => { clearTimeout(timer); reject(init?.signal?.reason); };
+        init?.signal?.addEventListener("abort", abort, { once: true });
+        if (init?.signal?.aborted) abort();
+      });
+    },
+  });
+  const vm = client.vm("test");
+  const helper = new E2BLifecycle({ provider: "arker", sandboxId: "test", getInstance: () => vm } as unknown as UniversalSandbox);
+  await assert.rejects(helper.isRunning({ requestTimeoutMs: 5 }), error => error instanceof DOMException && error.name === "TimeoutError");
+  assert.equal(attempts, 1, "timeout during backoff must prevent retry");
+  const controller = new AbortController();
+  const failure = new Error("caller cancelled");
+  const cancelled = helper.isRunning({ requestTimeoutMs: 0, signal: controller.signal });
+  const completed = helper.isRunning({ requestTimeoutMs: 0 });
+  controller.abort(failure);
+  await assert.rejects(cancelled, error => error === failure);
+  assert.equal(await completed, true);
+  const before = attempts;
+  await assert.rejects(helper.isRunning({ signal: controller.signal }), error => error === failure);
+  assert.equal(attempts, before, "pre-aborted request must not send");
+});
+
+test("HTTP/2 cancellation closes only its stream and keeps the shared connection usable", async () => {
+  const { createServer } = await import("node:http2");
+  const { Arker } = await import("../src/index.js");
+  const server = createServer();
+  const sessions = new Set<import("node:http2").ServerHttp2Session>();
+  server.on("session", session => { sessions.add(session); session.on("close", () => sessions.delete(session)); });
+  let closed!: () => void;
+  const cancelledStreamClosed = new Promise<void>(resolve => { closed = resolve; });
+  server.on("stream", (stream: import("node:http2").ServerHttp2Stream, headers) => {
+    stream.on("error", () => {});
+    if (String(headers[":path"]).includes("/slow/")) { stream.on("close", closed); return; }
+    stream.respond({ ":status": 200, "content-type": "application/json" });
+    stream.end(JSON.stringify({ vm_id: "fast", state: "running", mode: null, customer_paused: false }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const client = new Arker({ apiKey: "test", baseUrl: `http://127.0.0.1:${(server.address() as import("node:net").AddressInfo).port}`, retry: false });
+  const helper = (id: string) => new E2BLifecycle({ provider: "arker", sandboxId: id, getInstance: () => client.vm(id) } as unknown as UniversalSandbox);
+  try {
+    assert.equal(await helper("fast").isRunning(), true);
+    await assert.rejects(helper("slow").isRunning({ requestTimeoutMs: 20 }), error => error instanceof DOMException && error.name === "TimeoutError");
+    await cancelledStreamClosed;
+    assert.equal(await helper("fast").isRunning({ requestTimeoutMs: 0 }), true);
+    assert.equal(sessions.size, 1);
+  } finally {
+    for (const session of sessions) session.destroy();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
 });

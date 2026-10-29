@@ -271,14 +271,14 @@ async function testE2BSurface(): Promise<void> {
   try { await withFakeCompute(box, async (fake) => {
     const sandbox = await E2BSandbox.create("catalog-template", { timeoutMs: 123 });
     assertArkerFirst(fake.captured(), "e2b");
-    assert.deepEqual(fake.createCalls[0], { templateId: "catalog-template", timeout: 123, metadata: {} });
+    assert.deepEqual(fake.createCalls[0], { templateId: "catalog-template", timeoutMs: 123 });
     assert.equal(sandbox.sandboxId, "e2b-box");
     assert.equal(sandbox.getHost(8080), "p8080.example.invalid");
     assert.equal(sandbox.getHost(3000), "p8080-3000.example.invalid");
     for (const name of ["commands", "files", "pty", "git"] as const) assert.equal(sandbox[name], components[name]);
     await E2BSandbox.create({ timeoutMs: 321 });
-    assert.deepEqual(fake.createCalls.at(-1), { timeout: 321, metadata: {} });
-    for (const key of ["template", "envVars"]) await assert.rejects(E2BSandbox.create({ [key]: "unsupported" } as any), /unsupported option/);
+    assert.deepEqual(fake.createCalls.at(-1), { timeoutMs: 321 });
+
   }); } finally { factory.dataPlane = original; }
 }
 

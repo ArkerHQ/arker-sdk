@@ -48,9 +48,9 @@ export function sandboxInfo(vm: VM, lifecycle: Record<string, unknown>): Sandbox
   }
   if (!Number.isFinite(end.getTime())) unavailable("Arker returned an invalid sandbox expiration timestamp");
   const inbound = Object.values(vm.policies?.rules ?? {}).filter(rule => rule.type === "inbound");
-  const apps = inbound.find(rule => rule.type === "inbound" && rule.action === "allow" &&
+  const apps = inbound.find(rule => rule.type === "inbound" && rule.action === "allow" && rule.expires_at === undefined &&
     JSON.stringify(rule.match) === JSON.stringify({ ports: [[1, 49982], [49984, 65535]] }));
-  const control = inbound.find(rule => rule.type === "inbound" && rule.action === "allow" && rule.auth === "arker" &&
+  const control = inbound.find(rule => rule.type === "inbound" && rule.action === "allow" && rule.expires_at === undefined && rule.auth === "arker" &&
     JSON.stringify(rule.match) === JSON.stringify({ ports: [49983] }));
   const publicTraffic = inbound.length === 2 && control && apps?.type === "inbound" && ["arker", "open"].includes(String(apps.auth))
     ? apps.auth === "open" : undefined;

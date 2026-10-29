@@ -1,4 +1,4 @@
-import { Sandbox, NotFoundError, CommandExitError, FileType } from "e2b";
+import { Sandbox, NotFoundError, CommandExitError, FileType, type SandboxApiOpts } from "e2b";
 import { defineProvider } from "@computesdk/provider";
 import { onMissing } from "./common.js";
 
@@ -96,11 +96,11 @@ const provider = defineProvider<Sandbox, Record<string, never>>({
   },
 });
 
-export function createNativeE2BProvider() {
+export function createNativeE2BProvider(lookupOptions?: SandboxApiOpts) {
   return Object.assign(provider({}), {
     ownershipProbe: async (id: string) => {
       return onMissing(async () => {
-        await Sandbox.getInfo(id);
+        await Sandbox.getInfo(id, lookupOptions);
         return true;
       }, (error) => error instanceof NotFoundError, false);
     },

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from ._compat import UnsupportedCompatibilityOption, _InstanceOrClassMethod, import_optional
+from ._compat import _InstanceOrClassMethod, import_optional
 from ._compat_async import NativeBridge, route
 from ._compat_async import call as _call
 from ._compat_e2b_lifecycle import AsyncLifecycle
@@ -100,12 +100,27 @@ class AsyncSandbox:
             await self._prepare_data_plane()
         return self
 
+    @classmethod
+    async def _class_pause(cls, sandbox_id, keep_memory=None, *, mode=None, **opts):
+        return await _route("pause", sandbox_id, keep_memory=keep_memory, mode=mode, **opts)
+
+    @classmethod
+    async def _class_beta_pause(cls, sandbox_id, keep_memory=None, *, mode=None, **opts):
+        return await _route("beta_pause", sandbox_id, keep_memory=keep_memory, mode=mode, **opts)
+
+    @classmethod
+    async def _class_set_timeout(cls, sandbox_id, timeout, **opts):
+        return await _route("set_timeout", sandbox_id, timeout, **opts)
+
+    @_InstanceOrClassMethod
     async def pause(self, keep_memory=None, *, mode=None, **opts):
         return await self._lifecycle().pause(keep_memory, mode=mode, **opts)
 
+    @_InstanceOrClassMethod
     async def beta_pause(self, keep_memory=None, *, mode=None, **opts):
         return await self._lifecycle().beta_pause(keep_memory, mode=mode, **opts)
 
+    @_InstanceOrClassMethod
     async def set_timeout(self, timeout, **opts):
         return await self._lifecycle().set_timeout(timeout, **opts)
 
@@ -151,11 +166,9 @@ class AsyncSandbox:
     async def kill(self, **kwargs):
         if self._sandbox._native is not None:
             return await self._sandbox._native.kill(**kwargs)
-        if kwargs:
-            raise UnsupportedCompatibilityOption("Arker sandbox deletion does not yet support per-request options")
         if self._data_plane is not None:
             await self._data_plane.aclose()
-        return await _call(self._sandbox.kill)
+        return await _call(self._sandbox.kill, **kwargs)
 
     @classmethod
     async def _class_kill(cls, sandbox_id: str | AsyncSandbox, **kwargs):

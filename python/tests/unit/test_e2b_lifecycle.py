@@ -127,7 +127,7 @@ def test_kill_preserves_provider_boolean(deleted):
     assert (
         shim.Sandbox(
             vm=types.SimpleNamespace(
-                id="vm", refresh=lambda: None, delete=lambda: types.SimpleNamespace(deleted=deleted)
+                id="vm", refresh=lambda **kwargs: None, delete=lambda **kwargs: types.SimpleNamespace(deleted=deleted)
             )
         ).kill()
         is deleted
@@ -152,10 +152,10 @@ def test_kill_only_treats_authoritative_absence_as_false(status):
 
     error = ArkerError("request_failed", "request failed", status=status)
 
-    def delete():
+    def delete(**kwargs):
         raise error
 
-    sandbox = shim.Sandbox(vm=types.SimpleNamespace(id="vm", refresh=lambda: None, delete=delete))
+    sandbox = shim.Sandbox(vm=types.SimpleNamespace(id="vm", refresh=lambda **kwargs: None, delete=delete))
     if status == 404:
         assert sandbox.kill() is False
     else:
@@ -177,7 +177,7 @@ def test_connect_probes_metadata_before_connecting_only_the_winner(monkeypatch, 
     monkeypatch.setattr(shim.Sandbox, "_native_sandbox", staticmethod(lambda: native))
     vm = types.SimpleNamespace(id="arker-winner", state="idle", base_url="https://worker.example")
 
-    def refresh():
+    def refresh(**kwargs):
         calls.append(("refresh", vm.state))
         return vm
 
@@ -187,7 +187,7 @@ def test_connect_probes_metadata_before_connecting_only_the_winner(monkeypatch, 
             "/v1/vms/arker-winner/resume",
             {"deadline": {"policy_id": "computesdk-e2b-lifetime", "timeout_seconds": 300}},
         )
-        assert kwargs == {"base_url": vm.base_url}
+        assert kwargs == {"base_url": vm.base_url, "request_timeout": 60}
         calls.append(("resume", vm.id))
         vm.state = "running"
         return {"vm_id": vm.id, "state": "running", "mode": "full"}
@@ -224,8 +224,8 @@ def test_static_kill_uses_shared_ownership_without_connecting(monkeypatch, owner
     )
     vm = types.SimpleNamespace(
         id="shared-id",
-        refresh=lambda: None,
-        delete=lambda: calls.append("arker-kill") or types.SimpleNamespace(deleted=True),
+        refresh=lambda **kwargs: None,
+        delete=lambda **kwargs: calls.append("arker-kill") or types.SimpleNamespace(deleted=True),
     )
     monkeypatch.setattr(shim.Sandbox, "_native_sandbox", staticmethod(lambda: native))
 

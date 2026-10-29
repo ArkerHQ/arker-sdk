@@ -20,7 +20,7 @@ try:
         assert shorter.state == "running"
         assert shorter.started_at == before.started_at
         assert shorter.end_at < before.end_at
-        assert sandbox.set_timeout(240) is None
+        assert Sandbox.set_timeout(sandbox.sandbox_id, 240, request_timeout=60) is None
         longer = sandbox.get_info()
         assert longer.started_at == before.started_at
         assert longer.end_at > shorter.end_at
@@ -52,8 +52,8 @@ try:
         else:
             assert sandbox.pause() is False
             assert_deadline(sandbox.sandbox_id, False)
-            assert sandbox.pause() is False
-            assert sandbox.get_info().state == "paused"
+            assert Sandbox.beta_pause(sandbox.sandbox_id, request_timeout=60) is False
+            assert sandbox.get_info(request_timeout=0).state == "paused"
         assert sandbox.is_running() is False
         assert_deadline(sandbox.sandbox_id, False)
 finally:
@@ -68,7 +68,7 @@ ASYNC_PROGRAM = async_program(
 CASES = {
     "running-timeout": ["Sandbox.set_timeout", "Sandbox.get_info"],
     "paused-timeout": ["Sandbox.pause", "Sandbox.set_timeout", "Sandbox.is_running"],
-    "repeated-pause": ["Sandbox.pause", "Sandbox.is_running", "Sandbox.get_info"],
+    "repeated-pause": ["Sandbox.pause", "Sandbox.beta_pause", "Sandbox.is_running", "Sandbox.get_info"],
     "deleted-state": ["Sandbox.is_running", "Sandbox.get_info"],
 }
 

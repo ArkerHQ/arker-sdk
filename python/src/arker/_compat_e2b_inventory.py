@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ._compat import UnsupportedCompatibilityOption
@@ -82,15 +82,18 @@ def sandbox_info(vm: Any, lifecycle: dict[str, Any]) -> Any:
 class InventoryPaginator:
     """Use the server cursor; state checks never activate the listed VMs."""
 
-    def __init__(self, client: Any, *, query=None, limit=None, next_token=None, order=None):
+    def __init__(self, client: Any, *, query=None, limit=None, next_token=None, order=None, **opts):
         from e2b import InvalidArgumentException
 
-        if order is not None:
-            raise UnsupportedCompatibilityOption("Arker inventory does not expose native global ordering")
+        if order is not None and order not in {"asc", "desc"}:
+            raise InvalidArgumentException("order must be asc or desc")
+        self.order = order or "desc"
         if limit is not None and (type(limit) is not int or limit <= 0):
             raise InvalidArgumentException("limit must be a positive integer")
-        if query is not None and field(query, "started_after") is not None:
-            raise UnsupportedCompatibilityOption("Arker inventory does not expose native start-time filtering")
+        started_after = field(query, "started_after")
+        if started_after is not None and not isinstance(started_after, datetime):
+            raise InvalidArgumentException("started_after must be a datetime")
+        self.started_after = started_after.astimezone(timezone.utc).isoformat() if started_after is not None else None
         metadata = field(query, "metadata") or {}
         if not isinstance(metadata, dict) or not all(
             isinstance(k, str) and isinstance(v, str) for k, v in metadata.items()
@@ -99,6 +102,10 @@ class InventoryPaginator:
         states = field(query, "state")
         if states and any(state not in {"running", "paused"} for state in states):
             raise InvalidArgumentException("state must contain running or paused")
+        from ._compat_e2b_lifecycle import _options
+
+        _options(opts)
+        self.options = opts
         self.client, self.query, self.limit = client, query, limit
         self.states = set(states) if states else {"running", "paused"}
         self.metadata_filter = {"arker_e2b": {"version": 1, "metadata": metadata}}
@@ -118,18 +125,26 @@ class InventoryPaginator:
         return self._next_token
 
     def next_items(self, **opts):
-        from ._compat_e2b_lifecycle import Lifecycle, _options
+        from ._compat_e2b_lifecycle import Lifecycle, _control, _options
         from .computer import ArkerError
 
-        _options(opts)
+        request = _options({**self.options, **{key: value for key, value in opts.items() if value is not None}})
         if not self.has_next:
             raise Exception("No more items to fetch")
-        page = self.client.list_vms(cursor=self.next_token, limit=self.limit, metadata_filter=self.metadata_filter)
+        page = _control(
+            self.client.list_vms,
+            cursor=self.next_token,
+            limit=self.limit,
+            metadata_filter=self.metadata_filter,
+            started_after=self.started_after,
+            started_at_order=self.order,
+            **request,
+        )
         result = []
         for vm in page.vms:
             try:
                 lifecycle = Lifecycle(vm=vm)
-                observed = lifecycle._read_lifecycle()
+                observed = lifecycle._read_lifecycle(**request)
                 state = "paused" if observed["customer_paused"] else "running"
                 if state in self.states:
                     result.append(sandbox_info(vm, observed))
@@ -171,7 +186,7 @@ def list_sandboxes(native, config, *, asynchronous=False, **options):
         raise UnsupportedCompatibilityOption(
             "Sandbox.list requires a single inventory provider; cross-provider pagination is unavailable"
         )
-    known = {"query", "limit", "next_token", "order"}
+    known = {"query", "limit", "next_token", "order", "request_timeout"}
     unsupported = set(options) - known
     if unsupported:
         raise UnsupportedCompatibilityOption("Unsupported inventory options: " + ", ".join(sorted(unsupported)))

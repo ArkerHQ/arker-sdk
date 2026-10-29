@@ -29,7 +29,7 @@ def vm():
         resources={"vcpu": 2, "memory_mib": 512},
         policies={"rules": {"computesdk-e2b-lifetime": {"type": "schedule", "action": "delete", "at": END}}},
     )
-    value.refresh = lambda: value
+    value.refresh = lambda **kwargs: value
     value._client = SimpleNamespace(
         _request=lambda *a, **k: {"vm_id": value.id, "state": "idle", "mode": None, "customer_paused": False}
     )
@@ -67,7 +67,7 @@ def test_creation_time_never_substitutes_for_lifecycle_time(vm):
 def test_get_info_missing_maps_native_exception(vm):
     from e2b import SandboxNotFoundException
 
-    def missing():
+    def missing(**kwargs):
         raise ArkerError("not_found", "missing", 404)
 
     vm.refresh = missing
@@ -107,6 +107,9 @@ def test_inventory_cursor_filters_metadata_before_pagination(vm, monkeypatch, as
     assert calls[0] == {
         "cursor": None,
         "limit": 2,
+        "request_timeout": 60,
+        "started_after": None,
+        "started_at_order": "desc",
         "metadata_filter": {"arker_e2b": {"version": 1, "metadata": {"team": "x"}}},
     }
     assert calls[1]["cursor"] == "page2"
@@ -195,3 +198,48 @@ def test_paused_info_uses_pause_marker_without_lifetime_rule(vm):
 def test_template_filter_uses_recorded_source_reference():
     paginator = InventoryPaginator(object(), query=SimpleNamespace(template="vm-source"))
     assert paginator.metadata_filter["arker_e2b"]["source"] == {"value": "vm-source"}
+
+
+@pytest.mark.parametrize("order", [None, "asc", "desc"])
+def test_inventory_forwards_inclusive_start_filter_and_global_order(order):
+    from datetime import datetime
+
+    calls = []
+    client = SimpleNamespace(
+        list_vms=lambda **kwargs: calls.append(kwargs) or SimpleNamespace(vms=[], next_cursor=None)
+    )
+    paginator = InventoryPaginator(
+        client, query=SimpleNamespace(started_after=datetime.fromisoformat("2026-01-01T03:00:00+02:00")), order=order
+    )
+    assert paginator.next_items() == []
+    assert calls[0]["started_after"] == "2026-01-01T01:00:00+00:00"
+    assert calls[0]["started_at_order"] == (order or "desc")
+
+
+@pytest.mark.parametrize("options", [{"order": "newest"}, {"query": {"started_after": "yesterday"}}])
+def test_invalid_inventory_order_and_timestamp_fail_before_io(options):
+    from e2b import InvalidArgumentException
+
+    with pytest.raises(InvalidArgumentException):
+        InventoryPaginator(object(), **options)
+
+
+@pytest.mark.parametrize("expires_at", ["2000-01-01T00:00:00Z", "2100-01-01T00:00:00Z"])
+@pytest.mark.parametrize("expiring_rule", ["apps", "control"])
+@pytest.mark.parametrize("app_auth", ["open", "arker"])
+def test_expiring_inbound_rules_never_infer_public_traffic(vm, expires_at, expiring_rule, app_auth):
+    rules = vm.policies["rules"]
+    rules.update(
+        {
+            "apps": {
+                "type": "inbound",
+                "action": "allow",
+                "auth": app_auth,
+                "match": {"ports": [[1, 49982], [49984, 65535]]},
+            },
+            "control": {"type": "inbound", "action": "allow", "auth": "arker", "match": {"ports": [49983]}},
+        }
+    )
+    rules[expiring_rule]["expires_at"] = expires_at
+    result = sandbox_info(vm, {"customer_paused": False, "started_at": START})
+    assert result.network is None

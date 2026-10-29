@@ -16,6 +16,7 @@ lifecycle parity still require backend and live differential validation.
 from __future__ import annotations
 
 import asyncio
+import math
 from typing import Any
 
 from ._compat import UnsupportedCompatibilityOption
@@ -31,10 +32,48 @@ def _timeout(seconds: int) -> None:
         raise ValueError("timeout must be between 1 and 86400 seconds")
 
 
-def _options(options: dict[str, Any]) -> None:
-    unsupported = sorted(key for key, value in options.items() if value is not None)
+def _options(options: dict[str, Any]) -> dict[str, Any]:
+    unsupported = sorted(key for key, value in options.items() if key != "request_timeout" and value is not None)
     if unsupported:
         raise UnsupportedCompatibilityOption(f"Arker lifecycle does not support option(s): {', '.join(unsupported)}")
+    timeout = options.get("request_timeout")
+    if timeout is None:
+        timeout = 60
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout < 0:
+        from e2b import InvalidArgumentException
+
+        raise InvalidArgumentException("request_timeout must be a finite non-negative number of seconds")
+    return {"request_timeout": None if timeout == 0 else timeout}
+
+
+def _control(call, *args, **kwargs):
+    import httpx2
+
+    try:
+        return call(*args, **kwargs)
+    except httpx2.TimeoutException as error:
+        import httpx
+
+        kinds = (
+            (httpx2.ConnectTimeout, httpx.ConnectTimeout),
+            (httpx2.ReadTimeout, httpx.ReadTimeout),
+            (httpx2.WriteTimeout, httpx.WriteTimeout),
+            (httpx2.PoolTimeout, httpx.PoolTimeout),
+        )
+        native_type = next((native for source, native in kinds if isinstance(error, source)), httpx.TimeoutException)
+        try:
+            original = error.request
+        except RuntimeError:
+            request = None
+        else:
+            request = httpx.Request(
+                original.method,
+                str(original.url),
+                headers=original.headers.raw,
+                extensions=dict(original.extensions),
+                stream=original.stream,
+            )
+        raise native_type(str(error), request=request) from error
 
 
 class Lifecycle:
@@ -54,7 +93,7 @@ class Lifecycle:
     def set_timeout(self, timeout: int, **opts: Any) -> Any:
         if self.native is not None:
             return self.native.set_timeout(timeout, **opts)
-        _options(opts)
+        request = _options(opts)
         _timeout(timeout)
         from e2b import SandboxNotFoundException
 
@@ -62,7 +101,9 @@ class Lifecycle:
         from ._compat_e2b_inventory import timestamp
 
         try:
-            response = self._request("POST", "deadline", {"policy_id": LIFETIME_POLICY_ID, "timeout_seconds": timeout})
+            response = self._request(
+                "POST", "deadline", {"policy_id": LIFETIME_POLICY_ID, "timeout_seconds": timeout}, **request
+            )
             if response.get("vm_id") != self.vm.id:
                 raise RuntimeError("Invalid Arker deadline response")
             timestamp(response.get("deadline_at"), "deadline response timestamp")
@@ -75,7 +116,7 @@ class Lifecycle:
     def connect(self, timeout: int | None = None, *, on_resume: str = "restore", **opts: Any) -> Any:
         if self.native is not None:
             return self.native.connect(timeout=timeout, on_resume=on_resume, **opts)
-        _options(opts)
+        request = _options(opts)
         if timeout is not None:
             _timeout(timeout)
         if on_resume not in ("restore", "reboot"):
@@ -87,14 +128,21 @@ class Lifecycle:
         }
         if on_resume == "reboot":
             body["mode"] = "filesystem"
-        response = self._request("POST", "resume", body)
+        response = self._request("POST", "resume", body, **request)
         self._check_response(response, "running")
         if on_resume == "reboot" and response["mode"] != "filesystem":
             raise RuntimeError("Invalid Arker resume mode")
-        return self.vm.refresh()
+        return _control(self.vm.refresh, **request)
 
-    def _request(self, method: str, operation: str, body: Any = None) -> dict[str, Any]:
-        return self.vm._client._request(method, f"{_vm_path(self.vm.id)}/{operation}", body, base_url=self.vm.base_url)
+    def _request(self, method: str, operation: str, body: Any = None, **request) -> dict[str, Any]:
+        return _control(
+            self.vm._client._request,
+            method,
+            f"{_vm_path(self.vm.id)}/{operation}",
+            body,
+            base_url=self.vm.base_url,
+            **request,
+        )
 
     def _check_response(self, response: dict[str, Any], state: str) -> None:
         if (
@@ -109,17 +157,19 @@ class Lifecycle:
             return self.native.pause(keep_memory=keep_memory, mode=mode, **opts)
         from e2b import InvalidArgumentException
 
-        _options(opts)
+        request = _options(opts)
         if mode is not None and keep_memory is not None:
             raise InvalidArgumentException("Pass either mode or keep_memory, not both")
         if mode is not None and mode not in ("full", "filesystem"):
             raise InvalidArgumentException("mode must be 'full' or 'filesystem'")
         if keep_memory is not None and not isinstance(keep_memory, bool):
             raise InvalidArgumentException("keep_memory must be a boolean")
-        if self._state() == "paused":
+        if self._state(**request) == "paused":
             return False
         selected = mode or ("filesystem" if keep_memory is False else "full")
-        response = self._request("POST", "pause", {"mode": selected, "deadline": {"policy_id": LIFETIME_POLICY_ID}})
+        response = self._request(
+            "POST", "pause", {"mode": selected, "deadline": {"policy_id": LIFETIME_POLICY_ID}}, **request
+        )
         self._check_response(response, "paused")
         if type(response.get("already_paused")) is not bool or (
             not response["already_paused"] and response["mode"] != selected
@@ -135,19 +185,24 @@ class Lifecycle:
     def is_running(self, request_timeout: float | None = None) -> bool:
         if self.native is not None:
             return self.native.is_running(request_timeout=request_timeout)
-        _options({"request_timeout": request_timeout})
+        import httpx
+        from e2b.exceptions import format_request_timeout_error
+
+        request = _options({"request_timeout": request_timeout})
         try:
-            return self._state() == "running"
+            return self._state(**request) == "running"
+        except httpx.TimeoutException as error:
+            raise format_request_timeout_error() from error
         except ArkerError as error:
             if error.status == 404:
                 return False
             raise
 
-    def _state(self) -> str:
-        return "paused" if self._read_lifecycle()["customer_paused"] else "running"
+    def _state(self, **request) -> str:
+        return "paused" if self._read_lifecycle(**request)["customer_paused"] else "running"
 
-    def _read_lifecycle(self) -> dict[str, Any]:
-        response = self._request("GET", "lifecycle")
+    def _read_lifecycle(self, **request) -> dict[str, Any]:
+        response = self._request("GET", "lifecycle", **request)
         if (
             response.get("vm_id") != self.vm.id
             or "mode" not in response
@@ -168,10 +223,10 @@ class Lifecycle:
 
         from ._compat_e2b_inventory import sandbox_info
 
-        _options(opts)
+        request = _options(opts)
         try:
-            current = self.vm.refresh()
-            observed = Lifecycle(vm=current)._read_lifecycle()
+            current = _control(self.vm.refresh, **request)
+            observed = Lifecycle(vm=current)._read_lifecycle(**request)
             return sandbox_info(current, observed)
         except ArkerError as error:
             if error.status == 404:

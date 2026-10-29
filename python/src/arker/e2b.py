@@ -22,7 +22,7 @@ from ._compat import (
     run_command,
 )
 from ._compat_e2b_async import AsyncSandbox as AsyncSandbox
-from ._compat_e2b_lifecycle import Lifecycle
+from ._compat_e2b_lifecycle import Lifecycle, _control, _options
 from ._compat_e2b_mounts import (
     AsyncVolume as AsyncVolume,
 )
@@ -296,17 +296,18 @@ class Sandbox(UnsupportedMixin):
     @classmethod
     def _lookup(cls, sandbox_id: str, kwargs: dict[str, Any]):
         arker_config = pop_arker_config(kwargs)
-        if kwargs:
-            unsupported = ", ".join(sorted(kwargs))
-            raise TypeError(f"Sandbox lookup received unsupported option(s): {unsupported}")
         native = cls._native_sandbox()
         found = routed_get(
             sandbox_id,
             "e2b",
             arker_config,
             {
-                "arker": lambda: arker_get(sandbox_id, arker_config),
-                "e2b": lambda: get_or_none(lambda: native.get_info(sandbox_id)) if native is not None else None,
+                "arker": lambda: _control(
+                    arker_get, sandbox_id, arker_config, **_options({"request_timeout": kwargs.get("request_timeout")})
+                ),
+                "e2b": lambda: (
+                    get_or_none(lambda: native.get_info(sandbox_id, **kwargs)) if native is not None else None
+                ),
             },
         )
         return found, native
@@ -314,7 +315,13 @@ class Sandbox(UnsupportedMixin):
     @classmethod
     def _class_connect(cls, sandbox_id: str, **kwargs: Any) -> Sandbox:
         config = pop_arker_config(kwargs)
-        found, native = cls._lookup(sandbox_id, {"arker": config})
+        found, native = cls._lookup(
+            sandbox_id,
+            {
+                "arker": config,
+                **{key: value for key, value in kwargs.items() if key not in {"timeout", "on_resume"}},
+            },
+        )
         if found is None:
             raise format_not_found("Sandbox", sandbox_id)
         provider, result = found
@@ -332,12 +339,43 @@ class Sandbox(UnsupportedMixin):
             self._prepare_data_plane()
         return self
 
+    @classmethod
+    def _class_lifecycle(cls, method, sandbox_id, *args, **opts):
+        from e2b import SandboxNotFoundException
+
+        config = pop_arker_config(opts)
+        lookup = {"arker": config, **{key: value for key, value in opts.items() if key not in {"mode", "keep_memory"}}}
+        found, native = cls._lookup(sandbox_id, lookup)
+        if found is None:
+            raise SandboxNotFoundException("Sandbox was not found")
+        provider, vm = found
+        return (
+            getattr(native, method)(sandbox_id, *args, **opts)
+            if provider == "e2b"
+            else getattr(Lifecycle(vm=vm), method)(*args, **opts)
+        )
+
+    @classmethod
+    def _class_pause(cls, sandbox_id, keep_memory=None, *, mode=None, **opts):
+        return cls._class_lifecycle("pause", sandbox_id, keep_memory=keep_memory, mode=mode, **opts)
+
+    @classmethod
+    def _class_beta_pause(cls, sandbox_id, keep_memory=None, *, mode=None, **opts):
+        return cls._class_lifecycle("beta_pause", sandbox_id, keep_memory=keep_memory, mode=mode, **opts)
+
+    @classmethod
+    def _class_set_timeout(cls, sandbox_id, timeout, **opts):
+        return cls._class_lifecycle("set_timeout", sandbox_id, timeout, **opts)
+
+    @_InstanceOrClassMethod
     def pause(self, keep_memory: bool | None = None, *, mode: str | None = None, **opts: Any) -> bool:
         return Lifecycle(vm=self._vm, native=self._native).pause(keep_memory, mode=mode, **opts)
 
+    @_InstanceOrClassMethod
     def beta_pause(self, keep_memory: bool | None = None, *, mode: str | None = None, **opts: Any) -> bool:
         return Lifecycle(vm=self._vm, native=self._native).beta_pause(keep_memory, mode=mode, **opts)
 
+    @_InstanceOrClassMethod
     def set_timeout(self, timeout: int, **opts: Any) -> None:
         return Lifecycle(vm=self._vm, native=self._native).set_timeout(timeout, **opts)
 
@@ -364,7 +402,9 @@ class Sandbox(UnsupportedMixin):
             "e2b",
             config,
             {
-                "arker": lambda: arker_get(sandbox_id, config),
+                "arker": lambda: _control(
+                    arker_get, sandbox_id, config, **_options({"request_timeout": opts.get("request_timeout")})
+                ),
                 "e2b": lambda: get_or_none(lambda: native.get_info(sandbox_id, **opts)) if native else None,
             },
         )
@@ -391,20 +431,20 @@ class Sandbox(UnsupportedMixin):
         if found is None:
             return False
         provider, result = found
-        return native.kill(sandbox_id) if provider == "e2b" else cls(vm=result).kill()
+        return native.kill(sandbox_id, **kwargs) if provider == "e2b" else cls(vm=result).kill(**kwargs)
 
     @_InstanceOrClassMethod
-    def kill(self) -> bool:
+    def kill(self, **opts) -> bool:
         if self._vm is not None:
+            request = _options(opts)
             if self._data_plane is not None:
                 self._data_plane.close()
             try:
-                self._vm.refresh()
-                return self._vm.delete().deleted
+                return _control(self._vm.delete, **request).deleted
             except ArkerError as error:
                 if error.status == 404:
                     return False
                 raise
         if hasattr(self._native, "kill"):
-            return self._native.kill()
+            return self._native.kill(**opts)
         raise AttributeError("Native E2B sandbox does not expose kill().")
