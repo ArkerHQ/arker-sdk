@@ -340,6 +340,8 @@ class FileSystem:
         if self._vm is None:
             return self._native.write_tree(files, destination_path)
         destination = destination_path or ""
+        if destination.startswith("~"):
+            destination = "/" + destination
         for file in files:
             values = file if isinstance(file, dict) else vars(file)
             path = values.get("path")

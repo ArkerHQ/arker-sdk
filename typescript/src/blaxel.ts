@@ -168,12 +168,17 @@ export class SandboxInstance {
       writeStdin: guest.writeStdin.bind(guest),
       closeStdin: guest.closeStdin.bind(guest),
     }) as BlaxelCompatProcess;
+    // Native generated routes prefix a slash; raw binary upload and shell cp do not.
+    const endpointPath = (path: string) => path.startsWith("~") ? "/" + path : path;
+    const displayPath = (path: string) => filesystemDisplayPath(endpointPath(path));
+    const directoryPath = (path: string) => filesystemPath(endpointPath(path));
+    const filePath = (path: string) => filesystemFilePath(endpointPath(path));
     this.fs = (native?.fs ?? {
-      read: (path) => box.filesystem.readFile(this.provider === "arker" ? filesystemFilePath(path) : path),
+      read: (path) => box.filesystem.readFile(this.provider === "arker" ? filePath(path) : path),
       write: (path, content) => {
         if (typeof content !== "string") throw new TypeError("fs.write requires text; use fs.writeBinary for binary content");
-        const resolved = filesystemFilePath(path);
-        return box.filesystem.writeFile(resolved, content).then(() => ({ message: "File created/updated successfully", path: filesystemDisplayPath(path) }));
+        const resolved = filePath(path);
+        return box.filesystem.writeFile(resolved, content).then(() => ({ message: "File created/updated successfully", path: displayPath(path) }));
       },
       writeBinary: async (path, content) => {
         const bytes = typeof content === "string" ? await readFile(content)
@@ -186,12 +191,12 @@ export class SandboxInstance {
       },
       readBinary: async (path) => {
         const vm = (box as unknown as { getInstance(): VM }).getInstance();
-        const bytes = await vm.sync(filesystemFilePath(path));
+        const bytes = await vm.sync(filePath(path));
         return new Blob([new Uint8Array(bytes)]);
       },
       download: async (src, destinationPath, { mode = 0o644 } = {}) => {
         const vm = (box as unknown as { getInstance(): VM }).getInstance();
-        const bytes = await vm.sync(filesystemFilePath(src));
+        const bytes = await vm.sync(filePath(src));
         await writeFile(destinationPath, bytes);
         await chmod(destinationPath, mode);
       },
@@ -199,15 +204,15 @@ export class SandboxInstance {
         if (!/^0?[0-7]{3}$/.test(permissions)) {
           throw new Error("fs.mkdir permissions must be a three- or four-digit octal mode");
         }
-        const resolved = filesystemPath(path);
+        const resolved = directoryPath(path);
         const quoted = shellQuote(resolved);
         const result = await box.runCommand(`mkdir -p -- ${quoted} && chmod -- ${permissions} ${quoted}`);
         if (result.exitCode !== 0) throw new Error(result.stderr || `mkdir failed with exit ${result.exitCode}`);
-        return { message: "Directory created successfully", path: filesystemDisplayPath(path) };
+        return { message: "Directory created successfully", path: displayPath(path) };
       },
       ls: async (path) => {
-        const display = filesystemDisplayPath(path);
-        const entries = await box.filesystem.readdir(filesystemPath(path));
+        const display = displayPath(path);
+        const entries = await box.filesystem.readdir(directoryPath(path));
         const withPath = (entry: { name: string }) => ({
           ...entry,
           path: posix.resolve(posix.join(display, entry.name)),
@@ -220,7 +225,7 @@ export class SandboxInstance {
         };
       },
       rm: async (path, recursive = false) => {
-        const resolved = filesystemPath(path);
+        const resolved = directoryPath(path);
         const quoted = shellQuote(resolved);
         const directoryCommand = recursive ? "rm -r" : "rmdir";
         const result = await box.runCommand(
@@ -228,7 +233,7 @@ export class SandboxInstance {
           `${directoryCommand} -- ${quoted} && printf directory; else rm -- ${quoted} && printf file; fi`,
         );
         if (result.exitCode !== 0) throw new Error(result.stderr || `remove failed with exit ${result.exitCode}`);
-        return { message: `${result.stdout === "directory" ? "Directory" : "File"} deleted successfully`, path: filesystemDisplayPath(path) };
+        return { message: `${result.stdout === "directory" ? "Directory" : "File"} deleted successfully`, path: displayPath(path) };
       },
       cp: async (source, destination, { maxWait = 180_000 } = {}) => {
         if (!Number.isFinite(maxWait) || maxWait <= 0) throw new RangeError("maxWait must be positive and finite");
@@ -240,7 +245,7 @@ export class SandboxInstance {
         return { message: "Files copied", source, destination };
       },
       writeTree: async (files, destinationPath = null) => {
-        const destination = destinationPath ?? "";
+        const destination = endpointPath(destinationPath ?? "");
         for (const file of files) {
           if (typeof file.path !== "string" || typeof file.content !== "string") {
             throw new TypeError("writeTree files require string path and content");
@@ -263,7 +268,7 @@ export class SandboxInstance {
         for (const directory of excludeDirs ?? []) predicates.push(`! -path ${shellQuote(`*/${directory}/*`)}`);
         if (excludeHidden) predicates.push("! -path '*/.*'");
         const result = await box.runCommand(
-          `find ${shellQuote(filesystemPath(path))} -mindepth 1 ${predicates.join(" ")} -printf '%y\\0%p\\0'`,
+          `find ${shellQuote(directoryPath(path))} -mindepth 1 ${predicates.join(" ")} -printf '%y\\0%p\\0'`,
         );
         if (result.exitCode !== 0) throw new Error(result.stderr || `find failed with exit ${result.exitCode}`);
         const fields = result.stdout.split("\0");
@@ -285,7 +290,7 @@ export class SandboxInstance {
         if (filePattern) flags.push("--include", filePattern);
         for (const directory of excludeDirs ?? []) flags.push("--exclude-dir", directory);
         const result = await box.runCommand(
-          ["grep", ...flags.map(shellQuote), "--", shellQuote(query), shellQuote(filesystemPath(path))].join(" "),
+          ["grep", ...flags.map(shellQuote), "--", shellQuote(query), shellQuote(directoryPath(path))].join(" "),
         );
         if (result.exitCode !== 0 && result.exitCode !== 1) {
           throw new Error(result.stderr || `grep failed with exit ${result.exitCode}`);
