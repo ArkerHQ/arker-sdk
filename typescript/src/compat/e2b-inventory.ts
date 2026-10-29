@@ -52,7 +52,13 @@ export function sandboxInfo(vm: VM, lifecycle: Record<string, unknown>): Sandbox
     JSON.stringify(rule.match) === JSON.stringify({ ports: [[1, 49982], [49984, 65535]] }));
   const control = inbound.find(rule => rule.type === "inbound" && rule.action === "allow" && rule.expires_at === undefined && rule.auth === "arker" &&
     JSON.stringify(rule.match) === JSON.stringify({ ports: [49983] }));
-  const publicTraffic = inbound.length === 2 && control && apps?.type === "inbound" && ["arker", "open"].includes(String(apps.auth))
+  const tokenApps = vm.policies?.rules?.["computesdk-e2b-apps"];
+  const managedPrivate = tokenApps?.type === "inbound" && tokenApps.action === "allow" && tokenApps.auth === "open" && tokenApps.expires_at === undefined
+    && JSON.stringify(tokenApps.match?.ports) === JSON.stringify([[1, 49982], [49984, 65535]])
+    && Object.keys(tokenApps.match ?? {}).length === 2 && Object.keys(tokenApps.match?.headers ?? {}).length === 1
+    && tokenApps.match?.headers?.["e2b-traffic-access-token"]?.length === 1
+    && ["***", "${secret:computesdk-e2b-traffic}"].includes(tokenApps.match.headers["e2b-traffic-access-token"][0]);
+  const publicTraffic = inbound.length === 2 && control && managedPrivate ? false : inbound.length === 2 && control && apps?.type === "inbound" && ["arker", "open"].includes(String(apps.auth))
     ? apps.auth === "open" : undefined;
   return {
     sandboxId: vm.id, templateId: source.value,

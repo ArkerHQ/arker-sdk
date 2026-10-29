@@ -161,3 +161,15 @@ for (const expiry of ["2000-01-01T00:00:00Z", "2999-01-01T00:00:00Z"]) {
     }
   });
 }
+
+
+test("inventory identifies managed secret-header app ingress as private without leaking credentials", () => {
+  const f = fixture();
+  Object.assign(f.raw.policies.rules, {
+    "computesdk-e2b-apps": { type: "inbound", priority: 0, action: "allow", auth: "open", match: { ports: [[1, 49982], [49984, 65535]], headers: { "e2b-traffic-access-token": ["***"] } } },
+    "computesdk-e2b-envd": { type: "inbound", priority: 1000000, action: "allow", auth: "arker", match: { ports: [49983] } },
+  });
+  const info = sandboxInfo(f.vm, f.lifecycle);
+  assert.deepEqual(info.network, { allowPublicTraffic: false });
+  assert.ok(!JSON.stringify(info).includes("***"));
+});

@@ -465,7 +465,16 @@ def start(config, state_path):
         if active and inherited_envs is None:
             inherited_envs = load(vm_directory(active["vm_id"]) / "state.json").get("envs")
         envs = config.get("envs", inherited_envs)
+        traffic_token = config.get("traffic_access_token", previous.get("traffic_access_token") if previous else None)
+        if traffic_token is not None and (
+            not isinstance(traffic_token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", traffic_token)
+        ):
+            raise BootstrapError("invalid_traffic_token")
+        if previous and previous.get("traffic_access_token") != traffic_token:
+            raise BootstrapError("reconnect_traffic_token_mismatch")
         saved = {"vm_id": vm_id, "token": token}
+        if traffic_token is not None:
+            saved["traffic_access_token"] = traffic_token
         if envs is not None:
             saved["envs"] = envs
         marker = state_path.parent / "ready.json"

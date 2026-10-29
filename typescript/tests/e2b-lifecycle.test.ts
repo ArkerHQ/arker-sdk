@@ -4,10 +4,14 @@ import { test } from "node:test";
 import {
   Sandbox as Native,
   NotFoundError,
+  SandboxError,
   CommandExitError,
   FileType,
 } from "e2b";
 import { Sandbox } from "../src/e2b.js";
+import { Arker, type VM } from "../src/index.js";
+import { rememberTrafficToken } from "../src/compat/e2b-network.js";
+import { createArkerComputeProvider } from "../src/compat/arker-provider.js";
 import { createNativeE2BProvider } from "../src/compat/e2b-provider.js";
 import { preserveProperties, preserveEnvironment, listen } from "./provider-fixtures.js";
 
@@ -217,4 +221,48 @@ test("Arker-only creation restrictions reject vendor credentials before any requ
   for (const options of [{ apiKey: "native-test" }, { secure: true }, { network: { maskRequestHost: true } }]) {
     await assert.rejects(Sandbox.create(options as any), /unsupported .*option/i);
   }
+});
+
+test("Arker create timeout bounds use native 400 errors before creating a VM", async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "COMPUTESDK_ROUTER_CONFIG", "ARKER_SOURCE_VM_ID");
+  process.env.ARKER_API_KEY = "arker-test";
+  process.env.ARKER_SOURCE_VM_ID = "00000000000000000000000000";
+  delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  for (const timeoutMs of [-1000, 0, 86_401_000]) {
+    await assert.rejects(Sandbox.create({ timeoutMs }), error => error instanceof SandboxError
+      && error.constructor === SandboxError && error.statusCode === 400);
+  }
+});
+
+test("traffic token property preserves native optional values and reads VM-bound state", () => {
+  for (const token of [undefined, "synthetic-traffic-token"]) {
+    const native = Reflect.construct(Sandbox, [{ provider: "e2b", sandboxId: "native" }, { trafficAccessToken: token }]) as Sandbox;
+    assert.equal(native.trafficAccessToken, token);
+  }
+  const vm = {} as VM;
+  const sandbox = Reflect.construct(Sandbox, [{ provider: "arker", sandboxId: "fixture", getInstance: () => vm }]) as Sandbox;
+  assert.equal(sandbox.trafficAccessToken, undefined);
+  rememberTrafficToken(vm, "synthetic-app-token");
+  assert.equal(sandbox.trafficAccessToken, "synthetic-app-token");
+  rememberTrafficToken(vm, null);
+  assert.equal(sandbox.trafficAccessToken, undefined);
+});
+
+test("provider fork hook installs policies in the only fork request", async t => {
+  preserveProperties(t, Arker.prototype, "fork");
+  const calls: unknown[] = [];
+  Arker.prototype.fork = async function(request) {
+    calls.push(request);
+    return { id: "fixture" } as VM;
+  };
+  const policy = { rules: { app: { type: "inbound" as const, priority: 0, action: "allow" as const, auth: "open" as const,
+    match: { ports: [8080], headers: { "e2b-traffic-access-token": ["${secret:APP}"] } } } }, secrets: { APP: "synthetic-app-token" } };
+  const provider = createArkerComputeProvider({ apiKey: "synthetic-key", sourceVmId: "fixture-source" }, undefined, undefined,
+    async (client, request) => {
+      assert.equal(calls.length, 0);
+      assert.equal(request.source_vm_id, "fixture-source");
+      return client.fork({ ...request, policies: policy });
+    });
+  await provider.sandbox.create();
+  assert.deepEqual(calls, [{ source_vm_id: "fixture-source", policies: policy }]);
 });

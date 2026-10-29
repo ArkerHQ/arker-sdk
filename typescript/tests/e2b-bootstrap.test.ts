@@ -20,7 +20,7 @@ for (const existing of [false, true]) test(`bootstrap secret request and existin
   const vm = {
     id: "vm-a", refresh: async () => ({ hostname: "vm-a.example.com" }),
     sync: async (path: string, data?: any, options?: any) => {
-      if (data === undefined) return Buffer.from(JSON.stringify({ token }));
+      if (data === undefined) return Buffer.from(JSON.stringify({ vm_id: "vm-a", token, traffic_access_token: "b".repeat(43) }));
       writes.push({ path, data, options });
     },
     run: async (command: string, options?: any) => {
@@ -46,6 +46,7 @@ for (const existing of [false, true]) test(`bootstrap secret request and existin
     assert.equal(ready.ready, true);
     for (const write of writes.filter(w => !w.path.includes("/.candidate-"))) assert.equal(write.options.isSecret, true);
     const request = JSON.parse(writes.at(-1).data);
+    assert.equal(request.traffic_access_token, existing ? "b".repeat(43) : null);
     assert.equal(request.token, descriptor.envd_access_token);
     assert.equal(Object.hasOwn(request, "envs"), envs !== undefined);
     if (envs !== undefined) assert.deepEqual(request.envs, envs);

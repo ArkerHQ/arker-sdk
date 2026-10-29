@@ -23,13 +23,16 @@ from ._compat import UnsupportedCompatibilityOption
 from .computer import ArkerError, _vm_path
 
 LIFETIME_POLICY_ID = "computesdk-e2b-lifetime"
+MAX_SESSION_SECONDS = 86_400
 
 
-def _timeout(seconds: int) -> None:
+def _timeout(seconds: int, *, setting: bool = False) -> None:
     if isinstance(seconds, bool) or not isinstance(seconds, int):
         raise TypeError("timeout must be an integer number of seconds")
-    if not 1 <= seconds <= 86_400:
-        raise ValueError("timeout must be between 1 and 86400 seconds")
+    if seconds < 0 or (not setting and not 1 <= seconds <= MAX_SESSION_SECONDS):
+        from e2b import SandboxException
+
+        raise SandboxException("timeout is outside the supported range", status_code=400)
 
 
 def _options(options: dict[str, Any]) -> dict[str, Any]:
@@ -94,7 +97,7 @@ class Lifecycle:
         if self.native is not None:
             return self.native.set_timeout(timeout, **opts)
         request = _options(opts)
-        _timeout(timeout)
+        _timeout(timeout, setting=True)
         from e2b import SandboxNotFoundException
 
         from ._compat_e2b_errors import translate_error
@@ -102,7 +105,14 @@ class Lifecycle:
 
         try:
             response = self._request(
-                "POST", "deadline", {"policy_id": LIFETIME_POLICY_ID, "timeout_seconds": timeout}, **request
+                "POST",
+                "deadline",
+                {
+                    "policy_id": LIFETIME_POLICY_ID,
+                    "timeout_seconds": timeout,
+                    "max_session_duration_seconds": MAX_SESSION_SECONDS,
+                },
+                **request,
             )
             if response.get("vm_id") != self.vm.id:
                 raise RuntimeError("Invalid Arker deadline response")

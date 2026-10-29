@@ -218,3 +218,31 @@ def test_control_preserves_native_timeout_subclass_and_unread_request(name, with
         assert translated.request.headers.raw == original.headers.raw
         assert translated.request.extensions == original.extensions
         assert translated.request.stream is original.stream
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_repeated_kill_preserves_authoritative_backend_deleted_boolean(asynchronous):
+    import arker.e2b as shim
+
+    exists = True
+    calls = []
+
+    def delete(**opts):
+        nonlocal exists
+        calls.append("delete")
+        deleted, exists = exists, False
+        return SimpleNamespace(deleted=deleted)
+
+    sandbox = shim.Sandbox(vm=SimpleNamespace(id="vm-a", delete=delete))
+    if asynchronous:
+
+        async def check():
+            current = shim.AsyncSandbox(sandbox)
+            assert await current.kill() is True
+            assert await current.kill() is False
+
+        asyncio.run(check())
+    else:
+        assert sandbox.kill() is True
+        assert sandbox.kill() is False
+    assert calls == ["delete", "delete"]

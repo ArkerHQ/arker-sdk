@@ -1760,6 +1760,7 @@ class ResumeVmDeadline:
 class SetVmDeadlineRequest:
     policy_id: str
     timeout_seconds: int
+    max_session_duration_seconds: int | None = None
 
 
 @dataclass(frozen=True)

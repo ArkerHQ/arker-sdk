@@ -89,7 +89,7 @@ def test_inventory_cursor_filters_metadata_before_pagination(vm, monkeypatch, as
     monkeypatch.setattr(
         inventory,
         "sandbox_info",
-        lambda item, observed: (item.id, "paused" if observed["customer_paused"] else "running"),
+        lambda item, observed, **options: (item.id, "paused" if observed["customer_paused"] else "running"),
     )
     paginator = InventoryPaginator(client, query=SimpleNamespace(metadata={"team": "x"}, state=["running"]), limit=2)
     if asynchronous:
@@ -243,3 +243,51 @@ def test_expiring_inbound_rules_never_infer_public_traffic(vm, expires_at, expir
     rules[expiring_rule]["expires_at"] = expires_at
     result = sandbox_info(vm, {"customer_paused": False, "started_at": START})
     assert result.network is None
+
+
+@pytest.mark.parametrize(
+    "app_auth,header,expected",
+    [
+        ("open", None, True),
+        ("arker", None, False),
+        ("open", "${secret:computesdk-e2b-traffic}", False),
+        ("open", "***", False),
+    ],
+)
+def test_detail_network_uses_only_canonical_policy_and_list_omits_it(vm, app_auth, header, expected):
+    from arker._compat_e2b_network import APP, CONTROL, PORTS
+
+    vm.policies["rules"].update(
+        {
+            APP: {
+                "type": "inbound",
+                "action": "allow",
+                "auth": app_auth,
+                "match": {"ports": PORTS, **({"headers": {"e2b-traffic-access-token": [header]}} if header else {})},
+            },
+            CONTROL: {"type": "inbound", "action": "allow", "auth": "arker", "match": {"ports": [49983]}},
+        }
+    )
+    observed = {"customer_paused": False, "started_at": START}
+    assert sandbox_info(vm, observed).network == {"allow_public_traffic": expected}
+    assert sandbox_info(vm, observed, include_network=False).network is None
+
+
+@pytest.mark.parametrize("modification", ["expiry", "paths", "other-header", "other-rule", "wrong-secret"])
+def test_modified_private_ingress_does_not_invent_network_visibility(vm, modification):
+    from arker._compat_e2b_network import APP, CONTROL, traffic_policies
+
+    policies, _ = traffic_policies(None, None, False)
+    vm.policies["rules"].update(policies["rules"])
+    rules = vm.policies["rules"]
+    if modification == "expiry":
+        rules[CONTROL]["expires_at"] = "2100-01-01T00:00:00Z"
+    elif modification == "paths":
+        rules[APP]["match"]["paths"] = ["/restricted"]
+    elif modification == "other-header":
+        rules[APP]["match"]["headers"]["x-extra"] = ["value"]
+    elif modification == "other-rule":
+        rules["custom"] = {"type": "inbound", "action": "allow", "auth": "open"}
+    else:
+        rules[APP]["match"]["headers"]["e2b-traffic-access-token"] = ["${secret:other}"]
+    assert sandbox_info(vm, {"customer_paused": False, "started_at": START}).network is None

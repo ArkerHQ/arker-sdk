@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { VM } from "../index.js";
 import type { EnvdDescriptor } from "./e2b-data-plane.js";
 import { stageEnvdArtifact } from "./e2b-artifact.js";
+import { createdTrafficToken, rememberTrafficToken } from "./e2b-network.js";
 import { guestScript, manifest } from "./e2b-envd-guest.generated.js";
 
 const scriptPath = "/root/.arker-envd-bootstrap.py";
@@ -46,6 +47,13 @@ Promise<readonly [EnvdDescriptor, EnvdReadiness]> {
   }
   await vm.sync(scriptPath, guestScript, { isSecret: true });
   const prepared: Prepared = await guestJson(vm, "prepare", vm.id);
+  let appToken = createdTrafficToken(vm);
+  if (appToken === undefined) {
+    const source = prepared.existing_state_path;
+    const saved = source === null ? undefined : JSON.parse(new TextDecoder().decode(await vm.sync(source)));
+    appToken = saved?.vm_id === vm.id ? saved.traffic_access_token ?? null : null;
+  }
+  if (appToken !== null && (typeof appToken !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(appToken))) throw new Error("Invalid traffic token state");
   let token = options.token;
   if (token === undefined) {
     let source = prepared.existing_state_path;
@@ -67,9 +75,10 @@ Promise<readonly [EnvdDescriptor, EnvdReadiness]> {
   const candidate = verified.verified ? null : await stageEnvdArtifact(vm, root, manifest.artifacts[prepared.arch],
     options.cacheDirectory ?? join(homedir(), ".cache", "arker", "envd"));
   const request = `${prepared.request_directory}/${randomUUID()}.json`;
-  await vm.sync(request, JSON.stringify({ vm_id: vm.id, token, artifact_path: candidate, offline: true, ...(options.envs !== undefined ? { envs: options.envs } : {}) }), { isSecret: true });
+  await vm.sync(request, JSON.stringify({ vm_id: vm.id, token, traffic_access_token: appToken, artifact_path: candidate, offline: true, ...(options.envs !== undefined ? { envs: options.envs } : {}) }), { isSecret: true });
   const ready: EnvdReadiness = await guestJson(vm, "ensure", request);
   if (ready.ready !== true || ready.port !== 49983 || ready.version !== manifest.version) throw new Error("Guest bootstrap did not establish readiness");
+  rememberTrafficToken(vm, appToken);
   const current = await vm.refresh();
   if (!current.hostname?.includes(".")) throw new Error("Missing VM endpoint");
   const dot = current.hostname.indexOf(".");

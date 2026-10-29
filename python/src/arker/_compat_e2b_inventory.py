@@ -21,7 +21,45 @@ def timestamp(value: Any, name: str) -> datetime:
     return parsed
 
 
-def sandbox_info(vm: Any, lifecycle: dict[str, Any]) -> Any:
+def _network_info(vm):
+    from ._compat_e2b_network import APP, PORTS, SECRET
+    from .computer import _drop_none
+
+    rules = field(field(vm, "policies"), "rules") or {}
+    inbound = {name: rule for name, rule in rules.items() if field(rule, "type") == "inbound"}
+    if len(inbound) != 2 or any(
+        "expires_at" in rule if isinstance(rule, dict) else field(rule, "expires_at") is not None
+        for rule in inbound.values()
+    ):
+        return None
+    normalized = {name: _drop_none(rule) for name, rule in inbound.items()}
+    if any(set(rule) - {"type", "priority", "action", "auth", "match"} for rule in normalized.values()):
+        return None
+    control = [
+        rule
+        for rule in normalized.values()
+        if rule.get("action") == "allow" and rule.get("auth") == "arker" and rule.get("match") == {"ports": [49983]}
+    ]
+    if len(control) != 1:
+        return None
+    for name, rule in normalized.items():
+        if rule.get("action") != "allow":
+            continue
+        if rule.get("match") == {"ports": PORTS} and rule.get("auth") in ("open", "arker"):
+            return {"allow_public_traffic": rule["auth"] == "open"}
+        if (
+            name == APP
+            and rule.get("auth") == "open"
+            and any(
+                rule.get("match") == {"ports": PORTS, "headers": {"e2b-traffic-access-token": [value]}}
+                for value in ("***", "${secret:" + SECRET + "}")
+            )
+        ):
+            return {"allow_public_traffic": False}
+    return None
+
+
+def sandbox_info(vm: Any, lifecycle: dict[str, Any], *, include_network: bool = True) -> Any:
     from e2b import SandboxInfo, SandboxState
 
     descriptor = field(field(vm, "metadata"), "arker_e2b")
@@ -76,6 +114,7 @@ def sandbox_info(vm: Any, lifecycle: dict[str, Any]) -> Any:
         cpu_count=cpu,
         memory_mb=memory,
         envd_version=version,
+        network=_network_info(vm) if include_network else None,
     )
 
 
@@ -147,7 +186,7 @@ class InventoryPaginator:
                 observed = lifecycle._read_lifecycle(**request)
                 state = "paused" if observed["customer_paused"] else "running"
                 if state in self.states:
-                    result.append(sandbox_info(vm, observed))
+                    result.append(sandbox_info(vm, observed, include_network=False))
             except ArkerError as error:
                 if error.status != 404:
                     raise

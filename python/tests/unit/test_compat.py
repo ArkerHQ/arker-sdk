@@ -314,12 +314,17 @@ def test_native_network_floor_preserves_configured_policy_controls(arker_env, or
 )
 def test_provider_block_network_options_translate_to_arker_policy(arker_env, create) -> None:
     t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "GET" and url.endswith("/v1/vms/catalog-template"),
+        200,
+        vm_payload("catalog-template"),
+    )
     t.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, vm_payload("vm_policy"))
 
     with use_transport(t):
         create()
 
-    body = json.loads(t.calls[0]["body"])
+    body = json.loads(next(call["body"] for call in t.calls if call["method"] == "POST"))
     guards = [rule for rule in body["policies"]["rules"].values() if rule["type"] == "outbound_guard"]
     assert guards == [{"type": "outbound_guard", "allow": []}]
 
@@ -475,6 +480,11 @@ def test_python_shims_translate_or_reject_arker_create_options(arker_env) -> Non
 
 def test_e2b_control_plane_surface(arker_env) -> None:
     t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "GET" and url == "https://test.invalid/api/v1/vms/catalog-template",
+        200,
+        vm_payload("catalog-template"),
+    )
     add_create_run_delete(t, "vm_e2b", "")
     with use_transport(t):
         sandbox = E2BSandbox.create()
@@ -899,6 +909,11 @@ def test_compat_imports_preserve_vendor_builders(monkeypatch, shim_name, native_
 
 def test_unsupported_calls_fail_fast(arker_env) -> None:
     t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "GET" and url.endswith("/v1/vms/catalog-template"),
+        200,
+        vm_payload("catalog-template"),
+    )
     t.add_json(
         lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/fork",
         200,

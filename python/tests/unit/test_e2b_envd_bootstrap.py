@@ -507,3 +507,20 @@ def test_default_source_identity_requires_nonroot_user_and_expected_home(monkeyp
     else:
         with pytest.raises(helper.BootstrapError, match="unsupported_user_home"):
             helper.ensure_user()
+
+
+def test_traffic_token_is_private_stable_and_not_inherited_by_child(guest):
+    token = "b" * 43
+    first = guest.ensure(traffic_access_token=token)
+    assert token not in json.dumps(first)
+    assert helper.load(Path(first["state_path"]))["traffic_access_token"] == token
+    again = guest.ensure(traffic_access_token=token)
+    assert again["reused"]
+    assert Path(again["state_path"]).stat().st_mode & 0o777 == 0o600
+    with pytest.raises(helper.BootstrapError, match="reconnect_traffic_token_mismatch"):
+        guest.ensure(traffic_access_token="c" * 43)
+    child = guest.ensure(vm="child", traffic_access_token="d" * 43)
+    assert helper.load(Path(child["state_path"]))["traffic_access_token"] == "d" * 43
+    assert helper.load(Path(first["state_path"]))["traffic_access_token"] == token
+    public_child = guest.ensure(vm="public-child")
+    assert "traffic_access_token" not in helper.load(Path(public_child["state_path"]))

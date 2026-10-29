@@ -12,7 +12,10 @@ def fork_requests(monkeypatch):
     child = types.SimpleNamespace(id="child")
     monkeypatch.setattr(
         "arker._compat.arker_client",
-        lambda config: types.SimpleNamespace(fork=lambda **request: requests.append(request) or child),
+        lambda config: types.SimpleNamespace(
+            get_vm=lambda source: types.SimpleNamespace(policies=None),
+            fork=lambda **request: requests.append(request) or child,
+        ),
     )
     return requests, child
 
@@ -50,11 +53,11 @@ def test_arker_creation_maps_e2b_lifetime_to_server_delete_schedule(timeout, for
     ]
     assert len([rule for rule in rules.values() if rule["type"] == "outbound_guard"]) == 1
     assert rules["custom"] == {"type": "outbound", "priority": 7, "action": "allow"}
-    assert requests[0]["policies"]["secrets"] == {"TOKEN": "synthetic"}
+    assert requests[0]["policies"]["secrets"]["TOKEN"] == "synthetic"
     assert set(config["policies"]["rules"]) == {"custom"}
 
 
-@pytest.mark.parametrize("timeout", [True, 0, -1, 86_401, 1.5, "300"])
+@pytest.mark.parametrize("timeout", [True, 1.5, "300"])
 def test_arker_creation_rejects_invalid_e2b_lifetime_before_fork(timeout, monkeypatch):
     monkeypatch.setattr(shim, "arker_create", lambda *args, **kwargs: pytest.fail("must not fork"))
     with pytest.raises((TypeError, ValueError), match="timeout"):
@@ -108,17 +111,15 @@ def test_python_create_does_not_misread_millisecond_alias_as_seconds(alias, monk
         shim.Sandbox.create(**{alias: 300_000})
 
 
-def test_arker_creation_preserves_legacy_ordered_policy(fork_requests):
+def test_arker_creation_refuses_uncomposable_legacy_policy_without_mutation(fork_requests):
     requests, _ = fork_requests
     ordered = [{"type": "outbound", "priority": 1, "action": "deny"}]
     config = {"source": "template", "policies": {"policies": ordered}}
 
-    shim.Sandbox._create_arker(config, None, None, None, {})
+    with pytest.raises(ValueError, match="named ingress"):
+        shim.Sandbox._create_arker(config, None, None, None, {})
 
-    assert requests[0]["policies"]["policies"] == ordered
-    assert [rule for rule in requests[0]["policies"]["rules"].values() if rule["type"] == "schedule"] == [
-        {"type": "schedule", "after_created": 300, "action": "delete"}
-    ]
+    assert requests == []
     assert config == {"source": "template", "policies": {"policies": ordered}}
 
 
@@ -241,7 +242,7 @@ def test_static_kill_uses_shared_ownership_without_connecting(monkeypatch, owner
 
 
 @pytest.mark.parametrize("public", [None, False, True])
-def test_create_keeps_envd_private_and_preserves_custom_rules(fork_requests, public):
+def test_create_preserves_custom_ingress_without_adding_broader_rules(fork_requests, public):
     requests, _ = fork_requests
     custom = {"type": "inbound", "priority": 7, "action": "deny", "match": {"ports": [22]}}
     options = {} if public is None else {"network": {"allow_public_traffic": public}}
@@ -256,11 +257,7 @@ def test_create_keeps_envd_private_and_preserves_custom_rules(fork_requests, pub
     rules = policies["rules"]
     assert rules["custom"] == custom
     assert policies["secrets"] == {"TOKEN": "synthetic"}
-    assert rules["computesdk-e2b-envd"]["match"] == {"ports": [49983]}
-    assert rules["computesdk-e2b-envd"]["auth"] == "arker"
-    assert rules["computesdk-e2b-apps"]["match"] == {"ports": [[1, 49982], [49984, 65535]]}
-    assert rules["computesdk-e2b-apps"]["auth"] == ("arker" if public is False else "open")
-    assert rules["computesdk-e2b-envd"]["priority"] > custom["priority"] > rules["computesdk-e2b-apps"]["priority"]
+    assert {name: rule for name, rule in rules.items() if rule["type"] == "inbound"} == {"custom": custom}
     assert any(rule["type"] == "outbound_guard" for rule in rules.values())
 
 
@@ -272,12 +269,12 @@ def test_invalid_create_envs_are_rejected_before_fork(monkeypatch, envs):
 
 
 @pytest.mark.parametrize("priority", [0, 1000000])
-def test_reserved_ingress_priority_collision_never_rewrites_user_rules(monkeypatch, priority):
-    monkeypatch.setattr(shim, "arker_create", lambda *a, **k: pytest.fail("must not fork"))
+def test_reserved_ingress_priority_collision_never_rewrites_user_rules(fork_requests, priority):
     custom = {"type": "outbound", "priority": priority, "action": "deny"}
-    config = {"policies": {"rules": {"custom": custom}}}
+    config = {"source": "template", "policies": {"rules": {"custom": custom}}}
     with pytest.raises(ValueError, match="reserved"):
         shim.Sandbox._create_arker(config, None, None, None, {})
+    assert fork_requests[0] == []
     assert config["policies"]["rules"] == {"custom": custom}
 
 
@@ -309,3 +306,42 @@ def test_create_rejects_invalid_metadata_before_fork(metadata, fork_requests):
     with pytest.raises(TypeError, match="metadata"):
         shim.Sandbox._create_arker({"source": "ubuntu"}, None, None, None, {"metadata": metadata})
     assert fork_requests[0] == []
+
+
+@pytest.mark.parametrize("timeout", [0, -1, 86401])
+def test_create_timeout_range_error_is_native_generic_400(timeout, monkeypatch):
+    from e2b import SandboxException
+
+    monkeypatch.setattr(shim, "arker_create", lambda *args, **kwargs: pytest.fail("must not fork"))
+    with pytest.raises(SandboxException) as raised:
+        shim.Sandbox._create_arker({}, None, timeout, None, {})
+    assert type(raised.value) is SandboxException
+    assert raised.value.status_code == 400
+
+
+@pytest.mark.parametrize("public", [False, True])
+def test_facade_fork_installs_child_ingress_and_token_in_single_request(monkeypatch, public):
+    from arker._compat_e2b_network import APP, CONTROL, SECRET, traffic_policies, traffic_token
+
+    inherited, parent_token = traffic_policies(None, None, False)
+    child, calls = types.SimpleNamespace(id="child"), []
+    client = types.SimpleNamespace(
+        get_vm=lambda source: types.SimpleNamespace(policies=inherited),
+        fork=lambda **request: calls.append(request) or child,
+    )
+    monkeypatch.setattr("arker._compat.arker_client", lambda config: client)
+    result = shim.Sandbox._create_arker(
+        {"source": "parent"}, None, None, None, {"network": {"allow_public_traffic": public}}
+    )
+    assert result is child and len(calls) == 1
+    policy = calls[0]["policies"]
+    token = traffic_token(child)
+    assert token != parent_token
+    assert policy["secrets"][SECRET] == token
+    assert policy["rules"][CONTROL]["auth"] == "arker"
+    assert policy["rules"][CONTROL]["match"] == {"ports": [49983]}
+    if public:
+        assert token is None and "headers" not in policy["rules"][APP]["match"]
+    else:
+        assert len(token) == 43
+        assert policy["rules"][APP]["match"]["headers"] == {"e2b-traffic-access-token": ["${secret:" + SECRET + "}"]}

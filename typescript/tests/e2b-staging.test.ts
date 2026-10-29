@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Sandbox } from "../src/e2b.js";
-import { ArkerError } from "../src/index.js";
+import { Arker, ArkerError, VM } from "../src/index.js";
 import { setCompatComputeFactoryForTests } from "../src/compat/runtime.js";
+import { preserveEnvironment, preserveProperties } from "./provider-fixtures.js";
 
 for (const outcome of ["deleted", "missing", "failure"] as const) {
   test(`kill closes only the owned data plane when ${outcome}`, async () => {
@@ -42,17 +43,22 @@ test("failed data-plane initialization deletes the newly created VM", async (t) 
   assert.equal(deleted, 1);
 });
 
-test("network initialization failure deletes only the new VM before bootstrap", async t => {
+test("source policy failure prevents fork and bootstrap without deleting any VM", async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "ARKER_SOURCE_VM_ID", "COMPUTESDK_ROUTER_CONFIG");
+  preserveProperties(t, Arker.prototype, "getVm", "fork");
+  preserveProperties(t, VM.prototype, "delete");
+  process.env.ARKER_API_KEY = "synthetic-key";
+  process.env.ARKER_SOURCE_VM_ID = "00000000000000000000000000";
+  delete process.env.COMPUTESDK_ROUTER_CONFIG;
   const factory = Sandbox as unknown as { dataPlane: () => Promise<unknown> };
   const original = factory.dataPlane;
-  t.after(() => { factory.dataPlane = original; setCompatComputeFactoryForTests(); });
+  t.after(() => { factory.dataPlane = original; });
   const failure = new Error("policy read failed");
-  let deleted = 0;
-  factory.dataPlane = async () => { throw new Error("bootstrap must not run"); };
-  const box = { provider: "arker", sandboxId: "new-sandbox", getInstance: () => ({
-    refresh: async () => { throw failure; }, delete: async () => { deleted++; },
-  }) };
-  setCompatComputeFactoryForTests((() => ({ sandbox: { create: async () => box } })) as never);
+  const events: string[] = [];
+  Arker.prototype.getVm = async () => { events.push("source-policy"); throw failure; };
+  Arker.prototype.fork = async () => { events.push("fork"); throw new Error("fork must not run"); };
+  VM.prototype.delete = async () => { events.push("delete"); throw new Error("no VM to delete"); };
+  factory.dataPlane = async () => { events.push("bootstrap"); throw new Error("bootstrap must not run"); };
   await assert.rejects(Sandbox.create(), error => error === failure);
-  assert.equal(deleted, 1);
+  assert.deepEqual(events, ["source-policy"]);
 });

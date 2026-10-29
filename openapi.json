@@ -6743,7 +6743,7 @@
         "additionalProperties": false,
         "properties": {
           "deleted": {
-            "description": "True when the resource has been deleted.",
+            "description": "True when deletion completed; false when the target was already authoritatively absent.",
             "type": "boolean"
           }
         }
@@ -14034,8 +14034,14 @@
           "timeout_seconds": {
             "type": "integer",
             "format": "uint64",
+            "minimum": 0,
+            "description": "Lifetime in seconds measured from server time. Zero expires an active VM before success is returned; customer-paused VMs are rejected without mutation."
+          },
+          "max_session_duration_seconds": {
+            "type": "integer",
+            "format": "uint64",
             "minimum": 1,
-            "description": "Positive lifetime in seconds measured from server time."
+            "description": "Optional cap measured from the authoritative session start (initial creation or most recent explicit resume). The deadline is the earlier of this cap and server time plus timeout_seconds."
           }
         },
         "description": "Replace one delete schedule deadline without activating the VM."

@@ -4,6 +4,7 @@ import {
   ConnectionConfig,
   InvalidArgumentError,
   SandboxNotFoundError,
+  SandboxError,
   SandboxNotRunningError,
   type Sandbox as NativeSandbox,
   type SandboxConnectOpts,
@@ -50,12 +51,15 @@ export function validateArkerE2BLifecycle(lifecycle?: SandboxLifecycle): void {
   }
 }
 
-function timeoutDuration(timeoutMs: number): number {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 86_400_000) {
-    throw new InvalidArgumentError("timeoutMs must be positive, finite, and no greater than 86400000");
+export function e2bTimeoutDuration(timeoutMs: number, setter = false): number {
+  // Match the native wire conversion before applying the operation's bounds.
+  const seconds = Math.ceil(timeoutMs / 1000);
+  if (!Number.isFinite(seconds) || seconds < (setter ? 0 : 1) || (!setter && seconds > 86_400)) {
+    const error = new SandboxError("Invalid sandbox timeout");
+    error.statusCode = 400;
+    throw error;
   }
-  // E2B sends whole seconds, rounding up, to its API.
-  return Math.ceil(timeoutMs / 1000) * 1000;
+  return seconds * 1000;
 }
 
 /** Lifecycle operations shared by the E2B facade's instance and static methods.
@@ -109,7 +113,7 @@ export class E2BLifecycle {
     if (opts?.onResume !== undefined && opts.onResume !== "restore" && opts.onResume !== "reboot") {
       throw new InvalidArgumentError("onResume must be 'restore' or 'reboot'");
     }
-    const duration = timeoutDuration(opts?.timeoutMs ?? 300_000);
+    const duration = e2bTimeoutDuration(opts?.timeoutMs ?? 300_000);
     const body = {
       deadline: { policy_id: E2B_LIFETIME_POLICY_ID, timeout_seconds: duration / 1000 },
       ...(opts?.onResume === "reboot" ? { mode: "filesystem" } : {}),
@@ -123,10 +127,10 @@ export class E2BLifecycle {
   async setTimeout(timeoutMs: number, opts?: RequestOptions): Promise<void> {
     if (this.native) return this.native.setTimeout(timeoutMs, opts);
     assertSupportedObjectKeys(opts, ["requestTimeoutMs", "signal"], "e2b", "Sandbox.setTimeout");
-    const duration = timeoutDuration(timeoutMs);
+    const duration = e2bTimeoutDuration(timeoutMs, true);
     let response: Record<string, unknown>;
     try {
-      response = await this.request("POST", "deadline", { policy_id: E2B_LIFETIME_POLICY_ID, timeout_seconds: duration / 1000 }, lifecycleTransport(opts));
+      response = await this.request("POST", "deadline", { policy_id: E2B_LIFETIME_POLICY_ID, timeout_seconds: duration / 1000, max_session_duration_seconds: 86_400 }, lifecycleTransport(opts));
     } catch (error) {
       if (error instanceof ArkerError && e2bAdmissionError(error) instanceof SandboxNotRunningError) throw new SandboxNotFoundError(`Sandbox ${this.box.sandboxId} not found`);
       throw error;

@@ -47,7 +47,7 @@ def test_bootstrap_uses_secret_sync_and_recovers_existing_token(monkeypatch, tmp
         id="vm-a",
         run=run,
         _send_one_write=write,
-        sync=lambda path: json.dumps({"token": TOKEN}).encode(),
+        sync=lambda path: json.dumps({"vm_id": "vm-a", "token": TOKEN, "traffic_access_token": "b" * 43}).encode(),
         refresh=lambda: SimpleNamespace(hostname="vm-a.example.com"),
     )
     monkeypatch.setattr(bootstrap.secrets, "token_urlsafe", lambda count: TOKEN)
@@ -63,6 +63,7 @@ def test_bootstrap_uses_secret_sync_and_recovers_existing_token(monkeypatch, tmp
     assert descriptor.envd_access_token == TOKEN and TOKEN not in repr(descriptor)
     assert result == ready
     request = json.loads(writes[-1][1])
+    assert request["traffic_access_token"] == ("b" * 43 if existing else None)
     assert request["token"] == TOKEN
     assert request["offline"] is True
     if existing:

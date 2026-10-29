@@ -22,7 +22,7 @@ from ._compat import (
     run_command,
 )
 from ._compat_e2b_async import AsyncSandbox as AsyncSandbox
-from ._compat_e2b_lifecycle import Lifecycle, _control, _options
+from ._compat_e2b_lifecycle import Lifecycle, _control, _options, _timeout
 from ._compat_e2b_mounts import (
     AsyncVolume as AsyncVolume,
 )
@@ -37,7 +37,6 @@ from ._compat_e2b_mounts import (
 from .computer import VM, ArkerError
 
 _E2B_DEFAULT_TIMEOUT_SECONDS = 300
-_E2B_MAX_TIMEOUT_SECONDS = 86_400
 _E2B_LIFETIME_POLICY_ID = "computesdk-e2b-lifetime"
 
 
@@ -81,6 +80,14 @@ class Sandbox(UnsupportedMixin):
         self.commands, self.files, self.git = replacement.commands, replacement.files, replacement.git
         if previous is not None:
             previous.close()
+
+    @property
+    def traffic_access_token(self) -> str | None:
+        if self._native is not None:
+            return self._native.traffic_access_token
+        from ._compat_e2b_network import traffic_token
+
+        return traffic_token(self._vm)
 
     @property
     def pty(self):
@@ -226,10 +233,7 @@ class Sandbox(UnsupportedMixin):
         ):
             raise TypeError("envs must be a mapping of strings to strings")
         lifetime = _E2B_DEFAULT_TIMEOUT_SECONDS if timeout is None else timeout
-        if isinstance(lifetime, bool) or not isinstance(lifetime, int):
-            raise TypeError("timeout must be an integer number of seconds")
-        if not 1 <= lifetime <= _E2B_MAX_TIMEOUT_SECONDS:
-            raise ValueError(f"timeout must be between 1 and {_E2B_MAX_TIMEOUT_SECONDS} seconds")
+        _timeout(lifetime)
         configured_rules = (arker_config.get("policies") or {}).get("rules", {})
         if _E2B_LIFETIME_POLICY_ID in configured_rules:
             raise ValueError(f"policy id {_E2B_LIFETIME_POLICY_ID!r} is reserved for the E2B sandbox lifetime")
@@ -239,31 +243,10 @@ class Sandbox(UnsupportedMixin):
         public = network_options.get("allow_public_traffic", True)
         if not isinstance(public, bool):
             raise TypeError("network.allow_public_traffic must be a boolean")
-        ingress = {
-            "computesdk-e2b-envd": {
-                "type": "inbound",
-                "priority": 1000000,
-                "action": "allow",
-                "match": {"ports": [49983]},
-                "auth": "arker",
-            },
-            "computesdk-e2b-apps": {
-                "type": "inbound",
-                "priority": 0,
-                "action": "allow",
-                "match": {"ports": [[1, 49982], [49984, 65535]]},
-                "auth": "open" if public else "arker",
-            },
-        }
-        if set(ingress).intersection(configured_rules) or any(
-            rule.get("priority") in {0, 1000000} for rule in configured_rules.values()
-        ):
-            raise ValueError("E2B ingress policy IDs and priorities 0/1000000 are reserved")
         network = compat_network_policies(block_all=allow_internet_access is False)
         policies = {
             "rules": {
                 **((network or {}).get("rules", {})),
-                **ingress,
                 _E2B_LIFETIME_POLICY_ID: {
                     "type": "schedule",
                     "after_created": lifetime,
@@ -272,6 +255,7 @@ class Sandbox(UnsupportedMixin):
             }
         }
         from ._compat_e2b_artifact import envd_version
+        from ._compat_e2b_network import fork_with_traffic
 
         source_id = arker_config.get("source_vm_id") or os.environ.get("ARKER_SOURCE_VM_ID")
         source = (
@@ -283,6 +267,7 @@ class Sandbox(UnsupportedMixin):
             arker_config,
             template_id=template_id,
             policies=policies,
+            fork=lambda client, request: fork_with_traffic(client, request, public),
             metadata={
                 "arker_e2b": {
                     "version": 1,

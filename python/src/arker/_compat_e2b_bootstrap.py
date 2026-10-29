@@ -88,6 +88,19 @@ def bootstrap_envd(vm, *, token=None, envs=None, cache_directory=CACHE):
     _require_private_envd(vm)
     secret_sync(vm, GUEST_SCRIPT, files("arker").joinpath("_guest_e2b_envd.py").read_bytes())
     prepared = guest_json(vm, "prepare", vm.id)
+    from ._compat_e2b_network import UNSET, created_traffic_token, remember_traffic_token
+
+    app_token = created_traffic_token(vm)
+    if app_token is UNSET:
+        source = prepared["existing_state_path"]
+        saved = json.loads(vm.sync(source)) if source is not None else {}
+        app_token = saved.get("traffic_access_token") if saved.get("vm_id") == vm.id else None
+    if app_token is not None and (
+        not isinstance(app_token, str)
+        or len(app_token) != 43
+        or any(c not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-" for c in app_token)
+    ):
+        raise RuntimeError("Invalid traffic token state")
     if token is None:
         source = prepared["existing_state_path"]
         if source is not None:
@@ -120,6 +133,7 @@ def bootstrap_envd(vm, *, token=None, envs=None, cache_directory=CACHE):
             {
                 "vm_id": vm.id,
                 "token": token,
+                "traffic_access_token": app_token,
                 "artifact_path": candidate,
                 "offline": True,
                 **({"envs": envs} if envs is not None else {}),
@@ -129,6 +143,7 @@ def bootstrap_envd(vm, *, token=None, envs=None, cache_directory=CACHE):
     ready = guest_json(vm, "ensure", request)
     if ready.get("ready") is not True or ready.get("port") != 49983 or ready.get("version") != envd_version():
         raise RuntimeError("Guest bootstrap did not establish readiness")
+    remember_traffic_token(vm, app_token)
     current = vm.refresh()
     first, rest = current.hostname.split(".", 1)
     descriptor = EnvdDescriptor(

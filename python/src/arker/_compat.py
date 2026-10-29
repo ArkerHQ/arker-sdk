@@ -109,6 +109,7 @@ def arker_create(
     resources: dict[str, Any] | None = None,
     policies: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
+    fork: Callable[..., VM] | None = None,
 ) -> VM:
     cfg = config or {}
     request: dict[str, Any] = {"name": name or cfg.get("name")}
@@ -134,7 +135,8 @@ def arker_create(
             fork_policies["rules"] = rules
     if fork_policies:
         request["policies"] = fork_policies
-    return arker_client(config).fork(**request)
+    client = arker_client(config)
+    return fork(client, request) if fork is not None else client.fork(**request)
 
 
 def compat_network_policies(

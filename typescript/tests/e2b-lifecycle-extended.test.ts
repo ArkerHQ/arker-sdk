@@ -4,9 +4,9 @@ import { createServer } from "node:http";
 import { Sandbox as VendorSandbox } from "e2b";
 import { Sandbox } from "../src/e2b.js";
 import { preserveEnvironment, preserveProperties, listen, closeServer } from "./provider-fixtures.js";
-import { InvalidArgumentError, SandboxNotFoundError, SandboxNotRunningError, type Sandbox as NativeSandbox } from "e2b";
+import { SandboxError, InvalidArgumentError, SandboxNotFoundError, SandboxNotRunningError, type Sandbox as NativeSandbox } from "e2b";
 import { ArkerError, type VM, type PolicyUpdate } from "../src/index.js";
-import { E2BLifecycle, E2B_LIFETIME_POLICY_ID as lifetime, validateArkerE2BLifecycle } from "../src/compat/e2b-lifecycle.js";
+import { E2BLifecycle, E2B_LIFETIME_POLICY_ID as lifetime, validateArkerE2BLifecycle, e2bTimeoutDuration } from "../src/compat/e2b-lifecycle.js";
 import type { UniversalSandbox } from "../src/compat/common.js";
 
 function fixture() {
@@ -57,7 +57,7 @@ test("running timeout uses the atomic active-only endpoint, including reductions
   const before = structuredClone(f.current.policies);
   for (const timeout of [60_000, 1001]) await f.helper.setTimeout(timeout);
   assert.deepEqual(f.requests.map(call => [call.method, call.path, call.body]), [60, 2].map(seconds => [
-    "POST", "/v1/vms/test-sandbox/deadline", { policy_id: lifetime, timeout_seconds: seconds },
+    "POST", "/v1/vms/test-sandbox/deadline", { policy_id: lifetime, timeout_seconds: seconds, max_session_duration_seconds: 86_400 },
   ]));
   assert.deepEqual(f.current.policies, before);
   assert.deepEqual(f.writes, []);
@@ -87,9 +87,13 @@ test("atomic deadline refusals never fall back to a policy PATCH or resume", asy
 
 test("invalid timeout and unsupported transport options fail before I/O", async () => {
   const f = fixture();
-  for (const timeout of [0, -1, NaN, Infinity, 86_400_001]) {
-    await assert.rejects(f.helper.setTimeout(timeout), InvalidArgumentError);
-    await assert.rejects(f.helper.connect({ timeoutMs: timeout }), InvalidArgumentError);
+  const badRequest = (error: unknown) => error instanceof SandboxError && error.constructor === SandboxError && error.statusCode === 400;
+  for (const timeout of [-1000, NaN, Infinity]) {
+    await assert.rejects(f.helper.setTimeout(timeout), badRequest);
+  }
+  for (const timeout of [-1000, 0, NaN, Infinity, 86_401_000]) {
+    await assert.rejects(f.helper.connect({ timeoutMs: timeout }), badRequest);
+    assert.throws(() => e2bTimeoutDuration(timeout), badRequest);
   }
   await assert.rejects(f.helper.setTimeout(1000, { domain: "example.invalid" } as any), /unsupported option/);
   await assert.rejects(f.helper.isRunning({ apiKey: "test" } as any), /unsupported option/);
@@ -425,4 +429,14 @@ test("HTTP/2 cancellation closes only its stream and keeps the shared connection
     for (const session of sessions) session.destroy();
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
+});
+
+test("zero and oversized setters delegate expiration and session cap without GET arithmetic", async () => {
+  const f = fixture();
+  for (const timeout of [0, 86_401_000]) await f.helper.setTimeout(timeout);
+  assert.deepEqual(f.requests.map(call => call.body), [0, 86_401].map(seconds => ({
+    policy_id: lifetime, timeout_seconds: seconds, max_session_duration_seconds: 86_400,
+  })));
+  assert.equal(f.reads, 0);
+  assert.equal(f.writes.length, 0);
 });

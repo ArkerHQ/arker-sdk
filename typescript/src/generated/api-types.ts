@@ -1358,7 +1358,7 @@ export interface components {
             next_cursor?: string | null;
         };
         DeleteVmResponse: {
-            /** @description True when the resource has been deleted. */
+            /** @description True when deletion completed; false when the target was already authoritatively absent. */
             deleted: boolean;
         };
         DeleteSessionResponse: {
@@ -3893,9 +3893,14 @@ export interface components {
             policy_id: string;
             /**
              * Format: uint64
-             * @description Positive lifetime in seconds measured from server time.
+             * @description Lifetime in seconds measured from server time. Zero expires an active VM before success is returned; customer-paused VMs are rejected without mutation.
              */
             timeout_seconds: number;
+            /**
+             * Format: uint64
+             * @description Optional cap measured from the authoritative session start (initial creation or most recent explicit resume). The deadline is the earlier of this cap and server time plus timeout_seconds.
+             */
+            max_session_duration_seconds?: number;
         };
         SetVmDeadlineResponse: {
             /** @description Identifier of the VM whose deadline was updated. */

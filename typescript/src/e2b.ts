@@ -1,7 +1,7 @@
 import { listSandboxes, type E2BListOptions, type E2BPaginator } from "./compat/e2b-list.js";
 import { e2bForkMetadata } from "./compat/e2b-metadata.js";
-import { configureE2BIngress, validateE2BNetwork, type E2BNetworkOptions } from "./compat/e2b-network.js";
-import { E2BLifecycle, lifecycleTransport } from "./compat/e2b-lifecycle.js";
+import { forkWithTraffic, trafficToken, validateE2BNetwork, type E2BNetworkOptions } from "./compat/e2b-network.js";
+import { E2BLifecycle, lifecycleTransport, e2bTimeoutDuration } from "./compat/e2b-lifecycle.js";
 import { E2BFileURLs, type E2BFileURLOptions } from "./compat/e2b-urls.js";
 import { bootstrapEnvd, validateEnvdEnvs } from "./compat/e2b-bootstrap.js";
 import { createE2BDataPlane, type E2BDataPlane, type EnvdDescriptor } from "./compat/e2b-data-plane.js";
@@ -22,12 +22,13 @@ export type { CommandResult as CommandExitResult } from "e2b";
 
 const descriptors = new WeakMap<E2BDataPlane, EnvdDescriptor>();
 
-type NativeSandbox = Pick<VendorSandbox, "kill" | "getHost" | "commands" | "files" | "git" | "pty">;
+type NativeSandbox = Pick<VendorSandbox, "kill" | "getHost" | "commands" | "files" | "git" | "pty" | "trafficAccessToken">;
 const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess", "volumeMounts", "network"] as const;
 
 function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMounts, lookupOptions?: SandboxApiOpts) {
   const { mode: _mode, keepMemory: _keepMemory, onResume: _onResume, timeoutMs: _timeout, ...apiOptions } =
     (lookupOptions ?? {}) as SandboxPauseOpts & SandboxConnectOpts;
+  let publicTraffic = true;
   const fallbackProvider = createNativeE2BProvider(apiOptions);
   if (volumeMounts !== undefined) {
     const create = fallbackProvider.sandbox.create.bind(fallbackProvider.sandbox);
@@ -41,13 +42,15 @@ function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMount
     routerConfigPath,
     arkerLookupTransport: lookupOptions ? lifecycleTransport(lookupOptions) : undefined,
     mapArkerForkMetadata: e2bForkMetadata,
+    arkerFork: (client: import("./index.js").Arker, request: import("./index.js").ForkOptions) => forkWithTraffic(client, request, publicTraffic),
     mapArkerCreateOptions: (values: Record<string, unknown>) => {
       assertSupportedObjectKeys(values, [...E2B_CREATE_OPTION_KEYS, "templateId"], "e2b", "Sandbox.create");
       validateEnvdEnvs(values.envs as Record<string, string> | undefined);
       validateE2BNetwork(values.network as E2BNetworkOptions | undefined);
+      publicTraffic = (values.network as E2BNetworkOptions | undefined)?.allowPublicTraffic ?? true;
       if (volumeMounts !== undefined) checkMountBackend(volumeMounts, "arker");
       const { volumeMounts: _mounts, network: _network, envs: _envs, timeoutMs: _timeoutMs, ...rest } = values;
-      return { ...rest, timeout: resolveTimeout(values as CreateOptions) ?? 300_000 };
+      return { ...rest, timeout: e2bTimeoutDuration(resolveTimeout(values as CreateOptions) ?? 300_000) };
     },
   };
 }
@@ -68,6 +71,11 @@ export class Sandbox {
     const components = this.#native ?? this.#dataPlane;
     if (!components) throw new Error("Sandbox data plane is not initialized");
     return components;
+  }
+
+  get trafficAccessToken(): string | undefined {
+    return this.#native ? this.#native.trafficAccessToken
+      : trafficToken((this.#box as UniversalSandbox & { getInstance(): VM }).getInstance());
   }
 
   get commands(): Commands { return this.components().commands; }
@@ -130,15 +138,6 @@ export class Sandbox {
       ...nativeOptions,
       ...(templateId !== undefined ? { templateId } : {}),
     });
-    if (box.provider === "arker") {
-      const vm = (box as UniversalSandbox & { getInstance(): VM }).getInstance();
-      try { await configureE2BIngress(vm, opts?.network?.allowPublicTraffic ?? true); }
-      catch (error) {
-        try { await vm.delete(); }
-        catch (cleanupError) { throw new AggregateError([error, cleanupError], "Sandbox network initialization and cleanup failed"); }
-        throw error;
-      }
-    }
     if (box.provider !== "arker" || !opts?.volumeMounts || !Object.keys(opts.volumeMounts).length) {
       return Sandbox.wrap(box, { deleteOnValidationFailure: true, envs: opts?.envs });
     }

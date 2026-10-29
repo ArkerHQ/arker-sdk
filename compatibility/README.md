@@ -9,6 +9,11 @@ The migration target is the core sandbox API. Apps and Functions remain native;
 this exclusion does not exclude sandbox image inputs, secrets, drives, mounts,
 processes, policies, or lifecycle behavior. These still have unverified gaps.
 
+For Arker routes, set `ARKER_API_KEY`, `ARKER_PROVIDER`, `ARKER_REGION`, and
+`ARKER_SOURCE_VM_ID` to select your prepared parent. An explicit `ARKER_BASE_URL`
+replaces provider/region configuration. Keep native provider credentials for
+native routes.
+
 ## Image parents and host policy secrets
 
 The shared Arker adapter accepts `source_vm_id` (Python) or `sourceVmId`

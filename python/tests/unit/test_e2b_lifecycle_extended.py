@@ -59,20 +59,28 @@ def vm(monkeypatch):
     return vm
 
 
-@pytest.mark.parametrize("seconds", [1, 17, 300])
+@pytest.mark.parametrize("seconds", [0, 1, 17, 300, 86401])
 def test_timeout_uses_atomic_endpoint_without_policy_patch_or_resume(vm, seconds):
     original = copy.deepcopy(vm.policies)
     vm.refresh = lambda **kwargs: pytest.fail("must not preflight or activate")
     lifecycle.Lifecycle(vm=vm).set_timeout(seconds)
     assert vm.calls == [] and vm.policies == original
     assert [(method, path, body) for method, path, body, _ in vm.requests] == [
-        ("POST", "/v1/vms/sandbox/deadline", {"policy_id": lifecycle.LIFETIME_POLICY_ID, "timeout_seconds": seconds})
+        (
+            "POST",
+            "/v1/vms/sandbox/deadline",
+            {
+                "policy_id": lifecycle.LIFETIME_POLICY_ID,
+                "timeout_seconds": seconds,
+                "max_session_duration_seconds": 86400,
+            },
+        )
     ]
 
 
 @pytest.mark.parametrize(
     "seconds,exception",
-    [(True, TypeError), (1.5, TypeError), ("1", TypeError), (0, ValueError), (-1, ValueError), (86401, ValueError)],
+    [(True, TypeError), (1.5, TypeError), ("1", TypeError)],
 )
 def test_timeout_validation_before_mutation(vm, seconds, exception):
     with pytest.raises(exception):
@@ -483,3 +491,20 @@ def test_timeout_does_not_mask_unrelated_backend_failures(vm, status, code, deta
     with pytest.raises(ArkerError) as raised:
         lifecycle.Lifecycle(vm=vm).set_timeout(5)
     assert raised.value is error and vm.calls == []
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize(
+    "operation,timeout", [("set_timeout", -1), ("connect", -1), ("connect", 0), ("connect", 86401)]
+)
+def test_timeout_range_errors_have_exact_native_class_and_status(vm, asynchronous, operation, timeout):
+    from e2b import SandboxException
+
+    helper = (lifecycle.AsyncLifecycle if asynchronous else lifecycle.Lifecycle)(vm=vm)
+    with pytest.raises(SandboxException) as raised:
+        value = getattr(helper, operation)(timeout)
+        if asynchronous:
+            asyncio.run(value)
+    assert type(raised.value) is SandboxException
+    assert raised.value.status_code == 400
+    assert vm.requests == [] and vm.calls == []

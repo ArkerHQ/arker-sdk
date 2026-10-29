@@ -317,7 +317,9 @@ class ArkerComputeSandbox implements SandboxInterface {
 
 export type ForkMetadataMapper = (source: Readonly<ForkOptions>, metadata: unknown) => ForkOptions["metadata"];
 
-export function createArkerComputeProvider(config: ArkerComputeProviderConfig = {}, mapMetadata?: ForkMetadataMapper, lookupTransport?: RequestTransportOptions): DirectProvider {
+export type ForkExecutor = (client: Arker, request: ForkOptions) => Promise<VM>;
+
+export function createArkerComputeProvider(config: ArkerComputeProviderConfig = {}, mapMetadata?: ForkMetadataMapper, lookupTransport?: RequestTransportOptions, fork?: ForkExecutor): DirectProvider {
   async function destroy(sandboxId: string): Promise<void> {
     const client = makeClient(config);
     try {
@@ -403,7 +405,7 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
           ...(policies ? { policies } : {}),
           ...(image && config.registryAuth ? { registry_auth: config.registryAuth } : {}),
         };
-        const vm = await client.fork(request);
+        const vm = await (fork ? fork(client, request) : client.fork(request));
         return wrap(vm);
       },
       getById: async (sandboxId: string): Promise<SandboxInterface | null> => {
