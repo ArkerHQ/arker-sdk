@@ -10,7 +10,6 @@ from ._compat import (
     UnsupportedMixin,
     arker_create,
     arker_get,
-    format_not_found,
     get_or_none,
     import_optional,
     pop_arker_config,
@@ -18,6 +17,7 @@ from ._compat import (
     routed_get,
 )
 from ._compat_async import route
+from ._compat_blaxel_errors import control_call, not_found
 from .computer import VM
 
 if TYPE_CHECKING:
@@ -156,12 +156,15 @@ class SyncSandboxInstance(UnsupportedMixin):
         )
 
         def create_arker() -> VM:
+            from ._compat_blaxel_create import fork_named
             from ._compat_blaxel_data_plane import validate_native
 
+            options = dict(kwargs)
+            get_or_create = options.pop("create_if_not_exist", False)
             supported = {"name", "image", "memory", "ttl", "envs", "runtime"}
             unknown = sorted(set(values) - supported)
-            if kwargs or unknown:
-                names = [*sorted(kwargs), *unknown]
+            if options or unknown:
+                names = [*sorted(options), *unknown]
                 raise UnsupportedCompatibilityOption(
                     f"SandboxInstance.create received unsupported option(s) for Arker: {', '.join(names)}"
                 )
@@ -175,6 +178,9 @@ class SyncSandboxInstance(UnsupportedMixin):
             memory = values.get("memory")
             return arker_create(
                 arker_config,
+                fork=lambda client, request: fork_named(
+                    client, request, config=arker_config or {}, get_or_create=get_or_create
+                ),
                 name=values.get("name"),
                 image=values.get("image"),
                 resources={"memory_mib": memory} if memory is not None else None,
@@ -184,7 +190,7 @@ class SyncSandboxInstance(UnsupportedMixin):
             "blaxel",
             arker_config,
             {
-                "arker": create_arker,
+                "arker": lambda: control_call("create", create_arker),
                 "blaxel": create_native,
             },
         )
@@ -193,6 +199,8 @@ class SyncSandboxInstance(UnsupportedMixin):
             try:
                 instance._plane()
             except BaseException as error:
+                if kwargs.get("create_if_not_exist", False):
+                    raise
                 try:
                     result.delete()
                 except Exception as cleanup_error:
@@ -205,37 +213,42 @@ class SyncSandboxInstance(UnsupportedMixin):
         arker_config = pop_arker_config(kwargs)
         if kwargs:
             raise TypeError(f"SandboxInstance.get received unsupported option(s): {', '.join(sorted(kwargs))}")
+        instance = cls._lookup(sandbox_id, arker_config)
+        if instance._vm is not None:
+            instance._plane()
+        return instance
+
+    @classmethod
+    def _lookup(cls, sandbox_id: str, arker_config: dict[str, Any]) -> SyncSandboxInstance:
         native = cls._native_class()
         found = routed_get(
             sandbox_id,
             "blaxel",
             arker_config,
             {
-                "arker": lambda: arker_get(sandbox_id, arker_config),
+                "arker": lambda: control_call("get", lambda: arker_get(sandbox_id, arker_config)),
                 "blaxel": lambda: get_or_none(lambda: native.get(sandbox_id)) if native is not None else None,
             },
         )
         if found is None:
-            raise format_not_found("Sandbox", sandbox_id)
+            raise not_found()
         provider, result = found
-        instance = cls(vm=result if provider == "arker" else None, native=result if provider == "blaxel" else None)
-        if provider == "arker":
-            instance._plane()
-        return instance
+        return cls(vm=result if provider == "arker" else None, native=result if provider == "blaxel" else None)
 
     @classmethod
     def create_if_not_exists(cls, sandbox: Any = None, **kwargs: Any) -> SyncSandboxInstance:
         # Name reconciliation belongs to the provider's atomic create operation.
-        # The Arker create path rejects this option before performing any I/O.
         return cls.create(sandbox, create_if_not_exist=True, **kwargs)
 
     def delete(self) -> None:
         if isinstance(self, str):
-            SyncSandboxInstance.get(self).delete()
+            SyncSandboxInstance._lookup(self, {}).delete()
             return
         if self._vm is not None:
             try:
-                self._vm.delete()
+                result = control_call("delete", self._vm.delete)
+                if getattr(result, "deleted", True) is False:
+                    raise not_found()
             finally:
                 if self._data_plane is not None:
                     self._data_plane.close()

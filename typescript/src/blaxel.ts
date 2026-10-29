@@ -1,10 +1,12 @@
 import { SandboxInstance as NativeBlaxelSandbox, settings as blaxelSettings } from "@blaxel/core";
 import type { VM } from "./index.js";
 
-import { CompatibilityNotFoundError, guardUnsupported, type UniversalSandbox } from "./compat/common.js";
+import { guardUnsupported, type UniversalSandbox } from "./compat/common.js";
 import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
 import { createBlaxelDataPlane, validateBlaxelNative, type BlaxelDataPlane } from "./compat/blaxel-data-plane.js";
+import { blaxelControlCall, blaxelNotFound } from "./compat/blaxel-errors.js";
+import { namedBlaxelFork } from "./compat/blaxel-create.js";
 import { bootstrapBlaxel } from "./compat/blaxel-bootstrap.js";
 import { privateFetch } from "./compat/private-fetch.js";
 import { createNativeBlaxelProvider } from "./compat/blaxel-provider.js";
@@ -46,16 +48,27 @@ function parseTtl(ttl: string | number | undefined): number | undefined {
   return Number(match[1]) * multiplier;
 }
 
-function makeSdk(config: BlaxelCompatConfig = {}): CompatSdk {
+function makeSdk(config: BlaxelCompatConfig = {}, getOrCreate = false): CompatSdk {
   return createCompatSdk({
     arker: config.arker,
-    mapArkerCreateOptions: options => { validateBlaxelNative(); return options; },
+    arkerFork: (client, request) => blaxelControlCall("create", () => namedBlaxelFork(config.arker, getOrCreate)(client, request)),
+    mapArkerCreateOptions: options => {
+      validateBlaxelNative();
+      const { createIfNotExist: _, ...rest } = options;
+      return rest;
+    },
     fallbackProvider: createNativeBlaxelProvider({
       apiKey: config.apiKey,
       workspace: config.workspace,
     }),
     routerConfigPath: config.routerConfigPath,
   });
+}
+
+async function deleteArkerBox(box: UniversalSandbox): Promise<void> {
+  const vm = (box as UniversalSandbox & { getInstance(): VM }).getInstance();
+  const result = await blaxelControlCall("delete", () => vm.delete());
+  if (!result.deleted) throw blaxelNotFound();
 }
 
 interface FetchProfile {
@@ -136,7 +149,7 @@ export class SandboxInstance {
 
   static async create(options: BlaxelCreateOptions = {}, callOptions: BlaxelCreateCallOptions = {}): Promise<SandboxInstance> {
     const profile = fetchProfile(options.region);
-    const box = await makeSdk(callOptions).sandbox.create({
+    const box = await makeSdk(callOptions, callOptions.createIfNotExist ?? false).sandbox.create({
       name: options.name,
       image: options.image,
       memory: options.memory,
@@ -174,17 +187,23 @@ export class SandboxInstance {
   }
 
   static async get(id: string, config: BlaxelCompatConfig = {}): Promise<SandboxInstance> {
-    const box = await makeSdk(config).sandbox.getById(id);
-    if (!box) throw new CompatibilityNotFoundError(`Sandbox ${id} not found`);
+    const box = await blaxelControlCall("get", () => makeSdk(config).sandbox.getById(id));
+    if (!box) throw blaxelNotFound();
     return SandboxInstance.wrap(box);
   }
 
   static async delete(id: string, config: BlaxelCompatConfig = {}): Promise<void> {
-    await makeSdk(config).sandbox.destroy(id);
+    const box = await blaxelControlCall("get", () => makeSdk(config).sandbox.getById(id));
+    if (!box) throw blaxelNotFound();
+    if (box.provider === "arker") await deleteArkerBox(box);
+    else await (nativeInstance(box) as NativeBlaxelSandbox).delete();
   }
 
   async delete(): Promise<void> {
-    try { await this.#box.destroy(); } finally { this.#dataPlane?.close(); }
+    try {
+      if (this.#native) await this.#native.delete();
+      else await deleteArkerBox(this.#box);
+    } finally { this.#dataPlane?.close(); }
   }
 }
 

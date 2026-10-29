@@ -19,8 +19,16 @@ must pass with fresh evidence before claiming parity.
 
 ## Remaining release requirements
 
-- Blaxel strict duplicate-name creation and atomic get-or-create are not
-  equivalent on Arker. A local lock cannot enforce distributed uniqueness.
+- Blaxel named creation uses the public global gateway for distributed uniqueness.
+  Custom regional URLs require an explicit control URL with naming support.
+  Strict duplicates and get-or-create still need fresh differential live validation;
+  successful unit tests do not establish cross-region or response-loss parity.
+  Strict named creation does not replay a failed transport request: the outcome
+  may be unknown, and a matching name does not prove ownership of that creation.
+- Blaxel control-plane refusals use native exception classes/body shapes while
+  retaining Arker's authoritative status and reason. Backend-specific error text
+  and authentication documentation are not copied from Blaxel. Network outcomes
+  and timeouts remain explicit; they do not imply native creation cancellation.
 - Blaxel private HTTP fetch, sessions, redirect/cookie/timeout behavior and
   network configuration need complete differential validation. Async strict-create
   cancellation drains creation and removes the newly owned sandbox; native Blaxel

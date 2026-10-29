@@ -2374,8 +2374,8 @@ function canRetryAgain(
   return attempt < retry.attempts - 1;
 }
 
-/** A policy read back (`vm.policies`) also reports fields an update refuses. */
-function withoutReadOnlyPolicyFields(policies: PolicyUpdate): PolicyUpdate {
+/** @internal A policy read back (`vm.policies`) also reports fields an update refuses. */
+export function withoutReadOnlyPolicyFields(policies: PolicyUpdate): PolicyUpdate {
   const { hostname: _h, mitm_domains: _m, warnings: _w, outbound_guards, ...update } = policies as PolicyUpdate & Partial<PolicyDoc>;
   if (outbound_guards && Object.keys(outbound_guards).length) {
     update.rules = {...outbound_guards, ...update.rules};

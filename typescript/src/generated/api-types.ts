@@ -4468,6 +4468,10 @@ export interface operations {
             header?: {
                 /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork retried while the original is still running may wait for it and returns the same VM; when it cannot wait, it answers 409 resource_busy with Retry-After and the VM id. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Opt in to an organization-wide name binding at the public gateway. Regional endpoints reject this header. Name generations use fresh regional idempotency keys. Requires Arker-VM-Name-Mode. Commands are not accepted on named forks. Requires organization-wide vm:create, vm:read and vm:delete scopes. Pool placement and a caller-supplied Idempotency-Key are not accepted. */
+                "Arker-VM-Name"?: string;
+                /** @description create conflicts with an existing named VM; get_or_create returns it without applying the new request. Pending creation returns resource_busy when it cannot be joined. Abandoned creation is fenced after five minutes and cleaned up before name reuse; retry resource_busy. Requires Arker-VM-Name. */
+                "Arker-VM-Name-Mode"?: "create" | "get_or_create";
             };
             path?: never;
             cookie?: never;

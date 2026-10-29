@@ -369,6 +369,7 @@ def test_arker_shim_config_customizes_source_without_forwarding_to_client(
 
 
 def test_python_shims_translate_or_reject_arker_create_options(arker_env, monkeypatch) -> None:
+    monkeypatch.setenv("ARKER_CONTROL_BASE_URL", "https://test.invalid/api")
     t = FakeTransport()
     monkeypatch.setattr("arker._compat_blaxel_bootstrap.bootstrap_blaxel", lambda *args: None)
     monkeypatch.setattr("arker._compat_blaxel_data_plane.validate_native", lambda: None)
@@ -399,6 +400,7 @@ def test_python_shims_translate_or_reject_arker_create_options(arker_env, monkey
         "name": "daytona",
         "resources": {"vcpu": 4, "memory_mib": 8192},
     }
+    assert t.calls[1]["headers"]["Arker-VM-Name-Mode"] == "create"
     blaxel = json.loads(t.calls[1]["body"])
     assert blaxel == {
         "image": "ubuntu:24.04",

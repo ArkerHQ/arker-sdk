@@ -168,6 +168,29 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "in": "header",
+            "name": "Arker-VM-Name",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+            },
+            "description": "Opt in to an organization-wide name binding at the public gateway. Regional endpoints reject this header. Name generations use fresh regional idempotency keys. Requires Arker-VM-Name-Mode. Commands are not accepted on named forks. Requires organization-wide vm:create, vm:read and vm:delete scopes. Pool placement and a caller-supplied Idempotency-Key are not accepted."
+          },
+          {
+            "in": "header",
+            "name": "Arker-VM-Name-Mode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "create",
+                "get_or_create"
+              ]
+            },
+            "description": "create conflicts with an existing named VM; get_or_create returns it without applying the new request. Pending creation returns resource_busy when it cannot be joined. Abandoned creation is fenced after five minutes and cleaned up before name reuse; retry resource_busy. Requires Arker-VM-Name."
           }
         ],
         "requestBody": {
