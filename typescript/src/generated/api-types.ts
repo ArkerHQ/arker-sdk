@@ -1221,6 +1221,8 @@ export interface components {
             /** @description Register the captured VM as immutable before it becomes visible. The guest is not started. Requires a VM source with full memory and disk state; image sources, filesystem-only layers, commands, and resource overrides are rejected. Descendant forks are mutable unless they also request immutable. Not available on pool workers. Omitted or false creates a mutable VM. */
             immutable?: boolean;
             image_config?: components["schemas"]["ImageConfigOverrides"];
+            /** @description Start the prepared image ENTRYPOINT and CMD after creating a non-durable mutable filesystem-only VM fork and installing its policies. Requires a VM source, layers [disk], and a valid resolved image configuration on the source filesystem. Incompatible with command, immutable, and durable. Startup dispatch is idempotent per child; dispatch failure returns an error with the child VM ID for recovery. Command completion is asynchronous. Omitted or false does not start the image command. */
+            start_image?: boolean;
         } & ({
             source_vm_id: string;
             source_vm_name?: null;

@@ -2461,6 +2461,7 @@ class ForkRequest1:
     metadata: dict[str, Any] | None = None
     immutable: bool | None = None
     image_config: ImageConfigOverrides | None = None
+    start_image: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -2490,6 +2491,7 @@ class ForkRequest2:
     metadata: dict[str, Any] | None = None
     immutable: bool | None = None
     image_config: ImageConfigOverrides | None = None
+    start_image: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -2519,6 +2521,7 @@ class ForkRequest3:
     metadata: dict[str, Any] | None = None
     immutable: bool | None = None
     image_config: ImageConfigOverrides | None = None
+    start_image: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -2548,6 +2551,7 @@ class ForkRequest4:
     metadata: dict[str, Any] | None = None
     immutable: bool | None = None
     image_config: ImageConfigOverrides | None = None
+    start_image: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -2577,6 +2581,7 @@ class ForkRequest5:
     metadata: dict[str, Any] | None = None
     immutable: bool | None = None
     image_config: ImageConfigOverrides | None = None
+    start_image: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -2606,6 +2611,7 @@ class ForkRequest6:
     metadata: dict[str, Any] | None = None
     immutable: bool | None = None
     image_config: ImageConfigOverrides | None = None
+    start_image: bool | None = None
 
 
 ForkRequest: TypeAlias = (

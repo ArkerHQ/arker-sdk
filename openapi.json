@@ -6505,6 +6505,10 @@
           },
           "image_config": {
             "$ref": "#/components/schemas/ImageConfigOverrides"
+          },
+          "start_image": {
+            "type": "boolean",
+            "description": "Start the prepared image ENTRYPOINT and CMD after creating a non-durable mutable filesystem-only VM fork and installing its policies. Requires a VM source, layers [disk], and a valid resolved image configuration on the source filesystem. Incompatible with command, immutable, and durable. Startup dispatch is idempotent per child; dispatch failure returns an error with the child VM ID for recovery. Command completion is asynchronous. Omitted or false does not start the image command."
           }
         },
         "not": {
