@@ -53,11 +53,12 @@ def _managed(name, rule):
     ):
         return False
     ports = match.get("ports")
+    app_auth = rule.get("auth", "open")
     return (
         (name == APP or re.fullmatch(r"e2b-app-ingress-[0-9a-f-]{36}", name))
         and ports == PORTS
-        and rule.get("auth") in ("arker", "open")
-        and (not headers or rule.get("auth") == "open")
+        and app_auth in ("arker", "open")
+        and (not headers or app_auth == "open")
     ) or (
         (name == CONTROL or re.fullmatch(r"e2b-envd-ingress-[0-9a-f-]{36}", name))
         and ports == [49983]

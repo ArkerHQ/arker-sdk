@@ -28,7 +28,8 @@ function managed(id: string, rule: Rule): boolean {
   const headers = rule.match?.headers;
   if (headers && (Object.keys(headers).length !== 1 || headers["e2b-traffic-access-token"]?.length !== 1 || !headers["e2b-traffic-access-token"]?.every(value => value === "***" || value === `\${secret:${SECRET}}`))) return false;
   const ports = JSON.stringify(rule.match?.ports);
-  return ((id === APP || /^e2b-app-ingress-[0-9a-f-]{36}$/.test(id)) && ports === JSON.stringify(PORTS) && ["arker", "open"].includes(String(rule.auth)) && (!headers || rule.auth === "open"))
+  const appAuth = Object.hasOwn(rule, "auth") ? rule.auth : "open";
+  return ((id === APP || /^e2b-app-ingress-[0-9a-f-]{36}$/.test(id)) && ports === JSON.stringify(PORTS) && ["arker", "open"].includes(String(appAuth)) && (!headers || appAuth === "open"))
     || ((id === CONTROL || /^e2b-envd-ingress-[0-9a-f-]{36}$/.test(id)) && ports === "[49983]" && rule.auth === "arker" && !headers);
 }
 

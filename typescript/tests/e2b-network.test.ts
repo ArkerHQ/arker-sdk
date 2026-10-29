@@ -83,3 +83,44 @@ test("custom private ingress rejects before fork without changing source or conf
     }
   }
 });
+
+
+test("canonical managed GET omits open auth, including private redacted header", async () => {
+  for (const privateTraffic of [false, true]) {
+    const source: any = { rules: {
+      [APP]: { type: "inbound", action: "allow", priority: 0, match: { ports: [[1, 49982], [49984, 65535]], ...(privateTraffic ? { headers: { "e2b-traffic-access-token": ["***"] } } : {}) } },
+      [CONTROL]: { type: "inbound", action: "allow", priority: 1000000, auth: "arker", match: { ports: [49983] } },
+    }, secrets: { [SECRET]: "***" } };
+    const original = structuredClone(source);
+    const calls: any[] = [];
+    const child = { id: "child" } as any;
+    const client = { getVm: async () => ({ policies: source }), fork: async (request: any) => { calls.push(request); return child; } };
+    assert.equal(await forkWithTraffic(client as any, { source_vm_id: "parent" }, false), child);
+    const token = trafficToken(child);
+    assert.match(token!, /^[A-Za-z0-9_-]{43}$/);
+    assert.equal(calls[0].policies.secrets[SECRET], token);
+    assert.equal(calls[0].policies.rules[APP].auth, "open");
+    assert.deepEqual(calls[0].policies.rules[APP].match.headers, { "e2b-traffic-access-token": [`\${secret:${SECRET}}`] });
+    assert.equal(calls[0].policies.rules[CONTROL].auth, "arker");
+    assert.deepEqual(source, original);
+  }
+});
+
+test("missing auth default cannot admit custom rules or the control port", async () => {
+  for (const change of ["name", "ports", "paths", "header", "auth_null", "control_auth"]) {
+    const source: any = { rules: { [APP]: { type: "inbound", action: "allow", match: { ports: [[1, 49982], [49984, 65535]], headers: { "e2b-traffic-access-token": ["***"] } } } } };
+    const rule = source.rules[APP];
+    if (change === "name") { source.rules.customer = rule; delete source.rules[APP]; }
+    else if (change === "ports") rule.match.ports = [8080];
+    else if (change === "paths") rule.match.paths = ["/restricted"];
+    else if (change === "header") rule.match.headers = { "customer-token": ["***"] };
+    else if (change === "auth_null") rule.auth = null;
+    else source.rules[CONTROL] = { type: "inbound", action: "allow", match: { ports: [49983] } };
+    const original = structuredClone(source);
+    let forks = 0;
+    const client = { getVm: async () => ({ policies: source }), fork: async () => { forks++; } };
+    await assert.rejects(forkWithTraffic(client as any, { source_vm_id: "parent" }, false), /custom inbound/);
+    assert.equal(forks, 0);
+    assert.deepEqual(source, original);
+  }
+});

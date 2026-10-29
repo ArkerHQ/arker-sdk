@@ -89,3 +89,69 @@ def test_custom_private_rejected_before_fork_without_mutating_policies(auth, act
         fork_with_traffic(client, request, False)
     assert calls == []
     assert custom == original
+
+
+@pytest.mark.parametrize("private", [False, True])
+def test_canonical_managed_get_without_open_auth_rotates_private_child(private):
+    source = {
+        "rules": {
+            APP: {"type": "inbound", "action": "allow", "priority": 0, "match": {"ports": PORTS}},
+            CONTROL: {
+                "type": "inbound",
+                "action": "allow",
+                "priority": 1000000,
+                "auth": "arker",
+                "match": {"ports": [49983]},
+            },
+        },
+        "secrets": {SECRET: "***"},
+    }
+    if private:
+        source["rules"][APP]["match"]["headers"] = {"e2b-traffic-access-token": ["***"]}
+    original = deepcopy(source)
+    calls = []
+    child = SimpleNamespace(id="child")
+    client = SimpleNamespace(
+        get_vm=lambda _: SimpleNamespace(policies=source), fork=lambda **request: calls.append(request) or child
+    )
+    assert fork_with_traffic(client, {"source_vm_id": "parent"}, False) is child
+    token = traffic_token(child)
+    assert len(token) == 43 and token != "***"
+    policy = calls[0]["policies"]
+    assert policy["secrets"][SECRET] == token
+    assert policy["rules"][APP]["auth"] == "open"
+    assert policy["rules"][APP]["match"]["headers"] == {"e2b-traffic-access-token": ["${secret:" + SECRET + "}"]}
+    assert policy["rules"][CONTROL]["auth"] == "arker"
+    assert source == original
+
+
+@pytest.mark.parametrize("change", ["name", "ports", "paths", "header", "auth_null", "control_auth"])
+def test_missing_auth_does_not_recognize_custom_or_control_rules(change):
+    source = {
+        "rules": {
+            APP: {
+                "type": "inbound",
+                "action": "allow",
+                "match": {"ports": PORTS, "headers": {"e2b-traffic-access-token": ["***"]}},
+            }
+        }
+    }
+    rule = source["rules"][APP]
+    if change == "name":
+        source["rules"]["customer"] = source["rules"].pop(APP)
+    elif change == "ports":
+        rule["match"]["ports"] = [8080]
+    elif change == "paths":
+        rule["match"]["paths"] = ["/restricted"]
+    elif change == "header":
+        rule["match"]["headers"] = {"customer-token": ["***"]}
+    elif change == "auth_null":
+        rule["auth"] = None
+    else:
+        source["rules"][CONTROL] = {"type": "inbound", "action": "allow", "match": {"ports": [49983]}}
+    original = deepcopy(source)
+    calls = []
+    client = SimpleNamespace(get_vm=lambda _: SimpleNamespace(policies=source), fork=lambda **kw: calls.append(kw))
+    with pytest.raises(ValueError, match="custom inbound"):
+        fork_with_traffic(client, {"source_vm_id": "parent"}, False)
+    assert calls == [] and source == original
