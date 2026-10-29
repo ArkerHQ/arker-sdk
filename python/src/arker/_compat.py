@@ -106,6 +106,7 @@ def arker_create(
     name: str | None = None,
     template_id: str | None = None,
     image: str | None = None,
+    image_config: dict[str, Any] | None = None,
     resources: dict[str, Any] | None = None,
     policies: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
@@ -121,6 +122,11 @@ def arker_create(
         request["source_vm_id"] = source_id
     else:
         request["source_vm_name"] = template_id or arker_source(config)
+    image_config = image_config if image_config is not None else cfg.get("image_config")
+    if image_config is not None:
+        if not image:
+            raise UnsupportedCompatibilityOption("image_config requires an image source")
+        request["image_config"] = image_config
     if metadata is not None:
         request["metadata"] = metadata
     if resources:

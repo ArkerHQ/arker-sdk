@@ -54,3 +54,22 @@ export function namedBlaxelFork(config: ArkerComputeProviderConfig = {}, getOrCr
     }
   };
 }
+
+
+/** Apply creation envs to the image before its init or entrypoint executes. */
+export function blaxelImageConfiguration(values: Record<string, unknown>, config: ArkerComputeProviderConfig = {}): ForkOptions["image_config"] | undefined {
+  const envs = values.envs;
+  if (envs === undefined) return undefined;
+  if (!envs || typeof envs !== "object" || Array.isArray(envs)) throw new TypeError("Invalid Blaxel environment");
+  const entries = Object.entries(envs);
+  if (entries.length === 0) return undefined;
+  if (typeof values.image !== "string" || !values.image) throw new TypeError("Blaxel creation envs require an image source");
+  const environment: Record<string, string> = {};
+  for (const [name, value] of entries) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || typeof value !== "string" || value.includes("\0")) {
+      throw new TypeError("Invalid Blaxel environment entry");
+    }
+    Object.defineProperty(environment, name, { value, enumerable: true, writable: true, configurable: true });
+  }
+  return { ...config.imageConfig, env: { ...config.imageConfig?.env, ...environment } };
+}

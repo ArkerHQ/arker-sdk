@@ -6,6 +6,7 @@ import os
 import re
 import time
 
+from ._compat import UnsupportedCompatibilityOption
 from ._compat_async import RoutingCancelled
 from ._compat_blaxel_errors import creation_error
 from .computer import REQUEST_TIMEOUT_S, VM, ArkerError, _drop_none, _policy_update, _vm_info
@@ -85,3 +86,32 @@ def fork_named(client, request, *, config, get_or_create=False, cancelled=lambda
             ):
                 raise creation_error(error.message, 409, "SANDBOX_ALREADY_EXISTS") from error
             raise
+
+
+def image_configuration(values, config):
+    """Resolve creation envs before image init, preserving explicit argv clears."""
+    envs = values.get("envs")
+    if envs is None:
+        return None
+    if not isinstance(envs, list):
+        raise ValueError("Blaxel environment must be a list of name/value entries")
+    if not envs:
+        return None
+    if not values.get("image"):
+        raise UnsupportedCompatibilityOption("Blaxel creation envs require an image source")
+    environment = {}
+    for entry in envs:
+        if hasattr(entry, "to_dict"):
+            entry = entry.to_dict()
+        if (
+            not isinstance(entry, dict)
+            or set(entry) != {"name", "value"}
+            or not isinstance(entry["name"], str)
+            or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", entry["name"]) is None
+            or not isinstance(entry["value"], str)
+            or "\0" in entry["value"]
+        ):
+            raise ValueError("Invalid Blaxel environment entry")
+        environment[entry["name"]] = entry["value"]
+    inherited = config.get("image_config") or {}
+    return {**inherited, "env": {**(inherited.get("env") or {}), **environment}}

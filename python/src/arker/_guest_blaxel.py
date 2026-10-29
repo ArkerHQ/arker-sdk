@@ -15,6 +15,37 @@ ROOT = Path("/root/.arker/blaxel")
 STATE = ROOT / "state.json"
 
 
+def initial_configuration(path=Path("/etc/arker/image-config.json")):
+    """Use the resolved image environment only when creating daemon state."""
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(1024 * 1024 + 1)
+    except FileNotFoundError:
+        return {"envs": {}, "user": ""}
+    try:
+        if len(raw) > 1024 * 1024:
+            raise ValueError()
+        image = json.loads(raw)
+        entries = image.get("env", [])
+        if not isinstance(entries, list) or any(
+            not isinstance(entry, list)
+            or len(entry) != 2
+            or not all(isinstance(value, str) and "\0" not in value for value in entry)
+            for entry in entries
+        ):
+            raise ValueError()
+        return {"envs": dict(entries), "user": ""}
+    except (ValueError, TypeError, AttributeError):
+        raise security.BootstrapError("invalid_image_environment") from None
+
+
+def startup_configuration(explicit, state):
+    if explicit is not None:
+        return explicit
+    # Named reuse and reconnect retain the configuration of the winning creation.
+    return state["configuration"] if state else initial_configuration()
+
+
 def ensure(request_path):
     if os.geteuid() != 0 or request_path.parent != ROOT / "requests":
         raise security.BootstrapError("invalid_request")
@@ -51,7 +82,7 @@ def ensure(request_path):
                 raise security.BootstrapError("running_configuration_conflict")
             reused = True
         else:
-            desired = desired if desired is not None else state["configuration"] if state else {"envs": {}, "user": ""}
+            desired = startup_configuration(desired, state)
             envs = desired["envs"]
             if not isinstance(envs, dict) or not all(
                 isinstance(k, str) and isinstance(v, str) for k, v in envs.items()

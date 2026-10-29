@@ -31,6 +31,8 @@ export interface ArkerComputeProviderConfig extends ArkerOptions {
   policies?: ForkOptions["policies"];
   /** Used only when creating from an image, never when forking an existing VM. */
   registryAuth?: ForkOptions["registry_auth"];
+  /** Applied to a new image before startup; requires an image source. */
+  imageConfig?: ForkOptions["image_config"];
 }
 
 interface DirectProvider {
@@ -342,7 +344,7 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
         const values = (options ?? {}) as Record<string, unknown>;
         const supported = new Set([
           "name", "image", "memory", "memoryMiB", "cpu", "vcpus", "diskMiB", "snapshotId", "templateId",
-          "allowInternetAccess", "metadata", "registryAuth",
+          "allowInternetAccess", "metadata", "registryAuth", "imageConfig",
           "timeout",
           "networkBlockAll", "blockNetwork", "domainAllowList", "outboundDomainAllowlist", "networkAllowList",
           "outboundCidrAllowlist", "createIfNotExist",
@@ -379,6 +381,10 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
           || typeof (registryAuth as Record<string, unknown>).password !== "string")) {
           throw new ArkerError("invalid_request", "Registry authentication requires an image and username/password strings", 422);
         }
+        const imageConfig = values.imageConfig ?? config.imageConfig;
+        if (imageConfig !== undefined && !image) {
+          throw new ArkerError("invalid_request", "imageConfig requires an image source", 422);
+        }
         const sourceRequest: ForkOptions = image
           ? { image }
           : sourceVmId
@@ -405,6 +411,7 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
         const request: ForkOptions = {
           ...sourceRequest,
           ...(metadata !== undefined ? { metadata } : {}),
+          ...(imageConfig !== undefined ? { image_config: imageConfig as ForkOptions["image_config"] } : {}),
           ...(options?.name ? { name: options.name } : {}),
           ...(resources ? { resources } : {}),
           ...(policies ? { policies } : {}),

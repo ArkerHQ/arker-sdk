@@ -225,6 +225,20 @@ status/list, wait, logs, stdin/EOF, stop, kill, and execution timeout.
 The current guest protocol requires Python 3. Image-independent operation remains
 a release requirement before claiming arbitrary-image compatibility.
 
+## Blaxel image creation environment
+
+Creation `envs` are applied before boot when creating from an explicit OCI image.
+Python uses native name/value entries; TypeScript uses its native environment
+object. The Arker configuration also accepts `image_config` (Python) or
+`imageConfig` (TypeScript) with `env`, `entrypoint` and `cmd`. Omitted command
+arrays inherit the image; empty arrays clear them. This requires a server with
+the image-configuration API. Captured VM sources reject these overrides.
+
+A source whose entrypoint launches a public daemon must be prepared with explicit
+`entrypoint: []` and `cmd: []` before private bootstrap. The shim does not silently
+replace a customer's startup command. Custom-image user identity, native default
+image resolution and unattended daemon lifecycle are not fully qualified.
+
 ## Modal creation recipes
 
 Arker supports plain registry-image recipes, local secret values, creation
