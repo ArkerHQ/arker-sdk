@@ -817,13 +817,13 @@ export interface paths {
         };
         /**
          * Download a capability-scoped file
-         * @description Stream a download through the private native file service using a read capability. Supply only the ticket query parameter; path, user, signature, and signature expiry come from the capability. The issuing API key must remain valid and authorized. Native response statuses and bodies are preserved. Range and conditional request headers are forwarded; redirects are not followed. Credentials, redirect Location, Set-Cookie, and trailers are not forwarded. No explicit transfer size cap is imposed; normal transport deadlines apply. Guest response headers are filtered. Every guest status is served with Content-Disposition: attachment and Content-Security-Policy: sandbox; default-src 'none'; frame-ancestors 'none'; base-uri 'none', replacing guest values. Content-Type and body bytes are preserved; nosniff, no-referrer, and no-store protections remain enforced. Guest Refresh is not forwarded.
+         * @description Stream a download through the private native file service using a read capability. Supply only the ticket query parameter; path, user, signature, and signature expiry come from the capability. The issuing API key must remain valid and authorized. Native response statuses and bodies are preserved. Range and conditional request headers are forwarded; redirects are not followed. Credentials, redirect Location, Set-Cookie, and trailers are not forwarded. No explicit transfer size cap is imposed; normal transport deadlines apply. Guest response headers are filtered. Every guest status is served with Content-Disposition: attachment and Content-Security-Policy: sandbox; default-src 'none'; frame-ancestors 'none'; base-uri 'none', replacing guest values. Content-Type and body bytes are preserved; nosniff, no-referrer, and no-store protections remain enforced. Guest Refresh is not forwarded. An explicitly paused sandbox returns the native 502 unavailable response without resuming; capability authorization and issuer revocation checks still precede this response.
          */
         get: operations["downloadFileTransfer"];
         put?: never;
         /**
          * Upload a capability-scoped file
-         * @description Stream a multipart upload unchanged through the private native file service using a write capability. Supply only the ticket query parameter. Repeated file fields and empty uploads retain native semantics. Path, optional user, signature, and signature expiry come solely from the capability. An empty authorized path is omitted from the native request so multipart filenames determine destinations. Native response statuses and bodies are preserved. Credentials, redirect Location, Set-Cookie, and trailers are not forwarded, and redirects are not followed. No explicit transfer size cap is imposed; normal transport deadlines apply. Guest response headers are filtered. Every guest status is served with Content-Disposition: attachment and Content-Security-Policy: sandbox; default-src 'none'; frame-ancestors 'none'; base-uri 'none', replacing guest values. Content-Type and body bytes are preserved; nosniff, no-referrer, and no-store protections remain enforced. Guest Refresh is not forwarded.
+         * @description Stream a multipart upload unchanged through the private native file service using a write capability. Supply only the ticket query parameter. Repeated file fields and empty uploads retain native semantics. Path, optional user, signature, and signature expiry come solely from the capability. An empty authorized path is omitted from the native request so multipart filenames determine destinations. Native response statuses and bodies are preserved. Credentials, redirect Location, Set-Cookie, and trailers are not forwarded, and redirects are not followed. No explicit transfer size cap is imposed; normal transport deadlines apply. Guest response headers are filtered. Every guest status is served with Content-Disposition: attachment and Content-Security-Policy: sandbox; default-src 'none'; frame-ancestors 'none'; base-uri 'none', replacing guest values. Content-Type and body bytes are preserved; nosniff, no-referrer, and no-store protections remain enforced. Guest Refresh is not forwarded. An explicitly paused sandbox returns the native 502 unavailable response without resuming; capability authorization and issuer revocation checks still precede this response.
          */
         post: operations["uploadFileTransfer"];
         delete?: never;
@@ -3916,6 +3916,25 @@ export interface components {
              */
             deadline_at: string;
         };
+        /**
+         * @description Native signed-file ingress response when explicit pause prevents serving the sandbox. This response does not resume it.
+         * @example {
+         *       "sandboxId": "vm-example",
+         *       "message": "The sandbox was not found",
+         *       "code": 502
+         *     }
+         */
+        NativeSandboxUnavailableResponse: {
+            /** @description The sandbox identifier from the signed file capability. */
+            sandboxId: string;
+            /** @description The native unavailable message: The sandbox was not found. */
+            message: string;
+            /**
+             * Format: int32
+             * @description The native unavailable HTTP status, 502.
+             */
+            code: number;
+        };
     };
     responses: {
         Conflict: {
@@ -6151,6 +6170,16 @@ export interface operations {
                     "*/*": string;
                 };
             };
+            /** @description After capability authorization, an explicitly paused sandbox returns NativeSandboxUnavailableResponse without activation. A 502 returned by the delegated native file service is forwarded unchanged and may contain another JSON shape or non-JSON body. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NativeSandboxUnavailableResponse"] | unknown;
+                    "*/*": string;
+                };
+            };
             503: components["responses"]["CapacityUnavailableOrUnavailableError"];
             504: components["responses"]["GatewayTimeoutError"];
         };
@@ -6237,6 +6266,16 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InternalErrorResponse"] | unknown;
+                    "*/*": string;
+                };
+            };
+            /** @description After capability authorization, an explicitly paused sandbox returns NativeSandboxUnavailableResponse without activation. A 502 returned by the delegated native file service is forwarded unchanged and may contain another JSON shape or non-JSON body. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NativeSandboxUnavailableResponse"] | unknown;
                     "*/*": string;
                 };
             };

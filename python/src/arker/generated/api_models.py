@@ -1768,6 +1768,13 @@ class SetVmDeadlineResponse:
 
 
 @dataclass(frozen=True)
+class NativeSandboxUnavailableResponse:
+    sandboxId: str
+    message: str
+    code: int
+
+
+@dataclass(frozen=True)
 class ListVmsParameters:
     cursor: str | None = None
     limit: int | None = None
@@ -2052,6 +2059,9 @@ DownloadFileTransferResponse2: TypeAlias = NotFoundErrorResponse | Any
 DownloadFileTransferResponse3: TypeAlias = InternalErrorResponse | Any
 
 
+DownloadFileTransferResponse4: TypeAlias = NativeSandboxUnavailableResponse | Any
+
+
 @dataclass(frozen=True)
 class UploadFileTransferParameters:
     id: str
@@ -2076,6 +2086,9 @@ UploadFileTransferResponse3: TypeAlias = InternalErrorResponse | Any
 
 
 UploadFileTransferResponse4: TypeAlias = list[FileTransferUploadEntry]
+
+
+UploadFileTransferResponse5: TypeAlias = NativeSandboxUnavailableResponse | Any
 
 
 @dataclass(frozen=True)
