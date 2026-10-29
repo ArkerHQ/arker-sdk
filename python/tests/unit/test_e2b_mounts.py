@@ -170,9 +170,7 @@ def test_exported_async_volume_lifecycle_runs_off_loop(client, configure_router,
 
 @pytest.mark.parametrize("request_timeout", [0, 0.25, 60])
 @pytest.mark.parametrize("mount_fails", [False, True])
-def test_cancelled_exported_sandbox_cleans_up_after_mount_settles(
-    client, monkeypatch, mount_fails, request_timeout
-):
+def test_cancelled_exported_sandbox_cleans_up_after_mount_settles(client, monkeypatch, mount_fails, request_timeout):
     import arker.e2b as shim
     from arker import _compat_e2b_bootstrap as bootstrap
 
