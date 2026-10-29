@@ -26,6 +26,7 @@ from ._compat import (
     shell_command,
 )
 from ._modal_async import dualmethod
+from ._modal_errors import exec_errors
 from ._modal_recipes import App as AppRecipe
 from ._modal_recipes import Image as ImageRecipe
 from ._modal_recipes import RecipeFactory, image_recipe, secret_recipe
@@ -290,6 +291,7 @@ class Sandbox(UnsupportedMixin):
         return cls.from_id(sandbox_id, **kwargs)
 
     @dualmethod
+    @exec_errors
     def exec(self, *command: Any, **kwargs: Any) -> Any:
         if self._vm is None:
             from ._modal_recipes import native_secrets

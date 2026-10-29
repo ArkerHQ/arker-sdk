@@ -13,6 +13,8 @@ import {
 import { ModalAppRecipe, ModalVolumeRecipe, registryImage, registry, registryCredentials, localSecret, secretEnvironment, recipeService, creationDefaults } from "./compat/modal-recipes.js";
 import { MODAL_DEFAULTS_MARKER, prepareExec, discardExec, writeDefaults } from "./compat/modal-defaults.js";
 import { createNativeModalProvider } from "./compat/modal-provider.js";
+import { rethrowModalExecError } from "./compat/modal-errors.js";
+import type { VM } from "./index.js";
 import { modalCommandHandle } from "./compat/modal-command.js";
 import { modalFilesystem } from "./compat/modal-filesystem.js";
 import { GuestProcesses } from "./compat/guest-process.js";
@@ -128,25 +130,29 @@ export class Sandbox {
         ? this.#native.exec(argv, opts as SandboxExecParams & { mode: "binary" })
         : this.#native.exec(argv, opts as SandboxExecParams & { mode?: "text" });
     }
-    const environment = secretEnvironment(opts?.secrets);
-    const runOptions = toRunCommandOptions({ ...opts, secrets: [] }) ?? {};
-    runOptions.env = { ...environment, ...runOptions.env };
-    if (!this.#processes) throw new Error("Native Modal sandbox instance is unavailable");
-    if (!argv.length || argv.some(arg => typeof arg !== "string")) throw new TypeError("Modal exec requires a nonempty array of string arguments");
-    const control = await prepareExec(this.#box, argv, runOptions.env, runOptions.cwd);
-    let current;
     try {
-      current = await this.#processes.exec({
-        command: argv.map(shellQuote).join(" "), argv: control.argv, _modalControl: control.name, spawnFailureExitCode: 128, preserveDescendants: true, workingDir: control.name ? "/" : runOptions.cwd ?? "/", env: {},
-        stdin: true, ...(runOptions.timeout !== undefined ? { timeout: runOptions.timeout } : {}),
-      });
+      const environment = secretEnvironment(opts?.secrets);
+      const runOptions = toRunCommandOptions({ ...opts, secrets: [] }) ?? {};
+      runOptions.env = { ...environment, ...runOptions.env };
+      if (!this.#processes) throw new Error("Native Modal sandbox instance is unavailable");
+      if (!argv.length || argv.some(arg => typeof arg !== "string")) throw new TypeError("Modal exec requires a nonempty array of string arguments");
+      const control = await prepareExec(this.#box, argv, runOptions.env, runOptions.cwd);
+      let current;
+      try {
+        current = await this.#processes.exec({
+          command: argv.map(shellQuote).join(" "), argv: control.argv, _modalControl: control.name, spawnFailureExitCode: 128, preserveDescendants: true, workingDir: control.name ? "/" : runOptions.cwd ?? "/", env: {},
+          stdin: true, ...(runOptions.timeout !== undefined ? { timeout: runOptions.timeout } : {}),
+        });
+      } catch (error) {
+        await discardExec(this.#box, control.name, error);
+        throw error;
+      }
+      return opts?.mode === "binary"
+        ? modalCommandHandle(this.#processes, current, { ...opts, secrets: [], mode: "binary" })
+        : modalCommandHandle(this.#processes, current, { ...opts, secrets: [], mode: "text" });
     } catch (error) {
-      await discardExec(this.#box, control.name, error);
-      throw error;
+      return rethrowModalExecError(error, () => (this.#box as UniversalSandbox & { getInstance(): VM }).getInstance().refresh());
     }
-    return opts?.mode === "binary"
-      ? modalCommandHandle(this.#processes, current, { ...opts, secrets: [], mode: "binary" })
-      : modalCommandHandle(this.#processes, current, { ...opts, secrets: [], mode: "text" });
   }
 
   async terminate(): Promise<void>;

@@ -136,6 +136,24 @@ async function verifyDaytona(native, shim) {
 }
 
 async function verifyModal(native, shim) {
+  for (const deleted of [false, true]) {
+    const { ArkerError } = require("@arker-ai/sdk");
+    const error = new ArkerError("not_found", "Unavailable", 404, {
+      code: "not_found", message: "Unavailable", details: { resource: "vm" },
+      timestamp: "2026-01-01T00:00:00Z", request_id: "consumer",
+      request: { kind: "matched", operation_id: "createRun" },
+    });
+    const vm = { id: "consumer", metadata: {}, refresh: async () => {
+      if (deleted) throw error;
+      return vm;
+    } };
+    const sandbox = new shim.Sandbox({
+      sandboxId: "consumer", provider: "arker", getInstance: () => vm,
+      runCommand: async () => { throw error; },
+    });
+    await assert.rejects(sandbox.exec(["true"], { env: { VALUE: "synthetic" } }),
+      deleted ? native.NotFoundError : native.ConflictError);
+  }
   const previous = native.SandboxService.prototype.create;
   const app = { appId: "ap-consumer" };
   const image = { imageId: "im-consumer" };
