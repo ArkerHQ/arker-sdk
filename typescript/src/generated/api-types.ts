@@ -1220,6 +1220,7 @@ export interface components {
             } | null;
             /** @description Register the captured VM as immutable before it becomes visible. The guest is not started. Requires a VM source with full memory and disk state; image sources, filesystem-only layers, commands, and resource overrides are rejected. Descendant forks are mutable unless they also request immutable. Not available on pool workers. Omitted or false creates a mutable VM. */
             immutable?: boolean;
+            image_config?: components["schemas"]["ImageConfigOverrides"];
         } & ({
             source_vm_id: string;
             source_vm_name?: null;
@@ -3955,6 +3956,19 @@ export interface components {
              */
             code: number;
         };
+        /** @description Creation-time OCI configuration overrides, supported for image sources on Firecracker and Cloud Hypervisor. Applied to the private root disk before boot. Omitted fields inherit; env merges by key, and explicit entrypoint/cmd arrays replace argv (empty clears). USER and working directory remain inherited. Captured VM sources do not accept overrides. Combined UTF-8 keys, values and argv are limited to 64 KiB; each value or argument to 32768 bytes. */
+        ImageConfigOverrides: {
+            /** @description Environment entries merged over the image environment before boot. */
+            env?: {
+                [key: string]: string;
+            };
+            /** @description Replacement OCI entrypoint argv; an empty array clears it. */
+            entrypoint?: components["schemas"]["ImageArgv"];
+            /** @description Replacement OCI command argv; an empty array clears it. */
+            cmd?: components["schemas"]["ImageArgv"];
+        };
+        /** @description An explicit OCI argument vector. Empty clears the corresponding startup field; omission of that field inherits it. */
+        ImageArgv: string[];
     };
     responses: {
         Conflict: {

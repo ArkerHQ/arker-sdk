@@ -1775,6 +1775,12 @@ class NativeSandboxUnavailableResponse:
     code: int
 
 
+ImageArgvItem: TypeAlias = str
+
+
+ImageArgv: TypeAlias = list[ImageArgvItem]
+
+
 @dataclass(frozen=True)
 class ListVmsParameters:
     cursor: str | None = None
@@ -2290,6 +2296,13 @@ class ResumeVmRequest:
 
 
 @dataclass(frozen=True)
+class ImageConfigOverrides:
+    env: dict[str, str] | None = None
+    entrypoint: ImageArgv | None = None
+    cmd: ImageArgv | None = None
+
+
+@dataclass(frozen=True)
 class PolicyEntry:
     type: Literal['outbound', 'inbound']
     action: PolicyAction
@@ -2447,6 +2460,7 @@ class ForkRequest1:
     command: str | None = None
     metadata: dict[str, Any] | None = None
     immutable: bool | None = None
+    image_config: ImageConfigOverrides | None = None
 
 
 @dataclass(frozen=True)
@@ -2475,6 +2489,7 @@ class ForkRequest2:
     command: str | None = None
     metadata: dict[str, Any] | None = None
     immutable: bool | None = None
+    image_config: ImageConfigOverrides | None = None
 
 
 @dataclass(frozen=True)
@@ -2503,6 +2518,7 @@ class ForkRequest3:
     command: str | None = None
     metadata: dict[str, Any] | None = None
     immutable: bool | None = None
+    image_config: ImageConfigOverrides | None = None
 
 
 @dataclass(frozen=True)
@@ -2531,6 +2547,7 @@ class ForkRequest4:
     command: str | None = None
     metadata: dict[str, Any] | None = None
     immutable: bool | None = None
+    image_config: ImageConfigOverrides | None = None
 
 
 @dataclass(frozen=True)
@@ -2559,6 +2576,7 @@ class ForkRequest5:
     command: str | None = None
     metadata: dict[str, Any] | None = None
     immutable: bool | None = None
+    image_config: ImageConfigOverrides | None = None
 
 
 @dataclass(frozen=True)
@@ -2587,6 +2605,7 @@ class ForkRequest6:
     command: str | None = None
     metadata: dict[str, Any] | None = None
     immutable: bool | None = None
+    image_config: ImageConfigOverrides | None = None
 
 
 ForkRequest: TypeAlias = (
