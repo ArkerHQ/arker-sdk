@@ -779,7 +779,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/vms/{id}/file-transfer-urls": {
+    "/v1/vms/{id}/file-transfer-delegation": {
         parameters: {
             query?: never;
             header?: never;
@@ -792,10 +792,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Mint a scoped file transfer URL
-         * @description Requires an API key authorized for the VM and a prepared private native file service. Wraps the supplied native file signature and its exact path, optional username, operation, and optional absolute expiry in a reusable Arker capability. The service does not normalize path or username. Revoking or expiring the issuing API key or removing its VM grant invalidates future redemptions. No platform API key or raw envd access token is forwarded to the guest.
+         * Create a local file-signing delegation
+         * @description Requires an API key authorized for the mutable VM and at least one file action. Returns a client-only signing key and opaque context for locally constructing path-scoped file URLs without further mint requests. Child ticket framing is ark_file_v1_<context>.<payload>.<mac>, where payload is unpadded base64url of UTF-8 JSON containing path, operation, envd_signature, optional user and optional expires_at. The MAC is HMAC-SHA256 with the decoded signing_key over UTF-8 arker:file-transfer:v1 followed by a NUL byte, ASCII context, a period, and ASCII payload; encode it as unpadded base64url. No canonical JSON serialization is required: exact encoded bytes are authenticated. A finite delegation requires a finite child expiry at or before its cap. Revoking or expiring the issuing key or removing its required VM/action grant invalidates subsequent redemption. Use the returned canonical regional redemption URL. Never expose signing_key or raw envd credentials to URL recipients.
          */
-        post: operations["mintFileTransferUrl"];
+        post: operations["createFileTransferDelegation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -805,7 +805,7 @@ export interface paths {
     "/v1/vms/{id}/file-transfer": {
         parameters: {
             query: {
-                /** @description Capability returned by mintFileTransferUrl. No other query fields are accepted. */
+                /** @description Locally signed file capability from createFileTransferDelegation. No other query fields are accepted. */
                 ticket: string;
             };
             header?: never;
@@ -2043,7 +2043,7 @@ export interface components {
          * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
          * @enum {string}
          */
-        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "openVmPort" | "openVmSocket" | "mintSessionPtyTicket" | "mintFileTransferUrl" | "downloadFileTransfer" | "uploadFileTransfer" | "pauseVm" | "resumeVm" | "getVmLifecycle" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey" | "setVmDeadline";
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "openVmPort" | "openVmSocket" | "mintSessionPtyTicket" | "createFileTransferDelegation" | "downloadFileTransfer" | "uploadFileTransfer" | "pauseVm" | "resumeVm" | "getVmLifecycle" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey" | "setVmDeadline";
         /** @enum {string} */
         HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
         /**
@@ -3779,28 +3779,31 @@ export interface components {
         };
         /** @enum {string} */
         FileTransferOperation: "read" | "write";
-        MintFileTransferUrlRequest: {
-            /** @description Guest pathname exactly as used to compute the native signature. The service does not normalize it. Read requires a nonempty path. Write permits an empty path, allowing native multipart filenames to select destinations. */
-            path: string;
-            operation: components["schemas"]["FileTransferOperation"];
-            /** @description Native file signature for the exact path, operation, optional username, and optional expiration. A v1_ prefix followed by 43 unpadded standard Base64 characters. Send the signature, never the raw envd access token. */
-            envd_signature: string;
-            /** @description Existing guest account exactly as used to compute the native signature. Omission selects the native service default. The service does not normalize the username. Colons and NUL characters are rejected. */
-            user?: string;
+        CreateFileTransferDelegationRequest: {
             /**
              * Format: int64
-             * @description Absolute Unix expiry in seconds, copied unchanged from the native file signature. Omit for no expiry. The capability expires when this value is strictly less than the current Unix second; equality remains valid.
+             * @description Optional delegation expiry as absolute Unix seconds. Omitted or null has no time limit. A finite delegation requires each locally signed URL to have an expiry no later than this cap.
              */
-            expires_at?: number;
-        } & unknown;
-        FileTransferUrlResponse: {
-            /** @description Identifier of the VM authorized by this capability. */
-            vm_id: string;
-            /** @description Arker-issued file capability scoped to the VM, path, optional user, operation, native signature, and optional expiry. Contains neither the platform API key nor the raw envd access token. */
-            ticket: string;
+            expires_at?: number | null;
+        };
+        FileTransferDelegation: {
+            /**
+             * Format: uri
+             * @description Canonical regional HTTPS file-transfer endpoint from trusted deployment configuration. Append only the ticket query parameter; this URL contains no credentials.
+             */
+            redemption_url: string;
+            /** @description Opaque versioned context encoded as unpadded base64url. Preserve exactly; binds the VM, organization, issuing API key, file-action grants, and delegation expiry. */
+            context: string;
+            /**
+             * Format: password
+             * @description Secret 32-byte HMAC signing key encoded as unpadded base64url. Retain only in the authenticated client. Never put this key in URLs, guest state, logs, or printable representations.
+             */
+            signing_key: string;
+            /** @description File operations granted at issuance. Redemption also checks current issuer permissions. */
+            operations: components["schemas"]["FileTransferOperation"][];
             /**
              * Format: int64
-             * @description Expiration time in Unix seconds, or null when the capability has no time limit.
+             * @description Delegation expiry in absolute Unix seconds, inclusive, or null. Issuer expiry/revocation and VM authorization are checked on every redemption.
              */
             expires_at: number | null;
         };
@@ -6032,7 +6035,7 @@ export interface operations {
             503: components["responses"]["UnavailableError"];
         };
     };
-    mintFileTransferUrl: {
+    createFileTransferDelegation: {
         parameters: {
             query?: never;
             header?: never;
@@ -6044,17 +6047,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["MintFileTransferUrlRequest"];
+                "application/json": components["schemas"]["CreateFileTransferDelegationRequest"];
             };
         };
         responses: {
-            /** @description Capability minted. Redeem it as the sole ticket query parameter with GET for read or POST for write on the VM file-transfer route. */
+            /** @description Client-only delegation issued. The response is not cacheable. Sign each exact file scope locally and append it as the sole ticket query parameter to redemption_url. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FileTransferUrlResponse"];
+                    "application/json": components["schemas"]["FileTransferDelegation"];
                 };
             };
             400: components["responses"]["BadRequestError"];
@@ -6074,7 +6077,7 @@ export interface operations {
     downloadFileTransfer: {
         parameters: {
             query: {
-                /** @description Capability returned by mintFileTransferUrl. No other query fields are accepted. */
+                /** @description Locally signed file capability from createFileTransferDelegation. No other query fields are accepted. */
                 ticket: string;
             };
             header?: never;
@@ -6153,7 +6156,7 @@ export interface operations {
     uploadFileTransfer: {
         parameters: {
             query: {
-                /** @description Capability returned by mintFileTransferUrl. No other query fields are accepted. */
+                /** @description Locally signed file capability from createFileTransferDelegation. No other query fields are accepted. */
                 ticket: string;
             };
             header?: never;

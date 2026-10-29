@@ -1,5 +1,6 @@
 """Explicit component seam for tests confined to control-plane routing."""
 
+import base64
 from types import SimpleNamespace
 
 import pytest
@@ -35,3 +36,14 @@ def mock_envd_bootstrap(monkeypatch):
     monkeypatch.setattr(bootstrap, "bootstrap_envd_async", prepare_async)
     monkeypatch.setattr(data_plane, "create_data_plane", components)
     return calls
+
+
+def delegation_response(**updates):
+    return {
+        "redemption_url": "https://regional.example.test/api/v1/vms/canonical/file-transfer",
+        "context": "b3BhcXVl",
+        "signing_key": base64.urlsafe_b64encode(bytes(range(32))).decode().rstrip("="),
+        "operations": ["read", "write"],
+        "expires_at": None,
+        **updates,
+    }

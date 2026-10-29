@@ -71,8 +71,10 @@ class Sandbox(UnsupportedMixin):
     def _prepare_data_plane(self, *, envs=None) -> None:
         from ._compat_e2b_bootstrap import bootstrap_envd
         from ._compat_e2b_data_plane import create_data_plane
+        from ._compat_e2b_urls import prepare_file_urls
 
         descriptor, _ = bootstrap_envd(self._vm, **({"envs": envs} if envs is not None else {}))
+        prepare_file_urls(self._vm)
         replacement = create_data_plane(descriptor, self._vm._client._api_key)
         previous = self._data_plane
         self._data_plane = replacement

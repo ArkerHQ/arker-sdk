@@ -7,6 +7,7 @@ from unittest.mock import Mock
 import pytest
 from async_lifecycle_helpers import configure_router as configure_router
 from e2b import AsyncSandbox, AsyncVolume, Sandbox, Volume
+from e2b_facade_helpers import delegation_response
 
 from arker._compat_e2b_mounts import ArkerVolume, Volumes
 from arker.computer import ArkerError
@@ -175,7 +176,15 @@ def test_cancelled_exported_sandbox_cleans_up_after_mount_settles(client, monkey
     started, release, deleted = threading.Event(), threading.Event(), threading.Event()
     events = []
     loop_thread = threading.get_ident()
-    vm = Mock(id="child", _client=client)
+    vm = Mock(id="child", _client=client, base_url="https://worker.example")
+
+    def request(method, path, body, **kwargs):
+        assert (method, path, body) == ("POST", "/v1/vms/child/file-transfer-delegation", {})
+        assert kwargs == {"base_url": vm.base_url}
+        events.append("delegation")
+        return delegation_response()
+
+    client._request.side_effect = request
 
     def mount(**kwargs):
         assert threading.get_ident() != loop_thread
@@ -214,7 +223,8 @@ def test_cancelled_exported_sandbox_cleans_up_after_mount_settles(client, monkey
         assert await asyncio.to_thread(deleted.wait, 5)
 
     asyncio.run(run())
-    assert events == ["settled", "deleted"]
+    assert events == ["delegation", "settled", "deleted"]
+    client._request.assert_called_once()
     vm.delete.assert_called_once()
     client.delete_filesystem.assert_not_called()
 
@@ -293,7 +303,15 @@ def test_sandbox_creation_mounts_waits_and_cleans_child(client, monkeypatch, asy
     import arker.e2b as shim
 
     events = []
-    vm = Mock(id="child", _client=client)
+    vm = Mock(id="child", _client=client, base_url="https://worker.example")
+
+    def request(method, path, body, **kwargs):
+        assert (method, path, body) == ("POST", "/v1/vms/child/file-transfer-delegation", {})
+        assert kwargs == {"base_url": vm.base_url}
+        events.append("delegation")
+        return delegation_response()
+
+    client._request.side_effect = request
     vm.delete.side_effect = lambda: events.append("delete")
 
     def attach(**kwargs):
@@ -336,12 +354,19 @@ def test_sandbox_creation_mounts_waits_and_cleans_child(client, monkeypatch, asy
     if failure:
         with pytest.raises(RuntimeError):
             create()
-        assert events[-1] == "delete"
+        assert events == [
+            "bootstrap",
+            "delegation",
+            "attach",
+            *(["readiness"] if failure == "readiness" else []),
+            "delete",
+        ]
         vm.delete.assert_called_once()
     else:
         assert create().sandbox_id == "child"
-        assert events == ["bootstrap", "attach", "readiness"]
+        assert events == ["bootstrap", "delegation", "attach", "readiness"]
         vm.delete.assert_not_called()
+    client._request.assert_called_once()
     client.delete_filesystem.assert_not_called()
 
 

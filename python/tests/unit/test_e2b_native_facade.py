@@ -15,7 +15,18 @@ from arker._compat_e2b_data_plane import EnvdDescriptor
 def facade_vm(monkeypatch, servers):
     endpoint, _behavior, received, _redirected = servers
     calls = []
-    vm = SimpleNamespace(id="owned", _client=SimpleNamespace(_api_key="platform-test-key"))
+    from test_e2b_urls import delegation_response
+
+    def request(method, path, body, **kwargs):
+        assert (method, path, body) == ("POST", "/v1/vms/owned/file-transfer-delegation", {})
+        calls.append("delegate")
+        return delegation_response()
+
+    vm = SimpleNamespace(
+        id="owned",
+        base_url="https://api.example.test",
+        _client=SimpleNamespace(_api_key="platform-test-key", _request=request),
+    )
     vm.refresh = lambda **options: vm
     vm.delete = lambda **options: calls.append("delete") or SimpleNamespace(deleted=True)
     descriptor = EnvdDescriptor(endpoint, "0.10.2", "guest-test-token")
@@ -49,6 +60,10 @@ def test_create_binds_native_components_without_vendor_control_plane(facade_vm, 
             assert sandbox.files is sandbox._data_plane.files
             assert sandbox.pty is sandbox._data_plane.pty
             assert sandbox.git is sandbox._data_plane.git
+            from test_e2b_urls import verify_url
+
+            verify_url(sandbox.download_url("~/file"))
+            verify_url(sandbox.upload_url(""))
             with pytest.raises(native.SandboxNotRunningException):
                 await sandbox.commands.run("true")
             with pytest.raises(native.SandboxNotRunningException):
@@ -66,13 +81,17 @@ def test_create_binds_native_components_without_vendor_control_plane(facade_vm, 
             assert sandbox.files is sandbox._data_plane.files
             assert sandbox.pty is sandbox._data_plane.pty
             assert sandbox.git is sandbox._data_plane.git
+            from test_e2b_urls import verify_url
+
+            verify_url(sandbox.download_url("~/file"))
+            verify_url(sandbox.upload_url(""))
             with pytest.raises(native.SandboxNotRunningException):
                 sandbox.commands.run("true")
             with pytest.raises(native.SandboxNotRunningException):
                 sandbox.files.read("/file")
         finally:
             sandbox.kill()
-    assert calls == ["bootstrap", "delete"]
+    assert calls == ["bootstrap", "delegate", "delete"]
     assert len(received) == 2
 
 
@@ -94,3 +113,23 @@ def test_bootstrap_failure_deletes_owned_created_vm(facade_vm, monkeypatch, asyn
         else:
             e2b.Sandbox.create()
     assert calls == ["delete"]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_delegation_failure_deletes_created_vm_before_client_allocation(facade_vm, monkeypatch, asynchronous):
+    from arker import _compat_e2b_data_plane as data_plane
+
+    vm, calls, _ = facade_vm
+
+    def fail(*args, **kwargs):
+        calls.append("delegate")
+        raise RuntimeError("delegation unavailable")
+
+    vm._client._request = fail
+    monkeypatch.setattr(data_plane, "create_data_plane", lambda *a, **kw: pytest.fail("allocated before delegation"))
+    with pytest.raises(RuntimeError, match="delegation unavailable"):
+        if asynchronous:
+            asyncio.run(e2b.AsyncSandbox.create())
+        else:
+            e2b.Sandbox.create()
+    assert calls == ["bootstrap", "delegate", "delete"]

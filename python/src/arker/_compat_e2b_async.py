@@ -19,9 +19,11 @@ async def _route(method, *args, **kwargs):
     class Routed(Sandbox):
         def _prepare_data_plane(self, *, envs=None):
             from ._compat_e2b_bootstrap import bootstrap_envd
+            from ._compat_e2b_urls import prepare_file_urls
 
             # Bootstrap precedes mounts; construct async clients on the caller's loop.
             self._prepared_descriptor, _ = bootstrap_envd(self._vm, **({"envs": envs} if envs is not None else {}))
+            prepare_file_urls(self._vm)
 
         @staticmethod
         def _native_sandbox():
@@ -46,6 +48,7 @@ class AsyncSandbox:
     async def _prepare_data_plane(self):
         from ._compat_e2b_bootstrap import bootstrap_envd_async
         from ._compat_e2b_data_plane import create_data_plane
+        from ._compat_e2b_urls import prepare_file_urls_async
 
         vm = self._sandbox._vm
         if vm is None:
@@ -53,6 +56,7 @@ class AsyncSandbox:
         descriptor = getattr(self._sandbox, "_prepared_descriptor", None)
         if descriptor is None:
             descriptor, _ = await bootstrap_envd_async(vm)
+            await prepare_file_urls_async(vm)
         else:
             del self._sandbox._prepared_descriptor
         replacement = create_data_plane(descriptor, vm._client._api_key, asynchronous=True)

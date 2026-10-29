@@ -5,6 +5,7 @@ import pytest
 from async_lifecycle_helpers import cancel_creation, run_async
 from async_lifecycle_helpers import configure_router as configure_router
 from async_lifecycle_helpers import late_arker_creation as late_arker_creation
+from e2b_facade_helpers import delegation_response
 from e2b_facade_helpers import mock_envd_bootstrap as mock_envd_bootstrap
 
 import arker.e2b as shim
@@ -48,12 +49,19 @@ def test_async_create_obeys_arker_only_routing_instead_of_bypassing_it(configure
 
     configure_router(["arker"])
     monkeypatch.setattr(native, "AsyncSandbox", Native)
-    monkeypatch.setattr(
-        shim, "arker_create", lambda *args, **kwargs: calls.append("arker") or types.SimpleNamespace(id="arker")
+
+    def request(method, path, body, **kwargs):
+        assert (method, path, body) == ("POST", "/v1/vms/arker/file-transfer-delegation", {})
+        calls.append("delegation")
+        return delegation_response()
+
+    vm = types.SimpleNamespace(
+        id="arker", base_url="https://worker.example", _client=types.SimpleNamespace(_request=request)
     )
+    monkeypatch.setattr(shim, "arker_create", lambda *args, **kwargs: calls.append("arker") or vm)
     result = asyncio.run(shim.AsyncSandbox.create("ubuntu"))
     assert result.sandbox_id == "arker"
-    assert calls == ["arker"]
+    assert calls == ["arker", "delegation"]
 
 
 @run_async
@@ -130,6 +138,10 @@ def test_async_race_checks_metadata_miss_without_connecting(configure_router, mo
 
     def request(method, path, body, **kwargs):
         resumed.append((method, path, body))
+        if path == "/v1/vms/arker/file-transfer-delegation":
+            assert method == "POST" and body == {}
+            return delegation_response()
+        assert path == "/v1/vms/arker/resume"
         return {"vm_id": "arker", "state": "running", "mode": "full"}
 
     vm = types.SimpleNamespace(
@@ -153,5 +165,10 @@ def test_async_race_checks_metadata_miss_without_connecting(configure_router, mo
     assert asyncio.run(shim.AsyncSandbox.connect("shared-name")).sandbox_id == "arker"
     assert calls == []
     assert resumed == [
-        ("POST", "/v1/vms/arker/resume", {"deadline": {"policy_id": "computesdk-e2b-lifetime", "timeout_seconds": 300}})
+        (
+            "POST",
+            "/v1/vms/arker/resume",
+            {"deadline": {"policy_id": "computesdk-e2b-lifetime", "timeout_seconds": 300}},
+        ),
+        ("POST", "/v1/vms/arker/file-transfer-delegation", {}),
     ]

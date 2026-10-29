@@ -499,7 +499,7 @@ OpenApiOperationId: TypeAlias = Literal[
     'openVmPort',
     'openVmSocket',
     'mintSessionPtyTicket',
-    'mintFileTransferUrl',
+    'createFileTransferDelegation',
     'downloadFileTransfer',
     'uploadFileTransfer',
     'pauseVm',
@@ -1695,18 +1695,16 @@ FileTransferOperation: TypeAlias = Literal['read', 'write']
 
 
 @dataclass(frozen=True)
-class MintFileTransferUrlRequest:
-    path: str
-    operation: FileTransferOperation
-    envd_signature: str
-    user: str | None = None
+class CreateFileTransferDelegationRequest:
     expires_at: int | None = None
 
 
 @dataclass(frozen=True)
-class FileTransferUrlResponse:
-    vm_id: str
-    ticket: str
+class FileTransferDelegation:
+    redemption_url: str
+    context: str
+    signing_key: str
+    operations: list[FileTransferOperation]
     expires_at: int | None
 
 
@@ -2032,7 +2030,7 @@ class RevokeApiKeyParameters:
 
 
 @dataclass(frozen=True)
-class MintFileTransferUrlParameters:
+class CreateFileTransferDelegationParameters:
     id: str
 
 

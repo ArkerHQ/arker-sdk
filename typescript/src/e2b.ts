@@ -2,7 +2,7 @@ import { listSandboxes, type E2BListOptions, type E2BPaginator } from "./compat/
 import { e2bForkMetadata } from "./compat/e2b-metadata.js";
 import { forkWithTraffic, trafficToken, validateE2BNetwork, type E2BNetworkOptions } from "./compat/e2b-network.js";
 import { E2BLifecycle, lifecycleTransport, e2bTimeoutDuration } from "./compat/e2b-lifecycle.js";
-import { E2BFileURLs, type E2BFileURLOptions } from "./compat/e2b-urls.js";
+import { E2BFileURLs, prepareFileURLs, type E2BFileURLOptions } from "./compat/e2b-urls.js";
 import { bootstrapEnvd, validateEnvdEnvs } from "./compat/e2b-bootstrap.js";
 import { createE2BDataPlane, type E2BDataPlane, type EnvdDescriptor } from "./compat/e2b-data-plane.js";
 import type { VM } from "./index.js";
@@ -97,6 +97,7 @@ export class Sandbox {
     const authorization = vm._client._authHeaders().authorization;
     if (!authorization?.startsWith("Bearer ")) throw new Error("Missing Arker transport credentials");
     const [descriptor] = await bootstrapEnvd(vm, { envs });
+    await prepareFileURLs(vm);
     const plane = await createE2BDataPlane(descriptor, authorization.slice(7));
     descriptors.set(plane, descriptor);
     return plane;

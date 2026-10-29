@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx2 as httpx
 import pytest
+from e2b_facade_helpers import delegation_response
 from e2b_facade_helpers import mock_envd_bootstrap as mock_envd_bootstrap
 
 import arker.computer as sdk
@@ -320,6 +321,11 @@ def test_provider_block_network_options_translate_to_arker_policy(arker_env, cre
         vm_payload("catalog-template"),
     )
     t.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, vm_payload("vm_policy"))
+    t.add_json(
+        lambda method, url: method == "POST" and url.endswith("/v1/vms/vm_policy/file-transfer-delegation"),
+        200,
+        delegation_response(),
+    )
 
     with use_transport(t):
         create()
@@ -484,6 +490,14 @@ def test_e2b_control_plane_surface(arker_env) -> None:
         lambda method, url: method == "GET" and url == "https://test.invalid/api/v1/vms/catalog-template",
         200,
         vm_payload("catalog-template"),
+    )
+
+    t.add_json(
+        lambda method, url: (
+            method == "POST" and url == "https://test.invalid/api/v1/vms/vm_e2b/file-transfer-delegation"
+        ),
+        200,
+        delegation_response(),
     )
     add_create_run_delete(t, "vm_e2b", "")
     with use_transport(t):
@@ -918,6 +932,11 @@ def test_unsupported_calls_fail_fast(arker_env) -> None:
         lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/fork",
         200,
         vm_payload("vm_unsupported"),
+    )
+    t.add_json(
+        lambda method, url: method == "POST" and url.endswith("/v1/vms/vm_unsupported/file-transfer-delegation"),
+        200,
+        delegation_response(),
     )
 
     with use_transport(t):

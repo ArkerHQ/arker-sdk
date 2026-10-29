@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from e2b_facade_helpers import delegation_response
 
 from arker import _compat_e2b_lifecycle as lifecycle
 from arker._compat import UnsupportedCompatibilityOption
@@ -359,6 +360,10 @@ def test_static_connect_resumes_before_bootstrap(vm, monkeypatch, asynchronous):
     request = vm._client._request
 
     def tracked_request(*args, **kwargs):
+        if args[1] == f"/v1/vms/{vm.id}/file-transfer-delegation":
+            assert args == ("POST", f"/v1/vms/{vm.id}/file-transfer-delegation", {})
+            events.append("delegation")
+            return delegation_response()
         events.append("resume")
         return request(*args, **kwargs)
 
@@ -376,7 +381,7 @@ def test_static_connect_resumes_before_bootstrap(vm, monkeypatch, asynchronous):
     )
     result = asyncio.run(e2b.AsyncSandbox.connect(vm.id)) if asynchronous else e2b.Sandbox.connect(vm.id)
     assert result.sandbox_id == vm.id
-    assert events == ["resume", "bootstrap"]
+    assert events == ["resume", "bootstrap", "delegation"]
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
