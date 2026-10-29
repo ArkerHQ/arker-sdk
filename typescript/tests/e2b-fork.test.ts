@@ -204,3 +204,25 @@ test("fork inherits the parent budget and an explicit override does not mutate i
   await assert.rejects(forkArker(parent, async vm => vm, vm => vm.delete()), /finite requestTimeoutMs/);
   assert.deepEqual(calls, []);
 });
+
+test("cancelled facade forks delete every guarded child even when close fails", async t => {
+  const { parent, children, calls } = fixture();
+  const controller = new AbortController();
+  const factory = Sandbox as unknown as { dataPlane: () => Promise<unknown> };
+  const original = factory.dataPlane;
+  t.after(() => { factory.dataPlane = original; });
+  let prepared = 0;
+  const closed: number[] = [];
+  factory.dataPlane = async () => {
+    const index = prepared++;
+    if (prepared === children.length) controller.abort();
+    return { commands: {}, files: {}, git: {}, pty: {}, close() {
+      closed.push(index);
+      if (index === 0) throw new Error("close failed");
+    } };
+  };
+  const sandbox = new (Sandbox as any)({ provider: "arker", sandboxId: parent.id, getInstance: () => parent }) as Sandbox;
+  await assert.rejects(sandbox.fork({ count: 2, signal: controller.signal }), AggregateError);
+  assert.deepEqual(closed, [0, 1]);
+  assert.deepEqual(calls.filter(([name]) => name === "delete"), [["delete", 0], ["delete", 1]]);
+});

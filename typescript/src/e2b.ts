@@ -142,7 +142,7 @@ export class Sandbox {
     } catch (error) {
       const vm = options.deleteOnValidationFailure && box.provider === "arker"
         ? (box as UniversalSandbox & { getInstance(): VM }).getInstance() : undefined;
-      return Sandbox.discard(error, dataPlane, vm);
+      return Sandbox.discard(error, () => dataPlane?.close(), vm);
     }
   }
 
@@ -172,7 +172,7 @@ export class Sandbox {
         opts?.signal?.throwIfAborted();
         return sandbox;
       } catch (error) {
-        return Sandbox.discard(error, sandbox ? sandbox.#dataPlane : undefined, vm);
+        return Sandbox.discard(error, () => sandbox?.closeDataPlane(), vm);
       }
     } finally {
       if (box.provider === "arker") finishInitialization((box as UniversalSandbox & { getInstance(): VM }).getInstance());
@@ -197,13 +197,7 @@ export class Sandbox {
     if (this.#native) return Sandbox.wrapForks(await this.#native.fork(opts));
     const vm = (this.#box as UniversalSandbox & { getInstance(): VM }).getInstance();
     return forkArker(vm, child => Sandbox.wrap(new ArkerComputeSandbox(child, async () => { await child.delete(); })),
-      async child => {
-        const failures: unknown[] = [];
-        try { child.closeDataPlane(); } catch (error) { failures.push(error); }
-        try { await (child.#box as UniversalSandbox & { getInstance(): VM }).getInstance().delete(); }
-        catch (error) { failures.push(error); }
-        if (failures.length) throw new AggregateError(failures, "Fork client cleanup failed");
-      }, opts);
+      child => child.disposeFork(), opts);
   }
 
   static async connect(sandboxId: string, opts?: SandboxConnectOpts & Pick<CreateOptions, "routerConfigPath">): Promise<Sandbox> {
@@ -224,15 +218,23 @@ export class Sandbox {
     } finally { finishInitialization(vm); }
   }
 
-  private static async discard(error: unknown, plane?: E2BDataPlane, vm?: VM): Promise<never> {
+  private static async discard(error: unknown, close?: () => void, vm?: VM): Promise<never> {
     const errors = [error];
-    try { plane?.close(); } catch (cleanupError) { errors.push(cleanupError); }
+    try { close?.(); } catch (cleanupError) { errors.push(cleanupError); }
     if (vm) {
       finishInitialization(vm);
       try { await vm.delete(); } catch (cleanupError) { errors.push(cleanupError); }
     }
     if (errors.length > 1) throw new AggregateError(errors, "Sandbox initialization and cleanup failed");
     throw error;
+  }
+
+  private async disposeFork(): Promise<void> {
+    const failures: unknown[] = [];
+    try { this.closeDataPlane(); } catch (error) { failures.push(error); }
+    try { await (this.#box as UniversalSandbox & { getInstance(): VM }).getInstance().delete(); }
+    catch (error) { failures.push(error); }
+    if (failures.length) throw new AggregateError(failures, "Fork client cleanup failed");
   }
 
   private closeDataPlane(): void {
