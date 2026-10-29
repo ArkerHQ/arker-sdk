@@ -1,5 +1,6 @@
 import asyncio
 import types
+from contextlib import nullcontext
 
 import pytest
 
@@ -246,13 +247,17 @@ def test_create_preserves_custom_ingress_without_adding_broader_rules(fork_reque
     requests, _ = fork_requests
     custom = {"type": "inbound", "priority": 7, "action": "deny", "match": {"ports": [22]}}
     options = {} if public is None else {"network": {"allow_public_traffic": public}}
-    shim.Sandbox._create_arker(
-        {"source": "template", "policies": {"rules": {"custom": custom}, "secrets": {"TOKEN": "synthetic"}}},
-        None,
-        None,
-        False,
-        options,
-    )
+    with pytest.raises(ValueError, match="custom inbound policies") if public is False else nullcontext():
+        shim.Sandbox._create_arker(
+            {"source": "template", "policies": {"rules": {"custom": custom}, "secrets": {"TOKEN": "synthetic"}}},
+            None,
+            None,
+            False,
+            options,
+        )
+    if public is False:
+        assert requests == []
+        return
     policies = requests[0]["policies"]
     rules = policies["rules"]
     assert rules["custom"] == custom
