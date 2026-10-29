@@ -1,3 +1,9 @@
+const observedProperties = new Set([
+  "Sandbox.sandboxId", "Sandbox.sandboxDomain", "Sandbox.trafficAccessToken",
+  "Sandbox.commands", "Sandbox.files", "Sandbox.pty", "Sandbox.git", "Sandbox.commands.supportsStdinClose",
+  "CommandHandle.pid", "CommandHandle.stdout", "CommandHandle.stderr", "CommandHandle.exitCode", "CommandHandle.error",
+]);
+
 export function traceVendor<T extends object>(target: T, prefix: string, calls: Set<string>): T {
   return new Proxy(target, {
     get(object, property) {
@@ -12,7 +18,7 @@ export function traceVendor<T extends object>(target: T, prefix: string, calls: 
             if (prefix.endsWith(".static") && ["create", "connect", "get", "createIfNotExists"].includes(property)) {
               return traceVendor(result as object, prefix.slice(0, -".static".length), calls);
             }
-            if (["Sandbox.commands.run", "Sandbox.commands.connect"].includes(api)
+            if (["Sandbox.commands.run", "Sandbox.commands.connect", "Sandbox.pty.create", "Sandbox.pty.connect"].includes(api)
               && result && typeof (result as { wait?: unknown }).wait === "function") {
               return traceVendor(result as object, "CommandHandle", calls);
             }
@@ -21,7 +27,7 @@ export function traceVendor<T extends object>(target: T, prefix: string, calls: 
           return result instanceof Promise ? result.then(observed) : observed(result);
         };
       }
-      if (prefix === "CommandHandle" && ["pid", "stdout", "stderr", "exitCode", "error"].includes(property)) calls.add(api);
+      if (observedProperties.has(api)) calls.add(api);
       return value && typeof value === "object" ? traceVendor(value, api, calls) : value;
     },
   });
