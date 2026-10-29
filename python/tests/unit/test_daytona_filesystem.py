@@ -379,3 +379,48 @@ def test_daytona_parent_id_selection_requires_independent_placement(monkeypatch)
     )
     arker_create()
     assert requests == [{"name": None, "source_vm_id": "local-parent"}]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_download_creates_local_parents_and_preserves_binary_overwrite(monkeypatch, tmp_path, asynchronous):
+    sandbox = Sandbox(vm=types.SimpleNamespace(id="local"))
+    remote = {}
+
+    def transfer(self, operation, path, data=None):
+        if operation == "upload":
+            remote[path] = data
+            return None
+        return remote[path]
+
+    monkeypatch.setattr(implementation.FileSystem, "_transfer", transfer)
+    destination = tmp_path / "missing" / "nested" / "payload.bin"
+    payload = bytes(range(256)) + b"\x00\xff"
+
+    async def program():
+        fs = AsyncSandbox(sandbox).fs if asynchronous else sandbox.fs
+
+        async def call(method, *args):
+            result = method(*args)
+            return await result if asynchronous else result
+
+        await call(fs.upload_file, payload, "remote")
+        assert await call(fs.download_file, "remote", str(destination)) is None
+        assert destination.read_bytes() == payload
+        await call(fs.upload_file, b"short", "remote")
+        await call(fs.download_file, "remote", str(destination))
+        assert destination.read_bytes() == b"short"
+
+    asyncio.run(program())
+
+
+def test_download_invalid_local_parent_returns_bulk_error_without_mutation(monkeypatch, tmp_path):
+    from daytona import FileDownloadRequest
+
+    fs = implementation.FileSystem(None)
+    monkeypatch.setattr(fs, "_transfer", lambda *args: b"remote")
+    parent = tmp_path / "not-a-directory"
+    parent.write_bytes(b"keep")
+    result = fs.download_files([FileDownloadRequest(source="remote", destination=str(parent / "child"))])[0]
+    assert result.error
+    assert result.result is None
+    assert parent.read_bytes() == b"keep"

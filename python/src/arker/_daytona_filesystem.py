@@ -33,6 +33,10 @@ def local_file(path, data=None):
 
     writing = data is not None
     try:
+        if writing:
+            parent = os.path.dirname(path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
         flags = os.O_NONBLOCK | (os.O_WRONLY | os.O_CREAT if writing else os.O_RDONLY)
         fd = os.open(path, flags, 0o666)
         with os.fdopen(fd, "wb" if writing else "rb") as stream:

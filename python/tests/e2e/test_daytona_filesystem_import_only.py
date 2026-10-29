@@ -3,7 +3,9 @@
 import asyncio
 import inspect
 import os
+import tempfile
 import uuid
+from pathlib import Path
 
 import pytest
 from compat_evidence import record
@@ -20,7 +22,44 @@ APIS = [
 ]
 
 
-async def program(Client, progress=lambda stage: None):
+async def local_downloads(fs, directory, call, progress):
+    from daytona import FileDownloadRequest
+
+    path = directory + "/binary"
+    payload = bytes(range(256)) + b"\x00\xff"
+    with tempfile.TemporaryDirectory(prefix="daytona-download-") as temporary:
+        root = Path(temporary)
+        destination = root / "missing" / "nested" / "payload.bin"
+        progress("local-parent-download")
+        await call(fs.upload_file, payload, path)
+        assert await call(fs.download_file, path, str(destination)) is None
+        assert destination.read_bytes() == payload
+        progress("local-overwrite")
+        await call(fs.upload_file, b"short", path)
+        assert await call(fs.download_file, path, str(destination)) is None
+        assert destination.read_bytes() == b"short"
+        progress("bulk-local-parent-and-error")
+        other = directory + "/other"
+        await call(fs.upload_file, payload, other)
+        bulk_destination = root / "bulk" / "nested" / "payload.bin"
+        requests = [
+            FileDownloadRequest(source=directory + "/missing"),
+            FileDownloadRequest(source=path),
+            FileDownloadRequest(source=other, destination=str(bulk_destination)),
+        ]
+        results = await call(fs.download_files, requests)
+        assert len(results) == len(requests)
+        by_source = {result.source: result for result in results}
+        assert set(by_source) == {request.source for request in requests}
+        missing = by_source[directory + "/missing"]
+        assert missing.error and missing.result is None
+        assert missing.error_details is not None and missing.error_details.status_code == 404
+        assert by_source[path].error is None and by_source[path].result == b"short"
+        assert by_source[other].error is None and by_source[other].result == str(bulk_destination)
+        assert bulk_destination.read_bytes() == payload
+
+
+async def program(Client, progress=lambda stage: None, scenario="buffered-filesystem"):
     async def call(function, *args, **kwargs):
         result = function(*args, **kwargs)
         return await result if inspect.isawaitable(result) else result
@@ -36,6 +75,9 @@ async def program(Client, progress=lambda stage: None):
         directory = "compat-files-" + uuid.uuid4().hex
         progress("create-folder")
         await call(fs.create_folder, directory, "700")
+        if scenario == "local-download-paths":
+            await local_downloads(fs, directory, call, progress)
+            return
         path = directory + "/bytes"
         payload = bytes(range(256))
         progress("upload")
@@ -84,9 +126,10 @@ async def program(Client, progress=lambda stage: None):
             raise cleanup
 
 
+@pytest.mark.parametrize("scenario", ["buffered-filesystem", "local-download-paths"])
 @pytest.mark.parametrize("style", ["sync", "async"])
 @pytest.mark.parametrize("provider,shim", [("daytona", False), ("daytona", True), ("arker", True)])
-def test_daytona_filesystem(style, provider, shim, live_router, monkeypatch):
+def test_daytona_filesystem(scenario, style, provider, shim, live_router, monkeypatch):
     if not os.getenv("DAYTONA_API_KEY") or not os.getenv("ARKER_API_KEY"):
         pytest.skip("Live Daytona and Arker credentials required")
     import daytona as native
@@ -105,7 +148,7 @@ def test_daytona_filesystem(style, provider, shim, live_router, monkeypatch):
         stage = value
 
     try:
-        asyncio.run(program(client, progress))
+        asyncio.run(program(client, progress, scenario))
         outcome = "passed"
     except BaseException as error:
         failure = error
@@ -114,8 +157,15 @@ def test_daytona_filesystem(style, provider, shim, live_router, monkeypatch):
             "daytona",
             style,
             "reference" if not shim else "arker" if provider == "arker" else "native",
-            "buffered-filesystem",
-            APIS,
+            scenario,
+            APIS
+            if scenario == "buffered-filesystem"
+            else [
+                "Sandbox.fs.create_folder",
+                "Sandbox.fs.upload_file",
+                "Sandbox.fs.download_file",
+                "Sandbox.fs.download_files",
+            ],
             outcome,
         )
     except BaseException as error:
