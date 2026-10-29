@@ -15,6 +15,9 @@ export function traceVendor<T extends object>(target: T, prefix: string, calls: 
           calls.add(api);
           const result = Reflect.apply(value, object, args);
           const observed = (result: unknown) => {
+            if (["Sandbox.fork", "Sandbox.static.fork"].includes(api) && Array.isArray(result)) {
+              return result.map(child => child instanceof Error ? child : traceVendor(child, "Sandbox", calls));
+            }
             if (prefix.endsWith(".static") && ["create", "connect", "get", "createIfNotExists"].includes(property)) {
               return traceVendor(result as object, prefix.slice(0, -".static".length), calls);
             }

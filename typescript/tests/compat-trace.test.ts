@@ -63,3 +63,24 @@ test("foreground command results and failed calls do not invent handle observati
   await assert.rejects(sandbox.commands.connect(), error => error === failure);
   assert.deepEqual([...calls], ["Sandbox.commands", "Sandbox.commands.run", "Sandbox.commands.connect"]);
 });
+
+for (const prefix of ["Sandbox", "Sandbox.static"]) test(`${prefix}.fork traces successful children without wrapping errors`, async () => {
+  const calls = new Set<string>();
+  class Child {
+    #id = "child";
+    getInfo() { return this.#id; }
+    async kill() { assert.equal(this.#id, "child"); return true; }
+  }
+  const child = new Child(), failure = new Error("child failed");
+  const parent = { async fork() { assert.equal(this, parent); return [child, failure]; } };
+  const observed = traceVendor(parent, prefix, calls);
+  const results = await observed.fork();
+  assert.equal(results[1], failure);
+  assert.ok(results[0] instanceof Child);
+  assert.deepEqual([...calls], [`${prefix}.fork`]);
+  const result = results[0] as Child;
+  assert.equal(result.getInfo(), "child");
+  assert.equal(await result.kill(), true);
+  assert.deepEqual([...calls], [`${prefix}.fork`, "Sandbox.getInfo", "Sandbox.kill"]);
+  assert.ok(!calls.has("Sandbox.files.read"));
+});
