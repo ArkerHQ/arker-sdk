@@ -32,6 +32,34 @@ async function program(Sandbox: SandboxConstructor): Promise<void> {
     assert.deepEqual(new Set(branches.branches), new Set(["feature", "main"]));
     await sandbox.git.checkoutBranch(checkout, "main");
     assert.equal((await sandbox.git.status(checkout)).currentBranch, "main");
+    await sandbox.git.deleteBranch(checkout, "feature");
+    assert.deepEqual((await sandbox.git.branches(checkout)).branches, ["main"]);
+    await sandbox.git.setConfig("compat.value", "value with spaces", { scope: "local", path: checkout });
+    assert.equal(await sandbox.git.getConfig("compat.value", { scope: "local", path: checkout }), "value with spaces");
+    assert.equal(await sandbox.git.getConfig("compat.missing", { scope: "local", path: checkout }), undefined);
+    await sandbox.git.remoteAdd(checkout, "backup", remote);
+    assert.equal(await sandbox.git.remoteGet(checkout, "backup"), remote);
+    assert.equal(await sandbox.git.remoteGet(checkout, "missing"), undefined);
+    await sandbox.git.push(checkout, { remote: "origin", branch: "main" });
+    const peer = `${root}/peer`;
+    await sandbox.git.clone(remote, { path: peer });
+    await sandbox.git.configureUser("Peer", "peer@arker.invalid", { scope: "local", path: peer });
+    await sandbox.files.write(`${peer}/hello.txt`, "updated\n");
+    await sandbox.git.add(peer, { files: ["hello.txt"] });
+    await sandbox.git.commit(peer, "update");
+    await sandbox.git.push(peer, { remote: "origin", branch: "main" });
+    await sandbox.git.pull(checkout, { remote: "origin", branch: "main" });
+    assert.equal(await sandbox.files.read(`${checkout}/hello.txt`), "updated\n");
+    await sandbox.files.write(`${checkout}/hello.txt`, "dirty\n");
+    await sandbox.git.add(checkout, { files: ["hello.txt"] });
+    await sandbox.git.reset(checkout, { paths: ["hello.txt"] });
+    assert.equal(await sandbox.files.read(`${checkout}/hello.txt`), "dirty\n");
+    await sandbox.git.restore(checkout, { paths: ["hello.txt"], worktree: true });
+    assert.equal(await sandbox.files.read(`${checkout}/hello.txt`), "updated\n");
+    assert.equal((await sandbox.git.status(checkout)).isClean, true);
+    await sandbox.git.dangerouslyAuthenticate({ username: "compat-user", password: "synthetic-token", host: "compat.invalid" });
+    assert.equal(await sandbox.git.getConfig("credential.helper"), "store");
+    assert.equal(await sandbox.files.read("/home/user/.git-credentials"), "https://compat-user:synthetic-token@compat.invalid\n");
   } finally {
     await sandbox.kill();
   }
