@@ -9,9 +9,12 @@ import hmac
 import json
 import re
 import time
+from dataclasses import dataclass, field
 from urllib.parse import quote, urlencode, urlsplit
 
 from ._compat_e2b_data_plane import EnvdDescriptor
+from .computer import ArkerError
+from .generated.api_models import MatchedRequestContext, UnsupportedOperation, UnsupportedOperationDetails
 
 
 def _request(path, user, operation, expiry, descriptor):
@@ -104,10 +107,34 @@ class _FileDelegation:
         return self.url + "?" + urlencode({"ticket": ticket})
 
 
+@dataclass(frozen=True)
+class _UnsupportedFileURLs:
+    error: ArkerError = field(repr=False)
+
+    def sign(self, body):
+        raise self.error.with_traceback(None)
+
+
 def _load_delegation(vm):
-    response = vm._client._request(
-        "POST", f"/v1/vms/{quote(vm.id, safe='')}/file-transfer-delegation", {}, base_url=vm.base_url
-    )
+    try:
+        response = vm._client._request(
+            "POST", f"/v1/vms/{quote(vm.id, safe='')}/file-transfer-delegation", {}, base_url=vm.base_url
+        )
+    except ArkerError as error:
+        body = error.body
+        if (
+            error.status == 422
+            and error.code == "unsupported_operation"
+            and isinstance(body, UnsupportedOperation)
+            and body.code == "unsupported_operation"
+            and isinstance(body.details, UnsupportedOperationDetails)
+            and body.details.reason == "feature_not_supported"
+            and isinstance(body.request, MatchedRequestContext)
+            and body.request.kind == "matched"
+            and body.request.operation_id == "createFileTransferDelegation"
+        ):
+            return _UnsupportedFileURLs(error)
+        raise
     return _FileDelegation(response)
 
 
@@ -127,6 +154,7 @@ class E2BFileURLs:
 
     Omitted expiry has no time limit; explicit expiry is 0..4294967295 seconds.
     Revoking the issuing API key invalidates subsequent redemptions.
+    Unsupported file URL capabilities raise the original API error locally.
     """
 
     def __init__(self, vm=None, native=None, descriptor: EnvdDescriptor | None = None):

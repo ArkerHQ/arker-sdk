@@ -1,6 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 import type { EnvdDescriptor } from "./e2b-data-plane.js";
-import type { VM } from "../index.js";
+import { ArkerError, type VM } from "../index.js";
 
 export interface E2BFileURLOptions {
   user?: string;
@@ -18,7 +18,7 @@ interface DelegationResponse {
   operations: ("read" | "write")[];
   expires_at: number | null;
 }
-const delegations = new WeakMap<URLVM, FileDelegation>();
+const delegations = new WeakMap<URLVM, FileDelegation | UnsupportedFileURLs>();
 function decode(value: string, limit: number): Buffer {
   if (typeof value !== "string" || !value.length || value.length > limit || !/^[A-Za-z0-9_-]+$/.test(value)) throw new TypeError("Invalid file delegation encoding");
   const bytes = Buffer.from(value, "base64url");
@@ -50,14 +50,30 @@ class FileDelegation {
     return `${response.redemption_url}?ticket=${ticket}`;
   }
 }
+class UnsupportedFileURLs {
+  constructor(private readonly error: ArkerError) { Object.freeze(this); }
+  sign(_body: { operation: "read" | "write"; expires_at?: number }): never { throw this.error; }
+}
 export async function prepareFileURLs(vm: URLVM): Promise<void> {
-  const response = await vm._client._request<DelegationResponse>("POST", `/v1/vms/${encodeURIComponent(vm.id)}/file-transfer-delegation`, {}, vm.baseUrl);
+  let response: DelegationResponse;
+  try {
+    response = await vm._client._request<DelegationResponse>("POST", `/v1/vms/${encodeURIComponent(vm.id)}/file-transfer-delegation`, {}, vm.baseUrl);
+  } catch (error) {
+    if (error instanceof ArkerError && error.status === 422 && error.code === "unsupported_operation"
+      && error.body?.code === "unsupported_operation" && error.body.details?.reason === "feature_not_supported"
+      && "request" in error.body && error.body.request?.kind === "matched" && error.body.request.operation_id === "createFileTransferDelegation") {
+      delegations.set(vm, new UnsupportedFileURLs(error));
+      return;
+    }
+    throw error;
+  }
   delegations.set(vm, new FileDelegation(response));
 }
 
 /** Revocable GET / multipart POST URLs for native file services.
  * Omitted expiry has no time limit; explicit expiry is 0..4294967295 seconds.
  * Revoking the issuing API key invalidates subsequent redemptions.
+ * Unsupported file URL capabilities raise the original API error locally.
  */
 export class E2BFileURLs {
   constructor(private readonly vm?: Pick<VM, "id" | "baseUrl" | "_client">, private readonly native?: NativeURLs, private readonly descriptor?: EnvdDescriptor) {}

@@ -14,6 +14,13 @@ For Arker routes, set `ARKER_API_KEY`, `ARKER_PROVIDER`, `ARKER_REGION`, and
 replaces provider/region configuration. Keep native provider credentials for
 native routes.
 
+E2B signed file URLs are unavailable on BYOC and self-hosted pool workers.
+When URL preparation returns the specific unsupported-capability error, sandbox
+creation may continue if bootstrap and native-client initialization succeed;
+URL methods then raise that original error locally. Other preparation failures
+still fail creation. Native E2B data-plane behavior on these pools has not been
+verified live.
+
 ## Image parents and host policy secrets
 
 The shared Arker adapter accepts `source_vm_id` (Python) or `sourceVmId`
