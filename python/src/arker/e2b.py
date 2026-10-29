@@ -138,6 +138,10 @@ class Sandbox(UnsupportedMixin):
 
     @classmethod
     def create(cls, template_id: str | None = None, **kwargs: Any) -> Sandbox:
+        if "template" in kwargs:
+            if template_id is not None:
+                raise TypeError("Specify template only once")
+            template_id = kwargs.pop("template")
         timeout = kwargs.pop("timeout", None)
         timeout_aliases = sorted({"timeout_ms", "timeoutMs"}.intersection(kwargs))
         if timeout_aliases:
@@ -214,12 +218,36 @@ class Sandbox(UnsupportedMixin):
     ) -> VM:
         check_mount_backend(native_options.get("volume_mounts"), "arker")
         unsupported = sorted(
-            key for key in native_options if key not in {"volume_mounts", "network", "envs", "metadata"}
+            key
+            for key in native_options
+            if key
+            not in {
+                "volume_mounts",
+                "network",
+                "envs",
+                "metadata",
+                "api_key",
+                "secure",
+                "validate_api_key",
+                "debug",
+                "lifecycle",
+            }
         )
         if unsupported:
             raise UnsupportedCompatibilityOption(
                 f"Sandbox.create option(s) are not supported by Arker: {', '.join(unsupported)}"
             )
+        if "debug" in native_options and native_options["debug"] is not False:
+            raise UnsupportedCompatibilityOption("Arker Sandbox.create supports only debug=False")
+        lifecycle = native_options.get("lifecycle")
+        if lifecycle is not None:
+            if not isinstance(lifecycle, dict) or set(lifecycle) - {"on_timeout", "auto_resume"}:
+                raise UnsupportedCompatibilityOption("Arker Sandbox.create supports only kill lifecycle")
+            action = lifecycle.get("on_timeout", "kill")
+            if action != "kill" and action != {"action": "kill"}:
+                raise UnsupportedCompatibilityOption("Arker Sandbox.create supports only kill lifecycle")
+            if lifecycle.get("auto_resume", False) is not False:
+                raise UnsupportedCompatibilityOption("Arker Sandbox.create supports only auto_resume=False")
         metadata = native_options.get("metadata")
         if metadata is None:
             metadata = {}

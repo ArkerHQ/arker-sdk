@@ -213,12 +213,12 @@ test("static lifecycle aliases forward native options without connecting", async
   assert.equal(pauses, 2);
 });
 
-test("Arker-only creation restrictions reject vendor credentials before any request", async t => {
+test("Arker-only creation restrictions reject unsupported options before any request", async t => {
   preserveEnvironment(t, "ARKER_API_KEY", "COMPUTESDK_ROUTER_CONFIG", "ARKER_SOURCE_VM_ID");
   process.env.ARKER_API_KEY = "arker-test";
   process.env.ARKER_SOURCE_VM_ID = "00000000000000000000000000";
   delete process.env.COMPUTESDK_ROUTER_CONFIG;
-  for (const options of [{ apiKey: "native-test" }, { secure: true }, { network: { maskRequestHost: true } }]) {
+  for (const options of [{ headers: {} }, { requestTimeoutMs: 0 }, { network: { maskRequestHost: true } }]) {
     await assert.rejects(Sandbox.create(options as any), /unsupported .*option/i);
   }
 });
@@ -265,4 +265,67 @@ test("provider fork hook installs policies in the only fork request", async t =>
     });
   await provider.sandbox.create();
   assert.deepEqual(calls, [{ source_vm_id: "fixture-source", policies: policy }]);
+});
+
+test("Arker creation separates native credentials and keeps default kill semantics", async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "COMPUTESDK_ROUTER_CONFIG", "ARKER_SOURCE_VM_ID");
+  process.env.ARKER_API_KEY = "arker-only";
+  delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  delete process.env.ARKER_SOURCE_VM_ID;
+  preserveProperties(t, Arker.prototype, "getVm", "fork");
+  const requests: unknown[] = [];
+  const marker = new Error("stop at fork");
+  Arker.prototype.getVm = (async function (this: Arker, source: string) {
+    assert.equal(source, "selected-template");
+    assert.equal(this._authHeaders().authorization, "Bearer arker-only");
+    return { policies: undefined } as VM;
+  }) as typeof Arker.prototype.getVm;
+  Arker.prototype.fork = async function (request) {
+    assert.equal(this._authHeaders().authorization, "Bearer arker-only");
+    requests.push(request);
+    throw marker;
+  };
+  for (const lifecycle of [undefined, {}, { autoResume: false }, { onTimeout: "kill" }, { onTimeout: { action: "kill" }, autoResume: false }]) {
+    const options = { template: "selected-template", apiKey: "native-only", secure: false, validateApiKey: false, debug: false, lifecycle };
+    const original = structuredClone(options);
+    await assert.rejects(Sandbox.create(options as any), error => error === marker);
+    const request = requests.at(-1) as any;
+    assert.equal(request.source_vm_name, "selected-template");
+    assert.deepEqual(request.policies.rules["computesdk-e2b-lifetime"], { type: "schedule", after_created: 300, action: "delete" });
+    assert.equal(request.policies.rules["computesdk-e2b-envd"].auth, "arker");
+    assert.ok(!JSON.stringify(request).includes("native-only"));
+    assert.deepEqual(options, original);
+  }
+});
+
+test("unsupported creation behaviors fail before source lookup or fork", async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "COMPUTESDK_ROUTER_CONFIG");
+  process.env.ARKER_API_KEY = "arker-only";
+  delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  preserveProperties(t, Arker.prototype, "getVm", "fork");
+  Arker.prototype.getVm = async () => { assert.fail("must not look up source"); };
+  Arker.prototype.fork = async () => { assert.fail("must not fork"); };
+  for (const options of [
+    { debug: true }, { lifecycle: { onTimeout: "pause" } },
+    { lifecycle: { onTimeout: { action: "pause", mode: "filesystem" } } },
+    { lifecycle: { autoResume: true } }, { lifecycle: { autoResume: 0 } },
+    { lifecycle: { onTimeout: { action: "kill", mode: "full" } } },
+    { lifecycle: { unknown: false } },
+  ]) await assert.rejects(Sandbox.create(options as any), /supports only|unsupported option/);
+});
+
+test("native object template and credentials remain native without Arker authentication", async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "COMPUTESDK_ROUTER_CONFIG");
+  delete process.env.ARKER_API_KEY;
+  delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  preserveProperties(t, Native, "create");
+  preserveProperties(t, Arker.prototype, "fork");
+  Arker.prototype.fork = async () => { assert.fail("native key must not enable Arker"); };
+  const options = { template: "native-template", apiKey: "native-only", secure: false, validateApiKey: true, debug: false,
+    lifecycle: { onTimeout: "pause" as const, autoResume: true }, requestTimeoutMs: 0 };
+  Native.create = (async (actual: unknown) => {
+    assert.deepEqual(actual, options);
+    return { sandboxId: "native" } as Native;
+  }) as typeof Native.create;
+  assert.equal((await Sandbox.create(options)).sandboxId, "native");
 });

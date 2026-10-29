@@ -23,7 +23,7 @@ export type { CommandResult as CommandExitResult } from "e2b";
 const descriptors = new WeakMap<E2BDataPlane, EnvdDescriptor>();
 
 type NativeSandbox = Pick<VendorSandbox, "kill" | "getHost" | "commands" | "files" | "git" | "pty" | "trafficAccessToken">;
-const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess", "volumeMounts", "network"] as const;
+const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess", "volumeMounts", "network", "template", "apiKey", "secure", "validateApiKey", "debug", "lifecycle"] as const;
 
 function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMounts, lookupOptions?: SandboxApiOpts) {
   const { mode: _mode, keepMemory: _keepMemory, onResume: _onResume, timeoutMs: _timeout, ...apiOptions } =
@@ -45,12 +45,24 @@ function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMount
     arkerFork: (client: import("./index.js").Arker, request: import("./index.js").ForkOptions) => forkWithTraffic(client, request, network?.allowPublicTraffic ?? true),
     mapArkerCreateOptions: (values: Record<string, unknown>) => {
       assertSupportedObjectKeys(values, [...E2B_CREATE_OPTION_KEYS, "templateId"], "e2b", "Sandbox.create");
+      if (values.debug !== undefined && values.debug !== false) throw new Error("Arker Sandbox.create supports only debug=false");
+      if (values.lifecycle !== undefined) {
+        const lifecycle = values.lifecycle as SandboxOpts["lifecycle"];
+        if (!lifecycle || typeof lifecycle !== "object" || Array.isArray(lifecycle)) throw new Error("Arker Sandbox.create supports only kill lifecycle");
+        assertSupportedObjectKeys(lifecycle, ["onTimeout", "autoResume"], "e2b", "Sandbox.create lifecycle");
+        const action = lifecycle.onTimeout ?? "kill";
+        if (action !== "kill" && !(typeof action === "object" && action.action === "kill" && Object.keys(action).length === 1)) {
+          throw new Error("Arker Sandbox.create supports only kill lifecycle");
+        }
+        if (lifecycle.autoResume !== undefined && lifecycle.autoResume !== false) throw new Error("Arker Sandbox.create supports only autoResume=false");
+      }
       validateEnvdEnvs(values.envs as Record<string, string> | undefined);
       validateE2BNetwork(values.network as E2BNetworkOptions | undefined);
       network = values.network as E2BNetworkOptions | undefined;
       if (volumeMounts !== undefined) checkMountBackend(volumeMounts, "arker");
-      const { volumeMounts: _mounts, network: _network, envs: _envs, timeoutMs: _timeoutMs, ...rest } = values;
-      return { ...rest, timeout: e2bTimeoutDuration(resolveTimeout(values as CreateOptions) ?? 300_000) };
+      const { volumeMounts: _mounts, network: _network, envs: _envs, timeoutMs: _timeoutMs,
+        apiKey: _apiKey, secure: _secure, validateApiKey: _validateApiKey, debug: _debug, lifecycle: _lifecycle, template, ...rest } = values;
+      return { ...rest, ...(template !== undefined && rest.templateId === undefined ? { templateId: template } : {}), timeout: e2bTimeoutDuration(resolveTimeout(values as CreateOptions) ?? 300_000) };
     },
   };
 }
