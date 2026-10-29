@@ -60,7 +60,7 @@ Live checks (not vendor-equivalence evidence):
 
 ```sh
 cd python
-uv run pytest tests/e2e/test_compat_image_forks.py -q
+uv run --no-sync pytest tests/e2e/test_compat_image_forks.py -q
 cd ../typescript
 npx -y tsx@4.20.6 tests/compat-image-forks-live.ts
 ```
@@ -136,7 +136,7 @@ report's `full_api_equivalence` field to true.
 
 ## Reproduce
 
-Configure provider/Arker credentials, plus `ARKER_SOURCE`, `ARKER_PROVIDER`, and
+Configure provider/Arker credentials, plus `ARKER_SOURCE_VM_ID`, `ARKER_PROVIDER`, and
 `ARKER_REGION`. Credentials are never included in evidence.
 
 ```sh
@@ -144,12 +144,12 @@ export COMPAT_COVERAGE_RUN="$(date -u +%Y%m%dT%H%M%SZ)"
 cd python
 uv pip install -r ../compatibility/requirements.txt
 COMPAT_COVERAGE_EVIDENCE=/tmp/python-compat.jsonl \
-  uv run pytest tests/e2e/test_e2b_command_import_only.py
+  uv run --no-sync pytest tests/e2e/test_e2b_command_import_only.py
 COMPAT_COVERAGE_EVIDENCE=/tmp/python-compat.jsonl \
-uv run pytest tests/e2e/test_blaxel_import_only.py
+uv run --no-sync pytest tests/e2e/test_blaxel_import_only.py
 COMPAT_COVERAGE_EVIDENCE=/tmp/python-compat.jsonl \
-  uv run pytest tests/e2e/test_blaxel_fetch_import_only.py
-uv run python scripts/compat_coverage.py \
+  uv run --no-sync pytest tests/e2e/test_blaxel_fetch_import_only.py
+uv run --no-sync python scripts/compat_coverage.py \
   --evidence /tmp/python-compat.jsonl --output /tmp/python-coverage.json
 cd ../typescript
 bun install
@@ -185,7 +185,7 @@ or command arguments. Run:
 
 ```sh
 cd python
-uv run pytest tests/e2e/test_compat_private_registry.py
+uv run --no-sync pytest tests/e2e/test_compat_private_registry.py
 cd ../typescript
 npx -y tsx@4.20.6 tests/compat-private-registry-live.ts
 ```
