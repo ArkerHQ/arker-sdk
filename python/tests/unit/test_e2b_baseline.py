@@ -16,8 +16,22 @@ def _module():
     return module
 
 
+@pytest.fixture(autouse=True)
+def bootstrap_canary(monkeypatch):
+    from arker import _compat_e2b_bootstrap
+
+    calls = []
+
+    def bootstrap(vm):
+        assert len(vm.commands) == 4
+        calls.append(vm)
+
+    monkeypatch.setattr(_compat_e2b_bootstrap, "bootstrap_envd", bootstrap)
+    return calls
+
+
 class FakeVm:
-    def __init__(self, name="computesdk-e2b-baseline-owned", results=(0, 0)):
+    def __init__(self, name="computesdk-e2b-baseline-owned", results=(0, 0, 0, 0)):
         self.name = name
         self.results = iter(results)
         self.commands = []
@@ -26,7 +40,7 @@ class FakeVm:
     def refresh(self):
         return self
 
-    def run(self, command):
+    def run(self, command, **options):
         self.commands.append(command)
         return types.SimpleNamespace(exit_code=next(self.results), stderr="conflict")
 
@@ -35,7 +49,7 @@ class FakeVm:
         return types.SimpleNamespace(deleted=True)
 
 
-def test_baseline_uses_one_stable_key_digest_and_explicit_x86_platform():
+def test_baseline_uses_one_stable_key_digest_and_explicit_x86_platform(bootstrap_canary):
     baseline = _module()
     vm = FakeVm()
     calls = []
@@ -47,12 +61,20 @@ def test_baseline_uses_one_stable_key_digest_and_explicit_x86_platform():
                 raise ConnectionError("ambiguous write")
             return vm
 
-    assert baseline.create_e2b_baseline(Client(), marker=vm.name, idempotency_key="stable", attempts=2) is vm
+    assert (
+        baseline.create_e2b_baseline(
+            Client(), platform="graniterapids", marker=vm.name, idempotency_key="stable", attempts=2
+        )
+        is vm
+    )
     assert calls[0] == calls[1]
     assert calls[0]["image"].endswith("sha256:8aebbf5e7d1209ebdc4bbc5999624556c2d9eebe91b9fded756ff2d688367065")
-    assert calls[0]["platforms"] == ["icelake"]
+    assert calls[0]["platforms"] == ["graniterapids"]
     assert "! getent passwd 1000" in vm.commands[0]
-    assert "rmdir /home/user" in vm.commands[1]
+    assert "apt-get install" in vm.commands[1]
+    assert "rmdir /home/user" in vm.commands[2]
+    assert "ip6tables" in vm.commands[3]
+    assert bootstrap_canary == [vm]
 
 
 def test_baseline_conflict_deletes_only_marker_verified_owned_vm():
@@ -124,7 +146,7 @@ def test_failed_cleanup_preserves_interruption_as_cause(monkeypatch):
     interrupted = KeyboardInterrupt()
     cleanup_error = ConnectionError("cleanup unavailable")
 
-    def run(command):
+    def run(command, **options):
         raise interrupted
 
     def delete():
@@ -137,3 +159,49 @@ def test_failed_cleanup_preserves_interruption_as_cause(monkeypatch):
         baseline.create_e2b_baseline(client, marker=vm.name)
     assert caught.value is cleanup_error
     assert caught.value.__cause__ is interrupted
+
+
+def test_baseline_default_uses_regional_scheduling():
+    baseline = _module()
+    vm = FakeVm()
+    calls = []
+    client = types.SimpleNamespace(fork=lambda **options: calls.append(options) or vm)
+    assert baseline.create_e2b_baseline(client, marker=vm.name) is vm
+    assert "platforms" not in calls[0]
+
+
+@pytest.mark.parametrize("platform", ["", "  ", 1])
+def test_invalid_platform_refused_before_fork(platform):
+    baseline = _module()
+    with pytest.raises(ValueError, match="platform"):
+        baseline.create_e2b_baseline(object(), platform=platform)
+
+
+@pytest.mark.parametrize("stage", [1, 2, 3])
+def test_baseline_prerequisite_or_capability_failure_cleans_owned_vm(stage):
+    baseline = _module()
+    vm = FakeVm(results=(*([0] * stage), 1))
+    client = types.SimpleNamespace(fork=lambda **options: vm)
+    with pytest.raises(RuntimeError):
+        baseline.create_e2b_baseline(client, marker=vm.name)
+    assert len(vm.commands) == stage + 1
+    assert vm.deleted == 1
+
+
+def test_failed_bootstrap_canary_refuses_baseline_and_deletes_it(monkeypatch):
+    from arker import _compat_e2b_bootstrap
+
+    baseline = _module()
+    vm = FakeVm()
+    failure = RuntimeError("envd isolation unavailable")
+
+    def fail(current):
+        assert current is vm and len(vm.commands) == 4
+        raise failure
+
+    monkeypatch.setattr(_compat_e2b_bootstrap, "bootstrap_envd", fail)
+    client = types.SimpleNamespace(fork=lambda **options: vm)
+    with pytest.raises(RuntimeError) as caught:
+        baseline.create_e2b_baseline(client, marker=vm.name)
+    assert caught.value is failure
+    assert vm.deleted == 1
