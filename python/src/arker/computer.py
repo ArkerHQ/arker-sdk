@@ -50,6 +50,7 @@ from .generated.api_models import (
     CreatedApiKey,
     CreatePoolRequest,
     CreateSessionRequest,
+    DeleteFilesystemParameters,
     DeleteFilesystemResponse,
     DeleteMountResponse,
     DeleteSessionResponse,
@@ -609,10 +610,16 @@ class Arker:
             )
         )
 
-    def delete_filesystem(self, filesystem_id: str) -> DeleteFilesystemResponse:
+    def delete_filesystem(
+        self, filesystem_id: str, *, only_if_unmounted: bool | None = None
+    ) -> DeleteFilesystemResponse:
         payload = self._request(
             "DELETE",
-            f"/v1/filesystems/{_segment(filesystem_id)}",
+            _build_query(
+                f"/v1/filesystems/{_segment(filesystem_id)}",
+                DeleteFilesystemParameters(filesystem_id=filesystem_id, only_if_unmounted=only_if_unmounted),
+                path_fields={"filesystem_id"},
+            ),
             base_url=self.base_url,
         )
         return _decode_model(DeleteFilesystemResponse, payload)
@@ -1327,9 +1334,9 @@ class VM:
         payload = self._client._request("GET", path, base_url=self.base_url)
         return _decode_model(ListMountsResponse, payload)
 
-    def create_mount(self, *, filesystem_id: str, path: str | None = None) -> Mount:
+    def create_mount(self, *, filesystem_id: str, path: str | None = None, subpath: str | None = None) -> Mount:
         """Bind a filesystem into this VM at ``path``."""
-        request = MountCreateRequest(filesystem_id=filesystem_id, path=path)
+        request = MountCreateRequest(filesystem_id=filesystem_id, path=path, subpath=subpath)
         payload = self._client._request("POST", f"{_vm_path(self.id)}/mounts", request, base_url=self.base_url)
         return _mount(payload)
 
@@ -1908,7 +1915,11 @@ def _build_query(
     values = _drop_none(parameters)
     if not isinstance(values, dict):
         raise TypeError("operation parameters must serialize to an object")
-    pairs = [(key, str(value)) for key, value in values.items() if key not in path_fields]
+    pairs = [
+        (key, str(value).lower() if isinstance(value, bool) else str(value))
+        for key, value in values.items()
+        if key not in path_fields
+    ]
     qs = urllib.parse.urlencode(pairs)
     return f"{path}?{qs}" if qs else path
 

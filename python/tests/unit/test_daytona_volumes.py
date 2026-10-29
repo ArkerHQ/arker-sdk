@@ -40,7 +40,7 @@ def store(configure_router, monkeypatch):
             raise ArkerError("not_found", "missing", 404)
         return rows[identifier]
 
-    def delete(identifier):
+    def delete(identifier, *, only_if_unmounted=None):
         get(identifier)
         del rows[identifier]
         actions.append(("delete", identifier))
@@ -71,9 +71,7 @@ def test_volume_lifecycle_native_types_and_committed_namespace_metadata(store, a
         assert volume.organization_id == "org" and volume.last_used_at is None
         assert (await call(service.get, "shared", create=True)).id == volume.id
         assert [v.id for v in await call(service.list)] == [volume.id]
-        with pytest.raises(UnsupportedCompatibilityOption, match="atomically"):
-            await call(service.delete, volume)
-        store[0].delete_filesystem(volume.id)
+        await call(service.delete, volume)
         from daytona.common.errors import DaytonaNotFoundError
 
         with pytest.raises(DaytonaNotFoundError):
@@ -126,9 +124,8 @@ def test_native_volume_identity_and_arguments_stay_native(configure_router, monk
 def test_explicit_arker_handle_delete_never_routes_to_native(store, configure_router):
     volume = daytona.Daytona().volume.create("shared")
     configure_router(["daytona"])
-    with pytest.raises(UnsupportedCompatibilityOption, match="atomically"):
-        daytona.Daytona().volume.delete(volume)
-    assert store[2] == [("create", "shared")]
+    daytona.Daytona().volume.delete(volume)
+    assert store[2] == [("create", "shared"), ("delete", volume.id)]
 
 
 @pytest.mark.parametrize("failure", [None, "mount", "readiness"])
@@ -163,12 +160,16 @@ def test_whole_mount_resolves_before_create_waits_as_daytona_and_cleans_failure(
     assert actions[1] == ("mount", {"filesystem_id": volume.id, "path": "/data"})
 
 
-def test_subpath_rejected_before_vm_creation(store, monkeypatch):
-    from daytona import VolumeMount
-
-    monkeypatch.setattr(daytona, "arker_create", lambda *a, **kw: pytest.fail("no VM creation"))
-    with pytest.raises(UnsupportedCompatibilityOption, match="subpath"):
-        daytona.Daytona().create(volumes=[VolumeMount(volume_id="dir_owned", mount_path="/data", subpath="secret")])
+def test_subpath_reaches_backend_before_readiness(store, monkeypatch):
+    volume = daytona.Daytona().volume.create("subtree")
+    calls = []
+    vm = SimpleNamespace(id="owned", create_mount=lambda **kw: calls.append(kw))
+    monkeypatch.setattr(daytona, "arker_create", lambda *a, **kw: vm)
+    monkeypatch.setattr(daytona, "run_command", lambda *a: SimpleNamespace(exit_code=0))
+    daytona.Daytona().create(
+        volumes=[{"volume_id": volume.id, "mount_path": "/release..notes", "subpath": "child/nested"}]
+    )
+    assert calls == [{"filesystem_id": volume.id, "path": "/release..notes", "subpath": "child/nested"}]
 
 
 def test_native_sandbox_rejects_arker_id_before_native_creation(configure_router, monkeypatch):
@@ -364,10 +365,12 @@ def test_mount_path_traversal_refused_before_namespace_lookup(store, monkeypatch
         daytona.Daytona().create(volumes=[{"volume_id": "dir_owned", "mount_path": path}])
 
 
-@pytest.mark.parametrize("subpath", ["child", "../escape", "/absolute", "a/../../escape", "a\0b"])
-def test_subtree_is_never_emulated_or_admitted_before_backend_support(store, monkeypatch, subpath):
+@pytest.mark.parametrize(
+    "subpath", ["../escape", "/absolute", "a/../../escape", "a\0b", "a//b", "a/*", "${aws:username}"]
+)
+def test_subtree_escape_is_refused_before_vm_creation(store, monkeypatch, subpath):
     monkeypatch.setattr(daytona, "arker_create", lambda *a, **kw: pytest.fail("no VM creation"))
-    with pytest.raises(UnsupportedCompatibilityOption, match="subpath"):
+    with pytest.raises(ValueError, match="subpath"):
         daytona.Daytona().create(volumes=[{"volume_id": "dir_owned", "mount_path": "/data", "subpath": subpath}])
 
 
@@ -444,3 +447,162 @@ def test_volume_name_validation_uses_backend_error_contract(store, monkeypatch):
         daytona.Daytona().volume.create("name with spaces")
     assert caught.value.status_code == 400
     assert names == ["name with spaces"]
+
+
+def test_differential_race_failure_waits_for_volume_cleanup_and_closes_client(monkeypatch):
+    import runpy
+    from pathlib import Path
+
+    from daytona.common.errors import DaytonaInternalServerError
+
+    scenarios = Path(__file__).parents[1] / "e2e"
+    monkeypatch.syspath_prepend(str(scenarios))
+    program = runpy.run_path(str(scenarios / "test_daytona_volumes_import_only.py"))["program"]
+    actions = []
+    volume = SimpleNamespace(id="owned", state=SimpleNamespace(value="pending_create"), error_reason=None)
+
+    class Service:
+        creates = 0
+
+        async def get(self, name, create=False):
+            if create:
+                self.creates += 1
+                if self.creates == 2:
+                    raise DaytonaInternalServerError("native race", status_code=500)
+                return volume
+            actions.append("ready")
+            volume.state.value = "ready"
+            return volume
+
+        async def delete(self, value):
+            assert value is volume and value.state.value == "ready"
+            actions.append("delete")
+
+    class Client:
+        def __init__(self):
+            self.volume = Service()
+
+        async def close(self):
+            actions.append("close")
+
+    with pytest.raises(AssertionError):
+        asyncio.run(program(Client, scenario="get-create-concurrency"))
+    assert actions == ["ready", "delete", "close"]
+
+
+@pytest.mark.parametrize("status", [409, 422, 403])
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_conditional_deletion_preserves_namespace_and_native_error(store, monkeypatch, status, asynchronous):
+    from daytona.common.errors import create_daytona_error
+
+    volume = daytona.Daytona().volume.create("mounted")
+    calls = []
+
+    def refuse(identifier, *, only_if_unmounted):
+        calls.append((identifier, only_if_unmounted))
+        raise ArkerError("conflict" if status == 409 else "unsupported_operation", "refused", status)
+
+    monkeypatch.setattr(store[0], "delete_filesystem", refuse)
+
+    async def run():
+        service = (daytona.AsyncDaytona() if asynchronous else daytona.Daytona()).volume
+        with pytest.raises(type(create_daytona_error("refused", status_code=status))) as caught:
+            result = service.delete(volume)
+            if asynchronous:
+                await result
+        assert caught.value.status_code == status
+
+    asyncio.run(run())
+    assert calls == [(volume.id, True)]
+    assert volume.id in store[1]
+
+
+@pytest.mark.parametrize("subpath", [0, False, {}, [], "\x85", "a/\x9f"])
+def test_subpath_type_or_control_rejected_before_lookup(store, monkeypatch, subpath):
+    monkeypatch.setattr(store[0], "get_filesystem", lambda *args: pytest.fail("no lookup"))
+    with pytest.raises(ValueError, match="subpath"):
+        volumes.resolve_mounts(
+            [{"volume_id": "dir_owned", "mount_path": "/data", "subpath": subpath}], daytona.Daytona().volume
+        )
+
+
+def test_empty_subpath_is_whole_filesystem(store):
+    volume = daytona.Daytona().volume.create("whole")
+    assert volumes.resolve_mounts(
+        [{"volume_id": volume.id, "mount_path": "/data", "subpath": ""}], daytona.Daytona().volume
+    ) == [{"filesystem_id": volume.id, "path": "/data"}]
+
+
+def test_volume_inventory_paginates_past_five_hundred(store, monkeypatch):
+    base = store[0].create_filesystem(name="base")
+    rows = [SimpleNamespace(**{**vars(base), "filesystem_id": f"dir_{n}", "name": f"n-{n}"}) for n in range(601)]
+    calls = []
+
+    def page(*, cursor, limit):
+        calls.append((cursor, limit))
+        start = int(cursor)
+        end = min(start + limit, len(rows))
+        return SimpleNamespace(filesystems=rows[start:end], next_cursor=str(end) if end < len(rows) else None)
+
+    monkeypatch.setattr(store[0], "list_filesystems", page)
+    assert [v.id for v in daytona.Daytona().volume.list()] == [r.filesystem_id for r in rows]
+    assert calls == [(str(n), 100) for n in range(0, 601, 100)]
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"volume_id": "dir_second", "mount_path": "/second", "subpath": False},
+        {"volume_id": "dir_second", "mount_path": "relative"},
+        {"volume_id": 12, "mount_path": "/second"},
+    ],
+)
+def test_arker_all_mounts_validate_before_client_or_provider_io(store, monkeypatch, invalid):
+    service = daytona.Daytona().volume
+    monkeypatch.setattr(volumes, "arker_client", lambda *_: pytest.fail("no client construction"))
+    monkeypatch.setattr(service, "_mount_owner", lambda *_: pytest.fail("no provider lookup"))
+    with pytest.raises((ValueError, TypeError)):
+        volumes.resolve_mounts(
+            [
+                {"volume_id": "dir_first", "mount_path": "/first"},
+                invalid,
+            ],
+            service,
+        )
+
+
+def test_native_all_mounts_validate_before_provider_io(configure_router, monkeypatch):
+    from pydantic import ValidationError
+
+    configure_router(["arker", "daytona"])
+    service = daytona.Daytona().volume
+    monkeypatch.setattr(service, "_mount_owner", lambda *_: pytest.fail("no provider lookup"))
+    with pytest.raises(ValidationError):
+        volumes.check_native_mounts(
+            (),
+            {
+                "volumes": [
+                    {"volume_id": "native-first", "mount_path": "/first"},
+                    {"volume_id": "native-second", "mount_path": "/second", "subpath": False},
+                ]
+            },
+            service,
+        )
+
+
+@pytest.mark.parametrize("as_tuple", [False, True])
+def test_native_mount_prepass_preserves_vendor_model_and_path_semantics(configure_router, monkeypatch, as_tuple):
+    from daytona.common.volume import VolumeMount
+
+    configure_router(["arker", "daytona"])
+    service = daytona.Daytona().volume
+    calls = []
+    monkeypatch.setattr(service, "_mount_owner", lambda identifier: calls.append(identifier) or object())
+    mounts = [
+        VolumeMount(volume_id="native-first", mount_path="relative", subpath="../prefix/*"),
+        {"volume_id": "native-second", "mount_path": "/", "subpath": "${vendor}/?"},
+    ]
+    if as_tuple:
+        mounts = tuple(mounts)
+    volumes.check_native_mounts((), {"volumes": mounts}, service)
+    assert calls == ["native-first", "native-second"]

@@ -438,6 +438,7 @@ export type PtyTicketResponse = ApiSchema<"PtyTicketResponse">;
 export type ListVmsParameters = ApiQuery<"listVms">;
 export type ListOrgRunsParameters = ApiQuery<"listOrgRuns">;
 export type ListFilesystemsParameters = ApiQuery<"listFilesystems">;
+export type DeleteFilesystemParameters = ApiQuery<"deleteFilesystem">;
 export type ListPoolsParameters = ApiQuery<"listPools">;
 export type ListMountsParameters = ApiQuery<"listMounts">;
 export type ListRunsParameters = ApiQuery<"listRuns">;
@@ -507,6 +508,10 @@ export type ListVmsOptions = ListVmsParameters;
 export type ListFilesystemsOptions = Omit<ListFilesystemsParameters, "name_prefix"> & {
   namePrefix?: ListFilesystemsParameters["name_prefix"];
 };
+
+export interface DeleteFilesystemOptions {
+  onlyIfUnmounted?: DeleteFilesystemParameters["only_if_unmounted"];
+}
 
 export type ListMountsOptions = Omit<ListMountsParameters, "filesystem_id"> & {
   filesystemId?: ListMountsParameters["filesystem_id"];
@@ -867,8 +872,11 @@ export class Arker {
     return this._request("GET", `/v1/filesystems/${pathSegment(filesystemId)}`, undefined, this.baseUrl);
   }
 
-  async deleteFilesystem(filesystemId: string): Promise<DeleteFilesystemResponse> {
-    return this._request("DELETE", `/v1/filesystems/${pathSegment(filesystemId)}`, undefined, this.baseUrl);
+  async deleteFilesystem(filesystemId: string, opts: DeleteFilesystemOptions = {}): Promise<DeleteFilesystemResponse> {
+    const path = buildQuery(`/v1/filesystems/${pathSegment(filesystemId)}`, {
+      only_if_unmounted: opts.onlyIfUnmounted,
+    });
+    return this._request("DELETE", path, undefined, this.baseUrl);
   }
 
   /** List pools across regions through the control plane. */
@@ -1735,10 +1743,12 @@ export class VM {
   async createMount(request: {
     filesystemId: MountCreateRequest["filesystem_id"];
     path?: MountCreateRequest["path"];
+    subpath?: MountCreateRequest["subpath"];
   }): Promise<Mount> {
     const body: MountCreateRequest = {
       filesystem_id: request.filesystemId,
       path: request.path,
+      ...(request.subpath ? { subpath: request.subpath } : {}),
     };
     return this._client._request<Mount>("POST", `${vmPath(this.id)}/mounts`, body, this.baseUrl);
   }

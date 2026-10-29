@@ -58,22 +58,45 @@ function translateArker(error: unknown, conflictIsBadRequest = false): never {
 }
 
 function validateMountPath(path: unknown): asserts path is string {
-  if (typeof path !== "string" || path === "/" || !path.startsWith("/") || path.includes("\0") || posix.normalize(path) !== path) {
+  if (typeof path !== "string" || Buffer.byteLength(path) > 256 || path === "/" || !path.startsWith("/") || path.includes("\0") || posix.normalize(path) !== path) {
     throw new TypeError("Volume mount path must be canonical, absolute and non-root");
   }
 }
 
-function validateMountSubpath(value: unknown): asserts value is string | undefined {
-  if (value === undefined || value === "") return;
-  if (typeof value !== "string") throw new TypeError("Volume subpath must be a string");
+function normalizeMountSubpath(value: unknown): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (
+    typeof value !== "string"
+    || Buffer.byteLength(value) > 512
+    || value.startsWith("/")
+    || value.includes("\\")
+    || /\p{Cc}/u.test(value)
+    || value.includes("*")
+    || value.includes("?")
+    || value.includes("${")
+    || value.split("/").some((part) => part === "" || part === "." || part === "..")
+  ) {
+    throw new TypeError("Volume subpath must be a canonical relative path");
+  }
+  return value;
 }
 
-function validateMountSubpaths(value: unknown[]): void {
-  for (const item of value) {
-    if (item && typeof item === "object" && !Array.isArray(item)) {
-      validateMountSubpath((item as { subpath?: unknown }).subpath);
-    }
-  }
+export function normalizeDaytonaVolumeMounts(value: unknown): VolumeMount[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new TypeError("volumes must be an array");
+  const paths = new Set<string>();
+  return value.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new TypeError("Invalid Daytona volume mount");
+    const unknown = Object.keys(item).find((key) => !["volumeId", "mountPath", "subpath"].includes(key));
+    if (unknown) throw new TypeError(`Invalid Daytona volume mount field ${unknown}`);
+    const mount = item as VolumeMount & { subpath?: unknown };
+    validateMountPath(mount.mountPath);
+    if (paths.has(mount.mountPath)) throw new TypeError("Duplicate volume mount path");
+    paths.add(mount.mountPath);
+    if (typeof mount.volumeId !== "string" || !mount.volumeId) throw new TypeError("volumeId must be a nonempty string");
+    const subpath = normalizeMountSubpath(mount.subpath);
+    return { volumeId: mount.volumeId, mountPath: mount.mountPath, ...(subpath !== undefined ? { subpath } : {}) };
+  });
 }
 
 function readyCommand(paths: string[]): string {
@@ -171,10 +194,10 @@ export class DaytonaVolumeService {
   async #listArker(): Promise<Volume[]> {
     const result: Volume[] = [];
     const seen = new Set<string>();
-    let cursor: string | undefined;
+    let cursor: string | undefined = "0";
     do {
       let page;
-      try { page = await this.#arker!.listFilesystems({ cursor }); }
+      try { page = await this.#arker!.listFilesystems({ cursor, limit: 100 }); }
       catch (error) { translateArker(error); }
       result.push(...page.filesystems.map((info) => arkerVolume(info, this)));
       cursor = page.next_cursor ?? undefined;
@@ -210,8 +233,13 @@ export class DaytonaVolumeService {
 
   async delete(volume: Volume): Promise<void> {
     const owner = volume && typeof volume === "object" ? owners.get(volume) : undefined;
-    if (owner?.provider === "arker" || (!owner && typeof volume?.id === "string" && volume.id.startsWith("dir_"))) {
-      unsupported("Arker filesystem deletion requires its original provider-bound handle and cannot atomically refuse mounted volumes");
+    if (owner?.provider === "arker") {
+      try { await owner.service.#arker!.deleteFilesystem(volume.id, { onlyIfUnmounted: true }); }
+      catch (error) { translateArker(error); }
+      return;
+    }
+    if (!owner && typeof volume?.id === "string" && volume.id.startsWith("dir_")) {
+      unsupported("Arker filesystem deletion requires its original provider-bound handle");
     }
     if (owner && owner.service !== this) {
       await owner.service.delete(volume);
@@ -220,28 +248,16 @@ export class DaytonaVolumeService {
     await this.#native().delete(volume);
   }
 
-  async resolveMounts(value: unknown): Promise<Array<{ filesystemId: string; mountPath: string }>> {
-    if (value === undefined) return [];
-    if (!Array.isArray(value)) throw new TypeError("volumes must be an array");
-    validateMountSubpaths(value);
-    const resolved: Array<{ filesystemId: string; mountPath: string }> = [];
-    const paths = new Set<string>();
-    for (const item of value) {
-      if (!item || typeof item !== "object" || Array.isArray(item)) throw new TypeError("Invalid Daytona volume mount");
-      const mount = item as VolumeMount;
-      const unknown = Object.keys(item).find((key) => !["volumeId", "mountPath", "subpath"].includes(key));
-      if (unknown) throw new TypeError(`Invalid Daytona volume mount field ${unknown}`);
-      validateMountSubpath(mount.subpath);
-      if (mount.subpath) unsupported("Arker volume mounts do not support subpath");
-      validateMountPath(mount.mountPath);
-      if (paths.has(mount.mountPath)) throw new TypeError("Duplicate volume mount path");
-      paths.add(mount.mountPath);
-      if (typeof mount.volumeId !== "string" || !mount.volumeId) throw new TypeError("volumeId must be a nonempty string");
+  async resolveMounts(value: unknown): Promise<Array<{ filesystemId: string; mountPath: string; subpath?: string }>> {
+    const mounts = normalizeDaytonaVolumeMounts(value);
+    if (mounts === undefined) return [];
+    const resolved: Array<{ filesystemId: string; mountPath: string; subpath?: string }> = [];
+    for (const mount of mounts) {
       if (mount.volumeId.startsWith("dir_")) {
         if (!this.#arker) unsupported("Arker filesystem IDs require an Arker sandbox");
         try {
           const info = await this.#arker.getFilesystem(mount.volumeId);
-          resolved.push({ filesystemId: info.filesystem_id, mountPath: mount.mountPath });
+          resolved.push({ filesystemId: info.filesystem_id, mountPath: mount.mountPath, ...(mount.subpath ? { subpath: mount.subpath } : {}) });
         } catch (error) { translateArker(error); }
         continue;
       }
@@ -250,21 +266,17 @@ export class DaytonaVolumeService {
       const volume = found.instance as Volume;
       const owner = owners.get(volume);
       if (owner?.service !== this || owner.provider !== "arker") unsupported("Native Daytona volumes require a native sandbox");
-      resolved.push({ filesystemId: volume.id, mountPath: mount.mountPath });
+      resolved.push({ filesystemId: volume.id, mountPath: mount.mountPath, ...(mount.subpath ? { subpath: mount.subpath } : {}) });
     }
     return resolved;
   }
 
   async assertNativeMounts(value: unknown): Promise<void> {
-    if (value === undefined) return;
-    if (!Array.isArray(value)) throw new TypeError("volumes must be an array");
-    validateMountSubpaths(value);
-    for (const item of value) {
-      if (!item || typeof item !== "object") throw new TypeError("Invalid Daytona volume mount");
-      const mount = item as VolumeMount & { subpath?: unknown };
-      validateMountSubpath(mount.subpath);
-      const identifier = mount.volumeId;
-      if (typeof identifier !== "string" || !identifier) throw new TypeError("volumeId must be a nonempty string");
+    // Native Daytona owns payload validation; only enforce provider ownership here.
+    if (!Array.isArray(value)) return;
+    for (const mount of value) {
+      const identifier = mount?.volumeId;
+      if (typeof identifier !== "string" || !identifier) continue;
       if (identifier.startsWith("dir_")) unsupported("Arker filesystem IDs require an Arker sandbox");
       if (!await this.#mountRouter.hasConfiguredProvider("arker")) continue;
       const found = await this.#mountRouter.getOwner(identifier);
@@ -272,7 +284,7 @@ export class DaytonaVolumeService {
     }
   }
 
-  async attach(box: UniversalSandbox, mounts: Array<{ filesystemId: string; mountPath: string }>): Promise<void> {
+  async attach(box: UniversalSandbox, mounts: Array<{ filesystemId: string; mountPath: string; subpath?: string }>): Promise<void> {
     if (mounts.length === 0) return;
     const vm = (box as UniversalSandbox & { getInstance(): unknown }).getInstance() as VM;
     try {

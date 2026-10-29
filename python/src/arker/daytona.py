@@ -265,9 +265,9 @@ class Daytona(UnsupportedMixin):
                 from ._compat_e2b_mounts import mount_ready_command
                 from ._daytona_filesystem import guest_command
 
-                for filesystem_id, path in mounts:
-                    vm.create_mount(filesystem_id=filesystem_id, path=path)
-                command = mount_ready_command([path for _, path in mounts], 60)
+                for mount in mounts:
+                    vm.create_mount(**mount)
+                command = mount_ready_command([mount["path"] for mount in mounts], 60)
                 result = run_command(vm, guest_command({"operation": "exec", "command": command}))
                 if result.exit_code:
                     raise RuntimeError("Daytona volume mounts did not become accessible to the guest user")

@@ -599,7 +599,7 @@ def test_list_uses_configured_base_url() -> None:
     t.add_json(
         lambda method, url: (
             method == "GET"
-            and url == "https://arker.ai/api/v1/vms?region=us-west-2&provider=aws&org_id=ArkerHQ&public=True&state=idle"
+            and url == "https://arker.ai/api/v1/vms?region=us-west-2&provider=aws&org_id=ArkerHQ&public=true&state=idle"
         ),
         200,
         {
@@ -712,7 +712,7 @@ def test_list_runs_uses_control_plane_and_filters() -> None:
         lambda method, url: (
             method == "GET"
             and url
-            == "https://control.invalid/api/v1/runs?since=10&until=20&vm=vm_1&vms=vm_2%2Cvm_3&search=pytest&limit=25&offset=5&lite=True&runtime=fc&endpoint=run&actions=run%2Cfork&status=success%2Cinternal&status_min=200&status_max=599&sort=when&dir=asc"
+            == "https://control.invalid/api/v1/runs?since=10&until=20&vm=vm_1&vms=vm_2%2Cvm_3&search=pytest&limit=25&offset=5&lite=true&runtime=fc&endpoint=run&actions=run%2Cfork&status=success%2Cinternal&status_min=200&status_max=599&sort=when&dir=asc"
         ),
         200,
         {
@@ -3087,3 +3087,39 @@ def test_list_vms_encodes_metadata_filter_without_dropping_nested_nulls():
     query = parse_qs(urlsplit(t.calls[0]["url"]).query)
     assert json.loads(query["metadata_filter"][0]) == metadata_filter
     assert query["cursor"] == ["next"] and query["limit"] == ["2"]
+
+
+@pytest.mark.parametrize("conditional", [None, False, True])
+def test_filesystem_conditional_delete_exact_query(conditional):
+    transport = FakeTransport()
+    suffix = "" if conditional is None else f"?only_if_unmounted={str(conditional).lower()}"
+    url = "https://test.invalid/api/v1/filesystems/dir-owned" + suffix
+    transport.add_json(
+        lambda method, actual: method == "DELETE" and actual == url,
+        200,
+        {"filesystem_id": "dir-owned", "deleted": True},
+    )
+    with use_transport(transport):
+        client().delete_filesystem("dir-owned", only_if_unmounted=conditional)
+    assert transport.calls[0]["body"] is None
+
+
+def test_mount_subpath_exact_body_and_projection():
+    transport = FakeTransport()
+    mount = {
+        "mount_id": "mount-1",
+        "vm_id": "vm-1",
+        "filesystem_id": "fs-1",
+        "path": "/data",
+        "subpath": "team/nested",
+        "state": "attaching",
+    }
+    transport.add_json(lambda method, url: method == "POST" and url.endswith("/mounts"), 200, mount)
+    with use_transport(transport):
+        result = client().vm("vm-1").create_mount(filesystem_id="fs-1", path="/data", subpath="team/nested")
+    assert json.loads(transport.calls[0]["body"]) == {
+        "filesystem_id": "fs-1",
+        "path": "/data",
+        "subpath": "team/nested",
+    }
+    assert result.subpath == "team/nested"

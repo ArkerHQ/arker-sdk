@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import unicodedata
 from functools import lru_cache
 
 from ._compat import (
@@ -14,7 +15,6 @@ from ._compat import (
     routed_list,
     router_config,
 )
-from ._compat_e2b_mounts import _path
 from .computer import ArkerError
 
 
@@ -69,9 +69,9 @@ class VolumeService:
 
     def _list(self):
         client = arker_client(self.config)
-        result, seen, cursor = [], set(), None
+        result, seen, cursor = [], set(), "0"
         while True:
-            page = _error(client.list_filesystems, cursor=cursor)
+            page = _error(client.list_filesystems, cursor=cursor, limit=100)
             result.extend(_volume(info, client) for info in page.filesystems)
             cursor = page.next_cursor
             if not cursor:
@@ -162,9 +162,8 @@ class VolumeService:
         from daytona.common.volume import Volume
 
         if isinstance(volume, _arker_volume_type()):
-            raise UnsupportedCompatibilityOption(
-                "Arker filesystem deletion cannot atomically refuse mounted volumes; use the explicit filesystem API"
-            )
+            _error(volume._client.delete_filesystem, volume.id, only_if_unmounted=True)
+            return
         if isinstance(volume, Volume):
             if volume.id.startswith("dir_"):
                 raise UnsupportedCompatibilityOption("An Arker volume requires its original provider-bound handle")
@@ -173,28 +172,51 @@ class VolumeService:
             raise TypeError("Expected a Daytona Volume")
 
 
-def resolve_mounts(volumes, service):
+def _mount_path(path, *, relative):
+    label = "subpath" if relative else "Mount path"
+    if not isinstance(path, str) or not path or len(path.encode()) > (512 if relative else 256):
+        raise ValueError(f"{label} must be a bounded nonempty string")
+    components = path.split("/") if relative else path[1:].split("/")
+    if path.startswith("/") == relative or any(part in ("", ".", "..") for part in components):
+        raise ValueError(f"{label} must be canonical and {'relative' if relative else 'absolute and non-root'}")
+    if "\0" in path or (relative and ("\\" in path or any(unicodedata.category(char) == "Cc" for char in path))):
+        raise ValueError(f"{label} contains unsupported characters")
+    if relative and ("*" in path or "?" in path or "${" in path):
+        raise ValueError("subpath contains IAM policy syntax")
+
+
+def _normalize_arker_mounts(volumes):
     if volumes is None:
         return []
     if not isinstance(volumes, list):
         raise TypeError("volumes must be a list")
-    client = arker_client(service.config) if volumes else None
-    resolved, paths = [], set()
+    normalized, paths = [], set()
     for mount in volumes:
         value = mount.model_dump(exclude_none=True, exclude_unset=True) if hasattr(mount, "model_dump") else mount
         if isinstance(value, dict) and value.get("additional_properties") == {}:
             value = {k: v for k, v in value.items() if k != "additional_properties"}
         if not isinstance(value, dict) or set(value) - {"volume_id", "mount_path", "subpath"}:
             raise ValueError("Invalid Daytona volume mount")
-        if value.get("subpath") not in (None, ""):
-            raise UnsupportedCompatibilityOption("Arker volume mounts do not support subpath")
+        subpath = value.get("subpath")
+        if subpath not in (None, ""):
+            _mount_path(subpath, relative=True)
         path, identifier = value.get("mount_path"), value.get("volume_id")
-        _path(path)
+        _mount_path(path, relative=False)
         if path in paths:
             raise ValueError("Duplicate volume mount path")
         paths.add(path)
         if not isinstance(identifier, str) or not identifier:
             raise ValueError("volume_id must be a nonempty string")
+        normalized.append(value)
+    return normalized
+
+
+def resolve_mounts(volumes, service):
+    mounts = _normalize_arker_mounts(volumes)
+    client = arker_client(service.config) if mounts else None
+    resolved = []
+    for value in mounts:
+        identifier, path, subpath = value["volume_id"], value["mount_path"], value.get("subpath")
         if identifier.startswith("dir_"):
             info = _error(client.get_filesystem, identifier)
         else:
@@ -204,15 +226,22 @@ def resolve_mounts(volumes, service):
             if not isinstance(volume, _arker_volume_type()):
                 raise UnsupportedCompatibilityOption("Native Daytona volumes require a native sandbox")
             info = _error(client.get_filesystem, volume.id)
-        resolved.append((info.filesystem_id, path))
+        resolved.append(
+            {"filesystem_id": info.filesystem_id, "path": path, **({"subpath": subpath} if subpath else {})}
+        )
     return resolved
 
 
 def check_native_mounts(args, kwargs, service):
     params = args[0] if args else kwargs.get("params", kwargs)
     volumes = params.get("volumes") if isinstance(params, dict) else getattr(params, "volumes", None)
-    for mount in volumes or []:
-        identifier = mount.get("volume_id") if isinstance(mount, dict) else getattr(mount, "volume_id", None)
+    from daytona.common.volume import VolumeMount
+    from pydantic import TypeAdapter
+
+    # Preserve the vendor model's coercion and accepted path semantics.
+    mounts = TypeAdapter(list[VolumeMount]).validate_python(volumes) if volumes is not None else []
+    for mount in mounts:
+        identifier = mount.volume_id
         if isinstance(identifier, str) and identifier.startswith("dir_"):
             raise UnsupportedCompatibilityOption("Arker filesystem IDs require an Arker sandbox")
         if "arker" in router_config(service.config, "daytona").existing.order and isinstance(

@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { DaytonaAuthenticationError, DaytonaForbiddenError, DaytonaNotFoundError } from "@daytona/sdk";
+import { Daytona as NativeDaytona, DaytonaAuthenticationError, DaytonaConflictError, DaytonaForbiddenError, DaytonaNotFoundError, DaytonaUnprocessableEntityError } from "@daytona/sdk";
 
 import { Arker, ArkerError } from "../src/index.js";
 import { Daytona } from "../src/daytona.js";
@@ -37,7 +37,7 @@ function nativeService(values: any[] = []) {
 
 function patchArker(t: import("node:test").TestContext) {
   preserveEnvironment(t, "ARKER_API_KEY", "COMPUTESDK_ROUTER_CONFIG");
-  preserveProperties(t, Arker.prototype, "createFilesystem", "getFilesystem", "listFilesystems");
+  preserveProperties(t, Arker.prototype, "createFilesystem", "getFilesystem", "listFilesystems", "deleteFilesystem");
   process.env.ARKER_API_KEY = "arker-test";
   delete process.env.COMPUTESDK_ROUTER_CONFIG;
 }
@@ -187,8 +187,14 @@ test("Daytona volume create/get/list expose native fields and retain provider id
     { filesystems: [row("dir_two", "other")], next_cursor: null },
   ];
   Arker.prototype.createFilesystem = async ({ name }) => row("dir_created", name) as never;
-  Arker.prototype.listFilesystems = async ({ cursor } = {}) => pages[cursor ? 1 : 0] as never;
+  const listCalls: unknown[] = [];
+  Arker.prototype.listFilesystems = async (options = {}) => {
+    listCalls.push(options);
+    return pages[options.cursor === "0" ? 0 : 1] as never;
+  };
   Arker.prototype.getFilesystem = async (id) => row(id, id === "dir_one" ? "shared" : "other") as never;
+  const deletes: unknown[] = [];
+  Arker.prototype.deleteFilesystem = async (id, options) => { deletes.push([id, options]); return { deleted: true }; };
   const native = nativeService();
   const service = new DaytonaVolumeService({ apiKey: "arker-test" }, () => native.service as never);
 
@@ -199,7 +205,9 @@ test("Daytona volume create/get/list expose native fields and retain provider id
   });
   assert.equal((await service.get("shared")).id, "dir_one");
   assert.deepEqual((await service.list()).map((volume) => volume.id), ["dir_one", "dir_two"]);
-  await assert.rejects(service.delete(created), /cannot atomically refuse mounted volumes/);
+  assert.deepEqual(listCalls.slice(0, 2), [{ cursor: "0", limit: 100 }, { cursor: "next", limit: 100 }]);
+  await service.delete(created);
+  assert.deepEqual(deletes, [["dir_created", { onlyIfUnmounted: true }]]);
   const unbound = { id: "native-one", name: "native" };
   await service.delete(unbound as never);
   assert.deepEqual(native.calls.at(-1), ["delete", unbound]);
@@ -231,7 +239,7 @@ test("terminal 500-row filesystem pages fail closed before fallback or create", 
   assert.ok(native.calls.every((call: any) => call[0] === "get"));
 });
 
-test("mount resolution is whole-filesystem, provider-bound and fail-closed", async (t) => {
+test("mount resolution forwards validated filesystem subpaths", async (t) => {
   patchArker(t);
   Arker.prototype.listFilesystems = async () => ({ filesystems: [row()], next_cursor: null }) as never;
   Arker.prototype.getFilesystem = async (id) => row(id) as never;
@@ -242,7 +250,12 @@ test("mount resolution is whole-filesystem, provider-bound and fail-closed", asy
   assert.deepEqual(await service.resolveMounts([{ volumeId: "dir_direct", mountPath: "/data" }]), [
     { filesystemId: "dir_direct", mountPath: "/data" },
   ]);
-  await assert.rejects(service.resolveMounts([{ volumeId: "shared", mountPath: "/mnt", subpath: "child" }]), /do not support subpath/);
+  assert.deepEqual(await service.resolveMounts([{ volumeId: "shared", mountPath: "/mnt", subpath: "nested/child" }]), [
+    { filesystemId: "dir_one", mountPath: "/mnt", subpath: "nested/child" },
+  ]);
+  assert.deepEqual(await service.resolveMounts([{ volumeId: "shared", mountPath: "/release..notes", subpath: "" }]), [
+    { filesystemId: "dir_one", mountPath: "/release..notes" },
+  ]);
   await assert.rejects(service.resolveMounts([{ volumeId: "shared", mountPath: "relative" }]), /canonical, absolute/);
   await assert.rejects(service.assertNativeMounts([{ volumeId: "shared", mountPath: "/mnt/shared" }]), /require an Arker sandbox/);
 });
@@ -253,16 +266,26 @@ test("invalid subpath runtime types fail before provider I/O", async (t) => {
   Arker.prototype.listFilesystems = async () => { arkerLists += 1; return { filesystems: [row()], next_cursor: null } as never; };
   const native = nativeService();
   const service = new DaytonaVolumeService({ apiKey: "arker-test" }, () => native.service as never);
-  for (const subpath of [0, false, {}, []]) {
+  for (const subpath of [0, false, {}, [], ".", "..", "a//b", "/absolute", "a\\b", "a\0b", "a*b", "a?b", "a${b", "é".repeat(257)]) {
     const mounts = [
       { volumeId: "shared", mountPath: "/valid" },
       { volumeId: "native", mountPath: "/invalid", subpath },
     ];
     await assert.rejects(service.resolveMounts(mounts), TypeError);
-    await assert.rejects(service.assertNativeMounts(mounts), TypeError);
   }
   assert.equal(arkerLists, 0);
   assert.equal(native.calls.length, 0);
+});
+
+test("conditional Arker deletion preserves mounted and legacy accounting errors", async (t) => {
+  patchArker(t);
+  Arker.prototype.createFilesystem = async ({ name }) => row("dir_created", name) as never;
+  const service = new DaytonaVolumeService({ apiKey: "arker-test" }, () => nativeService().service as never);
+  const volume = await service.create("shared");
+  Arker.prototype.deleteFilesystem = async () => { throw new ArkerError("conflict", "mounted", 409); };
+  await assert.rejects(service.delete(volume), DaytonaConflictError);
+  Arker.prototype.deleteFilesystem = async () => { throw new ArkerError("unsupported_operation", "legacy accounting", 422); };
+  await assert.rejects(service.delete(volume), DaytonaUnprocessableEntityError);
 });
 
 test("attachment waits as the Daytona guest and cleans up a failed new VM", async () => {
@@ -319,4 +342,44 @@ test("native create and get defer empty-name validation to Daytona", async (t) =
   assert.equal((await service.create("")).name, "");
   await assert.rejects(service.get(""), DaytonaNotFoundError);
   assert.deepEqual(native.calls.slice(0, 2), [["create", ""], ["get", ""]]);
+});
+
+
+test("native create preserves vendor volume payloads and error identity", async (t) => {
+  preserveEnvironment(t, "ARKER_API_KEY", "COMPUTESDK_ROUTER_CONFIG");
+  delete process.env.ARKER_API_KEY;
+  delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  const original = NativeDaytona.prototype.create;
+  preserveProperties(t, NativeDaytona.prototype, "create");
+  const received: unknown[] = [];
+  const rejected = new DaytonaUnprocessableEntityError("vendor validation", 422);
+  NativeDaytona.prototype.create = async function (params, options) {
+    (this as any).sandboxApi.createSandbox = async (body: any) => {
+      received.push(body.volumes);
+      throw rejected;
+    };
+    return Reflect.apply(original, this, [params, options]);
+  };
+  const native = new NativeDaytona({ apiKey: "daytona-test" });
+  const shim = new Daytona({ apiKey: "daytona-test" });
+  try {
+    for (const volumes of [
+      [{ volumeId: "native", mountPath: "relative", subpath: "../prefix/*" }],
+      [{ volumeId: "native", mountPath: "/", subpath: "/absolute" }],
+      [{ volumeId: "native", mountPath: "/data", subpath: "" }],
+      [{ volumeId: "native", mountPath: "/data", subpath: 0, extra: true }],
+      null,
+    ]) {
+      await assert.rejects(native.create({ volumes } as any), (error) => error === rejected);
+      await assert.rejects(shim.create({ volumes }), (error) => error === rejected);
+      assert.strictEqual(received.at(-1), volumes);
+      assert.deepEqual(received.at(-1), received.at(-2));
+    }
+    const before = received.length;
+    await assert.rejects(shim.create({ volumes: [{ volumeId: "dir_owned", mountPath: "relative" }] }), /Arker filesystem IDs/);
+    assert.equal(received.length, before);
+  } finally {
+    await shim[Symbol.asyncDispose]();
+    await native[Symbol.asyncDispose]();
+  }
 });

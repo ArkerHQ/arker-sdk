@@ -34,6 +34,17 @@ async def program(Client, progress=lambda stage: None, *, cleanup_volume=None, s
     name = "compat-volume-" + uuid.uuid4().hex
     mount = "/mnt/compat-volume"
     primary = None
+
+    async def ready(value):
+        deadline = time.monotonic() + 60
+        while value.state.value != "ready":
+            assert value.error_reason is None
+            if time.monotonic() >= deadline:
+                raise AssertionError("Volume did not become ready")
+            await asyncio.sleep(0.25)
+            value = await call(client.volume.get, name)
+        return value
+
     try:
         progress("create-volume")
         if scenario == "get-create-concurrency":
@@ -51,28 +62,30 @@ async def program(Client, progress=lambda stage: None, *, cleanup_volume=None, s
 
             for result in outcomes:
                 if isinstance(result, BaseException):
+                    progress(f"get-create-race-{type(result).__name__}-{getattr(result, 'status_code', None)}")
                     assert isinstance(result, DaytonaBadRequestError) and result.status_code == 400
             with pytest.raises(DaytonaBadRequestError) as duplicate:
                 await call(client.volume.create, name)
             assert duplicate.value.status_code == 400
             assert (await call(client.volume.get, name)).id == volume.id
+            volume = await ready(volume)
             return
         volume = await call(client.volume.create, name)
-        deadline = time.monotonic() + 60
-        while volume.state.value != "ready":
-            assert volume.error_reason is None
-            if time.monotonic() >= deadline:
-                raise AssertionError("Volume did not become ready")
-            await asyncio.sleep(0.25)
-            volume = await call(client.volume.get, name)
+        volume = await ready(volume)
         progress("get-list")
         assert (await call(client.volume.get, name, create=True)).id == volume.id
         assert any(item.id == volume.id for item in await call(client.volume.list))
         for index in range(1 if scenario == "delete-mounted" else 2):
             progress("create-mounted-sandbox-" + str(index))
+            subtree = "nested" if scenario == "subpath-filesystem" and index == 1 else None
+            if subtree:
+                await call(sandboxes[0].fs.create_folder, mount + "/nested", "755")
+                await call(sandboxes[0].fs.upload_file, b"outside-subtree", mount + "/sibling")
             sandbox = await call(
                 client.create,
-                CreateSandboxFromSnapshotParams(volumes=[VolumeMount(volume_id=volume.id, mount_path=mount)]),
+                CreateSandboxFromSnapshotParams(
+                    volumes=[VolumeMount(volume_id=volume.id, mount_path=mount, subpath=subtree)]
+                ),
             )
             sandboxes.append(sandbox)
         if scenario == "delete-mounted":
@@ -88,7 +101,12 @@ async def program(Client, progress=lambda stage: None, *, cleanup_volume=None, s
             return
         first, second = sandboxes
         payload = bytes(range(256)) * 4 + b"\0\xff"
-        source, target = mount + "/payload", mount + "/renamed"
+        root = mount + "/nested" if scenario == "subpath-filesystem" else mount
+        source, target = root + "/payload", root + "/renamed"
+        second_source, second_target = mount + "/payload", mount + "/renamed"
+        if scenario == "subpath-filesystem":
+            with pytest.raises(DaytonaNotFoundError):
+                await call(second.fs.download_file, mount + "/sibling")
 
         async def visible(fs, path, expected):
             deadline = time.monotonic() + 30
@@ -114,14 +132,16 @@ async def program(Client, progress=lambda stage: None, *, cleanup_volume=None, s
 
         progress("cross-vm-binary-write-read")
         await call(first.fs.upload_file, payload, source)
-        await visible(second.fs, source, payload)
+        await visible(second.fs, second_source, payload)
         progress("cross-vm-rename")
-        await call(second.fs.move_files, source, target)
+        await call(second.fs.move_files, second_source, second_target)
         await visible(first.fs, target, payload)
         await absent(first.fs, source)
         progress("cross-vm-unlink")
         await call(first.fs.delete_file, target)
-        await absent(second.fs, target)
+        await absent(second.fs, second_target)
+        if scenario == "subpath-filesystem":
+            assert await call(first.fs.download_file, mount + "/sibling") == b"outside-subtree"
         progress("missing-volume-error")
         with pytest.raises(DaytonaNotFoundError):
             await call(client.volume.get, "missing-" + uuid.uuid4().hex)
@@ -137,14 +157,23 @@ async def program(Client, progress=lambda stage: None, *, cleanup_volume=None, s
                 cleanup_errors.append(error)
         if volume is not None:
             try:
+                volume = await ready(volume)
                 await call(cleanup_volume or client.volume.delete, volume)
+            except BaseException as error:
+                cleanup_errors.append(error)
+        close = getattr(client, "close", None)
+        if close is not None:
+            try:
+                await call(close)
             except BaseException as error:
                 cleanup_errors.append(error)
         if cleanup_errors:
             raise RuntimeError("Owned volume or sandbox cleanup failed") from (primary or cleanup_errors[0])
 
 
-@pytest.mark.parametrize("scenario", ["shared-volume-filesystem", "get-create-concurrency", "delete-mounted"])
+@pytest.mark.parametrize(
+    "scenario", ["shared-volume-filesystem", "subpath-filesystem", "get-create-concurrency", "delete-mounted"]
+)
 @pytest.mark.parametrize("style", ["sync", "async"])
 @pytest.mark.parametrize("provider,shim", [("daytona", False), ("daytona", True), ("arker", True)])
 def test_daytona_volumes(scenario, style, provider, shim, live_router):
@@ -175,7 +204,9 @@ def test_daytona_volumes(scenario, style, provider, shim, live_router):
     except BaseException as error:
         failure = error
     apis = APIS
-    if scenario == "get-create-concurrency":
+    if scenario == "subpath-filesystem":
+        apis = [*apis, "Sandbox.fs.create_folder"]
+    elif scenario == "get-create-concurrency":
         apis = ["Daytona.volume.create", "Daytona.volume.get"]
     elif scenario == "delete-mounted":
         apis = [api for api in APIS if api not in {"Sandbox.fs.move_files", "Sandbox.fs.delete_file"}]

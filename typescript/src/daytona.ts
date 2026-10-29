@@ -1,5 +1,5 @@
 import { DaytonaError } from "@daytona/sdk";
-import { Daytona as NativeDaytona, type DaytonaConfig as NativeDaytonaConfig, type Sandbox as NativeSandbox, type VolumeMount } from "@daytona/sdk";
+import { Daytona as NativeDaytona, type DaytonaConfig as NativeDaytonaConfig, type Sandbox as NativeSandbox } from "@daytona/sdk";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { createNativeDaytonaProvider } from "./compat/daytona-provider.js";
@@ -177,7 +177,7 @@ export class Daytona {
         options: arkerCreateOptions(options),
         context: await this.volume.resolveMounts(options.volumes),
       }),
-      finishArkerCreate: (sandbox, mounts) => this.volume.attach(sandbox, mounts as Array<{ filesystemId: string; mountPath: string }>),
+      finishArkerCreate: (sandbox, mounts) => this.volume.attach(sandbox, mounts as Array<{ filesystemId: string; mountPath: string; subpath?: string }>),
     });
     return guardUnsupported(this, "daytona");
   }
@@ -192,7 +192,7 @@ export class Daytona {
       ...(typeof source.name === "string" ? { name: source.name } : {}),
       ...(typeof source.language === "string" ? { runtime: source.language } : {}),
       ...(source.resources !== undefined ? { resources: source.resources } : {}),
-      ...(source.volumes !== undefined ? { volumes: source.volumes as VolumeMount[] } : {}),
+      ...(source.volumes !== undefined ? { volumes: source.volumes } : {}),
       ...(typeof source.networkBlockAll === "boolean" ? { networkBlockAll: source.networkBlockAll } : {}),
       ...(typeof source.networkAllowList === "string" ? { networkAllowList: source.networkAllowList } : {}),
       ...(typeof source.domainAllowList === "string" ? { domainAllowList: source.domainAllowList } : {}),

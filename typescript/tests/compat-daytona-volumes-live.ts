@@ -66,6 +66,7 @@ export async function sharedFilesystemProgram(
       return;
     }
     volume = await ready(await client.volume.create(name));
+    progress("get-list");
     assert.equal((await client.volume.get(name, true)).id, volume.id);
     assert.ok((await client.volume.list()).some((candidate) => candidate.id === volume.id));
     for (let index = 0; index < (scenario === "delete-mounted" ? 1 : 2); index += 1) {
@@ -91,7 +92,8 @@ export async function sharedFilesystemProgram(
     const target = `${root}/renamed`;
     const secondSource = `${mountPath}/bytes`;
     const secondTarget = `${mountPath}/renamed`;
-    const payload = Buffer.concat([Buffer.from(Array.from({ length: 256 }, (_, index) => index)), Buffer.from([0, 255])]);
+    const byteRange = Buffer.from(Array.from({ length: 256 }, (_, index) => index));
+    const payload = Buffer.concat([byteRange, byteRange, byteRange, byteRange, Buffer.from([0, 255])]);
     if (scenario === "subpath-filesystem") {
       await assert.rejects(second.fs.downloadFile(`${mountPath}/sibling`), DaytonaNotFoundError);
     }
@@ -116,7 +118,10 @@ export async function sharedFilesystemProgram(
       try { await client.delete(sandbox); } catch (error) { cleanupErrors.push(error); }
     }
     if (volume) {
-      try { await (cleanupVolume ? cleanupVolume(volume.id) : client.volume.delete(volume)); }
+      try {
+        volume = await ready(volume);
+        await (cleanupVolume ? cleanupVolume(volume.id) : client.volume.delete(volume));
+      }
       catch (error) { cleanupErrors.push(error); }
     }
     try { await client[Symbol.asyncDispose](); } catch (error) { cleanupErrors.push(error); }
