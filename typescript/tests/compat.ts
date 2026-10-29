@@ -1,5 +1,6 @@
 import { e2bForkMetadata } from "../src/compat/e2b-metadata.js";
 import assert from "node:assert/strict";
+import { FakeFetch as ScriptedFetch } from "./helpers/scripted-fetch.js";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, symlinkSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -450,46 +451,16 @@ async function testModalSurface(): Promise<void> {
   }
 }
 
-type FetchCall = {
-  url: string;
-  method: string;
-  body?: string;
-};
-
 function vmPayload(vmId: string) {
   return { vm_id: vmId, owner_org_id: "owner", created_at: "2026-01-01T00:00:00Z",
     public: false, state: "idle", sessions: [], tunnels: [] };
 }
 
-class FakeFetch {
-  readonly calls: FetchCall[] = [];
-  private readonly script: Array<{ predicate: (method: string, url: string) => boolean; response: Response }> = [];
-
+class FakeFetch extends ScriptedFetch {
   addFork(vmId: string): void {
     this.addJson((method, url) => method === "POST" && url === "https://arker.invalid/api/v1/fork",
       200, vmPayload(vmId));
   }
-
-  addJson(predicate: (method: string, url: string) => boolean, status: number, body: unknown): void {
-    this.script.push({
-      predicate,
-      response: new Response(JSON.stringify(body), {
-        status,
-        headers: { "content-type": "application/json" },
-      }),
-    });
-  }
-
-  fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    const method = init?.method ?? "GET";
-    const body = typeof init?.body === "string" ? init.body : undefined;
-    this.calls.push({ url, method, body });
-
-    const index = this.script.findIndex((entry) => entry.predicate(method, url));
-    assert.notEqual(index, -1, `no scripted response for ${method} ${url}`);
-    return this.script.splice(index, 1)[0]!.response;
-  };
 }
 
 async function testInternalArkerProvider(): Promise<void> {

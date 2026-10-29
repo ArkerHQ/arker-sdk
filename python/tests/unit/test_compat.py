@@ -8,15 +8,13 @@ import shlex
 import subprocess
 import sys
 import types
-from contextlib import contextmanager
 from typing import Any
 
-import httpx2 as httpx
 import pytest
 from e2b_facade_helpers import delegation_response
 from e2b_facade_helpers import mock_envd_bootstrap as mock_envd_bootstrap
+from scripted_transport import FakeTransport, use_transport
 
-import arker.computer as sdk
 from arker._compat import arker_create, arker_source, compat_network_policies
 from arker.blaxel import SyncSandboxInstance as BlaxelSandbox
 from arker.daytona import Daytona
@@ -116,48 +114,6 @@ def source_env(monkeypatch) -> None:
 def arker_env(monkeypatch):
     monkeypatch.setenv("ARKER_API_KEY", "ark_live_test")
     monkeypatch.setenv("ARKER_BASE_URL", "https://test.invalid/api")
-
-
-class FakeTransport:
-    """Scripts httpx responses by (method, url); drive it with ``use_transport``."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-        self.script: list[tuple[Any, int, bytes]] = []
-
-    def add_json(self, predicate, status: int, body: dict[str, Any]) -> None:
-        self.script.append((predicate, status, json.dumps(body).encode()))
-
-    def handler(self, request: httpx.Request) -> httpx.Response:
-        method = request.method
-        url = str(request.url)
-        self.calls.append(
-            {
-                "method": method,
-                "url": url,
-                "body": request.content or None,
-                "headers": request.headers,
-            }
-        )
-
-        for index, (predicate, status, payload) in enumerate(self.script):
-            if predicate(method, url):
-                self.script.pop(index)
-                return httpx.Response(status, content=payload)
-
-        raise AssertionError(f"no scripted response for {method} {url}")
-
-
-@contextmanager
-def use_transport(t: FakeTransport):
-    """Route the SDK's shared client through ``t`` for the duration."""
-    previous = sdk._http_client
-    sdk._http_client = httpx.Client(transport=httpx.MockTransport(t.handler))
-    try:
-        yield
-    finally:
-        sdk._http_client.close()
-        sdk._http_client = previous
 
 
 def vm_payload(vm_id: str) -> dict[str, Any]:
