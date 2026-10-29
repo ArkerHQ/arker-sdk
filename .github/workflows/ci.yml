@@ -69,7 +69,11 @@ jobs:
       - name: Run native compatibility unit regressions
         run: uv run --locked --python 3.12 --group dev --extra test --extra compat python -m pytest
       - name: Verify root-only private file permissions
-        run: sudo .venv/bin/python -m pytest tests/unit/test_e2b_envd_bootstrap.py::test_private_files_reject_symlinks_hardlinks_and_unsafe_modes
+        run: >-
+          sudo .venv/bin/python -m pytest
+          tests/unit/test_e2b_envd_bootstrap.py::test_private_files_reject_symlinks_hardlinks_and_unsafe_modes
+          tests/unit/test_modal_recipes.py::test_private_defaults_guard_checks_actual_filesystem
+          tests/unit/test_modal_recipes.py::test_guest_launcher_reads_defaults_and_consumes_control
 
   typescript:
     name: typescript

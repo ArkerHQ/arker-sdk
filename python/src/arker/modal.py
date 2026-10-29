@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 import shlex
 import time
@@ -25,11 +26,16 @@ from ._compat import (
     shell_command,
 )
 from ._modal_async import dualmethod
+from ._modal_recipes import App as AppRecipe
+from ._modal_recipes import Image as ImageRecipe
+from ._modal_recipes import Secret as SecretRecipe
 from .computer import VM
 
 
 def __getattr__(name: str) -> Any:
     module = import_optional("modal")
+    if name in {"App", "Image", "Secret"} and (module is None or os.environ.get("ARKER_API_KEY")):
+        return {"App": AppRecipe, "Image": ImageRecipe, "Secret": SecretRecipe}[name]
     if module is not None:
         return getattr(module, name)
     raise AttributeError(name)
@@ -109,6 +115,11 @@ class Sandbox(UnsupportedMixin):
     def create(cls, *args: Any, **kwargs: Any) -> Sandbox:
         arker_config = pop_arker_config(kwargs)
         native_kwargs = dict(kwargs)
+        secrets = kwargs.pop("secrets", None)
+        creation_env = kwargs.pop("env", None)
+        creation_workdir = kwargs.pop("workdir", None)
+        app = kwargs.pop("app", None)
+        image = kwargs.pop("image", None)
         timeout = kwargs.pop("timeout", 300)
         block_network = kwargs.pop("block_network", kwargs.pop("blockNetwork", False))
         outbound_cidrs = kwargs.pop("outbound_cidr_allowlist", kwargs.pop("outboundCidrAllowlist", None))
@@ -126,7 +137,15 @@ class Sandbox(UnsupportedMixin):
         def create_native() -> Any:
             if native is None or not hasattr(native, "create"):
                 raise CompatibilityCreationNotStartedError("Native Modal SDK is not installed")
-            return native.create(*args, **native_kwargs)
+            options = dict(native_kwargs)
+            if isinstance(options.get("app"), AppRecipe):
+                options["app"] = options["app"]._native()
+            from ._modal_recipes import native_secrets
+
+            options = native_secrets(options)
+            if isinstance(options.get("image"), ImageRecipe):
+                options["image"] = options["image"]._native()
+            return native.create(*args, **options)
 
         def create_arker() -> VM:
             if args or kwargs:
@@ -134,6 +153,45 @@ class Sandbox(UnsupportedMixin):
                 raise UnsupportedCompatibilityOption(
                     f"Sandbox.create option(s) are not supported by Arker: {', '.join(names)}"
                 )
+            if image is not None and type(image) is not ImageRecipe:
+                raise UnsupportedCompatibilityOption(
+                    "Arker requires a local Image recipe; opaque native image handles are unsupported"
+                )
+            if app is not None and type(app) is not AppRecipe:
+                raise UnsupportedCompatibilityOption("Arker requires a local App recipe, not an opaque native app")
+            metadata = {"computesdk-modal-app": app._group()} if app is not None else {}
+            exceptions = import_optional("modal.exception")
+            invalid = exceptions.InvalidError if exceptions is not None else ValueError
+            environment = {}
+            for secret in secrets or []:
+                if type(secret) is not SecretRecipe:
+                    raise UnsupportedCompatibilityOption("Arker creation requires local Secret.from_dict recipes")
+                environment.update(secret._values)
+            if creation_env is not None:
+                if not isinstance(creation_env, dict):
+                    raise invalid("the env argument to Sandbox must be a dict[str, str | None]")
+                environment.update({key: value for key, value in creation_env.items() if value is not None})
+            if any(
+                not isinstance(key, str)
+                or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) is None
+                or not isinstance(value, str)
+                for key, value in environment.items()
+            ):
+                raise invalid("Sandbox.create environment requires valid names and string values")
+            if creation_workdir is not None and (
+                not isinstance(creation_workdir, str) or not creation_workdir.startswith("/")
+            ):
+                raise invalid(f"workdir must be an absolute path, got: {creation_workdir}")
+            defaults = {"env": environment, "workdir": creation_workdir or "/"}
+            if environment or creation_workdir is not None:
+                from ._modal_defaults import MARKER
+
+                metadata[MARKER] = True
+            registry = image._registry() if image is not None else None
+            registry_auth = image._registry_auth() if image is not None else None
+            image_config = arker_config
+            if registry_auth is not None:
+                image_config = {**(arker_config or {}), "registry_auth": registry_auth}
             api_pb2 = import_optional("modal_proto.api_pb2")
             if api_pb2 is not None:
                 lifetime = api_pb2.Sandbox(timeout_secs=timeout).timeout_secs or 300
@@ -165,7 +223,20 @@ class Sandbox(UnsupportedMixin):
                 "after_created": lifetime,
                 "action": "delete",
             }
-            return arker_create(arker_config, policies=policies)
+            vm = arker_create(image_config, image=registry, policies=policies, metadata=metadata or None)
+            if environment or creation_workdir is not None:
+                from ._modal_defaults import write
+
+                try:
+                    write(vm, defaults)
+                except BaseException as error:
+                    try:
+                        vm.delete()
+                    except Exception as cleanup_error:
+                        error.vm_id = vm.id
+                        raise error from cleanup_error
+                    raise
+            return vm
 
         provider, result = routed_create(
             "modal",
@@ -213,7 +284,9 @@ class Sandbox(UnsupportedMixin):
     @dualmethod
     def exec(self, *command: Any, **kwargs: Any) -> Any:
         if self._vm is None:
-            return self._native.exec(*command, **kwargs)
+            from ._modal_recipes import native_secrets
+
+            return self._native.exec(*command, **native_secrets(kwargs))
         workdir = kwargs.pop("workdir", kwargs.pop("cwd", None))
         environment = kwargs.pop("env", None)
         timeout = kwargs.pop("timeout", None)
@@ -236,7 +309,10 @@ class Sandbox(UnsupportedMixin):
                     raise ValueError(f"Unsupported StreamType for {key}")
             if stream_options.get("bufsize") == 1 and stream_options.get("text", True) is False:
                 raise ValueError("line-buffering is only supported when text=True")
-            secrets = [synchronizer._translate_in(secret) for secret in (kwargs.pop("secrets", None) or [])]
+            secrets = [
+                synchronizer._translate_in(secret._native() if type(secret) is SecretRecipe else secret)
+                for secret in (kwargs.pop("secrets", None) or [])
+            ]
             if _resolvable_secrets(secrets):
                 raise UnsupportedCompatibilityOption(
                     "Sandbox.exec named or deployed secrets are not supported by Arker"
@@ -248,20 +324,19 @@ class Sandbox(UnsupportedMixin):
             for key, default in (("pty", False), ("pty_info", None), ("_pty_info", None)):
                 if key in kwargs and kwargs[key] == default:
                     kwargs.pop(key)
+        if not native_streams:
+            environment = {
+                **{key: value for key, value in (environment or {}).items() if value is not None},
+            }
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise TypeError(f"Sandbox.exec received unsupported option(s): {unsupported}")
-        prefix = ""
-        if environment:
-            exports = []
-            for key, value in environment.items():
-                if value is None:
-                    continue
-                if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)) is None:
-                    raise ValueError(f"Invalid environment variable name: {key}")
-                exports.append(f"export {key}={shlex.quote(str(value))};")
-            prefix += " ".join(exports) + " "
-        prefix += f"cd {shlex.quote(str(workdir or '/'))} && "
+        for key in environment or {}:
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)) is None:
+                raise ValueError(f"Invalid environment variable name: {key}")
+        from ._modal_defaults import discard_exec, prepare_exec
+
+        launch, control_name = prepare_exec(self._vm, command, environment, workdir)
         arker_timeout = timeout if timeout is not None else math.ceil(timeout_ms / 1_000) if timeout_ms else None
         if native_streams:
             from ._compat_process import GuestProcesses
@@ -271,18 +346,23 @@ class Sandbox(UnsupportedMixin):
                 self._processes = GuestProcesses(self._vm)
             milliseconds = timeout * 1000 if timeout is not None else timeout_ms
             deadline = time.monotonic() + milliseconds / 1000 if milliseconds else None
-            current = self._processes.exec(
-                {
-                    "command": " ".join(shlex.quote(part) for part in command),
-                    "argv": list(command),
-                    "env": {key: value for key, value in (environment or {}).items() if value is not None},
-                    "spawnFailureExitCode": 128,
-                    "preserveDescendants": True,
-                    "workingDir": workdir or "/",
-                    "stdin": True,
-                    **({"timeout": milliseconds} if milliseconds is not None else {}),
-                }
-            )
+            try:
+                current = self._processes.exec(
+                    {
+                        "command": " ".join(shlex.quote(part) for part in command),
+                        "argv": launch,
+                        **({"_modalControl": control_name} if control_name else {}),
+                        "env": {},
+                        "spawnFailureExitCode": 128,
+                        "preserveDescendants": True,
+                        "workingDir": "/" if control_name else workdir or "/",
+                        "stdin": True,
+                        **({"timeout": milliseconds} if milliseconds is not None else {}),
+                    }
+                )
+            except BaseException as error:
+                discard_exec(self._vm, control_name, error)
+                raise
             return modal_process(
                 self._processes,
                 current.pid,
@@ -292,7 +372,14 @@ class Sandbox(UnsupportedMixin):
                 stderr=stream_options.get("stderr"),
                 deadline=deadline,
             )
-        return Process(run_command(self._vm, prefix + shell_command(command), timeout=arker_timeout))
+        prefix = "" if control_name else f"cd {shlex.quote(str(workdir or '/'))} && "
+        try:
+            result = Process(run_command(self._vm, prefix + shell_command(launch), timeout=arker_timeout))
+        except BaseException as error:
+            discard_exec(self._vm, control_name, error)
+            raise
+        discard_exec(self._vm, control_name)
+        return result
 
     @dualmethod
     def terminate(self, *, wait: bool = False) -> int | None:

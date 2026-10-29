@@ -14,6 +14,39 @@ def guest():
     return types.SimpleNamespace(id="vm-test")
 
 
+@pytest.fixture
+def private_guest(tmp_path, monkeypatch):
+    import os
+    from pathlib import Path
+
+    from test_compat_process import LocalVM
+
+    from arker import _modal_defaults
+
+    root = tmp_path / "guest-root"
+    root.mkdir(mode=0o700)
+    # Map guest uid 0 to the local test owner; production guards stay unchanged.
+    monkeypatch.setattr(
+        _modal_defaults,
+        "_GUARD",
+        _modal_defaults._GUARD.replace('root = "/root"', f"root = {str(root)!r}").replace(
+            "st_uid != 0", f"st_uid != {os.geteuid()}"
+        ),
+    )
+    vm = LocalVM(tmp_path)
+    vm.id = "local"
+    sync = vm.sync
+
+    def private_sync(path, content):
+        if path.startswith("/root/.arker-modal/"):
+            (root / ".arker-modal" / Path(path).name).write_text(content)
+        else:
+            sync(path, content)
+
+    vm.sync = private_sync
+    return vm
+
+
 def test_arker_object_id_is_read_only(guest):
     sandbox = Sandbox(vm=guest)
     assert sandbox.object_id == "vm-test"
@@ -64,7 +97,7 @@ def test_native_calls_preserve_arguments_and_results(monkeypatch, method, args, 
             assert actual == result
 
 
-def test_arker_exec_none_environment_value_omits_override(monkeypatch, guest) -> None:
+def test_arker_exec_none_environment_value_omits_override(monkeypatch, private_guest) -> None:
     import subprocess
 
     def run(vm, command, **kwargs):
@@ -79,7 +112,7 @@ def test_arker_exec_none_environment_value_omits_override(monkeypatch, guest) ->
 
     monkeypatch.setattr(shim, "run_command", run)
     monkeypatch.setattr(shim, "import_optional", lambda _: None)
-    process = Sandbox(vm=guest).exec(
+    process = Sandbox(vm=private_guest).exec(
         "sh",
         "-c",
         'printf "%s|%s" "$DROP_ME" "$KEEP_ME"',
@@ -119,10 +152,8 @@ def test_mount_export_matches_pinned_native_sdk():
     assert not hasattr(shim, "Mount")
 
 
-def test_exec_local_secrets_precedence_and_native_defaults(tmp_path, monkeypatch):
+def test_exec_local_secrets_precedence_and_native_defaults(tmp_path, monkeypatch, private_guest):
     import json
-
-    from test_compat_process import LocalVM
 
     native = pytest.importorskip("modal")
     from modal._utils.async_utils import synchronizer
@@ -141,8 +172,7 @@ def test_exec_local_secrets_precedence_and_native_defaults(tmp_path, monkeypatch
     expected = {}
     for source in _secret_sources([synchronizer._translate_in(secret) for secret in secrets], {"ORDER": "explicit"}):
         expected.update(source.env.contents)
-    vm = LocalVM(tmp_path)
-    vm.id = "local"
+    vm = private_guest
     sandbox = Sandbox(vm=vm)
     process = sandbox.exec(
         "python3",

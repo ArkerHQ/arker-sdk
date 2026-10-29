@@ -472,20 +472,50 @@ def test_e2b_native_git_runs_workflow_against_local_repository(tmp_path):
 
 
 def test_modal_official_surface(monkeypatch, arker_env) -> None:
+    import base64
+
     monkeypatch.setattr("arker.modal.import_optional", lambda _: None)
     t = FakeTransport()
-    add_create_run_delete(t, "vm_modal", "hello\n")
-
+    t.add_json(lambda method, url: method == "POST" and url.endswith("/fork"), 200, vm_payload("vm_modal"))
+    for output in ("", "", "hello\n", ""):
+        t.add_json(lambda method, url: method == "POST" and url.endswith("/runs"), 200, completed(output))
+    t.add_json(
+        lambda method, url: method == "POST" and url.endswith("/sync"),
+        200,
+        {
+            "ok": True,
+            "op": "write",
+            "results": [
+                {
+                    "path": "/private-control",
+                    "size": 0,
+                    "received_bytes": 0,
+                    "ranges": [],
+                    "complete": True,
+                    "written": True,
+                }
+            ],
+        },
+    )
+    t.add_json(lambda method, url: method == "DELETE", 200, {"deleted": True})
     with use_transport(t):
         sandbox = ModalSandbox.create()
         process = sandbox.exec("echo", "hello", workdir="/workspace", env={"FOO": "bar"}, timeout_ms=1_500)
         assert process.stdout.read() == "hello\n"
         assert process.wait() == 0
         sandbox.terminate()
-
-    run = json.loads(t.calls[1]["body"])
-    assert run["command"] == "(\nexport FOO=bar; cd /workspace && echo hello\n)"
-    assert run["timeout"] == 2
+    runs = [json.loads(call["body"]) for call in t.calls if call["url"].endswith("/runs")]
+    assert all("export FOO=bar" not in run["command"] for run in runs)
+    assert " exec exec-" in runs[2]["command"]
+    assert runs[2]["timeout"] == 2
+    write = next(json.loads(call["body"])["writes"][0] for call in t.calls if call["url"].endswith("/sync"))
+    assert write["path"].startswith("/root/.arker-modal/exec-")
+    assert json.loads(base64.b64decode(write["content"])) == {
+        "argv": ["echo", "hello"],
+        "env": {"FOO": "bar"},
+        "workdir": "/workspace",
+        "defaults": False,
+    }
 
 
 def test_blaxel_native_surface_delegates_without_losing_provider_features() -> None:
@@ -557,8 +587,10 @@ def test_unsupported_calls_fail_fast(arker_env) -> None:
     with use_transport(t):
         sandbox = E2BSandbox.create()
         assert sandbox.files is sandbox._data_plane.files
-        with pytest.raises(TypeError, match="not supported by Arker: image"):
+        calls_before = len(t.calls)
+        with pytest.raises(TypeError, match="opaque native image handles are unsupported"):
             ModalSandbox.create(image="alpine")
+        assert len(t.calls) == calls_before
 
 
 def test_daytona_get_falls_back_to_native_sdk(monkeypatch, arker_env) -> None:

@@ -10,6 +10,8 @@ import {
   type UniversalSandbox,
   shellQuote,
 } from "./compat/common.js";
+import { ModalAppRecipe, ModalVolumeRecipe, registryImage, registry, registryCredentials, localSecret, secretEnvironment, recipeService, creationDefaults } from "./compat/modal-recipes.js";
+import { MODAL_DEFAULTS_MARKER, prepareExec, discardExec, writeDefaults } from "./compat/modal-defaults.js";
 import { createNativeModalProvider } from "./compat/modal-provider.js";
 import { modalCommandHandle } from "./compat/modal-command.js";
 import { modalFilesystem } from "./compat/modal-filesystem.js";
@@ -121,20 +123,30 @@ export class Sandbox {
   async exec(cmd: string[] | string, opts?: ModalExecOptions): Promise<ContainerProcess<string | Uint8Array>> {
     const argv = typeof cmd === "string" ? ["sh", "-c", cmd] : cmd;
     if (typeof this.#native?.exec === "function") {
+
       return opts?.mode === "binary"
-        ? this.#native.exec(argv, opts as ModalExecOptions & { mode: "binary" })
-        : this.#native.exec(argv, opts as ModalExecOptions & { mode?: "text" });
+        ? this.#native.exec(argv, opts as SandboxExecParams & { mode: "binary" })
+        : this.#native.exec(argv, opts as SandboxExecParams & { mode?: "text" });
     }
-    const runOptions = toRunCommandOptions(opts) ?? {};
+    const environment = secretEnvironment(opts?.secrets);
+    const runOptions = toRunCommandOptions({ ...opts, secrets: [] }) ?? {};
+    runOptions.env = { ...environment, ...runOptions.env };
     if (!this.#processes) throw new Error("Native Modal sandbox instance is unavailable");
     if (!argv.length || argv.some(arg => typeof arg !== "string")) throw new TypeError("Modal exec requires a nonempty array of string arguments");
-    const current = await this.#processes.exec({
-      command: argv.map(shellQuote).join(" "), argv, spawnFailureExitCode: 128, preserveDescendants: true, workingDir: runOptions.cwd ?? "/", env: runOptions.env ?? {},
-      stdin: true, ...(runOptions.timeout !== undefined ? { timeout: runOptions.timeout } : {}),
-    });
+    const control = await prepareExec(this.#box, argv, runOptions.env, runOptions.cwd);
+    let current;
+    try {
+      current = await this.#processes.exec({
+        command: argv.map(shellQuote).join(" "), argv: control.argv, _modalControl: control.name, spawnFailureExitCode: 128, preserveDescendants: true, workingDir: control.name ? "/" : runOptions.cwd ?? "/", env: {},
+        stdin: true, ...(runOptions.timeout !== undefined ? { timeout: runOptions.timeout } : {}),
+      });
+    } catch (error) {
+      await discardExec(this.#box, control.name, error);
+      throw error;
+    }
     return opts?.mode === "binary"
-      ? modalCommandHandle(this.#processes, current, opts as ModalExecOptions & { mode: "binary" })
-      : modalCommandHandle(this.#processes, current, opts as ModalExecOptions & { mode?: "text" });
+      ? modalCommandHandle(this.#processes, current, { ...opts, secrets: [], mode: "binary" })
+      : modalCommandHandle(this.#processes, current, { ...opts, secrets: [], mode: "text" });
   }
 
   async terminate(): Promise<void>;
@@ -151,15 +163,27 @@ export class ModalClient {
   #sdk: CompatSdk;
   #native: NativeModalClient | undefined;
   #nativeConfig: ModalClientParams;
+  #hasArker: boolean;
 
   #nativeClient(): NativeModalClient {
     return this.#native ??= new NativeModalClient(this.#nativeConfig);
   }
 
-  get apps(): NativeModalClient["apps"] { return this.#nativeClient().apps; }
-  get images(): NativeModalClient["images"] { return this.#nativeClient().images; }
-  get secrets(): NativeModalClient["secrets"] { return this.#nativeClient().secrets; }
-  get volumes(): NativeModalClient["volumes"] { return this.#nativeClient().volumes; }
+  readonly apps = recipeService(() => this.#nativeClient().apps, {
+    fromName: async (name: string, options?: Parameters<NativeModalClient["apps"]["fromName"]>[1]) =>
+      this.#hasArker ? new ModalAppRecipe(name, options) : this.#nativeClient().apps.fromName(name, options),
+  });
+  readonly images = recipeService(() => this.#nativeClient().images, {
+    fromRegistry: (tag: string, secret?: Parameters<NativeModalClient["images"]["fromRegistry"]>[1]) => registryImage(this.#nativeClient(), tag, secret),
+  });
+  readonly secrets = recipeService(() => this.#nativeClient().secrets, {
+    fromObject: (entries: Record<string, string>, options?: Parameters<NativeModalClient["secrets"]["fromObject"]>[1]) =>
+      localSecret(this.#nativeClient(), entries, options),
+  });
+  readonly volumes = recipeService(() => this.#nativeClient().volumes, {
+    fromName: async (name: string, options?: Parameters<NativeModalClient["volumes"]["fromName"]>[1]) =>
+      this.#hasArker ? new ModalVolumeRecipe(name, options) : this.#nativeClient().volumes.fromName(name, options),
+  });
   get cloudBucketMounts(): NativeModalClient["cloudBucketMounts"] { return this.#nativeClient().cloudBucketMounts; }
   get sandboxSnapshots(): NativeModalClient["sandboxSnapshots"] { return this.#nativeClient().sandboxSnapshots; }
   get proxies(): NativeModalClient["proxies"] { return this.#nativeClient().proxies; }
@@ -171,16 +195,27 @@ export class ModalClient {
     assertSupportedObjectKeys(config, MODAL_CONFIG_KEYS, "modal", "new ModalClient");
     const { arker, routerConfigPath, ...native } = config ?? {};
     this.#nativeConfig = native;
+    this.#hasArker = !!(arker?.apiKey || globalThis.process?.env?.ARKER_API_KEY?.trim());
     this.#sdk = createCompatSdk({
       arker,
       fallbackProvider: createNativeModalProvider(() => this.#nativeClient()),
       routerConfigPath,
       arkerLifetimePolicyId: "computesdk-modal-lifetime",
-      mapArkerCreateOptions: ({ modalCreateParams, ...rest }) => {
+      mapArkerCreateOptions: ({ modalCreateParams, modalApp, modalImage, ...rest }) => {
+        if (modalApp !== undefined || modalImage !== undefined) {
+          if (!(modalApp instanceof ModalAppRecipe)) {
+            throw new Error("Arker requires local app and image recipes; opaque native handles are unsupported");
+          }
+          rest = { ...rest, image: registry(modalImage, modalApp), registryAuth: registryCredentials(modalImage), metadata: { "computesdk-modal-app": modalApp.group() } };
+        }
         if (arker?.policies && "policies" in arker.policies) {
           throw new Error("Modal lifetime requires named policies, not ordered policies");
         }
-        const { timeoutMs, ...options } = (modalCreateParams ?? {}) as Record<string, unknown>;
+        const { timeoutMs, env, workdir, secrets, ...options } = (modalCreateParams ?? {}) as Record<string, unknown>;
+        const defaults = creationDefaults({ env, workdir, secrets });
+        if (Object.keys(defaults.env).length || workdir !== undefined) {
+          rest = { ...rest, metadata: { ...(rest.metadata as Record<string, unknown> ?? {}), [MODAL_DEFAULTS_MARKER]: true } };
+        }
         if (timeoutMs != null && (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs))) {
           throw new Error("timeoutMs must be a finite number");
         }
@@ -225,6 +260,17 @@ export class ModalClient {
         ...handles,
         modalCreateParams: options ?? {},
       });
+      if (box.provider === "arker") {
+        const defaults = creationDefaults(options ?? {});
+        if (Object.keys(defaults.env).length || options?.workdir !== undefined) {
+          try { await writeDefaults(box, defaults); }
+          catch (error) {
+            try { await box.destroy(); }
+            catch (cleanup) { throw new AggregateError([error, cleanup], `Modal setup and cleanup failed for VM ${box.sandboxId}`); }
+            throw error;
+          }
+        }
+      }
       return guardUnsupported(new Sandbox(box), "modal", nativeInstance(box));
     },
     fromId: async (sandboxId: string): Promise<Sandbox> => {

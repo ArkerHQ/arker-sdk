@@ -221,3 +221,36 @@ status/list, wait, logs, stdin/EOF, stop, kill, and execution timeout.
 
 The current guest protocol requires Python 3. Image-independent operation remains
 a release requirement before claiming arbitrary-image compatibility.
+
+## Modal creation recipes
+
+Arker supports plain registry-image recipes, local secret values, creation
+`env`/`workdir`, and sandbox grouping by app name with `create_if_missing=True`
+(Python) or `createIfMissing: true` (TypeScript). Creation defaults are stored in
+a private guest directory and restored on reconnect. Explicit exec environment
+values override exec secrets, which override creation defaults.
+
+In Python, configure `ARKER_API_KEY` before accessing the shim's `App`, `Image`,
+and `Secret` factories to obtain local recipes. With no Arker key and an installed
+Modal SDK, these names retain their native class identities. A native image
+handle created before enabling Arker is opaque and cannot be mapped to an Arker
+image. TypeScript records recipes produced by the client's local image and
+secret constructors without inspecting native builder closures.
+
+An Arker app group is VM metadata, not a deployed Modal App: it has no fabricated
+native ID, and lookup without `create_if_missing=True` / `createIfMissing: true`
+is unsupported.
+Named Volume recipes are not mapped to Arker storage. Python `debian_slim`, image
+build steps and unknown native image handles are also
+unsupported on Arker; those requests fail before creating a VM. Native routes
+continue to use native resources. The creation differential scenarios use the
+same workload arguments on all routes; native-only success does not certify the
+Arker route.
+
+Static private-registry credentials may be supplied through a local
+`Secret.from_dict` / `secrets.fromObject` recipe passed to the registry image
+constructor. Both `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` must be nonempty.
+Those two values are sent only in the image-pull request, not as sandbox
+environment variables. Named/remote secrets and cloud-registry credential
+exchange are unsupported. A per-image secret overrides configured registry
+credentials for that creation without mutating the client's defaults.

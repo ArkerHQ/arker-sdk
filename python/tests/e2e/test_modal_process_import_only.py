@@ -179,3 +179,63 @@ def test_modal_async_process_import_only(provider, shim, live_router, monkeypatc
         namespace = {}
         exec(compile(source, "modal_async_process_import_only.py", "exec"), namespace)
         asyncio.run(namespace["program"](options))
+
+
+CREATION_RECIPE_PROGRAM = r"""
+import modal
+
+def program():
+    app = modal.App.lookup("arker-compat-recipes", create_if_missing=True)
+    image = modal.Image.from_registry("python:3.12-slim-bookworm")
+    secret = modal.Secret.from_dict({"RECIPE_VALUE": "synthetic-fixture", "PRECEDENCE": "secret"})
+    sandbox = modal.Sandbox.create(app=app, image=image, secrets=[secret],
+                                   env={"PRECEDENCE": "creation"}, workdir="/tmp", timeout=180)
+    try:
+        found = modal.Sandbox.from_id(sandbox.object_id)
+        process = found.exec("python", "-c",
+            "import os,sys; assert sys.version_info[:2] == (3,12); "
+            "assert os.getcwd() == '/tmp'; "
+            "assert os.environ['RECIPE_VALUE'] == 'synthetic-fixture'; "
+            "assert os.environ['PRECEDENCE'] == 'exec'; print('recipe-ok')",
+            env={"PRECEDENCE": "exec"})
+        assert process.stdout.read() == "recipe-ok\n"
+        assert process.wait() == 0
+        return sandbox.object_id
+    finally:
+        sandbox.terminate()
+"""
+
+
+@pytest.mark.parametrize("provider,shim", [("modal", False), ("modal", True), ("arker", True)])
+def test_modal_creation_recipes_import_only(provider, shim, live_router, monkeypatch):
+    pytest.importorskip("modal")
+    required = ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET") if provider == "modal" else ("ARKER_API_KEY",)
+    if not all(os.environ.get(key) for key in required):
+        pytest.skip("Live credentials required")
+    if provider == "arker":
+        monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
+        monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
+    with record_scenario(
+        "modal",
+        "sync",
+        provider,
+        shim,
+        "import-only-creation-recipes",
+        [
+            "App.lookup",
+            "Image.from_registry",
+            "Secret.from_dict",
+            "Sandbox.create",
+            "Sandbox.from_id",
+            "Sandbox.exec",
+            "Sandbox.terminate",
+        ],
+    ):
+        source = (
+            CREATION_RECIPE_PROGRAM.replace("import modal", "from arker import modal", 1)
+            if shim
+            else CREATION_RECIPE_PROGRAM
+        )
+        namespace = {}
+        exec(compile(source, "modal_creation_recipes.py", "exec"), namespace)
+        namespace["program"]()

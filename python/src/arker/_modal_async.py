@@ -63,7 +63,9 @@ async def invoke(target, name, *args, **kwargs):
         )
         return target(vm=result._vm, native=result._native)
     if target._native is not None:
-        return await getattr(target._native, name).aio(*args, **kwargs)
+        from ._modal_recipes import native_secrets
+
+        return await getattr(target._native, name).aio(*args, **native_secrets(kwargs))
     if name == "exec":
 
         def discard(process):

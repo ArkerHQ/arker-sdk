@@ -342,7 +342,7 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
         const values = (options ?? {}) as Record<string, unknown>;
         const supported = new Set([
           "name", "image", "memory", "memoryMiB", "cpu", "vcpus", "diskMiB", "snapshotId", "templateId",
-          "allowInternetAccess", "metadata",
+          "allowInternetAccess", "metadata", "registryAuth",
           "timeout",
           "networkBlockAll", "blockNetwork", "domainAllowList", "outboundDomainAllowlist", "networkAllowList",
           "outboundCidrAllowlist", "createIfNotExist",
@@ -373,6 +373,12 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
         const resources = vcpu !== undefined || memoryMiB !== undefined || diskMiB !== undefined
           ? { ...(vcpu !== undefined ? { vcpu } : {}), ...(memoryMiB !== undefined ? { memory_mib: memoryMiB } : {}), ...(diskMiB !== undefined ? { disk_mib: diskMiB } : {}) }
           : undefined;
+        const registryAuth = image ? values.registryAuth ?? config.registryAuth : values.registryAuth;
+        if (registryAuth !== undefined && (!image || !registryAuth || typeof registryAuth !== "object"
+          || typeof (registryAuth as Record<string, unknown>).username !== "string"
+          || typeof (registryAuth as Record<string, unknown>).password !== "string")) {
+          throw new ArkerError("invalid_request", "Registry authentication requires an image and username/password strings", 422);
+        }
         const sourceRequest: ForkOptions = image
           ? { image }
           : sourceVmId
@@ -402,7 +408,7 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
           ...(options?.name ? { name: options.name } : {}),
           ...(resources ? { resources } : {}),
           ...(policies ? { policies } : {}),
-          ...(image && config.registryAuth ? { registry_auth: config.registryAuth } : {}),
+          ...(image && registryAuth ? { registry_auth: registryAuth as ForkOptions["registry_auth"] } : {}),
         };
         const vm = await (fork ? fork(client, request) : client.fork(request));
         return wrap(vm);

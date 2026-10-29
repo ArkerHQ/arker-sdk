@@ -15,7 +15,7 @@ await writeFile(config, JSON.stringify({
 const native = new Native();
 const shim = new Shim({ routerConfigPath: config });
 try {
-  const app = await shim.apps.fromName("arker-compat-image-test", { createIfMissing: true });
+  const app = await native.apps.fromName("arker-compat-image-test", { createIfMissing: true });
   const image = await shim.images.fromRegistry("alpine:3.22").build(app);
   const outputs: string[] = [];
   for (const [label, client] of [["native", native], ["shim", shim]] as const) {

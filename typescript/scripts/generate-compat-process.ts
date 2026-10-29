@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 
 for (const [source, target] of [
   ["_guest_process.py", "guest-process"],
+  ["_guest_modal_defaults.py", "modal-defaults-guest"],
   ["_linux_signals.json", "linux-signals"],
   ["_guest_filesystem.py", "guest-filesystem"],
   ["_guest_e2b_mount_ready.py", "e2b-mount-ready"],

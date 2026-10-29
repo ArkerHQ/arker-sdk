@@ -14,6 +14,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -188,6 +189,10 @@ def worker(request, ready_fd):
                         break
                     except InterruptedError:
                         continue
+            control = request.get("_modalControl", "")
+            if isinstance(control, str) and re.fullmatch(r"exec-[0-9a-f]{32}\.json", control):
+                with contextlib.suppress(FileNotFoundError):
+                    (Path("/root/.arker-modal") / control).unlink()
             (directory / "worker-complete").touch()
 
 

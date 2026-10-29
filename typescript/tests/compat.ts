@@ -375,6 +375,11 @@ async function testE2BArkerGitRunsOfficialWorkflowAgainstLocalRepository(): Prom
 
 async function testModalSurface(): Promise<void> {
   const box = new FakeSandbox("modal-box");
+  box.runResult = { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
+  const controls = new Map<string, unknown>();
+  box.sync = async (path, content) => {
+    if (content !== undefined) controls.set(path, JSON.parse(typeof content === "string" ? content : new TextDecoder().decode(content)));
+  };
   const fake = installFakeCompute(box);
   const original = { exec: GuestProcesses.prototype.exec, get: GuestProcesses.prototype.get, readOutput: GuestProcesses.prototype.readOutput };
   const requests: unknown[] = [];
@@ -423,9 +428,18 @@ async function testModalSurface(): Promise<void> {
     assert.equal(await proc.stdout.readText(), "stdout:echo modal");
     assert.equal(await proc.stderr.readText(), "stderr:echo modal");
     assert.equal(await proc.wait(), 7);
-    assert.deepEqual(requests[0], {
-      command: "sh -c 'echo modal'", argv: ["sh", "-c", "echo modal"], spawnFailureExitCode: 128, preserveDescendants: true, workingDir: "/workspace", env: { FOO: "bar" }, timeout: 1000, stdin: true,
+    const request = requests[0] as Record<string, any>;
+    assert.match(request._modalControl, /^exec-[0-9a-f]{32}\.json$/);
+    assert.deepEqual(request.argv.slice(0, 2), ["python3", "-c"]);
+    assert.deepEqual(request.argv.slice(3), ["exec", request._modalControl]);
+    assert.deepEqual(request, {
+      command: "sh -c 'echo modal'", argv: request.argv, _modalControl: request._modalControl,
+      spawnFailureExitCode: 128, preserveDescendants: true, workingDir: "/", env: {}, timeout: 1000, stdin: true,
     });
+    assert.deepEqual(controls.get(`/root/.arker-modal/${request._modalControl}`), {
+      argv: ["sh", "-c", "echo modal"], env: { FOO: "bar" }, workdir: "/workspace", defaults: false,
+    });
+    assert.ok(!JSON.stringify(request).includes('"FOO"'));
 
     await sandbox.exec(["node", "script with space.js", "arg"]);
     assert.equal((requests[1] as any).command, "node 'script with space.js' arg");

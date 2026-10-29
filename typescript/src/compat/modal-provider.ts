@@ -1,3 +1,4 @@
+import { ModalAppRecipe, buildNativeImage, nativeVolumes } from "./modal-recipes.js";
 import { defineProvider } from "@computesdk/provider";
 import {
   NotFoundError,
@@ -77,8 +78,8 @@ export function createNativeModalProvider(client: () => ModalClient) {
             throw new TypeError(
               "Native Modal app and image must be supplied together",
             );
-          const owner = modalApp ?? (await defaultApp());
-          const source = modalImage ?? (await defaultImage(owner));
+          const owner = modalApp instanceof ModalAppRecipe ? await modalApp.native(client()) : modalApp ?? (await defaultApp());
+          const source = modalImage ? await buildNativeImage(modalImage, owner) : await defaultImage(owner);
           const params: SandboxCreateParams =
             modalCreateParams !== undefined
               ? modalCreateParams
@@ -90,7 +91,7 @@ export function createNativeModalProvider(client: () => ModalClient) {
           const instance = await client().sandboxes.create(
             owner,
             source,
-            params,
+            await nativeVolumes(client(), params),
           );
           return { instance, instanceId: instance.sandboxId };
         },
