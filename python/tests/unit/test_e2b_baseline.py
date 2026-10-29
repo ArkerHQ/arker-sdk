@@ -70,3 +70,70 @@ def test_baseline_cleanup_refuses_marker_mismatch():
     with pytest.raises(RuntimeError, match="unproven"):
         baseline.delete_e2b_baseline(vm, "computesdk-e2b-baseline-owned")
     assert vm.deleted == 0
+
+
+@pytest.mark.parametrize("cleanup_step", ["refresh", "delete", "ownership"])
+def test_failed_preparation_preserves_error_when_cleanup_fails(monkeypatch, cleanup_step):
+    baseline = _module()
+    vm = FakeVm(results=(1,))
+    cleanup_error = ConnectionError("cleanup unavailable")
+    refreshes = 0
+
+    def refresh():
+        nonlocal refreshes
+        refreshes += 1
+        if refreshes > 1:
+            if cleanup_step == "refresh":
+                raise cleanup_error
+            if cleanup_step == "ownership":
+                vm.name = "customer-vm"
+        return vm
+
+    def delete():
+        vm.deleted += 1
+        raise cleanup_error
+
+    monkeypatch.setattr(vm, "refresh", refresh)
+    monkeypatch.setattr(vm, "delete", delete)
+    client = types.SimpleNamespace(fork=lambda **options: vm)
+    with pytest.raises((ConnectionError, RuntimeError)) as caught:
+        baseline.create_e2b_baseline(client, marker=vm.name)
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert "preflight conflict" in str(caught.value.__cause__)
+    if cleanup_step == "ownership":
+        assert "unproven" in str(caught.value)
+    else:
+        assert caught.value is cleanup_error
+    assert vm.deleted == (1 if cleanup_step == "delete" else 0)
+
+
+def test_creation_ownership_mismatch_never_runs_or_deletes_customer_vm():
+    baseline = _module()
+    vm = FakeVm(name="customer-vm")
+    client = types.SimpleNamespace(fork=lambda **options: vm)
+    with pytest.raises(RuntimeError, match="unproven") as caught:
+        baseline.create_e2b_baseline(client, marker="computesdk-e2b-baseline-owned")
+    assert "ownership marker mismatch" in str(caught.value.__cause__)
+    assert not vm.commands
+    assert vm.deleted == 0
+
+
+def test_failed_cleanup_preserves_interruption_as_cause(monkeypatch):
+    baseline = _module()
+    vm = FakeVm()
+    interrupted = KeyboardInterrupt()
+    cleanup_error = ConnectionError("cleanup unavailable")
+
+    def run(command):
+        raise interrupted
+
+    def delete():
+        raise cleanup_error
+
+    monkeypatch.setattr(vm, "run", run)
+    monkeypatch.setattr(vm, "delete", delete)
+    client = types.SimpleNamespace(fork=lambda **options: vm)
+    with pytest.raises(ConnectionError) as caught:
+        baseline.create_e2b_baseline(client, marker=vm.name)
+    assert caught.value is cleanup_error
+    assert caught.value.__cause__ is interrupted

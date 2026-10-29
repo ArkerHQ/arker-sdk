@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from contextlib import suppress
 from typing import Any
 
 from arker import Arker, ArkerError
@@ -71,10 +70,11 @@ def create_e2b_baseline(
             "E2B baseline provisioning failed",
         )
         return vm
-    except BaseException:
-        with suppress(BaseException):
-            if vm.refresh().name == marker:
-                vm.delete()
+    except BaseException as preparation_error:
+        try:
+            delete_e2b_baseline(vm, marker)
+        except BaseException as cleanup_error:
+            raise cleanup_error from preparation_error
         raise
 
 
