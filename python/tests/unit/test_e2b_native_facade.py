@@ -92,7 +92,7 @@ def test_create_binds_native_components_without_vendor_control_plane(facade_vm, 
         finally:
             sandbox.kill()
     assert calls == ["bootstrap", "delegate", "delete"]
-    assert len(received) == 2
+    assert [path for path, _ in received] == ["/process.Process/Start", "/files?path=%2Ffile"]
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])

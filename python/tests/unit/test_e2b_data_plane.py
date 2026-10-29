@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 import json
+import random
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
@@ -19,7 +20,23 @@ def servers():
     behavior = {"status": 409, "requirement": "explicit_resume"}
 
     class Target(BaseHTTPRequestHandler):
+        def consume_body(self):
+            # Closing with an unread chunked RPC body can reset the response.
+            if self.headers.get("Transfer-Encoding", "").lower() == "chunked":
+                while True:
+                    size = int(self.rfile.readline().split(b";", 1)[0], 16)
+                    if size == 0:
+                        while self.rfile.readline() not in (b"\r\n", b""):
+                            pass
+                        break
+                    assert len(self.rfile.read(size)) == size
+                    assert self.rfile.read(2) == b"\r\n"
+            else:
+                size = int(self.headers.get("Content-Length", "0"))
+                assert len(self.rfile.read(size)) == size
+
         def do_GET(self):
+            self.consume_body()
             redirected.append(dict(self.headers))
             self.send_response(200)
             self.end_headers()
@@ -33,6 +50,7 @@ def servers():
 
     class Handler(Target):
         def do_GET(self):
+            self.consume_body()
             received.append((self.path, dict(self.headers)))
             body = json.dumps(
                 {
@@ -292,3 +310,31 @@ def test_async_close_cancels_pending_dispatch_and_body_reads():
 
     asyncio.run(check(False))
     asyncio.run(check(True))
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_large_rpc_error_response_does_not_trigger_transport_health_probe(servers, asynchronous):
+    from e2b import SandboxNotRunningException
+
+    endpoint, _behavior, received, _redirected = servers
+    descriptor = EnvdDescriptor(endpoint, "0.10.2", "synthetic-guest")
+    command = random.Random(0).randbytes(512 * 1024).hex()
+
+    async def run():
+        data = create_data_plane(descriptor, "synthetic-platform", asynchronous=True)
+        try:
+            with pytest.raises(SandboxNotRunningException):
+                await data.commands.run(command)
+        finally:
+            await data.aclose()
+
+    if asynchronous:
+        asyncio.run(run())
+    else:
+        data = create_data_plane(descriptor, "synthetic-platform")
+        try:
+            with pytest.raises(SandboxNotRunningException):
+                data.commands.run(command)
+        finally:
+            data.close()
+    assert [path for path, _ in received] == ["/process.Process/Start"]
