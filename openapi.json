@@ -168,29 +168,6 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
-          },
-          {
-            "in": "header",
-            "name": "Arker-VM-Name",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "pattern": "^[A-Za-z0-9_.-]{1,128}$"
-            },
-            "description": "Opt in to an organization-wide name binding at the public gateway. Regional endpoints reject this header. Name generations use fresh regional idempotency keys. Requires Arker-VM-Name-Mode. Commands are not accepted on named forks. Requires organization-wide vm:create, vm:read and vm:delete scopes. Pool placement and a caller-supplied Idempotency-Key are not accepted."
-          },
-          {
-            "in": "header",
-            "name": "Arker-VM-Name-Mode",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "create",
-                "get_or_create"
-              ]
-            },
-            "description": "create conflicts with an existing named VM; get_or_create returns it without applying the new request. Pending creation returns resource_busy when it cannot be joined. Abandoned creation is fenced after five minutes and cleaned up before name reuse; retry resource_busy. Requires Arker-VM-Name."
           }
         ],
         "requestBody": {
@@ -3878,6 +3855,106 @@
             }
           }
         }
+      }
+    },
+    "/v1/named-fork": {
+      "post": {
+        "operationId": "forkNamed",
+        "tags": [
+          "VMs"
+        ],
+        "summary": "Atomically create or get an organization-wide named VM",
+        "x-arker-retry-window": {
+          "field": "queueing_timeout",
+          "unit": "seconds"
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Arker-VM-Name",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+            },
+            "description": "Opt in to an organization-wide name binding at the public gateway. Regional endpoints reject this header. Name generations use fresh regional idempotency keys. Requires Arker-VM-Name-Mode. Commands are not accepted on named forks. Requires organization-wide vm:create, vm:read and vm:delete scopes. Pool placement and a caller-supplied Idempotency-Key are not accepted."
+          },
+          {
+            "in": "header",
+            "name": "Arker-VM-Name-Mode",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "create",
+                "get_or_create"
+              ]
+            },
+            "description": "create conflicts with an existing named VM; get_or_create returns it without applying the new request. Pending creation returns resource_busy when it cannot be joined. Abandoned creation is fenced after five minutes and cleaned up before name reuse; retry resource_busy. Requires Arker-VM-Name."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The newly created or existing named VM.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vm"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestOrInsufficientResourcesError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequiredError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
+          "409": {
+            "$ref": "#/components/responses/AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/OperationFailedOrUnrecoverableOrUnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/CapacityUnavailableOrUnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
+          }
+        },
+        "description": "Public global gateway only. Unsupported gateways reject this dedicated route before creation. Never fall back to /v1/fork. Ordinary fork rejects naming headers."
       }
     }
   },
@@ -8900,7 +8977,8 @@
           "listApiKeys",
           "createApiKey",
           "revokeApiKey",
-          "setVmDeadline"
+          "setVmDeadline",
+          "forkNamed"
         ],
         "description": "Exact operationId values declared by this API. Refresh this enum when operations are added or removed."
       },

@@ -13,8 +13,9 @@ For Arker routes, set `ARKER_API_KEY`, `ARKER_PROVIDER`, `ARKER_REGION`, and
 `ARKER_SOURCE_VM_ID` to select your prepared parent. An explicit `ARKER_BASE_URL`
 replaces provider/region configuration. Named Blaxel creation additionally
 requires `ARKER_CONTROL_BASE_URL` when using a custom endpoint; it must identify
-the public global gateway that coordinates names. Keep native provider
-credentials for native routes.
+the public global gateway that supports `/v1/named-fork`. Unsupported gateways
+reject this dedicated endpoint before creation; no ordinary-fork fallback is
+attempted. Keep native provider credentials for native routes.
 
 E2B signed file URLs are unavailable on BYOC and self-hosted pool workers.
 When URL preparation returns the specific unsupported-capability error, sandbox
@@ -232,12 +233,20 @@ Arker supports plain registry-image recipes, local secret values, creation
 a private guest directory and restored on reconnect. Explicit exec environment
 values override exec secrets, which override creation defaults.
 
-In Python, configure `ARKER_API_KEY` before accessing the shim's `App`, `Image`,
-and `Secret` factories to obtain local recipes. With no Arker key and an installed
-Modal SDK, these names retain their native class identities. A native image
-handle created before enabling Arker is opaque and cannot be mapped to an Arker
-image. TypeScript records recipes produced by the client's local image and
-secret constructors without inspecting native builder closures.
+Python uses scoped recipe factories when the configured creation route includes
+Arker. Configure `COMPUTESDK_ROUTER_CONFIG` (or `computesdk_router.json`) before
+accessing `App`, `Image`, and `Secret`; credentials may then be supplied at
+`Sandbox.create`. Native-only routes retain the exact native classes, even when
+an Arker credential is present. With no explicit routing file, the normal
+credential-based routing defaults still apply.
+
+Recipe image and secret constructors preserve real native handles when Modal is
+installed and record only their public constructor inputs. App lookup is
+resolved when the native route or a native app operation is selected. Native
+opaque handles created before configuring an Arker-capable route cannot be
+mapped retroactively; per-call-only routing with such handles is unsupported.
+TypeScript records local image/secret recipes without inspecting native builder
+closures.
 
 An Arker app group is VM metadata, not a deployed Modal App: it has no fabricated
 native ID, and lookup without `create_if_missing=True` / `createIfMissing: true`

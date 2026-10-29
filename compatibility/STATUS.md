@@ -19,8 +19,10 @@ must pass with fresh evidence before claiming parity.
 
 ## Remaining release requirements
 
-- Blaxel named creation uses the public global gateway for distributed uniqueness.
-  Custom regional URLs require an explicit control URL with naming support.
+- Blaxel named creation uses the public global `/v1/named-fork` endpoint for
+  distributed uniqueness. Custom regional URLs require an explicit control URL
+  with naming support. Unsupported gateways reject this dedicated route before
+  creation; the shims never fall back to an ordinary fork.
   Strict duplicates and get-or-create still need fresh differential live validation;
   successful unit tests do not establish cross-region or response-loss parity.
   Strict named creation does not replay a failed transport request: the outcome

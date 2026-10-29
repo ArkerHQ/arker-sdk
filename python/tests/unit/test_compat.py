@@ -374,9 +374,9 @@ def test_python_shims_translate_or_reject_arker_create_options(arker_env, monkey
     monkeypatch.setattr("arker._compat_blaxel_bootstrap.bootstrap_blaxel", lambda *args: None)
     monkeypatch.setattr("arker._compat_blaxel_data_plane.validate_native", lambda: None)
     monkeypatch.setattr("arker._compat_blaxel_data_plane.BlaxelDataPlane", lambda *args: object())
-    for vm_id in ("vm_daytona_image", "vm_blaxel_image"):
+    for vm_id, path in (("vm_daytona_image", "fork"), ("vm_blaxel_image", "named-fork")):
         t.add_json(
-            lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/fork",
+            lambda method, url, path=path: method == "POST" and url == f"https://test.invalid/api/v1/{path}",
             200,
             vm_payload(vm_id),
         )

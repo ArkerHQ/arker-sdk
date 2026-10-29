@@ -109,7 +109,8 @@ def test_app_group_has_no_invented_native_id(forks):
     app = recipes.App.lookup("shared-workload", create_if_missing=True)
     shim.Sandbox.create(app=app, image=recipes.Image.from_registry("python:3.12-slim"))
     assert forks[0]["metadata"] == {"computesdk-modal-app": {"name": "shared-workload"}}
-    assert not hasattr(app, "app_id")
+    assert "app_id" not in vars(app)
+    assert app._resolved is None
 
 
 @pytest.mark.parametrize("app", [object(), recipes.App.lookup("existing")])
@@ -479,3 +480,128 @@ def test_invalid_registry_secret_fails_before_fork(forks, values):
     with pytest.raises(ValueError, match="Registry secret requires"):
         shim.Sandbox.create(image=recipes.Image.from_registry("private/image", secret=recipes.Secret.from_dict(values)))
     assert forks == []
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_public_recipes_route_with_per_call_key_and_configured_route(forks, monkeypatch, tmp_path, asynchronous):
+    import json
+
+    route = tmp_path / "router.json"
+    route.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "existing": {"strategy": "priority", "order": ["arker"]},
+                "create": {"strategy": "priority", "order": ["arker"]},
+            }
+        )
+    )
+    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(route))
+    native = pytest.importorskip("modal")
+    monkeypatch.delenv("ARKER_API_KEY", raising=False)
+    monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
+    monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
+    image = shim.Image.from_registry(
+        "private/image", secret=shim.Secret.from_dict({"REGISTRY_USERNAME": "user", "REGISTRY_PASSWORD": "password"})
+    )
+    assert isinstance(image, native.Image)
+    app = shim.App.lookup("same-app", create_if_missing=True)
+    options = {"app": app, "image": image, "arker": {"api_key": "synthetic"}}
+    box = asyncio.run(shim.Sandbox.create.aio(**options)) if asynchronous else shim.Sandbox.create(**options)
+    assert box.object_id == "owned"
+    assert forks[0]["registry_auth"] == {"username": "user", "password": "password"}
+
+
+def test_public_local_handles_preserve_native_identity_on_native_route(monkeypatch):
+    native = pytest.importorskip("modal")
+    monkeypatch.delenv("ARKER_API_KEY", raising=False)
+    image = shim.Image.from_registry("public/image")
+    secret = shim.Secret.from_dict({"VALUE": "fixture"})
+    assert isinstance(image, native.Image)
+    assert isinstance(secret, native.Secret)
+    sentinel = object()
+
+    def create(**options):
+        assert options["image"] is image
+        assert options["secrets"][0] is secret
+        return sentinel
+
+    monkeypatch.setattr(shim.Sandbox, "_native_sandbox", staticmethod(lambda: SimpleNamespace(create=create)))
+    monkeypatch.setattr(shim, "routed_create", lambda name, config, creators: ("modal", creators["modal"]()))
+    result = shim.Sandbox.create(image=image, secrets=[secret])
+    assert result._native is sentinel
+
+
+def test_lazy_app_forwards_native_operations_once(monkeypatch):
+    calls = []
+    native = SimpleNamespace(app_id="native-app", operation=lambda: "native-result")
+    monkeypatch.setattr(
+        recipes,
+        "import_optional",
+        lambda name: SimpleNamespace(
+            App=SimpleNamespace(lookup=lambda *args, **kwargs: calls.append((args, kwargs)) or native)
+        ),
+    )
+    app = recipes.App.lookup("lazy", create_if_missing=True)
+    assert calls == []
+    assert app.operation() == "native-result"
+    assert app.app_id == "native-app"
+    assert len(calls) == 1
+    assert app._native() is native
+
+
+@pytest.mark.parametrize("strategy", ["priority", "weighted"])
+def test_native_only_route_preserves_native_classes_even_with_arker_key(monkeypatch, tmp_path, strategy):
+    import json
+
+    native = pytest.importorskip("modal")
+    route = tmp_path / "native-router.json"
+    create = {"strategy": strategy, **({"order": ["modal"]} if strategy == "priority" else {"weights": {"modal": 1}})}
+    route.write_text(
+        json.dumps({"version": 1, "existing": {"strategy": "priority", "order": ["modal"]}, "create": create})
+    )
+    monkeypatch.setenv("ARKER_API_KEY", "synthetic-key-must-not-select-factories")
+    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(route))
+    for name in ("App", "Image", "Secret"):
+        assert getattr(shim, name) is getattr(native, name)
+
+
+@pytest.mark.parametrize(
+    "create",
+    [
+        {"strategy": "priority", "order": ["modal", "arker"]},
+        {"strategy": "weighted", "weights": {"arker": 1}},
+        {"strategy": "weighted", "weights": {"modal": 1}, "fallback": ["arker"]},
+    ],
+)
+def test_arker_capable_routes_track_public_factories_without_global_key(monkeypatch, tmp_path, create):
+    import json
+
+    native = pytest.importorskip("modal")
+    route = tmp_path / "mixed-router.json"
+    route.write_text(
+        json.dumps({"version": 1, "existing": {"strategy": "priority", "order": ["modal"]}, "create": create})
+    )
+    monkeypatch.setenv("COMPUTESDK_ROUTER_CONFIG", str(route))
+    monkeypatch.delenv("ARKER_API_KEY", raising=False)
+    image = shim.Image.from_registry("public/image")
+    assert isinstance(image, native.Image)
+    assert recipes.image_recipe(image)._registry() == "public/image"
+    # A native derived handle has additional semantics; the original recipe is insufficient.
+    changed = image.env({"BUILD_VALUE": "literal"})
+    assert changed is not image
+    assert recipes.image_recipe(changed) is None
+    assert recipes.image_recipe(image)._registry() == "public/image"
+
+
+def test_scoped_factory_forwards_unknown_native_constructor_without_tracking(monkeypatch):
+    native = pytest.importorskip("modal")
+    sentinel = object()
+    calls = []
+    monkeypatch.setattr(
+        native.Image, "from_name", staticmethod(lambda *args, **kwargs: calls.append((args, kwargs)) or sentinel)
+    )
+    factory = recipes.RecipeFactory("Image")
+    assert factory.from_name("native-image", namespace="workspace") is sentinel
+    assert calls == [(("native-image",), {"namespace": "workspace"})]
+    assert recipes.image_recipe(sentinel) is None

@@ -528,6 +528,7 @@ OpenApiOperationId: TypeAlias = Literal[
     'createApiKey',
     'revokeApiKey',
     'setVmDeadline',
+    'forkNamed',
 ]
 
 

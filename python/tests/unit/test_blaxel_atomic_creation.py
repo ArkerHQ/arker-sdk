@@ -96,7 +96,7 @@ def test_named_creation_uses_global_authority_and_retains_returned_identity(name
     assert vm.id == "winner"
     assert vm.base_url == client._control_base_url
     args, options = calls[0]
-    assert args == ("POST", "/v1/fork", {"name": "named", "source_vm_name": "source"})
+    assert args == ("POST", "/v1/named-fork", {"name": "named", "source_vm_name": "source"})
     assert options["extra_headers"] == {
         "Arker-VM-Name": "named",
         "Arker-VM-Name-Mode": "get_or_create" if mode else "create",
@@ -122,10 +122,12 @@ def test_busy_generation_reconciles_without_lookup_or_new_identity(named_client,
     client._request = pending
     monkeypatch.setattr(creation.time, "sleep", lambda _: None)
     assert creation.fork_named(client, {"name": "named"}, config={}, get_or_create=True).id == "winner"
-    assert attempts == [("POST", "/v1/fork", {"name": "named"})] * 2
+    assert attempts == [("POST", "/v1/named-fork", {"name": "named"})] * 2
 
 
-@pytest.mark.parametrize("status,code", [(401, "unauthorized"), (403, "forbidden"), (409, "idempotency_conflict")])
+@pytest.mark.parametrize(
+    "status,code", [(401, "unauthorized"), (403, "forbidden"), (404, "not_found"), (409, "idempotency_conflict")]
+)
 def test_authority_errors_never_fall_back_or_publish_cache(named_client, monkeypatch, status, code):
     import arker._compat as compat
     from arker.computer import ArkerError
@@ -134,6 +136,7 @@ def test_authority_errors_never_fall_back_or_publish_cache(named_client, monkeyp
     error = ArkerError(code, "refused", status)
 
     def reject(*args, **kwargs):
+        assert args[1] == "/v1/named-fork"
         raise error
 
     client._request = reject
@@ -319,6 +322,29 @@ def test_concurrent_callers_keep_independent_modes_and_return_authoritative_winn
     assert results[0] in [("winner", stored[0]["metadata"]), (409, "SANDBOX_ALREADY_EXISTS")]
 
 
+def test_old_gateway_cannot_silently_create_an_ordinary_vm(named_client):
+    from arker.computer import ArkerError
+
+    creation, client, _ = named_client
+    calls = []
+    mutations = []
+
+    def legacy_gateway(method, path, body, **kwargs):
+        calls.append(path)
+        if path == "/v1/fork":
+            mutations.append(body)
+            pytest.fail("named creation reached ordinary fork")
+        raise ArkerError("not_found", "Unknown route", 404)
+
+    client._request = legacy_gateway
+    for mode in (False, True):
+        with pytest.raises(ArkerError) as error:
+            creation.fork_named(client, {"name": "named"}, config={}, get_or_create=mode)
+        assert error.value.status == 404
+    assert calls == ["/v1/named-fork", "/v1/named-fork"]
+    assert mutations == []
+
+
 def test_named_fork_reuses_ordinary_policy_read_to_write_normalization(monkeypatch):
     import copy
     import json
@@ -397,3 +423,46 @@ def test_cancel_during_busy_retry_prevents_another_creation_post(named_client, m
     with pytest.raises(RoutingCancelled):
         creation.fork_named(client, {"name": "named"}, config={}, cancelled=cancelled.is_set)
     assert len(attempts) == 1
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize(
+    "name,message",
+    [
+        (123, "Failed to parse sandbox body"),
+        (0, "Failed to parse sandbox body"),
+        (False, "Failed to parse sandbox body"),
+        ("a" * 50, "Invalid sandbox configuration: metadata.name is too long (maximum 49 characters)"),
+        (
+            "Upper",
+            (
+                "Invalid sandbox configuration: metadata.name must contain only "
+                "lower case alphanumeric characters and hyphens"
+            ),
+        ),
+        (
+            "under_score",
+            (
+                "Invalid sandbox configuration: metadata.name must contain only "
+                "lower case alphanumeric characters and hyphens"
+            ),
+        ),
+    ],
+)
+def test_name_validation_matches_native_before_arker_preparation(monkeypatch, asynchronous, name, message):
+    SandboxAPIError = pytest.importorskip("blaxel.core.sandbox").SandboxAPIError
+    monkeypatch.setattr(blaxel, "routed_create", lambda vendor, config, handlers: ("arker", handlers["arker"]()))
+    monkeypatch.setattr(blaxel, "arker_create", lambda *a, **k: pytest.fail("invalid name reached fork preparation"))
+    with pytest.raises(SandboxAPIError) as error:
+        if asynchronous:
+            asyncio.run(blaxel.SandboxInstance.create({"name": name}))
+        else:
+            blaxel.SyncSandboxInstance.create({"name": name})
+    assert error.value.status_code == 400
+    assert error.value.body == {"code": "VALIDATION_FAILED", "message": message, "status_code": 400}
+
+
+def test_name_length49_reaches_named_creation(named_client):
+    creation, client, calls = named_client
+    creation.fork_named(client, {"name": "a" * 49}, config={})
+    assert calls[0][0][2]["name"] == "a" * 49

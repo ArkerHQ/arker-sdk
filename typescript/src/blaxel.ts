@@ -6,7 +6,7 @@ import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
 import { createBlaxelDataPlane, validateBlaxelNative, type BlaxelDataPlane } from "./compat/blaxel-data-plane.js";
 import { blaxelControlCall, blaxelNotFound } from "./compat/blaxel-errors.js";
-import { namedBlaxelFork } from "./compat/blaxel-create.js";
+import { namedBlaxelFork, validateBlaxelName } from "./compat/blaxel-create.js";
 import { bootstrapBlaxel } from "./compat/blaxel-bootstrap.js";
 import { privateFetch } from "./compat/private-fetch.js";
 import { createNativeBlaxelProvider } from "./compat/blaxel-provider.js";
@@ -53,6 +53,7 @@ function makeSdk(config: BlaxelCompatConfig = {}, getOrCreate = false): CompatSd
     arker: config.arker,
     arkerFork: (client, request) => blaxelControlCall("create", () => namedBlaxelFork(config.arker, getOrCreate)(client, request)),
     mapArkerCreateOptions: options => {
+      validateBlaxelName(options.name);
       validateBlaxelNative();
       const { createIfNotExist: _, ...rest } = options;
       return rest;

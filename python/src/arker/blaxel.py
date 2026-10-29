@@ -167,7 +167,7 @@ class SyncSandboxInstance(UnsupportedMixin):
         )
 
         def create_arker() -> VM:
-            from ._compat_blaxel_create import fork_named
+            from ._compat_blaxel_create import fork_named, validate_name
             from ._compat_blaxel_data_plane import validate_native
 
             options = dict(kwargs)
@@ -185,6 +185,7 @@ class SyncSandboxInstance(UnsupportedMixin):
                 raise UnsupportedCompatibilityOption(
                     f"SandboxInstance.create option(s) are not supported by Arker: {names}"
                 )
+            validate_name(values.get("name"))
             validate_native()
             if cls._creation_cancelled():
                 raise RoutingCancelled("Async routing was cancelled")

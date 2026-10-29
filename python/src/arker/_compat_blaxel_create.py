@@ -11,18 +11,30 @@ from ._compat_blaxel_errors import creation_error
 from .computer import REQUEST_TIMEOUT_S, VM, ArkerError, _drop_none, _policy_update, _vm_info
 
 
+def validate_name(name):
+    if name is None or name == "":
+        return
+    if not isinstance(name, str):
+        message = "Failed to parse sandbox body"
+    elif len(name) > 49:
+        message = "Invalid sandbox configuration: metadata.name is too long (maximum 49 characters)"
+    elif re.fullmatch(r"[a-z0-9-]+", name) is None:
+        message = (
+            "Invalid sandbox configuration: metadata.name must contain only "
+            "lower case alphanumeric characters and hyphens"
+        )
+    else:
+        return
+    raise creation_error(message, status=400, code="VALIDATION_FAILED")
+
+
 def fork_named(client, request, *, config, get_or_create=False, cancelled=lambda: False):
     name = request.get("name")
     if cancelled():
         raise RoutingCancelled("Async routing was cancelled")
+    validate_name(name)
     if not name:
         return client.fork(**request)
-    if not isinstance(name, str) or re.fullmatch(r"[a-z0-9-]+", name) is None:
-        raise creation_error(
-            "metadata.name must contain only lower case alphanumeric characters and hyphens",
-            status=400,
-            code="VALIDATION_FAILED",
-        )
     # A regional URL is not a global coordinator. Never silently send
     # that caller's source or credentials to the default production gateway.
     if (config.get("base_url") or os.environ.get("ARKER_BASE_URL")) and not (
@@ -45,7 +57,7 @@ def fork_named(client, request, *, config, get_or_create=False, cancelled=lambda
         try:
             wire = client._request(
                 "POST",
-                "/v1/fork",
+                "/v1/named-fork",
                 request,
                 base_url=client._control_base_url,
                 extra_headers=headers,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import os
 import re
 import shlex
 import time
@@ -22,20 +21,27 @@ from ._compat import (
     pop_arker_config,
     routed_create,
     routed_get,
+    router_config,
     run_command,
     shell_command,
 )
 from ._modal_async import dualmethod
 from ._modal_recipes import App as AppRecipe
 from ._modal_recipes import Image as ImageRecipe
+from ._modal_recipes import RecipeFactory, image_recipe, secret_recipe
 from ._modal_recipes import Secret as SecretRecipe
 from .computer import VM
+
+_factories = {name: RecipeFactory(name) for name in ("App", "Image", "Secret")}
 
 
 def __getattr__(name: str) -> Any:
     module = import_optional("modal")
-    if name in {"App", "Image", "Secret"} and (module is None or os.environ.get("ARKER_API_KEY")):
-        return {"App": AppRecipe, "Image": ImageRecipe, "Secret": SecretRecipe}[name]
+    if name in _factories:
+        route = router_config(None, "modal").create
+        providers = (*route.order, *route.weights, *route.fallback)
+        if module is None or "arker" in providers:
+            return _factories[name]
     if module is not None:
         return getattr(module, name)
     raise AttributeError(name)
@@ -153,7 +159,8 @@ class Sandbox(UnsupportedMixin):
                 raise UnsupportedCompatibilityOption(
                     f"Sandbox.create option(s) are not supported by Arker: {', '.join(names)}"
                 )
-            if image is not None and type(image) is not ImageRecipe:
+            recipe = image_recipe(image)
+            if image is not None and recipe is None:
                 raise UnsupportedCompatibilityOption(
                     "Arker requires a local Image recipe; opaque native image handles are unsupported"
                 )
@@ -164,7 +171,8 @@ class Sandbox(UnsupportedMixin):
             invalid = exceptions.InvalidError if exceptions is not None else ValueError
             environment = {}
             for secret in secrets or []:
-                if type(secret) is not SecretRecipe:
+                secret = secret_recipe(secret)
+                if secret is None:
                     raise UnsupportedCompatibilityOption("Arker creation requires local Secret.from_dict recipes")
                 environment.update(secret._values)
             if creation_env is not None:
@@ -187,8 +195,8 @@ class Sandbox(UnsupportedMixin):
                 from ._modal_defaults import MARKER
 
                 metadata[MARKER] = True
-            registry = image._registry() if image is not None else None
-            registry_auth = image._registry_auth() if image is not None else None
+            registry = recipe._registry() if recipe is not None else None
+            registry_auth = recipe._registry_auth() if recipe is not None else None
             image_config = arker_config
             if registry_auth is not None:
                 image_config = {**(arker_config or {}), "registry_auth": registry_auth}

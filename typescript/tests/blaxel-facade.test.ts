@@ -89,7 +89,7 @@ test("named fork uses global transport and maps only duplicate conflicts", async
     assert.equal(vm.id, "winner");
     assert.equal(vm.baseUrl, config.controlBaseUrl);
     const received = requests.at(-1)!;
-    assert.equal(received.url, "/api/v1/fork");
+    assert.equal(received.url, "/api/v1/named-fork");
     assert.equal(received.method, "POST");
     assert.equal(received.headers["arker-vm-name-mode"], getOrCreate ? "get_or_create" : "create");
     assert.equal(received.headers["arker-vm-name"], "named");
@@ -106,6 +106,14 @@ test("named fork uses global transport and maps only duplicate conflicts", async
   });
   status = 403; code = "forbidden";
   await assert.rejects(namedBlaxelFork(config)(client, request), error => error instanceof ArkerError && error.status === 403);
+  status = 404; code = "not_found";
+  for (const getOrCreate of [false, true]) {
+    const before = requests.length;
+    await assert.rejects(namedBlaxelFork(config, getOrCreate)(client, request),
+      error => error instanceof ArkerError && error.status === 404);
+    assert.equal(requests.length, before + 1);
+    assert.equal(requests.at(-1)!.url, "/api/v1/named-fork");
+  }
   const count = requests.length;
   await assert.rejects(namedBlaxelFork({baseUrl: "https://regional.example/api"})(client, request), /controlBaseUrl/);
   await assert.rejects(namedBlaxelFork(config)(client, {...request, name: "Invalid Name"}), error => {
@@ -242,4 +250,44 @@ test("Blaxel instance delete reports authoritative absence without preliminary l
   });
   assert.equal(deleted, 1);
   await assert.rejects(plane.fs.read("/file"), /closed/);
+});
+
+test("name validation retains native types, length and messages before requests", async () => {
+  const { namedBlaxelFork, validateBlaxelName } = await import("../src/compat/blaxel-create.js");
+  const { Arker } = await import("../src/index.js");
+  let calls = 0;
+  const client = new Arker({apiKey: "ark_test", fetch: (async () => { calls++; throw Error("unexpected request"); }) as typeof fetch});
+  const cases: Array<[unknown, string]> = [
+    [123, "Failed to parse sandbox body"], [0, "Failed to parse sandbox body"], [false, "Failed to parse sandbox body"],
+    ["a".repeat(50), "Invalid sandbox configuration: metadata.name is too long (maximum 49 characters)"],
+    ["Upper", "Invalid sandbox configuration: metadata.name must contain only lower case alphanumeric characters and hyphens"],
+    ["under_score", "Invalid sandbox configuration: metadata.name must contain only lower case alphanumeric characters and hyphens"],
+  ];
+  for (const [name, message] of cases) {
+    await assert.rejects(namedBlaxelFork()(client, {name} as never), error => {
+      assert.deepEqual(error, {code: "VALIDATION_FAILED", message, status_code: 400}); return true;
+    });
+  }
+  validateBlaxelName("a".repeat(49));
+  assert.equal(calls, 0);
+});
+
+test("facade rejects falsy non-string names before generic option preparation", async t => {
+  const {mkdtemp, writeFile, rm} = await import("node:fs/promises");
+  const {tmpdir} = await import("node:os");
+  const {join} = await import("node:path");
+  const {SandboxInstance} = await import("../src/blaxel.js");
+  const directory = await mkdtemp(join(tmpdir(), "blaxel-invalid-name-"));
+  t.after(() => rm(directory, {recursive: true, force: true}));
+  const path = join(directory, "router.json");
+  await writeFile(path, JSON.stringify({version: 1, create: {strategy: "priority", order: ["arker"]},
+    existing: {strategy: "priority", order: ["arker"]}, cache: {path: join(directory, "cache.json")}}));
+  for (const name of [0, false, 123]) {
+    await assert.rejects(SandboxInstance.create({name} as never, {routerConfigPath: path,
+      arker: {apiKey: "ark_test", source: "source", controlBaseUrl: "https://control.example/api",
+        fetch: (async () => {assert.fail("invalid name reached HTTP");}) as typeof fetch}}), error => {
+      assert.deepEqual(error, {code: "VALIDATION_FAILED", message: "Failed to parse sandbox body", status_code: 400});
+      return true;
+    });
+  }
 });

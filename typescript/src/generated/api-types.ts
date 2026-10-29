@@ -924,6 +924,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/named-fork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Atomically create or get an organization-wide named VM
+         * @description Public global gateway only. Unsupported gateways reject this dedicated route before creation. Never fall back to /v1/fork. Ordinary fork rejects naming headers.
+         */
+        post: operations["forkNamed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2045,7 +2065,7 @@ export interface components {
          * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
          * @enum {string}
          */
-        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "openVmPort" | "openVmSocket" | "mintSessionPtyTicket" | "createFileTransferDelegation" | "downloadFileTransfer" | "uploadFileTransfer" | "pauseVm" | "resumeVm" | "getVmLifecycle" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey" | "setVmDeadline";
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "openVmPort" | "openVmSocket" | "mintSessionPtyTicket" | "createFileTransferDelegation" | "downloadFileTransfer" | "uploadFileTransfer" | "pauseVm" | "resumeVm" | "getVmLifecycle" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey" | "setVmDeadline" | "forkNamed";
         /** @enum {string} */
         HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
         /**
@@ -4468,10 +4488,6 @@ export interface operations {
             header?: {
                 /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork retried while the original is still running may wait for it and returns the same VM; when it cannot wait, it answers 409 resource_busy with Retry-After and the VM id. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                /** @description Opt in to an organization-wide name binding at the public gateway. Regional endpoints reject this header. Name generations use fresh regional idempotency keys. Requires Arker-VM-Name-Mode. Commands are not accepted on named forks. Requires organization-wide vm:create, vm:read and vm:delete scopes. Pool placement and a caller-supplied Idempotency-Key are not accepted. */
-                "Arker-VM-Name"?: string;
-                /** @description create conflicts with an existing named VM; get_or_create returns it without applying the new request. Pending creation returns resource_busy when it cannot be joined. Abandoned creation is fenced after five minutes and cleaned up before name reuse; retry resource_busy. Requires Arker-VM-Name. */
-                "Arker-VM-Name-Mode"?: "create" | "get_or_create";
             };
             path?: never;
             cookie?: never;
@@ -6432,6 +6448,48 @@ export interface operations {
             409: components["responses"]["ConflictOrInvalidStateOrResourceBusyError"];
             413: components["responses"]["PayloadTooLargeError"];
             422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["CapacityUnavailableOrUnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
+        };
+    };
+    forkNamed: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opt in to an organization-wide name binding at the public gateway. Regional endpoints reject this header. Name generations use fresh regional idempotency keys. Requires Arker-VM-Name-Mode. Commands are not accepted on named forks. Requires organization-wide vm:create, vm:read and vm:delete scopes. Pool placement and a caller-supplied Idempotency-Key are not accepted. */
+                "Arker-VM-Name": string;
+                /** @description create conflicts with an existing named VM; get_or_create returns it without applying the new request. Pending creation returns resource_busy when it cannot be joined. Abandoned creation is fenced after five minutes and cleaned up before name reuse; retry resource_busy. Requires Arker-VM-Name. */
+                "Arker-VM-Name-Mode": "create" | "get_or_create";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForkRequest"];
+            };
+        };
+        responses: {
+            /** @description The newly created or existing named VM. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Vm"];
+                };
+            };
+            400: components["responses"]["BadRequestOrInsufficientResourcesError"];
+            401: components["responses"]["UnauthorizedError"];
+            402: components["responses"]["PaymentRequiredError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
+            409: components["responses"]["AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError"];
+            413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["OperationFailedOrUnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["CapacityUnavailableOrUnavailableError"];

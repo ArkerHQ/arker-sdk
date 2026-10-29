@@ -1,12 +1,20 @@
 import { ArkerError, VM, withoutReadOnlyPolicyFields, type Arker, type ForkOptions, type Vm } from "../index.js";
 import type { ArkerComputeProviderConfig } from "./arker-provider.js";
 
+export function validateBlaxelName(name: unknown): void {
+  if (name == null || name === "") return;
+  let message: string;
+  if (typeof name !== "string") message = "Failed to parse sandbox body";
+  else if (name.length > 49) message = "Invalid sandbox configuration: metadata.name is too long (maximum 49 characters)";
+  else if (!/^[a-z0-9-]+$/.test(name)) message = "Invalid sandbox configuration: metadata.name must contain only lower case alphanumeric characters and hyphens";
+  else return;
+  throw { code: "VALIDATION_FAILED", status_code: 400, message };
+}
+
 export function namedBlaxelFork(config: ArkerComputeProviderConfig = {}, getOrCreate = false) {
   return async (client: Arker, request: ForkOptions): Promise<VM> => {
+    validateBlaxelName(request.name);
     if (!request.name) return client.fork(request);
-    if (!/^[a-z0-9-]+$/.test(request.name)) {
-      throw { code: "VALIDATION_FAILED", status_code: 400, message: "metadata.name must contain only lower case alphanumeric characters and hyphens" };
-    }
     if ((config.baseUrl || process.env.ARKER_BASE_URL) && !(config.controlBaseUrl || process.env.ARKER_CONTROL_BASE_URL)) {
       throw new Error("Named Blaxel creation with a custom baseUrl requires controlBaseUrl for its public global gateway");
     }
@@ -24,7 +32,7 @@ export function namedBlaxelFork(config: ArkerComputeProviderConfig = {}, getOrCr
     const deadline = Date.now() + 300_000;
     while (true) {
       try {
-        const wire = await client._request<Vm>("POST", "/v1/fork", prepared, client.controlBaseUrl, headers,
+        const wire = await client._request<Vm>("POST", "/v1/named-fork", prepared, client.controlBaseUrl, headers,
           undefined, getOrCreate, { signal: AbortSignal.timeout(Math.max(0, deadline - Date.now())) });
         return new VM(client, wire.vm_id, client.controlBaseUrl, wire);
       } catch (error) {

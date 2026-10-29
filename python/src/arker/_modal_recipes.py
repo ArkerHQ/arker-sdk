@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from weakref import WeakKeyDictionary
 
 from ._compat import UnsupportedCompatibilityOption, import_optional
 
@@ -52,7 +53,8 @@ class Image:
         secret = self._options.get("secret")
         if secret is None:
             return None
-        if type(secret) is not Secret:
+        secret = secret_recipe(secret)
+        if secret is None:
             raise UnsupportedCompatibilityOption("Registry authentication requires a local Secret.from_dict recipe")
         values = secret._values
         if any(not values.get(key) for key in ("REGISTRY_USERNAME", "REGISTRY_PASSWORD")):
@@ -86,6 +88,7 @@ class App:
     _create_if_missing: bool
     _environment_name: str | None
     _client: Any = field(repr=False)
+    _resolved: Any = field(default=None, init=False, repr=False, compare=False)
 
     @staticmethod
     def lookup(
@@ -97,12 +100,21 @@ class App:
         module = import_optional("modal")
         if module is None:
             raise UnsupportedCompatibilityOption("Native Modal SDK is required to resolve a Modal app")
-        return module.App.lookup(
+        if self._resolved is not None:
+            return self._resolved
+        resolved = module.App.lookup(
             self._name,
             client=self._client,
             environment_name=self._environment_name,
             create_if_missing=self._create_if_missing,
         )
+        object.__setattr__(self, "_resolved", resolved)
+        return resolved
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self._native(), name)
 
     def _group(self) -> dict[str, str]:
         if not self._create_if_missing or self._client is not None:
@@ -147,3 +159,63 @@ def native_secrets(options):
         **options,
         "secrets": [secret._native() if type(secret) is Secret else secret for secret in (options["secrets"] or [])],
     }
+
+
+# Only objects created through these public factories acquire Arker recipes.
+_images: WeakKeyDictionary = WeakKeyDictionary()
+_secrets: WeakKeyDictionary = WeakKeyDictionary()
+
+
+def _known_recipe(value, recipe_type, known):
+    if type(value) is recipe_type:
+        return value
+    try:
+        return known.get(value)
+    except TypeError:
+        return None
+
+
+def image_recipe(value):
+    return _known_recipe(value, Image, _images)
+
+
+def secret_recipe(value):
+    return _known_recipe(value, Secret, _secrets)
+
+
+class RecipeFactory:
+    """Keep native local handles; defer remote app lookup until it is used."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def _class(self):
+        module = import_optional("modal")
+        if module is None:
+            raise UnsupportedCompatibilityOption("Native Modal SDK is required for this operation")
+        return getattr(module, self.name)
+
+    def __call__(self, *args, **kwargs):
+        return self._class()(*args, **kwargs)
+
+    def __instancecheck__(self, value):
+        recipe_type = {"Image": Image, "Secret": Secret, "App": App}[self.name]
+        if isinstance(value, recipe_type):
+            return True
+        return isinstance(value, self._class())
+
+    def __getattr__(self, name):
+        recipe_type = {"Image": Image, "Secret": Secret, "App": App}[self.name]
+        methods = {"Image": {"from_registry", "debian_slim"}, "Secret": {"from_dict"}, "App": {"lookup"}}
+        if name not in methods[self.name]:
+            return getattr(self._class(), name)
+
+        def construct(*args, **kwargs):
+            recipe = getattr(recipe_type, name)(*args, **kwargs)
+            if self.name == "App" or import_optional("modal") is None:
+                return recipe
+            native = recipe._native()
+            (_images if self.name == "Image" else _secrets)[native] = recipe
+            return native
+
+        return construct
