@@ -322,3 +322,39 @@ def test_network_requires_explicit_provenance_matching_current_policy(vm, record
     if recorded is not None:
         vm.metadata["arker_e2b"]["network"] = recorded
     assert sandbox_info(vm, {"customer_paused": False, "started_at": START}).network is None
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_inventory_hydrates_policy_projection_without_dropping_sandboxes(vm, monkeypatch, asynchronous):
+    calls = []
+
+    def refresh(**options):
+        calls.append(options)
+        return vm
+
+    listed = SimpleNamespace(**{**vars(vm), "policies": None, "refresh": refresh})
+    client = SimpleNamespace(list_vms=lambda **options: SimpleNamespace(vms=[listed], next_cursor=None))
+    monkeypatch.setattr(
+        Lifecycle, "_read_lifecycle", lambda self, **options: {"customer_paused": False, "started_at": START}
+    )
+    paginator = InventoryPaginator(client)
+    if asynchronous:
+        result = asyncio.run(AsyncInventoryPaginator(paginator).next_items(request_timeout=12))
+    else:
+        result = paginator.next_items(request_timeout=12)
+    assert [item.sandbox_id for item in result] == [vm.id]
+    assert result[0].end_at.isoformat() == "2026-01-01T01:05:00+00:00"
+    assert calls == [{"request_timeout": 12}]
+    assert not paginator.has_next
+
+
+def test_inventory_missing_authoritative_deadline_still_fails_without_advancing(vm, monkeypatch):
+    vm.policies = None
+    monkeypatch.setattr(
+        Lifecycle, "_read_lifecycle", lambda self, **options: {"customer_paused": False, "started_at": START}
+    )
+    client = SimpleNamespace(list_vms=lambda **options: SimpleNamespace(vms=[vm], next_cursor="later"))
+    paginator = InventoryPaginator(client, next_token="current")
+    with pytest.raises(UnsupportedCompatibilityOption, match="lifetime delete schedule"):
+        paginator.next_items()
+    assert paginator.next_token == "current" and paginator.has_next

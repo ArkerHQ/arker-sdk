@@ -193,6 +193,7 @@ class InventoryPaginator:
         result = []
         for vm in page.vms:
             try:
+                vm = _control(vm.refresh, **request)
                 lifecycle = Lifecycle(vm=vm)
                 observed = lifecycle._read_lifecycle(**request)
                 state = "paused" if observed["customer_paused"] else "running"
