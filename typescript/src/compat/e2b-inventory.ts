@@ -53,13 +53,15 @@ export function sandboxInfo(vm: VM, lifecycle: Record<string, unknown>): Sandbox
   const control = inbound.find(rule => rule.type === "inbound" && rule.action === "allow" && rule.expires_at === undefined && rule.auth === "arker" &&
     JSON.stringify(rule.match) === JSON.stringify({ ports: [49983] }));
   const tokenApps = vm.policies?.rules?.["computesdk-e2b-apps"];
-  const managedPrivate = tokenApps?.type === "inbound" && tokenApps.action === "allow" && tokenApps.auth === "open" && tokenApps.expires_at === undefined
+  const managedPrivate = tokenApps?.type === "inbound" && tokenApps.action === "allow" && (tokenApps.auth === "open" || tokenApps.auth === undefined) && tokenApps.expires_at === undefined
     && JSON.stringify(tokenApps.match?.ports) === JSON.stringify([[1, 49982], [49984, 65535]])
     && Object.keys(tokenApps.match ?? {}).length === 2 && Object.keys(tokenApps.match?.headers ?? {}).length === 1
     && tokenApps.match?.headers?.["e2b-traffic-access-token"]?.length === 1
     && ["***", "${secret:computesdk-e2b-traffic}"].includes(tokenApps.match.headers["e2b-traffic-access-token"][0]);
-  const publicTraffic = inbound.length === 2 && control && managedPrivate ? false : inbound.length === 2 && control && apps?.type === "inbound" && ["arker", "open"].includes(String(apps.auth))
-    ? apps.auth === "open" : undefined;
+  // Managed open rules omit the auth field.
+  const managedOpen = apps?.type === "inbound" && apps === tokenApps && apps.auth === undefined;
+  const publicTraffic = inbound.length === 2 && control && managedPrivate ? false : inbound.length === 2 && control && apps?.type === "inbound" && (managedOpen || ["arker", "open"].includes(String(apps.auth)))
+    ? managedOpen || apps.auth === "open" : undefined;
   return {
     sandboxId: vm.id, templateId: source.value,
     ...(source.kind === "vm_name" ? { name: source.value } : {}),
@@ -68,6 +70,7 @@ export function sandboxInfo(vm: VM, lifecycle: Record<string, unknown>): Sandbox
     endAt: end,
     state: lifecycle.customer_paused ? "paused" : "running",
     cpuCount: cpu!, memoryMB: memory!, envdVersion: descriptor.envd_version,
-    ...(publicTraffic === undefined ? {} : { network: { allowPublicTraffic: publicTraffic } }),
+    ...(publicTraffic === undefined || record(descriptor.network)?.allow_public_traffic !== publicTraffic
+      ? {} : { network: { allowPublicTraffic: publicTraffic } }),
   };
 }

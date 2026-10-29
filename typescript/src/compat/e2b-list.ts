@@ -58,7 +58,8 @@ class ArkerPaginator implements E2BPaginator {
           const state = await lifecycle.isRunning(requestOptions) ? "running" : "paused";
           if (!query.state.includes(state)) continue;
         }
-        results.push(await lifecycle.getInfo(requestOptions));
+        const { network: _network, ...info } = await lifecycle.getInfo(requestOptions);
+        results.push(info);
       }
       if (page.nextCursor) this.seen.add(page.nextCursor);
       this.cursor = page.nextCursor ?? undefined;

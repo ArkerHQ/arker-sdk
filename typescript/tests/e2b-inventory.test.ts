@@ -11,7 +11,7 @@ function fixture(id = "sandbox") {
     started_at: "2026-01-02T03:04:05Z", paused_at: null as string | null };
   const calls: string[] = [];
   const vm = { id, baseUrl: "https://example.invalid", created_at: "2026-01-01T00:00:00Z",
-    metadata: { arker_e2b: { version: 1, metadata: { purpose: "test" }, source: { kind: "vm_name", value: "actual-source" }, envd_version: "0.10.2" } },
+    metadata: { arker_e2b: { version: 1, network: { allow_public_traffic: true }, metadata: { purpose: "test" }, source: { kind: "vm_name", value: "actual-source" }, envd_version: "0.10.2" } },
     policies: { rules: { "computesdk-e2b-lifetime": { type: "schedule", action: "delete", at: "2026-01-02T03:09:05Z" } } },
     resources: { vcpu: 2, memory_mib: 512 },
     refresh: async () => { calls.push("refresh"); return vm; },
@@ -54,10 +54,17 @@ test("Arker paginator forwards metadata filters and opaque cursors without chang
   preserveProperties(t, Arker.prototype, "listVms");
   process.env.ARKER_API_KEY = "test"; delete process.env.E2B_API_KEY; delete process.env.COMPUTESDK_ROUTER_CONFIG;
   const f = fixture(); const requests: unknown[] = [];
+  Object.assign(f.raw.policies.rules, {
+    "computesdk-e2b-apps": { type: "inbound", priority: 0, action: "allow", match: { ports: [[1, 49982], [49984, 65535]] } },
+    "computesdk-e2b-envd": { type: "inbound", priority: 1000000, action: "allow", auth: "arker", match: { ports: [49983] } },
+  });
+  assert.deepEqual(sandboxInfo(f.vm, f.lifecycle).network, { allowPublicTraffic: true });
   Arker.prototype.listVms = async options => { requests.push(options); return { vms: [f.vm], nextCursor: requests.length === 1 ? "opaque-next" : null }; };
   const pages = listSandboxes({ query: { metadata: { purpose: "test" }, state: ["running"] }, limit: 2 });
   assert.equal(pages.hasNext, true);
-  assert.equal((await pages.nextItems())[0].sandboxId, "sandbox");
+  const first = (await pages.nextItems())[0];
+  assert.equal(first.sandboxId, "sandbox");
+  assert.equal(first.network, undefined);
   assert.equal(pages.nextToken, "opaque-next");
   await pages.nextItems(); assert.equal(pages.hasNext, false); assert.equal(pages.nextToken, undefined);
   assert.deepEqual(requests, [undefined, "opaque-next"].map(cursor => ({ cursor, limit: 2, started_at_order: "desc",
@@ -80,6 +87,7 @@ test("native paginator keeps object identity and receives original options", t =
 
 for (const open of [true, false]) test(`inventory exposes native public traffic flag ${open} from actual ingress`, () => {
   const f = fixture();
+  f.raw.metadata.arker_e2b.network.allow_public_traffic = open;
   Object.assign(f.raw.policies.rules, {
     apps: { type: "inbound", priority: 0, action: "allow", auth: open ? "open" : "arker", match: { ports: [[1, 49982], [49984, 65535]] } },
     control: { type: "inbound", priority: 1, action: "allow", auth: "arker", match: { ports: [49983] } },
@@ -165,6 +173,7 @@ for (const expiry of ["2000-01-01T00:00:00Z", "2999-01-01T00:00:00Z"]) {
 
 test("inventory identifies managed secret-header app ingress as private without leaking credentials", () => {
   const f = fixture();
+  f.raw.metadata.arker_e2b.network.allow_public_traffic = false;
   Object.assign(f.raw.policies.rules, {
     "computesdk-e2b-apps": { type: "inbound", priority: 0, action: "allow", auth: "open", match: { ports: [[1, 49982], [49984, 65535]], headers: { "e2b-traffic-access-token": ["***"] } } },
     "computesdk-e2b-envd": { type: "inbound", priority: 1000000, action: "allow", auth: "arker", match: { ports: [49983] } },
@@ -172,4 +181,45 @@ test("inventory identifies managed secret-header app ingress as private without 
   const info = sandboxInfo(f.vm, f.lifecycle);
   assert.deepEqual(info.network, { allowPublicTraffic: false });
   assert.ok(!JSON.stringify(info).includes("***"));
+});
+
+for (const privateTraffic of [false, true]) test(`inventory recognizes normalized managed ingress, private=${privateTraffic}`, () => {
+  const f = fixture();
+  f.raw.metadata.arker_e2b.network.allow_public_traffic = !privateTraffic;
+  const apps = { type: "inbound", priority: 0, action: "allow",
+    match: { ports: [[1, 49982], [49984, 65535]], ...(privateTraffic ? { headers: { "e2b-traffic-access-token": ["***"] } } : {}) } };
+  Object.assign(f.raw.policies.rules, {
+    "computesdk-e2b-apps": apps,
+    "computesdk-e2b-envd": { type: "inbound", priority: 1000000, action: "allow", auth: "arker", match: { ports: [49983] } },
+  });
+  assert.deepEqual(sandboxInfo(f.vm, f.lifecycle).network, { allowPublicTraffic: !privateTraffic });
+  const rules = f.raw.policies.rules as Record<string, unknown>;
+  delete rules["computesdk-e2b-apps"];
+  rules["customer-app"] = apps;
+  assert.equal(sandboxInfo(f.vm, f.lifecycle).network, undefined, "Do not infer open auth for arbitrary customer rules");
+});
+
+test("default or historical creation omits network details despite canonical public ingress", () => {
+  const f = fixture();
+  Object.assign(f.raw.policies.rules, {
+    "computesdk-e2b-apps": { type: "inbound", priority: 0, action: "allow", match: { ports: [[1, 49982], [49984, 65535]] } },
+    "computesdk-e2b-envd": { type: "inbound", priority: 1000000, action: "allow", auth: "arker", match: { ports: [49983] } },
+  });
+  assert.deepEqual(sandboxInfo(f.vm, f.lifecycle).network, { allowPublicTraffic: true });
+  f.raw.metadata.arker_e2b.network.allow_public_traffic = false;
+  assert.equal(sandboxInfo(f.vm, f.lifecycle).network, undefined, "Policy drift must not override recorded provenance");
+  delete (f.raw.metadata.arker_e2b as { network?: unknown }).network;
+  assert.equal(sandboxInfo(f.vm, f.lifecycle).network, undefined);
+});
+
+test("unknown explicit auth never acquires a public or private network flag", () => {
+  for (const headers of [undefined, { "e2b-traffic-access-token": ["***"] }]) {
+    const f = fixture();
+    Object.assign(f.raw.policies.rules, {
+      "computesdk-e2b-apps": { type: "inbound", priority: 0, action: "allow", auth: "unsupported-auth",
+        match: { ports: [[1, 49982], [49984, 65535]], ...(headers ? { headers } : {}) } },
+      "computesdk-e2b-envd": { type: "inbound", priority: 1000000, action: "allow", auth: "arker", match: { ports: [49983] } },
+    });
+    assert.equal(sandboxInfo(f.vm, f.lifecycle).network, undefined);
+  }
 });

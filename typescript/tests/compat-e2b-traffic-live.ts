@@ -5,8 +5,9 @@ import { recordEvidence } from "../scripts/compat-evidence.js";
 import { withLiveRouter } from "./compat-live-router.js";
 import { traceVendor } from "./compat-trace.js";
 
-async function program(Sandbox: typeof Native.Sandbox, privateTraffic: boolean): Promise<void> {
-  let sandbox = await Sandbox.create(privateTraffic ? { network: { allowPublicTraffic: false } } : {});
+async function program(Sandbox: typeof Native.Sandbox, publicTraffic: boolean | undefined): Promise<void> {
+  const privateTraffic = publicTraffic === false;
+  let sandbox = await Sandbox.create(publicTraffic === undefined ? {} : { network: { allowPublicTraffic: publicTraffic } });
   const status = async (headers: Record<string, string> = {}) => {
     const response = await fetch(`https://${sandbox.getHost(8080)}/`, { headers, redirect: "error", signal: AbortSignal.timeout(30000) });
     await response.body?.cancel();
@@ -42,7 +43,9 @@ PY`, { timeoutMs: 25000 });
         assert.equal(await status({ "E2B-Traffic-Access-Token": token! }), 200);
         assert.equal(await status({ "X-Access-Token": token! }), 403);
       }
-      assert.equal((await sandbox.getInfo()).network?.allowPublicTraffic, !privateTraffic);
+      const info = await sandbox.getInfo();
+      if (publicTraffic === undefined) assert.equal(info.network, undefined);
+      else assert.equal(info.network?.allowPublicTraffic, publicTraffic);
     }
   } finally { await sandbox.kill(); }
 }
@@ -56,12 +59,12 @@ await withLiveRouter(["E2B_API_KEY", "ARKER_API_KEY", "COMPAT_COVERAGE_EVIDENCE"
     await setProvider(provider);
     if (provider === "arker") delete process.env.E2B_API_KEY;
     else process.env.E2B_API_KEY = nativeKey;
-    for (const privateTraffic of [false, true]) {
-      const scenario = `application-traffic-${privateTraffic ? "private" : "public"}`;
+    for (const publicTraffic of [undefined, true, false]) {
+      const scenario = `application-traffic-${publicTraffic === undefined ? "default" : publicTraffic ? "public" : "private"}`;
       const called = new Set<string>();
       let outcome = "failed";
       try {
-        await program(traceVendor(module.Sandbox as unknown as typeof Native.Sandbox, "Sandbox.static", called), privateTraffic);
+        await program(traceVendor(module.Sandbox as unknown as typeof Native.Sandbox, "Sandbox.static", called), publicTraffic);
         outcome = "passed";
       } catch (error) {
         console.error(`${scenario} failed on ${route}: ${error instanceof Error ? error.name : typeof error}`);

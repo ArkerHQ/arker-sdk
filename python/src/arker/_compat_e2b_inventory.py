@@ -45,11 +45,12 @@ def _network_info(vm):
     for name, rule in normalized.items():
         if rule.get("action") != "allow":
             continue
-        if rule.get("match") == {"ports": PORTS} and rule.get("auth") in ("open", "arker"):
-            return {"allow_public_traffic": rule["auth"] == "open"}
+        auth = rule.get("auth", "open" if name == APP else None)
+        if rule.get("match") == {"ports": PORTS} and auth in ("open", "arker"):
+            return {"allow_public_traffic": auth == "open"}
         if (
             name == APP
-            and rule.get("auth") == "open"
+            and auth == "open"
             and any(
                 rule.get("match") == {"ports": PORTS, "headers": {"e2b-traffic-access-token": [value]}}
                 for value in ("***", "${secret:" + SECRET + "}")
@@ -102,6 +103,16 @@ def sandbox_info(vm: Any, lifecycle: dict[str, Any], *, include_network: bool = 
             )
         else:
             raise UnsupportedCompatibilityOption("E2B lifetime schedule uses an unsupported clock")
+    network = None
+    recorded_network = descriptor.get("network")
+    if (
+        include_network
+        and isinstance(recorded_network, dict)
+        and type(recorded_network.get("allow_public_traffic")) is bool
+    ):
+        observed_network = _network_info(vm)
+        if observed_network == recorded_network:
+            network = observed_network
     return SandboxInfo(
         sandbox_id=vm.id,
         sandbox_domain=None,
@@ -114,7 +125,7 @@ def sandbox_info(vm: Any, lifecycle: dict[str, Any], *, include_network: bool = 
         cpu_count=cpu,
         memory_mb=memory,
         envd_version=version,
-        network=_network_info(vm) if include_network else None,
+        network=network,
     )
 
 

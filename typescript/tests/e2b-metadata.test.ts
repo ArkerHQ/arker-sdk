@@ -20,3 +20,10 @@ test("metadata rejects non-string values and fabricated source identity", () => 
   }
   assert.throws(() => e2bForkMetadata({ image: "image" }, {}), /actual VM source/);
 });
+
+test("network provenance distinguishes default from explicit false, true and empty options", () => {
+  for (const network of [undefined, {}, { allowPublicTraffic: true }, { allowPublicTraffic: false }]) {
+    const metadata = e2bForkMetadata({ source_vm_id: "source" }, {}, network) as { arker_e2b: { network?: unknown } };
+    assert.deepEqual(metadata.arker_e2b.network, network === undefined ? undefined : { allow_public_traffic: network.allowPublicTraffic ?? true });
+  }
+});

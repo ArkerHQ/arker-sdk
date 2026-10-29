@@ -12,7 +12,7 @@ import httpx
 import shlex
 from e2b import Sandbox
 
-sandbox = Sandbox.create(network={"allow_public_traffic": False}) if private else Sandbox.create()
+sandbox = Sandbox.create(network={"allow_public_traffic": not private})
 try:
     token = sandbox.traffic_access_token
     assert isinstance(token, str) and token if private else token is None

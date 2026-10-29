@@ -28,7 +28,7 @@ const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "env
 function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMounts, lookupOptions?: SandboxApiOpts) {
   const { mode: _mode, keepMemory: _keepMemory, onResume: _onResume, timeoutMs: _timeout, ...apiOptions } =
     (lookupOptions ?? {}) as SandboxPauseOpts & SandboxConnectOpts;
-  let publicTraffic = true;
+  let network: E2BNetworkOptions | undefined;
   const fallbackProvider = createNativeE2BProvider(apiOptions);
   if (volumeMounts !== undefined) {
     const create = fallbackProvider.sandbox.create.bind(fallbackProvider.sandbox);
@@ -41,13 +41,13 @@ function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMount
     fallbackProvider,
     routerConfigPath,
     arkerLookupTransport: lookupOptions ? lifecycleTransport(lookupOptions) : undefined,
-    mapArkerForkMetadata: e2bForkMetadata,
-    arkerFork: (client: import("./index.js").Arker, request: import("./index.js").ForkOptions) => forkWithTraffic(client, request, publicTraffic),
+    mapArkerForkMetadata: (request: import("./index.js").ForkOptions, metadata: unknown) => e2bForkMetadata(request, metadata, network),
+    arkerFork: (client: import("./index.js").Arker, request: import("./index.js").ForkOptions) => forkWithTraffic(client, request, network?.allowPublicTraffic ?? true),
     mapArkerCreateOptions: (values: Record<string, unknown>) => {
       assertSupportedObjectKeys(values, [...E2B_CREATE_OPTION_KEYS, "templateId"], "e2b", "Sandbox.create");
       validateEnvdEnvs(values.envs as Record<string, string> | undefined);
       validateE2BNetwork(values.network as E2BNetworkOptions | undefined);
-      publicTraffic = (values.network as E2BNetworkOptions | undefined)?.allowPublicTraffic ?? true;
+      network = values.network as E2BNetworkOptions | undefined;
       if (volumeMounts !== undefined) checkMountBackend(volumeMounts, "arker");
       const { volumeMounts: _mounts, network: _network, envs: _envs, timeoutMs: _timeoutMs, ...rest } = values;
       return { ...rest, timeout: e2bTimeoutDuration(resolveTimeout(values as CreateOptions) ?? 300_000) };

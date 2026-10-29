@@ -350,3 +350,15 @@ def test_facade_fork_installs_child_ingress_and_token_in_single_request(monkeypa
     else:
         assert len(token) == 43
         assert policy["rules"][APP]["match"]["headers"] == {"e2b-traffic-access-token": ["${secret:" + SECRET + "}"]}
+
+
+@pytest.mark.parametrize("network", [None, {}, {"allow_public_traffic": True}, {"allow_public_traffic": False}])
+def test_create_records_only_explicit_network_visibility(network, fork_requests):
+    requests, _ = fork_requests
+    options = {"network": network}
+    shim.Sandbox._create_arker({"source": "ubuntu"}, None, None, None, options)
+    descriptor = requests[0]["metadata"]["arker_e2b"]
+    if network:
+        assert descriptor["network"] == network
+    else:
+        assert "network" not in descriptor

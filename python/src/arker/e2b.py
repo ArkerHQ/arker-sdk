@@ -274,6 +274,11 @@ class Sandbox(UnsupportedMixin):
                     "metadata": dict(metadata),
                     "source": source,
                     "envd_version": envd_version(),
+                    **(
+                        {"network": {"allow_public_traffic": public}}
+                        if "allow_public_traffic" in network_options
+                        else {}
+                    ),
                 }
             },
         )

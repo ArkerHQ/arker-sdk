@@ -228,6 +228,7 @@ def test_invalid_inventory_order_and_timestamp_fail_before_io(options):
 @pytest.mark.parametrize("expiring_rule", ["apps", "control"])
 @pytest.mark.parametrize("app_auth", ["open", "arker"])
 def test_expiring_inbound_rules_never_infer_public_traffic(vm, expires_at, expiring_rule, app_auth):
+    vm.metadata["arker_e2b"]["network"] = {"allow_public_traffic": app_auth == "open"}
     rules = vm.policies["rules"]
     rules.update(
         {
@@ -249,6 +250,9 @@ def test_expiring_inbound_rules_never_infer_public_traffic(vm, expires_at, expir
     "app_auth,header,expected",
     [
         ("open", None, True),
+        (None, None, True),
+        (None, "${secret:computesdk-e2b-traffic}", False),
+        (None, "***", False),
         ("arker", None, False),
         ("open", "${secret:computesdk-e2b-traffic}", False),
         ("open", "***", False),
@@ -268,6 +272,9 @@ def test_detail_network_uses_only_canonical_policy_and_list_omits_it(vm, app_aut
             CONTROL: {"type": "inbound", "action": "allow", "auth": "arker", "match": {"ports": [49983]}},
         }
     )
+    if app_auth is None:
+        del vm.policies["rules"][APP]["auth"]
+    vm.metadata["arker_e2b"]["network"] = {"allow_public_traffic": expected}
     observed = {"customer_paused": False, "started_at": START}
     assert sandbox_info(vm, observed).network == {"allow_public_traffic": expected}
     assert sandbox_info(vm, observed, include_network=False).network is None
@@ -277,6 +284,7 @@ def test_detail_network_uses_only_canonical_policy_and_list_omits_it(vm, app_aut
 def test_modified_private_ingress_does_not_invent_network_visibility(vm, modification):
     from arker._compat_e2b_network import APP, CONTROL, traffic_policies
 
+    vm.metadata["arker_e2b"]["network"] = {"allow_public_traffic": False}
     policies, _ = traffic_policies(None, None, False)
     vm.policies["rules"].update(policies["rules"])
     rules = vm.policies["rules"]
@@ -290,4 +298,27 @@ def test_modified_private_ingress_does_not_invent_network_visibility(vm, modific
         rules["custom"] = {"type": "inbound", "action": "allow", "auth": "open"}
     else:
         rules[APP]["match"]["headers"]["e2b-traffic-access-token"] = ["${secret:other}"]
+    assert sandbox_info(vm, {"customer_paused": False, "started_at": START}).network is None
+
+
+def test_unmanaged_rule_without_auth_does_not_infer_public_traffic(vm):
+    from arker._compat_e2b_network import APP, traffic_policies
+
+    vm.metadata["arker_e2b"]["network"] = {"allow_public_traffic": True}
+    policies, _ = traffic_policies(None, None, True)
+    rules = policies["rules"]
+    rules["custom"] = rules.pop(APP)
+    rules["custom"].pop("auth")
+    vm.policies["rules"].update(rules)
+    assert sandbox_info(vm, {"customer_paused": False, "started_at": START}).network is None
+
+
+@pytest.mark.parametrize("recorded", [None, {}, {"allow_public_traffic": False}, {"allow_public_traffic": 1}])
+def test_network_requires_explicit_provenance_matching_current_policy(vm, recorded):
+    from arker._compat_e2b_network import traffic_policies
+
+    policies, _ = traffic_policies(None, None, True)
+    vm.policies["rules"].update(policies["rules"])
+    if recorded is not None:
+        vm.metadata["arker_e2b"]["network"] = recorded
     assert sandbox_info(vm, {"customer_paused": False, "started_at": START}).network is None
