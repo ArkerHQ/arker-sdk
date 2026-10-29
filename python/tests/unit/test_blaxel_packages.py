@@ -14,6 +14,15 @@ import pytest
 SOURCE = Path(__file__).parents[2] / "src/arker/_guest_blaxel_packages.py"
 
 
+def isolate_process_table(bootstrap, tmp_path, monkeypatch):
+    proc = tmp_path / "proc"
+    (proc / "net").mkdir(parents=True)
+    for table in ("tcp", "tcp6"):
+        (proc / "net" / table).write_text("header\n")
+    paths = {"/proc": proc, "/proc/net": proc / "net"}
+    monkeypatch.setattr(bootstrap, "Path", lambda value: paths.get(value, Path(value)))
+
+
 @pytest.fixture
 def guest(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location("blaxel_packages", SOURCE)
@@ -240,6 +249,7 @@ def test_guest_ensure_requires_packages_before_isolation_or_launch(guest, monkey
     spec = importlib.util.spec_from_file_location("guest_bootstrap_packages", SOURCE.with_name("_guest_blaxel.py"))
     bootstrap = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bootstrap)
+    isolate_process_table(bootstrap, tmp_path, monkeypatch)
     monkeypatch.setattr(bootstrap, "ROOT", root)
     monkeypatch.setattr(bootstrap, "STATE", root / "state.json")
     monkeypatch.setattr(bootstrap.os, "geteuid", lambda: 0)
@@ -323,6 +333,7 @@ def test_running_daemon_prevents_reinstall_on_reconnect(guest, monkeypatch, tmp_
     spec = importlib.util.spec_from_file_location("guest_reconnect_packages", SOURCE.with_name("_guest_blaxel.py"))
     bootstrap = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bootstrap)
+    isolate_process_table(bootstrap, tmp_path, monkeypatch)
     monkeypatch.setattr(bootstrap, "ROOT", root)
     monkeypatch.setattr(bootstrap, "STATE", root / "state.json")
     monkeypatch.setattr(bootstrap.os, "geteuid", lambda: 0)
@@ -373,6 +384,7 @@ def test_loser_first_and_winner_crash_need_no_creation_receipt(guest, monkeypatc
     spec = importlib.util.spec_from_file_location("guest_profile_race", SOURCE.with_name("_guest_blaxel.py"))
     bootstrap = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bootstrap)
+    isolate_process_table(bootstrap, tmp_path, monkeypatch)
     monkeypatch.setattr(bootstrap, "ROOT", root)
     monkeypatch.setattr(bootstrap, "STATE", root / "state.json")
     monkeypatch.setattr(bootstrap.os, "geteuid", lambda: 0)
@@ -497,6 +509,7 @@ def test_concurrent_ensure_serializes_installation(guest, monkeypatch, tmp_path)
     spec = importlib.util.spec_from_file_location("guest_profile_contention", SOURCE.with_name("_guest_blaxel.py"))
     bootstrap = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bootstrap)
+    isolate_process_table(bootstrap, tmp_path, monkeypatch)
     monkeypatch.setattr(bootstrap, "ROOT", root)
     monkeypatch.setattr(bootstrap, "STATE", root / "state.json")
     monkeypatch.setattr(bootstrap.os, "geteuid", lambda: 0)
