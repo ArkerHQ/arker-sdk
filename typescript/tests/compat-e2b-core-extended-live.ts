@@ -6,7 +6,7 @@ import { recordEvidence } from "../scripts/compat-evidence.js";
 import { withLiveRouter } from "./compat-live-router.js";
 import { traceVendor } from "./compat-trace.js";
 
-const cases = ["watch-directory", "watch-recursive", "home-reconnect-user", "stream-read", "stream-cancel", "file-overwrite", "file-batch-rename", "public-app", "private-app", "pty", "pty-reconnect", "pty-kill", "pause-full", "pause-filesystem", "volume-mount"] as const;
+const cases = ["watch-directory", "watch-recursive", "home-reconnect-user", "stream-read", "stream-cancel", "file-read-errors", "stream-abort", "file-overwrite", "file-batch-rename", "public-app", "private-app", "pty", "pty-reconnect", "pty-kill", "pause-full", "pause-filesystem", "volume-mount"] as const;
 type Case = (typeof cases)[number];
 const selectedCases = process.env.COMPAT_E2B_CASES?.split(",") ?? [...cases];
 for (const name of selectedCases) assert.ok(cases.includes(name as Case), `Unknown E2B scenario: ${name}`);
@@ -32,7 +32,55 @@ async function program({ Sandbox, Volume, CommandExitError, SandboxError }: type
   }
   const sandbox = await Sandbox.create(scenario === "private-app" ? { network: { allowPublicTraffic: false } } : {});
   try {
-    if (scenario === "watch-directory" || scenario === "watch-recursive") {
+    if (scenario === "file-read-errors") {
+      const path = `/tmp/missing-${randomUUID()}`;
+      const reads = [
+        () => sandbox.files.read(path, { format: "text" }),
+        () => sandbox.files.read(path, { format: "bytes" }),
+        () => sandbox.files.read(path, { format: "blob" }),
+        () => sandbox.files.read(path, { format: "stream" }),
+      ];
+      for (const read of reads) {
+        await assert.rejects(read, (error: unknown) => {
+          assert.ok(error instanceof Native.FileNotFoundError);
+          assert.equal(error.constructor, Native.FileNotFoundError);
+          assert.equal(error.statusCode, undefined);
+          return true;
+        });
+        assert.equal(await sandbox.files.exists(path), false);
+      }
+      await sandbox.files.write(path, "readable");
+      assert.equal(await sandbox.files.read(path), "readable");
+    } else if (scenario === "stream-abort") {
+      const path = `/tmp/stream-abort-${randomUUID()}`;
+      const payload = Uint8Array.from({ length: 8 * 1024 * 1024 }, (_, index) => index % 251);
+      await sandbox.files.write(path, payload.buffer);
+      const controller = new AbortController();
+      const reader = (await sandbox.files.read(path, { format: "stream", signal: controller.signal })).getReader();
+      try {
+        const first = await reader.read();
+        assert.equal(first.done, false);
+        assert.ok(first.value && first.value.length > 0 && first.value.length < payload.length);
+        assert.deepEqual(first.value, payload.slice(0, first.value.length));
+        controller.abort();
+        await assert.rejects(async () => {
+          // Drain queued chunks so the assertion observes the stream's terminal state.
+          while (!(await reader.read()).done) {}
+        }, (error: unknown) => {
+          assert.ok(error instanceof DOMException);
+          assert.equal(error.constructor, DOMException);
+          assert.equal(error.name, "AbortError");
+          assert.equal(error, controller.signal.reason);
+          return true;
+        });
+      } finally {
+        await reader.cancel().catch(error => { if (error !== controller.signal.reason) throw error; });
+        reader.releaseLock();
+      }
+      assert.equal(controller.signal.aborted, true);
+      assert.deepEqual(await sandbox.files.read(path, { format: "bytes" }), payload);
+      assert.equal((await sandbox.commands.run("printf alive")).stdout, "alive");
+    } else if (scenario === "watch-directory" || scenario === "watch-recursive") {
       const root = `/home/user/watch-${randomUUID()}`;
       const recursive = scenario === "watch-recursive";
       const name = recursive ? "nested/event.txt" : "event.txt";
