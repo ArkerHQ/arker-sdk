@@ -12,7 +12,6 @@ from typing import Any
 from ._compat import (
     CommandResult,
     CompatibilityCreationNotStartedError,
-    CompatibilityNotFoundError,
     UnsupportedCompatibilityOption,
     UnsupportedMixin,
     arker_create,
@@ -635,22 +634,9 @@ class SyncSandboxInstance(UnsupportedMixin):
 
     @classmethod
     def create_if_not_exists(cls, sandbox: Any = None, **kwargs: Any) -> SyncSandboxInstance:
-        values = (
-            {key: value for key, value in _request_values(sandbox).items() if value is not None}
-            if sandbox is not None
-            else {}
-        )
-        name = values.get("name")
-        if not isinstance(name, str) or not name:
-            raise ValueError("create_if_not_exists requires a Blaxel sandbox name")
-        lookup_kwargs = {
-            key: value for key, value in kwargs.items() if key in {"arker", "router_config_path", "routerConfigPath"}
-        }
-        try:
-            return cls.get(name, **lookup_kwargs)
-        except CompatibilityNotFoundError:
-            pass
-        return cls.create(sandbox, **kwargs)
+        # Name reconciliation belongs to the provider's atomic create operation.
+        # The Arker create path rejects this option before performing any I/O.
+        return cls.create(sandbox, create_if_not_exist=True, **kwargs)
 
     def delete(self) -> None:
         if isinstance(self, str):
