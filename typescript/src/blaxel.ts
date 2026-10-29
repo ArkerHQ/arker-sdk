@@ -1,3 +1,4 @@
+import { validateFirewallStartup } from "./compat/blaxel-packages.js";
 import { validateBlaxelNetwork } from "./compat/blaxel-network.js";
 import { SandboxInstance as NativeBlaxelSandbox, settings as blaxelSettings } from "@blaxel/core";
 import type { VM } from "./index.js";
@@ -57,6 +58,7 @@ function makeSdk(config: BlaxelCompatConfig = {}, getOrCreate = false): CompatSd
       validateBlaxelName(options.name);
       const { createIfNotExist: _, network, envs: _envs, ...rest } = options;
       validateBlaxelNetwork(network);
+      validateFirewallStartup(options.image, config.arker?.imageConfig);
       validateBlaxelNative();
       const imageConfig = blaxelImageConfiguration(options, config.arker);
       return { ...rest, ...(imageConfig !== undefined ? { imageConfig } : {}) };

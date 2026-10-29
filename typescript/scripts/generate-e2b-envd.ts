@@ -13,3 +13,10 @@ await writeFile(new URL("../src/compat/blaxel-guest.generated.ts", import.meta.u
   `// Generated from canonical Python guest assets.\n` +
   `export const guestScript = ${JSON.stringify(blaxelScript)};\n` +
   `export const manifest = ${JSON.stringify(blaxelManifest)} as const;\n`);
+
+const packagesScript = await readFile(new URL("_guest_blaxel_packages.py", root), "utf8");
+const packagesManifest = JSON.parse(await readFile(new URL("_guest_blaxel_packages.json", root), "utf8"));
+await writeFile(new URL("../src/compat/blaxel-packages.generated.ts", import.meta.url),
+  `// Generated from canonical Python guest assets.\n` +
+  `export const guestScript = ${JSON.stringify(packagesScript)};\n` +
+  `export const manifest = ${JSON.stringify(packagesManifest)} as const;\n`);

@@ -188,6 +188,9 @@ class SyncSandboxInstance(UnsupportedMixin):
                 )
             validate_name(values.get("name"))
             validate_network(values.get("network"))
+            from ._compat_blaxel_packages import validate_firewall_startup
+
+            validate_firewall_startup(values.get("image"), (arker_config or {}).get("image_config"))
             validate_native()
             if cls._creation_cancelled():
                 raise RoutingCancelled("Async routing was cancelled")

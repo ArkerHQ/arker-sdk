@@ -46,9 +46,30 @@ def startup_configuration(explicit, state):
     return state["configuration"] if state else initial_configuration()
 
 
+def require_stopped_daemon(state):
+    if state and security.same_process(state):
+        raise security.BootstrapError("firewall_change_requires_daemon_stop")
+    for process in Path("/proc").iterdir():
+        if not process.name.isdecimal():
+            continue
+        try:
+            executable = os.readlink(process / "exe")
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        if executable.startswith(str(ROOT / "bin") + "/"):
+            raise security.BootstrapError("firewall_change_requires_daemon_stop")
+    for table in ("tcp", "tcp6"):
+        for line in (Path("/proc/net") / table).read_text().splitlines()[1:]:
+            fields = line.split()
+            if fields[3] == "0A" and fields[1].rsplit(":", 1)[1] == f"{49983:04X}":
+                raise security.BootstrapError("firewall_change_requires_daemon_stop")
+
+
 def ensure(request_path):
     if os.geteuid() != 0 or request_path.parent != ROOT / "requests":
         raise security.BootstrapError("invalid_request")
+    security.private_directory(ROOT)
+    security.private_directory(request_path.parent)
     config = security.load(request_path)
     request_path.unlink()
     lock = security.private_open(ROOT / "lock", os.O_CREAT | os.O_RDWR)
@@ -56,6 +77,15 @@ def ensure(request_path):
     candidate = None
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        state = security.load(STATE) if (STATE.exists() or STATE.is_symlink()) else None
+        import _guest_blaxel_packages as packages
+
+        firewall_profile = packages.profile()
+        if config.get("firewall_profile") and config["firewall_profile"] != firewall_profile:
+            raise security.BootstrapError("firewall_profile_changed")
+        if firewall_profile and not packages.verify(firewall_profile):
+            require_stopped_daemon(state)
+            packages.install(firewall_profile, config.get("package_candidates", []))
         # Port tunnels enter via root-owned loopback. Keep both external and
         # unprivileged local traffic blocked even after readiness.
         security.Isolation().block()
@@ -73,7 +103,7 @@ def ensure(request_path):
                 os.replace(candidate, target)
         if security.digest(target) != entry["sha256"]:
             raise security.BootstrapError("artifact_hash_mismatch")
-        state = security.load(STATE) if STATE.exists() else None
+        state = security.load(STATE) if (STATE.exists() or STATE.is_symlink()) else None
         desired = config.get("configuration")
         if state and security.same_process(state):
             if state["executable"] != str(target) or not security.owns_listener(state):
@@ -132,7 +162,7 @@ def ensure(request_path):
                         time.sleep(0.01)
                     connection.request("GET", "/health")
                     if connection.getresponse().status == 200:
-                        security.save(STATE, {**state, "vm_id": config["vm_id"]})
+                        security.save(STATE, {**state, "vm_id": config["vm_id"], "firewall_profile": firewall_profile})
                         return {
                             "ready": True,
                             "reused": reused,
@@ -166,6 +196,13 @@ def main():
             target = ROOT / "bin" / entry["sha256"]
             verified = target.exists() and security.digest(target) == entry["sha256"]
             result = {"arch": security.architecture(), "verified": verified}
+            if STATE.exists() or STATE.is_symlink():
+                security.load(STATE)
+            import _guest_blaxel_packages as packages
+
+            profile = packages.profile()
+            if profile:
+                result.update(firewall_profile=profile, firewall_verified=packages.verify(profile))
         else:
             result = ensure(Path(sys.argv[2]))
         print(json.dumps(result))

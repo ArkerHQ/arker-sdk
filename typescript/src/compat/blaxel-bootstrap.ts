@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { VM } from '../index.js';
+import { withStagedFirewallPackages } from './blaxel-packages.js';
+import { guestScript as packagesScript, manifest as packagesManifest } from './blaxel-packages.generated.js';
 import { stagePinnedArtifact } from './e2b-artifact.js';
 import { guestScript as security } from './e2b-envd-guest.generated.js';
 import { guestScript, manifest } from './blaxel-guest.generated.js';
@@ -22,6 +24,8 @@ export async function bootstrapBlaxel(vm: VM, options: {
   }
   await vm.sync(`${root}/_guest_e2b_envd.py`, security, { isSecret: true });
   await vm.sync(`${root}/_guest_blaxel.py`, guestScript, { isSecret: true });
+  await vm.sync(`${root}/_guest_blaxel_packages.py`, packagesScript, { isSecret: true });
+  await vm.sync(`${root}/_guest_blaxel_packages.json`, JSON.stringify(packagesManifest), { isSecret: true });
   await vm.sync(`${root}/manifest.json`, JSON.stringify(manifest), { isSecret: true });
   await vm.sync(`${root}/LICENSE`, manifest.license, { isSecret: true });
   async function invoke(operation: string, argument = '') {
@@ -39,10 +43,16 @@ export async function bootstrapBlaxel(vm: VM, options: {
   try {
     if (prepared.verified !== true) candidate = await stagePinnedArtifact(vm, root,
       manifest.artifacts[prepared.arch as 'amd64' | 'arm64'], options.cacheDirectory ?? join(homedir(), '.cache/arker/blaxel'));
-    await vm.sync(request, JSON.stringify({ vm_id: vm.id, candidate, configuration: options.configuration }), { isSecret: true });
-    const ready = await invoke('ensure', request);
-    if (ready.ready !== true || ready.version !== manifest.version) throw new Error('Native daemon did not establish readiness');
-    return ready;
+    const ensure = async (candidates: string[]) => {
+      await vm.sync(request, JSON.stringify({ vm_id: vm.id, candidate, configuration: options.configuration,
+        firewall_profile: prepared.firewall_profile, package_candidates: candidates }), { isSecret: true });
+      const ready = await invoke('ensure', request);
+      if (ready.ready !== true || ready.version !== manifest.version) throw new Error('Native daemon did not establish readiness');
+      return ready;
+    };
+    return prepared.firewall_verified === false
+      ? await withStagedFirewallPackages(vm, prepared.firewall_profile, options.cacheDirectory ?? join(homedir(), '.cache/arker/blaxel'), ensure)
+      : await ensure([]);
   } catch (error) {
     failed = true;
     failure = error;
