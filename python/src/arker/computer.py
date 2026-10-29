@@ -334,6 +334,7 @@ class Arker:
 
         # base_url fully determines routing, so provider/region are ignored when it is set.
         base_url = base_url or _env("ARKER_BASE_URL")
+        self._explicit_base_url = bool(base_url)
         if base_url:
             provider = region = None
         else:
@@ -480,6 +481,7 @@ class Arker:
         org_id: str | None = None,
         public: bool | None = None,
         state: str | None = None,
+        metadata_filter: dict[str, Any] | None = None,
     ) -> VmList:
         """Admin call - goes through the control plane so it can
         aggregate across providers and regions.
@@ -492,6 +494,7 @@ class Arker:
             org_id=org_id,
             public=public,
             state=state,
+            metadata_filter=json.dumps(metadata_filter) if metadata_filter is not None else None,
         )
         path = _build_query("/v1/vms", parameters)
         payload = self._request("GET", path, base_url=self._control_base_url)
@@ -499,7 +502,11 @@ class Arker:
         for item in payload.get("vms", []):
             info = _vm_info(item)
             placed = info.provider and info.region
-            base_url = _compute_base_url(info.provider, info.region) if placed else self.base_url
+            base_url = (
+                _compute_base_url(info.provider, info.region)
+                if placed and not self._explicit_base_url
+                else self.base_url
+            )
             vms.append(VM(self, info.vm_id, base_url, info))
         return VmList(vms=vms, next_cursor=_optional_str(payload.get("next_cursor")))
 
@@ -704,6 +711,7 @@ class VM:
     pool_id: str | None
     name: str | None
     description: str | None
+    metadata: dict[str, Any] | None
     state: str | None
     owner_org_id: str | None
     created_at: str | None
@@ -1933,7 +1941,7 @@ def _clamp_pty_dimension(value: int) -> int:
         n = int(value)
     except (TypeError, ValueError):
         return 1
-    return max(1, min(1000, n))
+    return max(1, min(65535, n))
 
 
 #: Environment that makes a PTY emit PLAIN TEXT instead of colour, cursor

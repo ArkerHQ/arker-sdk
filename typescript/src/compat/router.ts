@@ -16,6 +16,7 @@ type ProviderInstances = {
   create(options?: unknown): Promise<any>;
   getById(id: string): Promise<any | null>;
   destroy(id: string): Promise<void>;
+  list?(): Promise<any[]>;
 };
 
 export type RouterConfig = {
@@ -299,9 +300,15 @@ function retryable(error: unknown): boolean {
   return error instanceof CompatibilityCreationNotStartedError;
 }
 
-export function createRoutedProvider(providers: Provider[], routerConfigPath?: string): Provider & {
+export function createRoutedProvider(
+  providers: Provider[],
+  routerConfigPath?: string,
+  resource?: { namespace: string; identifier(instance: any): string | undefined },
+): Provider & {
+  list(): Promise<any[]>;
   getOwner(id: string): Promise<{ provider: string; instance?: any } | null>;
 } {
+  const cacheKey = (id: string) => resource ? `${resource.namespace}:${id}` : id;
   const byName = new Map(providers.map((provider) => [provider.name!, provider]));
   if (byName.size !== providers.length || byName.has(undefined as any)) throw new Error("compatibility providers need unique names");
   let cache: RouteCache = new MemoryRouteCache();
@@ -320,9 +327,9 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
   });
   const remember = async (instance: any, provider: Provider) => {
     let id: string | undefined;
-    try { id = instanceId(instance); } catch { return instance; }
+    try { id = resource ? resource.identifier(instance) : instanceId(instance); } catch { return instance; }
     if (id) {
-      await cache.set(id, provider.name!).catch(() => undefined);
+      await cache.set(cacheKey(id), provider.name!).catch(() => undefined);
     }
     return instance;
   };
@@ -333,7 +340,7 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
     return instance ? { instance, provider } : null;
   };
   const rememberOwner = async (id: string, located: Located): Promise<Located> => {
-    await cache.set(id, located.provider.name!).catch(() => undefined);
+    await cache.set(cacheKey(id), located.provider.name!).catch(() => undefined);
     return located;
   };
   const find = async (id: string): Promise<Located | null> => {
@@ -360,17 +367,17 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
         else rejectProbe(error);
       }).finally(() => clearTimeout(timer));
     });
-    let cachedName = await cache.get(id).catch(() => null);
-    const eligible = (name: string) => providerAcceptsIdentifier(name, id, router.existing.order.includes("arker"));
+    let cachedName = await cache.get(cacheKey(id)).catch(() => null);
+    const eligible = (name: string) => !!resource || providerAcceptsIdentifier(name, id, router.existing.order.includes("arker"));
     if (cachedName && (!byName.has(cachedName) || !router.existing.order.includes(cachedName) || !eligible(cachedName))) {
-      await cache.delete(id).catch(() => undefined);
+      await cache.delete(cacheKey(id)).catch(() => undefined);
       cachedName = null;
     }
     if (cachedName && byName.has(cachedName) && router.existing.order.includes(cachedName)) {
       const provider = byName.get(cachedName)!;
       const located = await probe(provider);
       if (located) return rememberOwner(id, located);
-      await cache.delete(id).catch(() => undefined);
+      await cache.delete(cacheKey(id)).catch(() => undefined);
     }
     const candidates = router.existing.order.filter((name) => name !== cachedName && eligible(name)).map((name) => byName.get(name)!);
     if (router.existing.strategy === "race") {
@@ -392,6 +399,16 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
 
   return {
     name: "arker-compat-router",
+    async list() {
+      const router = await configured;
+      const results = [];
+      for (const name of router.existing.order) {
+        const service = manager(byName.get(name)!);
+        if (!service.list) throw new Error(`Provider ${name} does not support resource listing`);
+        results.push(...await service.list());
+      }
+      return results;
+    },
     async getOwner(id: string) {
       const located = await find(id);
       return located ? { provider: located.provider.name!, instance: located.instance } : null;
@@ -422,14 +439,14 @@ export function createRoutedProvider(providers: Provider[], routerConfigPath?: s
         if (!located) return null;
         if (located.instance) return located.instance;
         const instance = await manager(located.provider).getById(id);
-        if (!instance) await cache.delete(id).catch(() => undefined);
+        if (!instance) await cache.delete(cacheKey(id)).catch(() => undefined);
         return instance;
       },
       async destroy(id: string) {
         const known = (await find(id))?.provider;
         if (!known) return;
         await manager(known).destroy(id);
-        await cache.delete(id).catch(() => undefined);
+        await cache.delete(cacheKey(id)).catch(() => undefined);
       },
     },
   };

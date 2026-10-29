@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import runpy
 import sys
@@ -90,6 +91,87 @@ def test_inventory_includes_e2b_returned_stream_input_handle():
     assert ("async", "CommandInputHandle", "e2b:AsyncCommandInputHandle") in roots
 
 
+@pytest.mark.parametrize("style", ["sync", "async"])
+def test_e2b_explicit_pty_roots_override_property_walk(monkeypatch, capsys, style):
+    native = pytest.importorskip(f"e2b.sandbox_{style}.commands.pty").Pty
+    root = (style, "Sandbox.pty", f"e2b.sandbox_{style}.commands.pty:Pty", f"e2b.sandbox_{style}.commands.pty:Pty")
+    assert root in coverage.ROOTS["e2b"]
+    roots = [entry for entry in coverage.ROOTS["e2b"] if entry[0] == style and entry[1] in ("Sandbox", "Sandbox.pty")]
+    assert roots[-1] == root
+    sandbox_root = roots[0]
+    walked = [
+        row
+        for row in coverage.surfaces(
+            "e2b", style, "Sandbox", coverage.resolve(sandbox_root[2]), coverage.resolve(sandbox_root[3])
+        )
+        if row["api"].startswith("Sandbox.pty.")
+    ]
+    assert walked and all(not row["declared_by_shim"] for row in walked)
+    monkeypatch.setattr(coverage, "ROOTS", {"e2b": roots})
+    monkeypatch.setattr(coverage, "implementation_fingerprint", lambda: "unit-test")
+    monkeypatch.setattr(sys, "argv", ["compat_coverage.py"])
+    coverage.main()
+    report = json.loads(capsys.readouterr().out)
+    assert report["complete_inventory"] is True
+    rows = [row for row in report["apis"] if row["api"].startswith("Sandbox.pty.")]
+    methods = {name for name, member in inspect.getmembers(native, callable) if not name.startswith("_")}
+    assert methods == {"create", "connect", "resize", "send_stdin", "kill", "stream_input"}
+    expected_ids = {f"python:e2b:{style}:Sandbox.pty.{name}" for name in methods}
+    assert {row["id"] for row in walked} == expected_ids
+    assert {row["id"] for row in rows} == expected_ids
+    assert len(rows) == len(expected_ids)
+    shim = coverage.resolve(root[3])
+    for row in rows:
+        method = row["api"].removeprefix("Sandbox.pty.")
+        assert row["declared_by_shim"] is True
+        assert row["signatures"] == coverage.signatures(getattr(native, method))
+        assert row["shim_signatures"] == coverage.signatures(getattr(shim, method))
+        assert row["status"] == "unverified"
+
+
+@pytest.mark.parametrize("api", ["Volume.create", "Volume.destroy", "AsyncVolume.create", "Volume.nonexistent"])
+def test_e2b_async_volume_evidence_matches_only_real_vendor_names(monkeypatch, tmp_path, capsys, api):
+    native = pytest.importorskip("e2b")
+    root = ("async", "Volume", "e2b:AsyncVolume", "arker.e2b:AsyncVolume")
+    assert root in coverage.ROOTS["e2b"]
+    assert coverage.resolve(root[2]) is native.AsyncVolume
+    monkeypatch.setattr(coverage, "ROOTS", {"e2b": [root]})
+    monkeypatch.setattr(coverage, "implementation_fingerprint", lambda: "unit-test")
+    version = coverage.importlib.metadata.version("e2b")
+    evidence = tmp_path / "evidence.jsonl"
+    evidence.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "provider": "e2b",
+                    "run": "unit-test",
+                    "scenario": "volume-mount",
+                    "route": route,
+                    "outcome": "passed",
+                    "apis": [f"python:e2b:async:{api}"],
+                    "vendor_version": version,
+                    "implementation_fingerprint": "unit-test",
+                }
+            )
+            for route in ("reference", "native", "arker")
+        )
+    )
+    monkeypatch.setattr(sys, "argv", ["compat_coverage.py", "--evidence", str(evidence)])
+    coverage.main()
+    report = json.loads(capsys.readouterr().out)
+    assert report["complete_inventory"] is True
+    rows = {row["id"]: row for row in report["apis"]}
+    for method in ("create", "destroy"):
+        assert inspect.iscoroutinefunction(getattr(native.AsyncVolume, method))
+        assert f"python:e2b:async:Volume.{method}" in rows
+    assert all(hasattr(native.AsyncVolume, row["api"].removeprefix("Volume.")) for row in rows.values())
+    verified = {name for name, row in rows.items() if row["status"] == "scenario_verified"}
+    expected = {f"python:e2b:async:{api}"} if api in ("Volume.create", "Volume.destroy") else set()
+    assert verified == expected
+    assert "python:e2b:async:AsyncVolume.create" not in rows
+    assert "python:e2b:async:Volume.nonexistent" not in rows
+
+
 def test_inventory_includes_public_context_and_iteration_protocols():
     class Native:
         def __enter__(self): ...
@@ -177,7 +259,14 @@ def test_malformed_current_evidence_fails_closed(field, value):
 
 @pytest.mark.parametrize(
     "name",
-    ["compat_coverage.py", "compat_evidence.py", "test_blaxel_import_only.py", "http-service.py", "api-scope.json"],
+    [
+        "compat_coverage.py",
+        "compat_evidence.py",
+        "test_blaxel_import_only.py",
+        "http-service.py",
+        "api-scope.json",
+        "_guest_e2b_envd_manifest.json",
+    ],
 )
 def test_evidence_fingerprint_includes_measurement_and_scenario_code(monkeypatch, name):
     original = Path.read_bytes
@@ -237,3 +326,19 @@ def test_empty_vendor_surfaces_cannot_pass_the_strict_gate(monkeypatch, capsys):
     report = json.loads(capsys.readouterr().out)
     assert report["complete_inventory"] is False
     assert len(report["missing_roots"]) == sum(len(roots) for roots in coverage.ROOTS.values())
+
+
+@pytest.mark.parametrize("style", ["sync", "async"])
+def test_e2b_inventory_paginator_roots_are_real_vendor_apis(style):
+    roots = [root for root in coverage.ROOTS["e2b"] if root[0] == style and root[1] == "SandboxPaginator"]
+    assert len(roots) == 1
+    _, prefix, reference, shim_reference = roots[0]
+    native, shim = coverage.resolve(reference), coverage.resolve(shim_reference)
+    rows = list(coverage.surfaces("e2b", style, prefix, native, shim))
+    assert {row["api"] for row in rows} >= {
+        "SandboxPaginator.next_items",
+        "SandboxPaginator.has_next",
+        "SandboxPaginator.next_token",
+    }
+    assert all(row["declared_by_shim"] for row in rows)
+    assert all(hasattr(native, row["api"].split(".")[-1]) for row in rows)

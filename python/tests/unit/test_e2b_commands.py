@@ -1,163 +1,131 @@
-import os
-import signal
-import subprocess
-import types
-from concurrent.futures import ThreadPoolExecutor
-from threading import Event
+"""Native command handles, callbacks, and exit errors over the adapter transport."""
+
+import asyncio
+import base64
+import json
+import struct
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+from e2b import AsyncCommandHandle, CommandExitException, CommandHandle
 
-import arker.e2b as shim
-from arker._compat import CommandResult
-
-
-def test_identity_command_exec_preserves_pid_and_signal_target():
-    command = shim._identity_command(
-        'printf \'%s %s\\n\' "$$" "$(id -u)"; exec sleep 30',
-    )
-    assert command.startswith("setpriv --reuid=user --regid=user --init-groups -- ")
-    command = command.replace(
-        "setpriv --reuid=user --regid=user --init-groups -- ",
-        f"setpriv --reuid={os.getuid()} --regid={os.getgid()} --keep-groups -- ",
-        1,
-    )
-    process = subprocess.Popen(
-        ["bash", "-c", "exec " + command],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    assert process.stdout is not None
-    pid, actual_uid = process.stdout.readline().split()
-    assert (int(pid), int(actual_uid)) == (process.pid, os.getuid())
-    os.kill(process.pid, signal.SIGTERM)
-    assert process.wait(timeout=2) == -signal.SIGTERM
+from arker._compat_e2b_data_plane import EnvdDescriptor, create_data_plane
 
 
-def test_native_creation_does_not_override_an_omitted_internet_policy(monkeypatch):
-    calls = []
+@pytest.fixture
+def process_server():
+    class Requests(list):
+        def __init__(self):
+            super().__init__()
+            self.headers = []
 
-    class Native:
-        @classmethod
-        def create(cls, **options):
-            calls.append(options)
-            return types.SimpleNamespace(sandbox_id="native")
+    requests = Requests()
 
-    monkeypatch.setattr(shim.Sandbox, "_native_sandbox", staticmethod(lambda: Native))
-    monkeypatch.setattr(shim, "routed_create", lambda provider, config, creators: ("e2b", creators["e2b"]()))
-    shim.Sandbox.create()
-    assert calls == [{}]
+    def frame(value, flags=0):
+        payload = json.dumps(value).encode()
+        return struct.pack(">BI", flags, len(payload)) + payload
 
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            if self.headers.get("Transfer-Encoding") == "chunked":
+                chunks = []
+                while size := int(self.rfile.readline().strip(), 16):
+                    chunks.append(self.rfile.read(size))
+                    self.rfile.read(2)
+                self.rfile.readline()
+                body = b"".join(chunks)
+            else:
+                body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            requests.append((self.path, body))
+            requests.headers.append(dict(self.headers))
+            streaming = self.path.endswith(("/Start", "/Connect"))
+            output = (
+                b"".join(
+                    [
+                        frame({"event": {"start": {"pid": 123}}}),
+                        frame({"event": {"data": {"stdout": base64.b64encode("λ".encode()).decode()}}}),
+                        frame({"event": {"end": {"exitCode": 7, "exited": True, "status": "exited"}}}),
+                        frame({}, 2),
+                    ]
+                )
+                if streaming
+                else b"{}"
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "application/connect+json" if streaming else "application/json")
+            self.send_header("Content-Length", str(len(output)))
+            self.end_headers()
+            self.wfile.write(output)
 
-def test_native_command_environment_uses_the_vendor_envs_option():
-    calls = []
-    native = types.SimpleNamespace(run=lambda command, **options: calls.append((command, options)))
-    shim.Commands(native=native).run("echo value", envs={"VALUE": "kept"})
-    assert calls == [("echo value", {"envs": {"VALUE": "kept"}})]
-
-
-def test_arker_command_accepts_vendor_environment_and_raises_vendor_exit(monkeypatch):
-    calls = []
-
-    def run(vm, command, **options):
-        calls.append(command)
-        return CommandResult(stdout="output", stderr="failure", exit_code=17)
-
-    monkeypatch.setattr(shim, "run_command", run)
-    with pytest.raises(shim.CommandExitException) as raised:
-        shim.Commands(vm=object()).run("exit 17", envs={"VALUE": "kept"})
-    assert raised.value.exit_code == 17
-    assert raised.value.stdout == "output"
-    assert raised.value.stderr == "failure"
-    assert raised.value.error == "exit status 17"
-    assert len(calls) == 1
-    assert calls[0].startswith("setpriv --reuid=user --regid=user --init-groups -- sh -c ")
-    assert "export HOME=/home/user" in calls[0]
-    assert "export VALUE=kept" in calls[0]
-    assert "cd /home/user" in calls[0]
-
-
-def test_background_returns_a_native_handle_with_stdin_eof_and_typed_wait(monkeypatch):
-    native = pytest.importorskip("e2b")
-    calls = []
-    current = types.SimpleNamespace(
-        pid="42", name="job", status="completed", stdout="hello\n", stderr="diagnostic", exit_code=17
-    )
-
-    class Processes:
-        def __init__(self, vm):
+        def log_message(self, *args):
             pass
 
-        def exec(self, request):
-            calls.append(request)
-            return current
-
-        def get(self, identifier, **options):
-            assert str(identifier) in {"42", "job"}
-            return current
-
-        def write_stdin(self, identifier, data):
-            calls.append(("stdin", str(identifier), data))
-
-        def close_stdin(self, identifier):
-            calls.append(("eof", str(identifier)))
-
-    monkeypatch.setattr(shim, "GuestProcesses", Processes, raising=False)
-    commands = shim.Commands(vm=object())
-    handle = commands.run("cat; printf diagnostic >&2; exit 17", background=True, stdin=True)
-    assert isinstance(handle, native.CommandHandle)
-    assert handle.pid == 42
-    handle.send_stdin("hello\n")
-    handle.close_stdin()
-    with pytest.raises(native.CommandExitException) as raised:
-        handle.wait()
-    assert (raised.value.stdout, raised.value.stderr, raised.value.exit_code, raised.value.error) == (
-        "hello\n",
-        "diagnostic",
-        17,
-        "exit status 17",
-    )
-    assert ("stdin", "42", "hello\n") in calls
-    assert ("eof", "42") in calls
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield EnvdDescriptor(f"http://127.0.0.1:{server.server_port}", "0.10.2", "guest"), requests
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
-def test_kill_only_returns_false_for_a_structured_missing_process(monkeypatch):
-    from arker._compat_process import GuestProcessError
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("background", [False, True])
+@pytest.mark.parametrize("user", ["root", "custom-account"])
+def test_native_exit_handle_callback_and_stdin_contract(process_server, asynchronous, background, user):
+    descriptor, requests = process_server
+    output = []
 
-    def fail(error):
-        raise error
+    async def check():
+        data = create_data_plane(descriptor, "platform", asynchronous=True)
+        try:
 
-    commands = shim.Commands(vm=object())
-    commands._processes = types.SimpleNamespace(get=lambda _: fail(GuestProcessError("missing", "process_not_found")))
-    assert commands.kill(2147483647) is False
-    unavailable = RuntimeError("connection refused")
-    commands._processes.get = lambda _: fail(unavailable)
-    with pytest.raises(RuntimeError) as raised:
-        commands.kill(42)
-    assert raised.value is unavailable
+            async def callback(chunk):
+                await asyncio.sleep(0)
+                output.append(chunk)
 
+            with pytest.raises(CommandExitException) as failure:
+                result = await data.commands.run(
+                    "exit 7", background=background, stdin=True, envs={"VALUE": "kept"}, on_stdout=callback, user=user
+                )
+                assert isinstance(result, AsyncCommandHandle)
+                await data.commands.send_stdin(result.pid, "hello")
+                await data.commands.close_stdin(result.pid)
+                await result.wait()
+            assert failure.value.exit_code == 7 and failure.value.stdout == "λ"
+        finally:
+            await data.aclose()
 
-def test_background_handle_supports_simultaneous_waiters(monkeypatch):
-    pytest.importorskip("e2b")
-    entered = Event()
-    release = Event()
-    current = types.SimpleNamespace(pid="42", name="job", status="completed", stdout="done\n", stderr="", exit_code=0)
+    if asynchronous:
+        asyncio.run(check())
+    else:
+        data = create_data_plane(descriptor, "platform")
+        try:
+            with pytest.raises(CommandExitException) as failure:
+                result = data.commands.run(
+                    "exit 7",
+                    background=background,
+                    stdin=True,
+                    envs={"VALUE": "kept"},
+                    on_stdout=output.append,
+                    user=user,
+                )
+                assert isinstance(result, CommandHandle)
+                data.commands.send_stdin(result.pid, "hello")
+                data.commands.close_stdin(result.pid)
+                result.wait()
+            assert failure.value.exit_code == 7 and failure.value.stdout == "λ"
+        finally:
+            data.close()
+    if not background:
+        assert output == ["λ"]
+    assert b'"VALUE":"kept"' in requests[0][1].replace(b" ", b"")
+    if background:
+        assert any(path.endswith("/SendInput") for path, _ in requests)
+        assert any(path.endswith("/CloseStdin") for path, _ in requests)
 
-    class Processes:
-        def get(self, identifier, **options):
-            assert identifier == "42"
-            entered.set()
-            assert release.wait(timeout=1)
-            return current
-
-    from arker._compat_e2b import command_handle
-
-    handle = command_handle(Processes(), current, timeout=1)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(handle.wait)
-        assert entered.wait(timeout=1)
-        second = pool.submit(handle.wait)
-        release.set()
-        results = [first.result(timeout=1), second.result(timeout=1)]
-
-    assert [(result.stdout, result.exit_code) for result in results] == [("done\n", 0), ("done\n", 0)]
+    headers = {key.lower(): value for key, value in requests.headers[0].items()}
+    assert headers["authorization"] == "Basic " + base64.b64encode(f"{user}:".encode()).decode()

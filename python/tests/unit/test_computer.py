@@ -700,7 +700,17 @@ def test_list_uses_configured_base_url() -> None:
     assert result.vms[0].disk_mib == 4096
 
 
-def test_listed_vm_uses_its_placement_endpoint() -> None:
+@pytest.mark.parametrize("explicit", [None, "argument", "environment"])
+def test_listed_vm_uses_its_placement_endpoint(monkeypatch, explicit) -> None:
+    monkeypatch.delenv("ARKER_BASE_URL", raising=False)
+    expected_base = "https://provider-two-region-two.arker.ai/api"
+    options = {"provider": "aws", "region": "us-east-1"}
+    if explicit:
+        expected_base = "https://feature.invalid/api"
+        if explicit == "argument":
+            options["base_url"] = expected_base
+        else:
+            monkeypatch.setenv("ARKER_BASE_URL", expected_base)
     t = FakeTransport()
     t.add_json(
         lambda method, url: method == "GET" and url == "https://arker.ai/api/v1/vms",
@@ -724,9 +734,7 @@ def test_listed_vm_uses_its_placement_endpoint() -> None:
         },
     )
     t.add_json(
-        lambda method, url: (
-            method == "POST" and url == "https://provider-two-region-two.arker.ai/api/v1/vms/vm_placed/runs"
-        ),
+        lambda method, url: method == "POST" and url == expected_base + "/v1/vms/vm_placed/runs",
         200,
         {
             "run_id": "run_placed",
@@ -741,12 +749,12 @@ def test_listed_vm_uses_its_placement_endpoint() -> None:
 
     arker = sdk.Arker(
         api_key="ark_live_test",
-        base_url="https://fallback.invalid/api",
+        **options,
         retry=False,
     )
     with use_transport(t):
         result = arker.list_vms()
-        assert result.vms[0].base_url == "https://provider-two-region-two.arker.ai/api"
+        assert result.vms[0].base_url == expected_base
         result.vms[0].run("printf ok")
 
 
@@ -3096,3 +3104,38 @@ def test_pool_shell_is_refused_before_creating_session() -> None:
         with pytest.raises(ValueError, match="interactive shells"):
             vm.connect_pty()
     assert t.calls == []
+
+
+@pytest.mark.parametrize("via_vm", [False, True])
+@pytest.mark.parametrize("metadata", [None, {}, {"nested": {"value": None}}])
+def test_fork_metadata_preserves_explicit_nulls(via_vm, metadata):
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, _fork_response("vm_child"))
+    with use_transport(t):
+        api = client()
+        if via_vm:
+            api.vm("vm_parent").fork(metadata=metadata)
+        else:
+            api.fork(source_vm_id="vm_parent", metadata=metadata)
+    assert json.loads(t.calls[0]["body"])["metadata"] == metadata
+
+
+def test_fork_omitted_metadata_inherits():
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, _fork_response("vm_child"))
+    with use_transport(t):
+        client().fork(source_vm_id="vm_parent")
+    assert "metadata" not in json.loads(t.calls[0]["body"])
+
+
+def test_list_vms_encodes_metadata_filter_without_dropping_nested_nulls():
+    from urllib.parse import parse_qs, urlsplit
+
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "GET" and "/v1/vms?" in url, 200, {"vms": [], "next_cursor": None})
+    metadata_filter = {"arker_e2b": {"version": 1, "metadata": {"optional": None}}}
+    with use_transport(t):
+        client().list_vms(metadata_filter=metadata_filter, cursor="next", limit=2)
+    query = parse_qs(urlsplit(t.calls[0]["url"]).query)
+    assert json.loads(query["metadata_filter"][0]) == metadata_filter
+    assert query["cursor"] == ["next"] and query["limit"] == ["2"]

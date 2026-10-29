@@ -1047,6 +1047,10 @@ export class VM {
   readonly worker_id?: string | null;
   readonly sessions?: Vm["sessions"];
   readonly policies?: Vm["policies"];
+  readonly metadata?: Vm["metadata"];
+  readonly started_at?: Vm["started_at"];
+  readonly paused_at?: Vm["paused_at"];
+  readonly customer_paused?: Vm["customer_paused"];
 
   constructor(client: Arker, vmId: string, baseUrl = client._baseUrlFor(vmId), data?: Vm) {
     this._client = client;
@@ -2067,7 +2071,7 @@ function ptyInputBytes(data: PtyInput): Uint8Array | ArrayBuffer {
 
 function clampPtyDimension(value: number): number {
   if (!Number.isFinite(value)) return 1;
-  return Math.max(1, Math.min(1000, Math.trunc(value)));
+  return Math.max(1, Math.min(65535, Math.trunc(value)));
 }
 
 function normalizeBaseUrl(baseUrl: string): string {

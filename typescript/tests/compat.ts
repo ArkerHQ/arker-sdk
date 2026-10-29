@@ -1,6 +1,7 @@
+import { e2bForkMetadata } from "../src/compat/e2b-metadata.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, symlinkSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, symlinkSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -8,7 +9,7 @@ import type { CommandResult, FileEntry, RunCommandOptions, SandboxInfo, SandboxI
 
 import { Daytona } from "../src/daytona.js";
 import { Sandbox as E2BSandbox } from "../src/e2b.js";
-import { CommandExitError } from "e2b";
+import { CommandExitError, Sandbox as NativeE2BSandbox } from "e2b";
 import { Image as DaytonaImage } from "@daytona/sdk";
 import { Secret as ModalSecret, CloudBucketMount as ModalBucketMount } from "modal";
 import { ArkerError } from "../src/index.js";
@@ -39,6 +40,9 @@ class FakeSandbox implements SandboxInterface {
     this.instanceId = sandboxId;
     this.provider = provider;
   }
+
+  readonly policies = { rules: {} };
+  async update() {}
 
   getInstance(): object { return this.native ?? this; }
 
@@ -259,57 +263,27 @@ async function testDaytonaNativeExecutionPreservesResponseAndInputs(): Promise<v
 
 async function testE2BSurface(): Promise<void> {
   const box = new FakeSandbox("e2b-box");
-  await withFakeCompute(box, async (fake) => {
+  const factory = E2BSandbox as unknown as { dataPlane: () => Promise<unknown> };
+  const original = factory.dataPlane;
+  const native = new NativeE2BSandbox({ sandboxId: "local", sandboxDomain: "example.invalid", envdVersion: "0.10.2" });
+  const components = { commands: native.commands, files: native.files, pty: native.pty, git: native.git, close() {} };
+  factory.dataPlane = async () => components;
+  try { await withFakeCompute(box, async (fake) => {
     const sandbox = await E2BSandbox.create("catalog-template", { timeoutMs: 123 });
     assertArkerFirst(fake.captured(), "e2b");
-    assert.deepEqual(fake.createCalls[0], { templateId: "catalog-template", timeout: 123 });
+    assert.deepEqual(fake.createCalls[0], { templateId: "catalog-template", timeout: 123, metadata: {} });
     assert.equal(sandbox.sandboxId, "e2b-box");
     assert.equal(sandbox.getHost(8080), "p8080.example.invalid");
     assert.equal(sandbox.getHost(3000), "p8080-3000.example.invalid");
-
-    await assert.rejects(() => sandbox.commands.run("printf e2b", { cwd: "/tmp", envs: { A: "b" }, timeoutMs: 200 }), (error: unknown) => {
-      assert.ok(error instanceof CommandExitError);
-      assert.equal(error.stdout, `stdout:${box.runCalls[0]!.command}`);
-      assert.equal(error.stderr, `stderr:${box.runCalls[0]!.command}`);
-      assert.equal(error.exitCode, 7);
-      assert.equal(error.error, "exit status 7");
-      return true;
-    });
-    assert.match(box.runCalls[0]!.command, /^setpriv --reuid=user --regid=user --init-groups -- /);
-    assert.match(box.runCalls[0]!.command, /cd \/tmp/);
-    assert.match(box.runCalls[0]!.command, /export A=b/);
-    assert.deepEqual(box.runCalls[0]!.options, { timeout: 200 });
-
-    box.runResult = { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
-
-    assert.equal(await sandbox.files.read("/tmp/a"), "read:/tmp/a");
-    await sandbox.files.write("/tmp/a", "content");
-    await sandbox.files.makeDir("/tmp/dir");
-    assert.deepEqual(await sandbox.files.list("/tmp"), []);
-    assert.equal(await sandbox.files.exists("/tmp/a"), true);
-    await sandbox.files.remove("/tmp/a");
-    assert.equal(await sandbox.kill(), true);
-    assert.equal(await sandbox.kill(), false);
-    assert.equal(box.destroyed, true);
-
-    assert.equal(typeof sandbox.files.rename, "function");
-    await assert.rejects(
-      () => E2BSandbox.create({ template: "bad" } as any),
-      /unsupported option\(s\) 'template'/,
-    );
+    for (const name of ["commands", "files", "pty", "git"] as const) assert.equal(sandbox[name], components[name]);
     await E2BSandbox.create({ timeoutMs: 321 });
-    assert.deepEqual(fake.createCalls.at(-1), { timeout: 321 });
-    await assert.rejects(
-      () => E2BSandbox.create("template", { envVars: { A: "B" } } as any),
-      /unsupported option\(s\) 'envVars'/,
-    );
-  });
+    assert.deepEqual(fake.createCalls.at(-1), { timeout: 321, metadata: {} });
+    for (const key of ["template", "envVars"]) await assert.rejects(E2BSandbox.create({ [key]: "unsupported" } as any), /unsupported option/);
+  }); } finally { factory.dataPlane = original; }
 }
 
 async function testE2BNativeErrorIdentity(): Promise<void> {
-  const foreignExit = Object.assign(new Error("exit status 17"), {
-    name: "CommandExitError", stdout: "output", stderr: "failure", exitCode: 17, error: "exit status 17",
-  });
+  const foreignExit = new CommandExitError({ stdout: "output", stderr: "failure", exitCode: 17, error: "exit status 17" });
   const authentication = new Error("authentication refused");
   for (const failure of [foreignExit, authentication]) {
     const box = new FakeSandbox("native-e2b", "e2b", {
@@ -337,7 +311,11 @@ function localE2BCommand(box: FakeSandbox): FakeSandbox["runCommand"] {
       return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
     }
     box.runCalls.push({ command, options });
-    command = command.replace("setpriv --reuid=user --regid=user --init-groups -- ", "");
+    // This local guest maps both guest identities to the test runner's account.
+    for (const user of ["user", "root"]) {
+      command = command.replace(`setpriv --reuid=${user} --regid=${user} --init-groups -- `, "");
+    }
+    command = command.replaceAll("pwd.getpwnam(user)", "pwd.getpwuid(os.getuid())");
     try {
       return {
         stdout: execFileSync("/bin/bash", ["-lc", command], { encoding: "utf8" }),
@@ -364,6 +342,15 @@ async function testE2BArkerGitRunsOfficialWorkflowAgainstLocalRepository(): Prom
   const box = new FakeSandbox("git-vm");
   box.runCommand = localE2BCommand(box);
   const fake = installFakeCompute(box);
+  const factory = E2BSandbox as unknown as { dataPlane: () => Promise<unknown> };
+  const original = factory.dataPlane;
+  const native = new NativeE2BSandbox({ sandboxId: "local", sandboxDomain: "example.invalid", envdVersion: "0.10.2" });
+  const Git = native.git.constructor as new (commands: unknown) => typeof native.git;
+  factory.dataPlane = async () => ({ commands: {}, files: {}, pty: {}, git: new Git({ run: async (command: string) => {
+    const result = await box.runCommand(command);
+    if (result.exitCode) throw new CommandExitError(result);
+    return result;
+  } }), close() {} });
   try {
     const sandbox = await E2BSandbox.create();
     await sandbox.git.init(remote, { bare: true, initialBranch: "main" });
@@ -379,55 +366,7 @@ async function testE2BArkerGitRunsOfficialWorkflowAgainstLocalRepository(): Prom
     assert.equal(branches.currentBranch, "feature");
     assert.deepEqual(new Set(branches.branches), new Set(["feature", "main"]));
   } finally {
-    fake.cleanup();
-    rmSync(root, { recursive: true, force: true });
-  }
-}
-
-async function testE2BArkerFilesBatchMetadataAndRename(): Promise<void> {
-  const root = mkdtempSync(join(tmpdir(), "arker-e2b-files-"));
-  const first = join(root, "nested", "first.txt");
-  const second = join(root, "second.bin");
-  const renamed = join(root, "renamed", "first.txt");
-  const vm = {
-    sync: async (path: string, content?: Uint8Array) => {
-      if (content === undefined) return new Uint8Array(readFileSync(path));
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, content);
-    },
-  };
-  const box = new FakeSandbox("files-vm", "arker", vm);
-  box.filesystem.writeFile = async (path, content) => {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, content);
-  };
-  box.runCommand = localE2BCommand(box);
-  const fake = installFakeCompute(box);
-  try {
-    const sandbox = await E2BSandbox.create();
-    const written = await sandbox.files.writeFiles([
-      { path: first, data: "hello" },
-      { path: second, data: Uint8Array.from([0, 1, 2, 255]).buffer },
-    ]);
-    assert.deepEqual(written.map(({ name, path, type }) => ({ name, path, type })), [
-      { name: "first.txt", path: first, type: "file" },
-      { name: "second.bin", path: second, type: "file" },
-    ]);
-    const info = await sandbox.files.getInfo(first);
-    assert.deepEqual(
-      { name: info.name, path: info.path, size: info.size, permissions: info.permissions },
-      { name: "first.txt", path: first, size: 5, permissions: "-rw-r--r--" },
-    );
-    const moved = await sandbox.files.rename(first, renamed);
-    assert.deepEqual({ name: moved.name, path: moved.path, size: moved.size }, { name: "first.txt", path: renamed, size: 5 });
-    assert.equal(existsSync(first), false);
-    assert.equal(readFileSync(renamed, "utf8"), "hello");
-    await assert.rejects(
-      () => sandbox.files.write(join(root, "blocked"), "secret", { metadata: { kind: "test" } }),
-      /metadata/,
-    );
-    assert.equal(existsSync(join(root, "blocked")), false);
-  } finally {
+    factory.dataPlane = original;
     fake.cleanup();
     rmSync(root, { recursive: true, force: true });
   }
@@ -1132,7 +1071,6 @@ await testDaytonaNativeExecutionPreservesResponseAndInputs();
 await testE2BSurface();
 await testE2BNativeErrorIdentity();
 await testE2BArkerGitRunsOfficialWorkflowAgainstLocalRepository();
-await testE2BArkerFilesBatchMetadataAndRename();
 await testModalSurface();
 await testInternalArkerProvider();
 await testInternalArkerProviderImageAndResources();
@@ -1179,4 +1117,25 @@ async function testSharedRouterPreservesNativeCreateError(): Promise<void> {
 }
 await testSharedRouterPreservesNativeCreateError();
 
+
+
+for (const metadata of [undefined, null, {}, { purpose: "child", nested: { enabled: true, cleared: null } }]) {
+  const fetch = new FakeFetch();
+  fetch.addFork("metadata-child");
+  const provider = createArkerComputeProvider({ apiKey: "test", source: "source", baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false });
+  await provider.sandbox.create({ metadata } as any);
+  const request = JSON.parse(fetch.calls[0]!.body!);
+  assert.equal(Object.hasOwn(request, "metadata"), metadata !== undefined);
+  if (metadata !== undefined) assert.deepEqual(request.metadata, metadata);
+}
+
+{
+  const fetch = new FakeFetch();
+  fetch.addFork("metadata-child");
+  const provider = createArkerComputeProvider({ apiKey: "test", sourceVmId: "resolved-parent", baseUrl: "https://arker.invalid/api", fetch: fetch.fetch, retry: false }, e2bForkMetadata);
+  await provider.sandbox.create();
+  const request = JSON.parse(fetch.calls[0]!.body!);
+  assert.equal(request.source_vm_id, "resolved-parent");
+  assert.deepEqual(request.metadata, { arker_e2b: { version: 1, envd_version: "0.10.2", metadata: {}, source: { kind: "vm_id", value: "resolved-parent" } } });
+}
 console.log("PASS compat");

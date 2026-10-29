@@ -48,6 +48,7 @@ ErrorCode: TypeAlias = Literal[
     'idempotency_conflict',
     'expired',
     'payload_too_large',
+    'request_timeout',
     'method_not_allowed',
     'unsupported_operation',
     'unrecoverable',
@@ -498,6 +499,12 @@ OpenApiOperationId: TypeAlias = Literal[
     'openVmPort',
     'openVmSocket',
     'mintSessionPtyTicket',
+    'mintFileTransferUrl',
+    'downloadFileTransfer',
+    'uploadFileTransfer',
+    'pauseVm',
+    'resumeVm',
+    'getVmLifecycle',
     'createMount',
     'listMounts',
     'deleteMount',
@@ -520,6 +527,7 @@ OpenApiOperationId: TypeAlias = Literal[
     'listApiKeys',
     'createApiKey',
     'revokeApiKey',
+    'setVmDeadline',
 ]
 
 
@@ -573,7 +581,7 @@ RateLimiter: TypeAlias = Literal['arker', 'upstream']
 
 
 StateRequirement: TypeAlias = Literal[
-    'running', 'mutable', 'unclaimed', 'uncommitted', 'not_deleting'
+    'running', 'mutable', 'unclaimed', 'uncommitted', 'not_deleting', 'explicit_resume'
 ]
 
 
@@ -1032,6 +1040,11 @@ class PayloadTooLarge(ErrorMetadata):
 
 
 @dataclass(frozen=True)
+class RequestTimeout(ErrorMetadata):
+    code: Literal['request_timeout'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
 class MethodNotAllowed(ErrorMetadata):
     code: Literal['method_not_allowed'] = field(kw_only=True)
     details: MethodNotAllowedDetails = field(kw_only=True)
@@ -1123,6 +1136,12 @@ class SyncBadRequestError(ErrorExecutionContext):
 
 
 @dataclass(frozen=True)
+class SyncForbiddenError(ErrorExecutionContext):
+    code: Literal['forbidden'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+
+
+@dataclass(frozen=True)
 class Details:
     resource: Literal['file', 'upload', 'resource']
 
@@ -1146,6 +1165,13 @@ class SyncPayloadTooLargeError(ErrorExecutionContext):
     code: Literal['payload_too_large'] = field(kw_only=True)
     message: str = field(kw_only=True)
     details: PayloadTooLargeDetails | None = None
+
+
+@dataclass(frozen=True)
+class SyncInsufficientResourcesError(ErrorExecutionContext):
+    code: Literal['insufficient_resources'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: InsufficientResourcesDetails = field(kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -1258,6 +1284,11 @@ class PayloadTooLargeErrorResponse:
 
 
 @dataclass(frozen=True)
+class RequestTimeoutErrorResponse:
+    error: RequestTimeout
+
+
+@dataclass(frozen=True)
 class MethodNotAllowedErrorResponse:
     error: MethodNotAllowed
 
@@ -1313,8 +1344,8 @@ class BadRequestOrInsufficientResourcesErrorResponse:
 
 
 @dataclass(frozen=True)
-class AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse:
-    error: AlreadyExists | Conflict | InvalidState | ResourceBusy
+class AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse:
+    error: AlreadyExists | Conflict | IdempotencyConflict | InvalidState | ResourceBusy
 
 
 @dataclass(frozen=True)
@@ -1660,6 +1691,83 @@ class ApiKeyPoolScope:
     pool_id: str
 
 
+FileTransferOperation: TypeAlias = Literal['read', 'write']
+
+
+@dataclass(frozen=True)
+class MintFileTransferUrlRequest:
+    path: str
+    operation: FileTransferOperation
+    envd_signature: str
+    user: str | None = None
+    expires_at: int | None = None
+
+
+@dataclass(frozen=True)
+class FileTransferUrlResponse:
+    vm_id: str
+    ticket: str
+    expires_at: int | None
+
+
+@dataclass(frozen=True)
+class FileTransferUploadEntry:
+    path: str
+    name: str
+    type: Literal['file']
+
+
+VmPauseMode: TypeAlias = Literal['full', 'filesystem']
+
+
+@dataclass(frozen=True)
+class PauseVmResponse:
+    vm_id: str
+    mode: VmPauseMode
+    state: Literal['paused']
+    already_paused: bool
+
+
+@dataclass(frozen=True)
+class ResumeVmResponse:
+    vm_id: str
+    mode: VmPauseMode
+    state: Literal['running']
+
+
+@dataclass(frozen=True)
+class VmLifecycleResponse:
+    vm_id: str
+    state: Literal['running', 'idle', 'paused']
+    mode: VmPauseMode | None
+    customer_paused: bool
+    started_at: str
+    paused_at: str | None = None
+
+
+@dataclass(frozen=True)
+class PauseVmDeadline:
+    policy_id: str
+
+
+@dataclass(frozen=True)
+class ResumeVmDeadline:
+    policy_id: str
+    timeout_seconds: int
+
+
+@dataclass(frozen=True)
+class SetVmDeadlineRequest:
+    policy_id: str
+    timeout_seconds: int
+
+
+@dataclass(frozen=True)
+class SetVmDeadlineResponse:
+    vm_id: str
+    deadline_at: str
+
+
 @dataclass(frozen=True)
 class ListVmsParameters:
     cursor: str | None = None
@@ -1673,6 +1781,7 @@ class ListVmsParameters:
     created_after: str | None = None
     created_before: str | None = None
     pool_id: str | None = None
+    metadata_filter: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1919,6 +2028,75 @@ class RevokeApiKeyParameters:
 
 
 @dataclass(frozen=True)
+class MintFileTransferUrlParameters:
+    id: str
+
+
+@dataclass(frozen=True)
+class DownloadFileTransferParameters:
+    id: str
+    ticket: str
+
+
+DownloadFileTransferResponse: TypeAlias = BadRequestErrorResponse | Any
+
+
+DownloadFileTransferResponse1: TypeAlias = UnauthorizedErrorResponse | Any
+
+
+DownloadFileTransferResponse2: TypeAlias = NotFoundErrorResponse | Any
+
+
+DownloadFileTransferResponse3: TypeAlias = InternalErrorResponse | Any
+
+
+@dataclass(frozen=True)
+class UploadFileTransferParameters:
+    id: str
+    ticket: str
+
+
+@dataclass(frozen=True)
+class UploadFileTransferRequest:
+    file: list[bytes] | None = None
+
+
+UploadFileTransferResponse: TypeAlias = BadRequestErrorResponse | Any
+
+
+UploadFileTransferResponse1: TypeAlias = UnauthorizedErrorResponse | Any
+
+
+UploadFileTransferResponse2: TypeAlias = NotFoundErrorResponse | Any
+
+
+UploadFileTransferResponse3: TypeAlias = InternalErrorResponse | Any
+
+
+UploadFileTransferResponse4: TypeAlias = list[FileTransferUploadEntry]
+
+
+@dataclass(frozen=True)
+class PauseVmParameters:
+    id: str
+
+
+@dataclass(frozen=True)
+class ResumeVmParameters:
+    id: str
+
+
+@dataclass(frozen=True)
+class GetVmLifecycleParameters:
+    id: str
+
+
+@dataclass(frozen=True)
+class SetVmDeadlineParameters:
+    id: str
+
+
+@dataclass(frozen=True)
 class PolicyAction1:
     rewrite: Rewrite | None = None
     gate: Gate | None = None
@@ -1973,9 +2151,11 @@ SyncReadResponse: TypeAlias = SyncReadInlineResponse | SyncReadPresignedResponse
 
 SyncFileError: TypeAlias = (
     SyncBadRequestError
+    | SyncForbiddenError
     | SyncNotFoundError
     | SyncConflictError
     | SyncPayloadTooLargeError
+    | SyncInsufficientResourcesError
     | SyncUnsupportedOperationError
     | SyncUnavailableError
     | SyncInternalError
@@ -2082,6 +2262,18 @@ class ListApiKeysResponse:
 
 
 @dataclass(frozen=True)
+class PauseVmRequest:
+    mode: VmPauseMode | None = None
+    deadline: PauseVmDeadline | None = None
+
+
+@dataclass(frozen=True)
+class ResumeVmRequest:
+    mode: VmPauseMode | None = None
+    deadline: ResumeVmDeadline | None = None
+
+
+@dataclass(frozen=True)
 class PolicyEntry:
     type: Literal['outbound', 'inbound']
     action: PolicyAction
@@ -2173,6 +2365,7 @@ ErrorBody: TypeAlias = (
     | IdempotencyConflict
     | Expired
     | PayloadTooLarge
+    | RequestTimeout
     | MethodNotAllowed
     | UnsupportedOperation
     | Unrecoverable
@@ -2236,6 +2429,7 @@ class ForkRequest1:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -2262,6 +2456,7 @@ class ForkRequest2:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -2288,6 +2483,7 @@ class ForkRequest3:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -2314,6 +2510,7 @@ class ForkRequest4:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -2340,6 +2537,7 @@ class ForkRequest5:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -2366,6 +2564,7 @@ class ForkRequest6:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 ForkRequest: TypeAlias = (
@@ -2446,6 +2645,10 @@ class Vm:
     platform: str | None = None
     compatible_platforms: list[CompatiblePlatform] | None = None
     pool_id: str | None = None
+    metadata: dict[str, Any] | None = None
+    started_at: str | None = None
+    paused_at: str | None = None
+    customer_paused: bool | None = None
 
 
 @dataclass(frozen=True)

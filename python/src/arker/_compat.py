@@ -108,6 +108,7 @@ def arker_create(
     image: str | None = None,
     resources: dict[str, Any] | None = None,
     policies: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> VM:
     cfg = config or {}
     request: dict[str, Any] = {"name": name or cfg.get("name")}
@@ -119,6 +120,8 @@ def arker_create(
         request["source_vm_id"] = source_id
     else:
         request["source_vm_name"] = template_id or arker_source(config)
+    if metadata is not None:
+        request["metadata"] = metadata
     if resources:
         request["resources"] = resources
     fork_policies = dict(cfg.get("policies") or {})
@@ -253,6 +256,7 @@ def get_or_none(getter: Callable[[], Any]) -> Any | None:
         for module_name, class_name in (
             ("modal.exception", "NotFoundError"),
             ("e2b.exceptions", "SandboxNotFoundException"),
+            ("e2b.exceptions", "VolumeNotFoundException"),
             ("daytona.common.errors", "DaytonaNotFoundError"),
         ):
             if any(base.__module__ == module_name for base in type(error).__mro__):
@@ -317,6 +321,9 @@ def routed_create(
     native_provider: str,
     config: dict[str, Any] | None,
     creators: dict[str, Any],
+    *,
+    resource: str | None = None,
+    resource_id: Callable[[Any], str] | None = None,
 ) -> tuple[str, Any]:
     router = router_config(config, native_provider)
     if router.create.strategy == "weighted":
@@ -339,8 +346,10 @@ def routed_create(
         # the same request to a second provider.
         with suppress(Exception):
             cache = _cache(router)
-            for identifier in _instance_identifiers(result):
-                _cache_set(cache, identifier, name)
+            identifiers = [resource_id(result)] if resource_id else _instance_identifiers(result)
+            for identifier in identifiers:
+                if isinstance(identifier, str):
+                    _cache_set(cache, f"{resource}:{identifier}" if resource else identifier, name)
         return name, result
     if last_error:
         raise last_error
@@ -352,7 +361,10 @@ def routed_get(
     native_provider: str,
     config: dict[str, Any] | None,
     getters: dict[str, Any],
+    *,
+    resource: str | None = None,
 ) -> tuple[str, Any] | None:
+    cache_identifier = f"{resource}:{identifier}" if resource else identifier
     router = router_config(config, native_provider)
     started = time.monotonic()
 
@@ -390,24 +402,24 @@ def routed_get(
     eligible = {
         name
         for name in router.existing.order
-        if provider_accepts_identifier(name, identifier, arker_enabled="arker" in router.existing.order)
+        if resource or provider_accepts_identifier(name, identifier, arker_enabled="arker" in router.existing.order)
     }
     cache = _cache(router)
     try:
-        cached = cache.get(identifier) if cache is not None else None
+        cached = cache.get(cache_identifier) if cache is not None else None
     except Exception:
         cached = None
     if cached is not None and (cached not in getters or cached not in eligible):
         if cache is not None:
             with suppress(Exception):
-                cache.delete(identifier)
+                cache.delete(cache_identifier)
         cached = None
     if cached in getters:
         result = probe(cached)
         if result is not None:
             return cached, result
         with suppress(Exception):
-            cache.delete(identifier)
+            cache.delete(cache_identifier)
     order = [name for name in router.existing.order if name in getters and name != cached and name in eligible]
     if router.existing.strategy == "race" and len(order) > 1:
         results: queue.Queue[tuple[str, Any, BaseException | None]] = queue.Queue()
@@ -437,12 +449,19 @@ def routed_get(
         for name in order:
             result = completed[name][0]
             if result is not None:
-                _cache_set(cache, identifier, name)
+                _cache_set(cache, cache_identifier, name)
                 return name, result
         return None
     for name in order:
         result = probe(name)
         if result is not None:
-            _cache_set(cache, identifier, name)
+            _cache_set(cache, cache_identifier, name)
             return name, result
     return None
+
+
+def routed_list(native_provider: str, config: dict[str, Any] | None, listers: dict[str, Any]) -> list[Any]:
+    """List each configured resource backend without treating errors as absence."""
+    router = router_config(config, native_provider)
+    _validate_router_providers(list(router.existing.order), listers)
+    return [item for name in router.existing.order for item in listers[name]()]

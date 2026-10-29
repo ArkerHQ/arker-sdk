@@ -314,7 +314,9 @@ class ArkerComputeSandbox implements SandboxInterface {
   }
 }
 
-export function createArkerComputeProvider(config: ArkerComputeProviderConfig = {}): DirectProvider {
+export type ForkMetadataMapper = (source: Readonly<ForkOptions>, metadata: unknown) => ForkOptions["metadata"];
+
+export function createArkerComputeProvider(config: ArkerComputeProviderConfig = {}, mapMetadata?: ForkMetadataMapper): DirectProvider {
   async function destroy(sandboxId: string): Promise<void> {
     const client = makeClient(config);
     try {
@@ -337,7 +339,7 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
         const values = (options ?? {}) as Record<string, unknown>;
         const supported = new Set([
           "name", "image", "memory", "memoryMiB", "cpu", "vcpus", "diskMiB", "snapshotId", "templateId",
-          "allowInternetAccess",
+          "allowInternetAccess", "metadata",
           "timeout",
           "networkBlockAll", "blockNetwork", "domainAllowList", "outboundDomainAllowlist", "networkAllowList",
           "outboundCidrAllowlist", "createIfNotExist",
@@ -391,8 +393,10 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
           ...config.policies,
           ...((network || lifetime) ? { rules: { ...config.policies?.rules, ...network?.rules, ...lifetime } } : {}),
         } : undefined;
+        const metadata = mapMetadata ? mapMetadata(sourceRequest, values.metadata) : values.metadata as ForkOptions["metadata"];
         const request: ForkOptions = {
           ...sourceRequest,
+          ...(metadata !== undefined ? { metadata } : {}),
           ...(options?.name ? { name: options.name } : {}),
           ...(resources ? { resources } : {}),
           ...(policies ? { policies } : {}),

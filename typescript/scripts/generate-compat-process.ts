@@ -4,7 +4,7 @@ for (const [source, target] of [
   ["_guest_process.py", "guest-process"],
   ["_linux_signals.json", "linux-signals"],
   ["_guest_filesystem.py", "guest-filesystem"],
-  ["_guest_e2b_file.py", "e2b-file-io"],
+  ["_guest_e2b_mount_ready.py", "e2b-mount-ready"],
   ["_guest_daytona_filesystem.py", "daytona-filesystem"],
 ]) {
   const text = await readFile(new URL(`../../python/src/arker/${source}`, import.meta.url), "utf8");

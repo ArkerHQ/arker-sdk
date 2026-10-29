@@ -1,3 +1,4 @@
+import { guestScript as envdSource } from "../src/compat/e2b-envd-guest.generated.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -71,7 +72,7 @@ const snapshots = ["before", "after"];
 const finishSnapshot = captureEvidenceSnapshot(async () => snapshots.shift()!);
 assert.deepEqual(await finishSnapshot(), { fingerprint: "before", changed: true });
 assert.deepEqual(await captureEvidenceSnapshot(async () => "stable")(), { fingerprint: "stable", changed: false });
-for (const name of ["compat-evidence.ts", "compat-coverage.ts", "compat-trace.ts", "compat-blaxel-import-live.ts", "http-service.py", "api-scope.json", "dist/index.mjs"]) {
+for (const name of ["compat-evidence.ts", "compat-coverage.ts", "compat-trace.ts", "compat-blaxel-import-live.ts", "http-service.py", "api-scope.json", "_guest_e2b_envd_manifest.json", "dist/index.mjs"]) {
   const changed = await implementationFingerprint(async (path) => {
     const content = await readFile(path);
     return path.endsWith(`/${name}`) ? Buffer.concat([content, Buffer.from("\n// changed harness\n")]) : content;
@@ -79,3 +80,5 @@ for (const name of ["compat-evidence.ts", "compat-coverage.ts", "compat-trace.ts
   assert.notEqual(changed, fingerprint, `${name} must invalidate existing evidence`);
 }
 console.log("PASS compatibility coverage evidence validation");
+
+assert.equal(envdSource, await readFile(new URL("../../python/src/arker/_guest_e2b_envd.py", import.meta.url), "utf8"));

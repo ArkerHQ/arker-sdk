@@ -67,31 +67,6 @@ def test_arker_creation_rejects_reserved_lifetime_policy_without_fork(monkeypatc
         shim.Sandbox._create_arker({"policies": {"rules": {"computesdk-e2b-lifetime": None}}}, None, None, None, {})
 
 
-def test_arker_identity_validation_fails_closed_without_mutation(monkeypatch):
-    vm = types.SimpleNamespace(id="custom", deleted=False, delete=lambda: pytest.fail("validation must not mutate"))
-    monkeypatch.setattr(
-        shim,
-        "run_command",
-        lambda vm, command: shim._CommonCommandResult(stdout="", stderr="mismatch", exit_code=1),
-    )
-    with pytest.raises(shim.UnsupportedCompatibilityOption, match="UID/GID 1000"):
-        shim._validate_e2b_identity(vm)
-
-
-def test_arker_creation_validation_deletes_only_the_known_child(monkeypatch):
-    deleted = []
-    child = types.SimpleNamespace(id="child", delete=lambda: deleted.append("child"))
-    monkeypatch.setattr(shim, "routed_create", lambda *args, **kwargs: ("arker", child))
-    monkeypatch.setattr(
-        shim,
-        "_validate_e2b_identity",
-        lambda vm: (_ for _ in ()).throw(shim.UnsupportedCompatibilityOption("identity mismatch")),
-    )
-    with pytest.raises(shim.UnsupportedCompatibilityOption, match="identity mismatch"):
-        shim.Sandbox.create()
-    assert deleted == ["child"]
-
-
 def test_native_filesystem_is_preserved_with_binary_options_and_metadata():
     marker = object()
 
@@ -126,81 +101,6 @@ def test_async_native_filesystem_is_preserved_without_sync_translation():
     assert asyncio.run(sandbox.files.read("/binary", format="bytes", request_timeout=7)) == bytearray(b"\xff")
 
 
-@pytest.mark.parametrize("asynchronous", [False, True])
-def test_arker_binary_reads_preserve_every_byte_and_native_return_type(asynchronous, monkeypatch):
-    payload = bytes(range(256))
-    vm = types.SimpleNamespace(id="arker", sync=lambda path: payload)
-    monkeypatch.setattr(
-        shim,
-        "run_command",
-        lambda vm, command, **kwargs: shim._CommonCommandResult(stdout="", stderr="", exit_code=0),
-    )
-    sandbox = shim.Sandbox(vm=vm)
-    if asynchronous:
-        from arker._compat_e2b_async import AsyncSandbox
-
-        sandbox = AsyncSandbox(sandbox)
-        result = asyncio.run(sandbox.files.read("/binary", format="bytes"))
-    else:
-        result = sandbox.files.read("/binary", format="bytes")
-    assert type(result) is bytearray
-    assert result == bytearray(payload)
-
-
-def test_arker_stream_reads_are_not_faked_with_a_buffer():
-    from arker._compat import UnsupportedCompatibilityOption
-
-    def unexpected_read(path):
-        pytest.fail("unsupported formats must not perform filesystem I/O")
-
-    sandbox = shim.Sandbox(vm=types.SimpleNamespace(id="arker", sync=unexpected_read))
-    with pytest.raises(UnsupportedCompatibilityOption, match="format"):
-        sandbox.files.read("/binary", format="stream")
-
-
-@pytest.mark.parametrize("outcome", ["success", "permission-denied", "upload-interrupted"])
-def test_arker_write_staging_cleanup_and_user_permissions(monkeypatch, outcome):
-    commands, staged = [], []
-    metadata = "/tmp/file\x1f4\x1f81a4\x1f-rw-r--r--\x1fuser\x1fuser\x1f1\x1fregular file"
-
-    def sync(path, content):
-        if outcome == "upload-interrupted":
-            raise OSError("upload interrupted")
-        staged.append((path, content))
-
-    def run(vm, command, **kwargs):
-        commands.append(command)
-        denied = outcome == "permission-denied" and command.startswith("setpriv ")
-        return shim._CommonCommandResult(
-            stdout=metadata if outcome == "success" else "",
-            stderr="Permission denied" if denied else "",
-            exit_code=1 if denied else 0,
-        )
-
-    monkeypatch.setattr(shim, "run_command", run)
-    files = shim.Sandbox(vm=types.SimpleNamespace(id="arker", sync=sync)).files
-    if outcome == "upload-interrupted":
-        with pytest.raises(OSError, match="upload interrupted"):
-            files.write("/tmp/file", "data")
-        assert len(commands) == 3
-        assert commands[2].startswith("rm -rf -- /tmp/.computesdk-e2b-write-")
-        return
-    if outcome == "permission-denied":
-        with pytest.raises(RuntimeError, match="Permission denied"):
-            files.write("/root/owned", "data")
-        assert commands[2].startswith("setpriv --reuid=user --regid=user --init-groups -- ")
-    else:
-        files.write("/tmp/file", "data")
-        info = files.get_info("/tmp/file")
-        assert commands[2].startswith("setpriv --reuid=user --regid=user --init-groups -- sh -c ")
-        assert "write /tmp/file" in commands[2]
-        assert " < /tmp/.computesdk-e2b-write-" in commands[2]
-        assert staged[0][0].startswith("/tmp/.computesdk-e2b-write-")
-        assert info.permissions == "-rw-r--r--"
-        assert (info.owner, info.group) == ("user", "user")
-    assert commands[3].startswith("rm -rf -- /tmp/.computesdk-e2b-write-")
-
-
 @pytest.mark.parametrize("alias", ["timeout_ms", "timeoutMs"])
 def test_python_create_does_not_misread_millisecond_alias_as_seconds(alias, monkeypatch):
     monkeypatch.setattr(shim, "routed_create", lambda *args, **kwargs: pytest.fail("must not route"))
@@ -216,7 +116,7 @@ def test_arker_creation_preserves_legacy_ordered_policy(fork_requests):
     shim.Sandbox._create_arker(config, None, None, None, {})
 
     assert requests[0]["policies"]["policies"] == ordered
-    assert list(requests[0]["policies"]["rules"].values()) == [
+    assert [rule for rule in requests[0]["policies"]["rules"].values() if rule["type"] == "schedule"] == [
         {"type": "schedule", "after_created": 300, "action": "delete"}
     ]
     assert config == {"source": "template", "policies": {"policies": ordered}}
@@ -275,16 +175,43 @@ def test_connect_probes_metadata_before_connecting_only_the_winner(monkeypatch, 
         ),
     )
     monkeypatch.setattr(shim.Sandbox, "_native_sandbox", staticmethod(lambda: native))
-    monkeypatch.setattr(shim, "_validate_e2b_identity", lambda vm: None)
+    vm = types.SimpleNamespace(id="arker-winner", state="idle", base_url="https://worker.example")
+
+    def refresh():
+        calls.append(("refresh", vm.state))
+        return vm
+
+    def request(method, path, body, **kwargs):
+        assert (method, path, body) == (
+            "POST",
+            "/v1/vms/arker-winner/resume",
+            {"deadline": {"policy_id": "computesdk-e2b-lifetime", "timeout_seconds": 300}},
+        )
+        assert kwargs == {"base_url": vm.base_url}
+        calls.append(("resume", vm.id))
+        vm.state = "running"
+        return {"vm_id": vm.id, "state": "running", "mode": "full"}
+
+    def prepare(self):
+        assert self._vm is vm and vm.state == "running"
+        calls.append(("bootstrap", vm.id))
+
+    vm.refresh = refresh
+    vm._client = types.SimpleNamespace(_request=request)
+    monkeypatch.setattr(shim.Sandbox, "_prepare_data_plane", prepare)
 
     def route(identifier, provider, config, getters):
         metadata = getters["e2b"]()
         assert calls == [("info", identifier)]
-        return owner, metadata if owner == "e2b" else types.SimpleNamespace(id="arker-winner")
+        return owner, metadata if owner == "e2b" else vm
 
     monkeypatch.setattr(shim, "routed_get", route)
     assert shim.Sandbox.connect(identifier).sandbox_id == (identifier if owner == "e2b" else "arker-winner")
-    assert calls == ([("info", identifier), ("connect", identifier)] if owner == "e2b" else [("info", identifier)])
+    assert calls == (
+        [("info", identifier), ("connect", identifier)]
+        if owner == "e2b"
+        else [("info", identifier), ("resume", vm.id), ("refresh", "running"), ("bootstrap", vm.id)]
+    )
 
 
 @pytest.mark.parametrize("owner", ["e2b", "arker", None])
@@ -311,3 +238,74 @@ def test_static_kill_uses_shared_ownership_without_connecting(monkeypatch, owner
     monkeypatch.setattr(shim, "routed_get", lookup)
     assert shim.Sandbox.kill(sandbox_id="shared-id") is (owner is not None)
     assert calls == (["info", ("native-kill", "shared-id")] if owner == "e2b" else ["arker-kill"] if owner else [])
+
+
+@pytest.mark.parametrize("public", [None, False, True])
+def test_create_keeps_envd_private_and_preserves_custom_rules(fork_requests, public):
+    requests, _ = fork_requests
+    custom = {"type": "inbound", "priority": 7, "action": "deny", "match": {"ports": [22]}}
+    options = {} if public is None else {"network": {"allow_public_traffic": public}}
+    shim.Sandbox._create_arker(
+        {"source": "template", "policies": {"rules": {"custom": custom}, "secrets": {"TOKEN": "synthetic"}}},
+        None,
+        None,
+        False,
+        options,
+    )
+    policies = requests[0]["policies"]
+    rules = policies["rules"]
+    assert rules["custom"] == custom
+    assert policies["secrets"] == {"TOKEN": "synthetic"}
+    assert rules["computesdk-e2b-envd"]["match"] == {"ports": [49983]}
+    assert rules["computesdk-e2b-envd"]["auth"] == "arker"
+    assert rules["computesdk-e2b-apps"]["match"] == {"ports": [[1, 49982], [49984, 65535]]}
+    assert rules["computesdk-e2b-apps"]["auth"] == ("arker" if public is False else "open")
+    assert rules["computesdk-e2b-envd"]["priority"] > custom["priority"] > rules["computesdk-e2b-apps"]["priority"]
+    assert any(rule["type"] == "outbound_guard" for rule in rules.values())
+
+
+@pytest.mark.parametrize("envs", [["bad"], {"NAME": 1}, {1: "value"}])
+def test_invalid_create_envs_are_rejected_before_fork(monkeypatch, envs):
+    monkeypatch.setattr(shim, "arker_create", lambda *a, **k: pytest.fail("must not fork"))
+    with pytest.raises(TypeError, match="envs"):
+        shim.Sandbox._create_arker({}, None, None, None, {"envs": envs})
+
+
+@pytest.mark.parametrize("priority", [0, 1000000])
+def test_reserved_ingress_priority_collision_never_rewrites_user_rules(monkeypatch, priority):
+    monkeypatch.setattr(shim, "arker_create", lambda *a, **k: pytest.fail("must not fork"))
+    custom = {"type": "outbound", "priority": priority, "action": "deny"}
+    config = {"policies": {"rules": {"custom": custom}}}
+    with pytest.raises(ValueError, match="reserved"):
+        shim.Sandbox._create_arker(config, None, None, None, {})
+    assert config["policies"]["rules"] == {"custom": custom}
+
+
+@pytest.mark.parametrize(
+    "options,expected", [({}, {}), ({"metadata": None}, {}), ({"metadata": {"team": "example"}}, {"team": "example"})]
+)
+@pytest.mark.parametrize("source_id", [None, "vm_source"])
+def test_create_replaces_inherited_metadata_with_versioned_descriptor(
+    fork_requests, monkeypatch, options, expected, source_id
+):
+    monkeypatch.delenv("ARKER_SOURCE_VM_ID", raising=False)
+    config = {"source": "ubuntu", "metadata": {"parent": "must not inherit"}}
+    if source_id:
+        config["source_vm_id"] = source_id
+    requests, _ = fork_requests
+    shim.Sandbox._create_arker(config, None, None, None, options)
+    assert requests[0]["metadata"] == {
+        "arker_e2b": {
+            "version": 1,
+            "envd_version": "0.10.2",
+            "metadata": expected,
+            "source": {"kind": "vm_id" if source_id else "vm_name", "value": source_id or "ubuntu"},
+        }
+    }
+
+
+@pytest.mark.parametrize("metadata", [[], {"value": 1}, {"value": None}])
+def test_create_rejects_invalid_metadata_before_fork(metadata, fork_requests):
+    with pytest.raises(TypeError, match="metadata"):
+        shim.Sandbox._create_arker({"source": "ubuntu"}, None, None, None, {"metadata": metadata})
+    assert fork_requests[0] == []

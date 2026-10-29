@@ -38,20 +38,23 @@ async function verifyE2B(native, shim) {
     exitCode: 17,
     error: "exit status 17",
   });
-  native.Sandbox.create = async () => ({
-    sandboxId: "consumer-e2b",
-    commands: {
-      run: async () => {
-        throw failure;
-      },
-    },
-  });
+  const handle = { pid: 123, wait: async () => { throw failure; } };
+  const commandOptions = { user: "root", background: true, stdin: true, timeoutMs: 0 };
+  const nativeSandbox = new native.Sandbox({ sandboxId: "consumer-e2b", envdVersion: "0.10.2" });
+  const { commands, files, git, pty } = nativeSandbox;
+  commands.run = async (command, options) => {
+    if (command === "background") { assert.equal(options, commandOptions); return handle; }
+    throw failure;
+  };
+  pty.connect = async () => handle;
+  native.Sandbox.create = async () => nativeSandbox;
   try {
     const sandbox = await shim.Sandbox.create();
-    await assert.rejects(
-      sandbox.commands.run("exit 17"),
-      (error) => error === failure,
-    );
+    for (const [key, expected] of Object.entries({ commands, files, git, pty })) assert.equal(sandbox[key], expected);
+    assert.equal(await sandbox.commands.run("background", commandOptions), handle);
+    assert.equal(await sandbox.pty.connect(123), handle);
+    await assert.rejects(handle.wait(), error => error === failure && error instanceof shim.CommandExitError);
+    await assert.rejects(sandbox.commands.run("exit 17"), error => error === failure);
   } finally {
     native.Sandbox.create = previous;
   }

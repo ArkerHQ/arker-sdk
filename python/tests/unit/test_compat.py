@@ -3,29 +3,26 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
 import shlex
 import subprocess
 import sys
 import types
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any
 
 import httpx2 as httpx
 import pytest
+from e2b_facade_helpers import mock_envd_bootstrap as mock_envd_bootstrap
 
 import arker.computer as sdk
-import arker.e2b as e2b_shim
 from arker._compat import arker_create, arker_source, compat_network_policies
 from arker.blaxel import SyncSandboxInstance as BlaxelSandbox
 from arker.daytona import Daytona
 from arker.e2b import Sandbox as E2BSandbox
 from arker.modal import Sandbox as ModalSandbox
 
-
-@pytest.fixture(autouse=True)
-def _valid_e2b_parent_identity(monkeypatch):
-    monkeypatch.setattr(e2b_shim, "_validate_e2b_identity", lambda vm: None)
+pytestmark = pytest.mark.usefixtures("mock_envd_bootstrap")
 
 
 def test_blaxel_native_filesystem_retains_options_and_operation_identity():
@@ -476,25 +473,15 @@ def test_python_shims_translate_or_reject_arker_create_options(arker_env) -> Non
     }
 
 
-def test_e2b_official_surface(arker_env) -> None:
+def test_e2b_control_plane_surface(arker_env) -> None:
     t = FakeTransport()
-    add_create_run_delete(t, "vm_e2b", "Hello from E2B Sandbox!\n")
-
+    add_create_run_delete(t, "vm_e2b", "")
     with use_transport(t):
         sandbox = E2BSandbox.create()
-        result = sandbox.commands.run('echo "Hello from E2B Sandbox!"', cwd="/workspace", env={"FOO": "bar"}, timeout=8)
-        assert result.stdout == "Hello from E2B Sandbox!\n"
-        assert result.exit_code == 0
         assert sandbox.get_host(8080) == "vm_e2b.aws-us-west-2.arker.app"
         assert sandbox.getHost(3000) == "vm_e2b-3000.aws-us-west-2.arker.app"
-        sandbox.kill()
-
-    run = json.loads(t.calls[1]["body"])
-    assert run["command"].startswith("(\nsetpriv --reuid=user --regid=user --init-groups -- sh -c ")
-    assert "cd /workspace" in run["command"]
-    assert "export HOME=/home/user" in run["command"]
-    assert "export FOO=bar" in run["command"]
-    assert run["timeout"] == 8
+        assert sandbox.kill()
+    assert not any("/runs" in call["url"] for call in t.calls)
 
 
 def test_e2b_nested_native_surface_delegates_provider_extensions() -> None:
@@ -513,37 +500,17 @@ def test_e2b_nested_native_surface_delegates_provider_extensions() -> None:
     assert sandbox.get_host(3000) == "native-3000.example"
 
 
-class LocalE2BVM:
-    def __init__(self, vm_id):
-        self.id = vm_id
+def test_e2b_native_git_runs_workflow_against_local_repository(tmp_path):
+    from e2b.sandbox_sync.git import Git
 
-    def sync(self, path, content=None):
-        target = Path(path)
-        if content is None:
-            return target.read_bytes()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(content.encode() if isinstance(content, str) else content)
-        return None
+    def run(command, **options):
+        result = subprocess.run(command, shell=True, capture_output=True, text=True, cwd=options.get("cwd"), check=True)
+        return types.SimpleNamespace(stdout=result.stdout, stderr=result.stderr, exit_code=result.returncode)
 
-    def run(self, command, **_options):
-        command = command.replace("setpriv --reuid=user --regid=user --init-groups -- ", "")
-        completed = subprocess.run(command, shell=True, text=True, capture_output=True, check=False)
-        return sdk.CompletedRunResult(
-            stdout=completed.stdout,
-            stderr=completed.stderr,
-            stdout_bytes=completed.stdout.encode(),
-            stderr_bytes=completed.stderr.encode(),
-            exit_code=completed.returncode,
-        )
-
-
-def test_e2b_arker_git_runs_official_workflow_against_local_repository(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(e2b_shim, "_identity_command", lambda command, **_options: command)
-
-    remote = tmp_path / "remote.git"
-    checkout = tmp_path / "checkout"
-    sandbox = E2BSandbox(vm=LocalE2BVM("local-git"))
-
+    commands = types.SimpleNamespace(run=run)
+    native = types.SimpleNamespace(sandbox_id="native", commands=commands, git=Git(commands))
+    sandbox = E2BSandbox(native=native)
+    remote, checkout = tmp_path / "remote.git", tmp_path / "checkout"
     sandbox.git.init(str(remote), bare=True, initial_branch="main", cwd=str(tmp_path))
     sandbox.git.clone(str(remote), str(checkout), cwd=str(tmp_path))
     sandbox.git.configure_user("Arker Test", "test@arker.invalid", scope="local", path=str(checkout), cwd=str(tmp_path))
@@ -551,47 +518,8 @@ def test_e2b_arker_git_runs_official_workflow_against_local_repository(monkeypat
     sandbox.git.add(str(checkout), files=["hello.txt"], cwd=str(tmp_path))
     sandbox.git.commit(str(checkout), "initial", cwd=str(tmp_path))
     sandbox.git.create_branch(str(checkout), "feature", cwd=str(tmp_path))
-
-    status = sandbox.git.status(str(checkout), cwd=str(tmp_path))
-    branches = sandbox.git.branches(str(checkout), cwd=str(tmp_path))
-    assert status.is_clean
-    assert branches.current_branch == "feature"
-    assert set(branches.branches) == {"feature", "main"}
-
-
-def test_e2b_arker_files_write_batch_metadata_and_rename(tmp_path) -> None:
-    sandbox = E2BSandbox(vm=LocalE2BVM("local-files"))
-    first = tmp_path / "nested" / "first.txt"
-    second = tmp_path / "second.bin"
-    renamed = tmp_path / "renamed" / "first.txt"
-
-    written = sandbox.files.write_files(
-        [
-            {"path": str(first), "data": "hello"},
-            {"path": str(second), "data": bytes(range(16))},
-        ]
-    )
-    assert [(entry.name, entry.path) for entry in written] == [
-        ("first.txt", str(first)),
-        ("second.bin", str(second)),
-    ]
-    info = sandbox.files.get_info(str(first))
-    assert (info.name, info.path, info.size, info.permissions, info.owner, info.group) == (
-        "first.txt",
-        str(first),
-        5,
-        "-rw-r--r--",
-        first.owner(),
-        first.group(),
-    )
-    moved = sandbox.files.rename(str(first), str(renamed))
-    assert (moved.name, moved.path, moved.size) == ("first.txt", str(renamed), 5)
-    assert not first.exists()
-    assert renamed.read_text() == "hello"
-
-    with pytest.raises(Exception, match="metadata"):
-        sandbox.files.write(str(tmp_path / "blocked"), "secret", metadata={"kind": "test"})
-    assert not (tmp_path / "blocked").exists()
+    assert sandbox.git.status(str(checkout), cwd=str(tmp_path)).is_clean
+    assert sandbox.git.branches(str(checkout), cwd=str(tmp_path)).current_branch == "feature"
 
 
 def test_modal_official_surface(monkeypatch, arker_env) -> None:
@@ -709,7 +637,6 @@ def test_blaxel_typed_request_and_directory_attributes(monkeypatch, arker_env) -
 @pytest.mark.parametrize("terminal", [False, True])
 def test_blaxel_listing_preserves_control_characters_in_names(monkeypatch, tmp_path, terminal):
     import errno
-    import os
     import pty
     import subprocess
     import tty
@@ -980,9 +907,7 @@ def test_unsupported_calls_fail_fast(arker_env) -> None:
 
     with use_transport(t):
         sandbox = E2BSandbox.create()
-        assert callable(sandbox.files.rename)
-        with pytest.raises(AttributeError, match="not supported by the Arker compatibility layer for e2b"):
-            sandbox.files.watch_dir  # noqa: B018
+        assert sandbox.files is sandbox._data_plane.files
         with pytest.raises(TypeError, match="not supported by Arker: image"):
             ModalSandbox.create(image="alpine")
 

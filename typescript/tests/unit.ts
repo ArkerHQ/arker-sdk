@@ -1308,6 +1308,10 @@ async function testConnectPtyCreatesSessionAndUsesBearerHeader(): Promise<void> 
   assert.equal(socket.sent[0], JSON.stringify({ type: "resize", cols: 120, rows: 33 }));
   assert.equal(socket.sent[1], JSON.stringify({ type: "kill" }));
   assert.deepEqual(socket.sent[2], new TextEncoder().encode("x"));
+  pty.resize(65535, 1001);
+  assert.equal(socket.sent[3], JSON.stringify({ type: "resize", cols: 65535, rows: 1001 }));
+  pty.resize(65536, 0);
+  assert.equal(socket.sent[4], JSON.stringify({ type: "resize", cols: 65535, rows: 1 }));
 }
 
 async function testConnectPtyUsesTicketForBrowserWebSocket(): Promise<void> {

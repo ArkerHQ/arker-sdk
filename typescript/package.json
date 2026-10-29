@@ -11,24 +11,54 @@
   },
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./daytona": {
-      "import": { "types": "./dist/daytona.d.ts", "default": "./dist/daytona.js" },
-      "require": { "types": "./dist/daytona.d.cts", "default": "./dist/daytona.cjs" }
+      "import": {
+        "types": "./dist/daytona.d.ts",
+        "default": "./dist/daytona.js"
+      },
+      "require": {
+        "types": "./dist/daytona.d.cts",
+        "default": "./dist/daytona.cjs"
+      }
     },
     "./e2b": {
-      "import": { "types": "./dist/e2b.d.ts", "default": "./dist/e2b.js" },
-      "require": { "types": "./dist/e2b.d.cts", "default": "./dist/e2b.cjs" }
+      "import": {
+        "types": "./dist/e2b.d.ts",
+        "default": "./dist/e2b.js"
+      },
+      "require": {
+        "types": "./dist/e2b.d.cts",
+        "default": "./dist/e2b.cjs"
+      }
     },
     "./modal": {
-      "import": { "types": "./dist/modal.d.ts", "default": "./dist/modal.js" },
-      "require": { "types": "./dist/modal.d.cts", "default": "./dist/modal.cjs" }
+      "import": {
+        "types": "./dist/modal.d.ts",
+        "default": "./dist/modal.js"
+      },
+      "require": {
+        "types": "./dist/modal.d.cts",
+        "default": "./dist/modal.cjs"
+      }
     },
     "./blaxel": {
-      "import": { "types": "./dist/blaxel.d.ts", "default": "./dist/blaxel.js" },
-      "require": { "types": "./dist/blaxel.d.cts", "default": "./dist/blaxel.cjs" }
+      "import": {
+        "types": "./dist/blaxel.d.ts",
+        "default": "./dist/blaxel.js"
+      },
+      "require": {
+        "types": "./dist/blaxel.d.cts",
+        "default": "./dist/blaxel.cjs"
+      }
     }
   },
   "files": [
@@ -51,7 +81,7 @@
     "test:consumer": "node scripts/test-consumer.mjs",
     "test:port": "bun build tests/port-stream.test.ts --target=node --external=ws --outfile=node_modules/.cache/port-tests.cjs --format=cjs && node node_modules/.cache/port-tests.cjs && bun test tests/port-stream.test.ts && bun run test:private-fetch && bun run test:e2b-handles",
     "test:e2b-handles": "bun run test:compat-handles",
-    "test:compat-handles": "bun build tests/compat-live-router.test.ts tests/e2b-command-handle.test.ts tests/e2b-lifecycle.test.ts tests/e2b-filesystem.test.ts tests/e2b-staging.test.ts tests/blaxel-provider.test.ts tests/daytona-provider.test.ts tests/daytona-filesystem.test.ts tests/modal-provider.test.ts tests/modal-sandbox.test.ts tests/modal-command.test.ts tests/modal-filesystem.test.ts tests/guest-process-input.test.ts --target=node --external=e2b --external=@blaxel/core --external=@daytona/sdk --external=modal --outdir=node_modules/.cache/compat-tests --root=tests --format=cjs && node node_modules/.cache/compat-tests/compat-live-router.test.js && node node_modules/.cache/compat-tests/e2b-command-handle.test.js && node node_modules/.cache/compat-tests/e2b-lifecycle.test.js && node node_modules/.cache/compat-tests/e2b-filesystem.test.js && node node_modules/.cache/compat-tests/e2b-staging.test.js && node node_modules/.cache/compat-tests/blaxel-provider.test.js && node node_modules/.cache/compat-tests/daytona-provider.test.js && node node_modules/.cache/compat-tests/daytona-filesystem.test.js && node node_modules/.cache/compat-tests/modal-provider.test.js && node node_modules/.cache/compat-tests/modal-sandbox.test.js && node node_modules/.cache/compat-tests/modal-command.test.js && node node_modules/.cache/compat-tests/modal-filesystem.test.js && node node_modules/.cache/compat-tests/guest-process-input.test.js",
+    "test:compat-handles": "node scripts/test-compat-handles.mjs",
     "test:private-fetch": "bun build tests/private-fetch.test.ts --target=node --outfile=node_modules/.cache/private-fetch-tests.cjs --format=cjs && node node_modules/.cache/private-fetch-tests.cjs",
     "coverage:compat": "bun scripts/compat-coverage.ts",
     "test:compat": "bun tests/compat.ts",
@@ -63,7 +93,7 @@
     "test:compat-blaxel-live": "bun tests/compat-blaxel-live.ts",
     "typecheck": "bun run generate:validators && tsc -p tsconfig.test.json",
     "prepublishOnly": "bun run build",
-    "generate:validators": "bun scripts/generate-compat-process.ts && bun scripts/generate-error-validators.ts"
+    "generate:validators": "bun scripts/generate-compat-process.ts && bun scripts/generate-e2b-envd.ts && bun scripts/generate-error-validators.ts"
   },
   "keywords": [
     "arker",
@@ -99,18 +129,27 @@
     "ajv-formats": "^3.0.1"
   },
   "peerDependencies": {
-    "e2b": "^2.56.0",
+    "e2b": "2.58.0",
     "@daytona/sdk": "^0.224.1 || ^0.226.0",
     "modal": "^0.11.1",
     "@blaxel/core": "^0.3.30"
   },
   "peerDependenciesMeta": {
-    "e2b": { "optional": true },
-    "@daytona/sdk": { "optional": true },
-    "modal": { "optional": true },
+    "e2b": {
+      "optional": true
+    },
+    "@daytona/sdk": {
+      "optional": true
+    },
+    "modal": {
+      "optional": true
+    },
     "@blaxel/core": {
       "optional": true
     }
+  },
+  "optionalDependencies": {
+    "@connectrpc/connect-node": "2.0.2"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.15.0",
