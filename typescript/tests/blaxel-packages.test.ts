@@ -66,12 +66,16 @@ test('bootstrap preserves cached qualification through ensure and refuses public
   const writes = new Map<string, string>();
   const commands: string[] = [];
   let publicIngress = false;
+  let acknowledged = false;
   const vm = {
     id: 'test', baseUrl: 'https://custom.example/api',
-    _client: {_request: async () => ({customer_paused: false})},
+    _client: {_request: async (method: string) => method === 'GET' ? {customer_paused: false} : undefined},
     refresh: async () => ({policies: {rules: publicIngress
       ? {public: {type: 'inbound', action: 'allow', auth: 'open', match: {ports: [49983]}}} : {}}}),
-    sync: async (path: string, value: string) => { writes.set(path, value); },
+    sync: async (path: string, value: string) => { writes.set(path, value); if (path.endsWith('.registered')) acknowledged = true; },
+    getRun: async () => ({state: acknowledged ? 'completed' : 'running', exit_code: 0,
+      stdoutBytes: new TextEncoder().encode(JSON.stringify({ready: true, version: daemon.version,
+        activity: {pid: 17, start_ticks: 1234, boot_id: '00000000-0000-0000-0000-000000000001'}})+'\n')}),
     run: async (command: string) => {
       commands.push(command);
       if (command.includes(' prepare')) return {exitCode: 0, stdout: JSON.stringify({arch: 'amd64', verified: true,
@@ -80,7 +84,7 @@ test('bootstrap preserves cached qualification through ensure and refuses public
         const request = JSON.parse(writes.get(command.split(' ').at(-1)!)!);
         assert.equal(request.firewall_profile, manifest.profile);
         assert.deepEqual(request.package_candidates, []);
-        return {exitCode: 0, stdout: JSON.stringify({ready: true, version: daemon.version})};
+        return {type: "background", runId: "run"};
       }
       return {exitCode: 0, stdout: ''};
     },

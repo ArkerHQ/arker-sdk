@@ -65,6 +65,31 @@ def require_stopped_daemon(state):
                 raise security.BootstrapError("firewall_change_requires_daemon_stop")
 
 
+def register_activity(request_path, state, ready):
+    ready["activity"] = {
+        "pid": state["pid"],
+        "start_ticks": int(state["start"]),
+        "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+    }
+    print(json.dumps(ready), flush=True)
+    acknowledgement = request_path.with_suffix(".registered")
+    deadline = time.monotonic() + 90
+    try:
+        while time.monotonic() < deadline:
+            if acknowledgement.exists() or acknowledgement.is_symlink():
+                if security.load(acknowledgement) != {"registered": True}:
+                    raise security.BootstrapError("daemon_activity_registration_failed")
+                if not security.same_process(state):
+                    raise security.BootstrapError("daemon_identity_mismatch")
+                return ready
+            if not security.same_process(state):
+                raise security.BootstrapError("daemon_identity_mismatch")
+            time.sleep(0.05)
+        raise security.BootstrapError("daemon_activity_registration_timeout")
+    finally:
+        acknowledgement.unlink(missing_ok=True)
+
+
 def ensure(request_path):
     if os.geteuid() != 0 or request_path.parent != ROOT / "requests":
         raise security.BootstrapError("invalid_request")
@@ -163,12 +188,16 @@ def ensure(request_path):
                     connection.request("GET", "/health")
                     if connection.getresponse().status == 200:
                         security.save(STATE, {**state, "vm_id": config["vm_id"], "firewall_profile": firewall_profile})
-                        return {
-                            "ready": True,
-                            "reused": reused,
-                            "version": manifest["version"],
-                            "arch": security.architecture(),
-                        }
+                        return register_activity(
+                            request_path,
+                            state,
+                            {
+                                "ready": True,
+                                "reused": reused,
+                                "version": manifest["version"],
+                                "arch": security.architecture(),
+                            },
+                        )
                 finally:
                     connection.close()
             if child and child.poll() is not None:

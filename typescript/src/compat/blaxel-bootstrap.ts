@@ -1,3 +1,4 @@
+import { registeredBootstrap } from './daemon-activity.js';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -46,7 +47,7 @@ export async function bootstrapBlaxel(vm: VM, options: {
     const ensure = async (candidates: string[]) => {
       await vm.sync(request, JSON.stringify({ vm_id: vm.id, candidate, configuration: options.configuration,
         firewall_profile: prepared.firewall_profile, package_candidates: candidates }), { isSecret: true });
-      const ready = await invoke('ensure', request);
+      const ready = await registeredBootstrap(vm, `python3 ${root}/_guest_blaxel.py ensure ${request}`, request, manifest.version);
       if (ready.ready !== true || ready.version !== manifest.version) throw new Error('Native daemon did not establish readiness');
       return ready;
     };
@@ -59,7 +60,7 @@ export async function bootstrapBlaxel(vm: VM, options: {
     throw error;
   } finally {
     try {
-      const cleanup = await vm.run(`rm -f -- ${request}${candidate ? ' ' + candidate : ''}`, { timeout: 10 });
+      const cleanup = await vm.run(`rm -f -- ${request} ${request.replace(/\.[^.]+$/, ".registered")}${candidate ? ' ' + candidate : ''}`, { timeout: 10 });
       if (cleanup.exitCode !== 0) throw new Error('Native daemon staging cleanup failed');
     } catch (error) {
       if (failed) throw new AggregateError([failure, error], "Native daemon bootstrap and staging cleanup failed");

@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from ._compat_blaxel_packages import staged_firewall_packages
+from ._compat_daemon_activity import registered_bootstrap
 from ._compat_e2b_artifact import stage_pinned_artifact
 from ._compat_e2b_bootstrap import secret_sync
 from ._compat_private_daemon import require_private_daemon
@@ -69,7 +70,9 @@ def bootstrap_blaxel(vm, *, configuration=None, cache_directory=None):
                     }
                 ).encode(),
             )
-            ready = invoke("ensure", request)
+            ready = registered_bootstrap(
+                vm, f"python3 {ROOT}/_guest_blaxel.py ensure {request}", request, manifest["version"]
+            )
             if ready.get("ready") is not True or ready.get("version") != manifest["version"]:
                 raise RuntimeError("Native daemon did not establish readiness")
             return ready
@@ -78,7 +81,15 @@ def bootstrap_blaxel(vm, *, configuration=None, cache_directory=None):
         raise
     finally:
         try:
-            cleanup = vm.run("rm -f -- " + request + (" " + candidate if candidate else ""), timeout=10)
+            cleanup = vm.run(
+                "rm -f -- "
+                + request
+                + " "
+                + request.rsplit(".", 1)[0]
+                + ".registered"
+                + (" " + candidate if candidate else ""),
+                timeout=10,
+            )
             if cleanup.exit_code != 0:
                 raise RuntimeError("Native daemon staging cleanup failed")
         except Exception as error:

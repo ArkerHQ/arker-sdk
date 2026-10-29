@@ -114,5 +114,8 @@ def test_qualified_packages_are_scoped_through_ensure(monkeypatch):
         run=run,
         _client=SimpleNamespace(_request=lambda *a, **kw: {"customer_paused": False}),
     )
+    monkeypatch.setattr(
+        module, "registered_bootstrap", lambda vm, command, request, version: json.loads(run(command).stdout)
+    )
     module.bootstrap_blaxel(vm)
     assert events == ["policy", "stage", "ensure", "package-cleanup", "request-cleanup"]
