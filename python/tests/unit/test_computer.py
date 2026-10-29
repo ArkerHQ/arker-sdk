@@ -1831,7 +1831,7 @@ def test_get_and_set_policies() -> None:
     assert updated.policies[0].type == "outbound"
     assert updated.mitm_domains == ["example.com"]
     put_call = next(c for c in t.calls if c["method"] == "PUT")
-    assert b"example.com" in put_call["body"]
+    assert json.loads(put_call["body"])["policies"][0]["match"]["hosts"] == ["example.com"]
 
 
 def test_request_policies_reach_the_server_unfiltered() -> None:

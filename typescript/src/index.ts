@@ -1315,7 +1315,11 @@ export class VM {
     const fsp = fs.promises;
 
     const localRoot = nodePath.resolve(localDir);
-    const remoteRoot = "/" + remoteDir.replace(/^\/+/, "").replace(/\/+$/, "");
+    let remoteStart = 0;
+    let remoteEnd = remoteDir.length;
+    while (remoteStart < remoteEnd && remoteDir[remoteStart] === "/") remoteStart++;
+    while (remoteEnd > remoteStart && remoteDir[remoteEnd - 1] === "/") remoteEnd--;
+    const remoteRoot = "/" + remoteDir.slice(remoteStart, remoteEnd);
 
     // 1. Authoritative remote manifest: relative path -> content hash and mode. A directory that
     //    doesn't exist yet (or an empty VM) yields {} -> everything is sent.

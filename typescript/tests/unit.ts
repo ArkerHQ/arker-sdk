@@ -1170,7 +1170,7 @@ async function testGetAndSetPolicies(): Promise<void> {
   assert.deepEqual(putResult.mitm_domains, ["example.com"]);
   const putCall = fetch.calls.find((c) => c.method === "PUT");
   assert.ok(putCall, "setPolicies should PUT");
-  assert.ok(putCall!.body?.includes("example.com"), "PUT body should include the policy match");
+  assert.deepEqual(JSON.parse(putCall!.body!).policies[0].match.hosts, ["example.com"]);
 }
 
 async function testCreateFilesystem(): Promise<void> {
@@ -1931,6 +1931,33 @@ async function testAssumeEmptySkipsTheManifestRoundTrip(): Promise<void> {
 }
 
 await testAssumeEmptySkipsTheManifestRoundTrip();
+
+async function testSyncDirBoundsSlashNormalization(): Promise<void> {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const nodePath = await import("node:path");
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "syncdir-slashes-"));
+  try {
+    for (const [input, expected] of [
+      ["/".repeat(100_000) + "p" + "/".repeat(100_000), "/p"],
+      ["/".repeat(100_000), "/"],
+    ]) {
+      const fetch = new FakeFetch();
+      fetch.addJson(
+        (method, url) => method === "POST" && url.endsWith("/sync"),
+        200,
+        { ok: true, op: "manifest", entries: [], truncated: false },
+      );
+      await client(fetch).vm("vm_1").syncDir(dir, input);
+      assert.equal(fetch.calls.length, 1);
+      assert.equal(JSON.parse(fetch.calls[0]!.body!).path, expected);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+await testSyncDirBoundsSlashNormalization();
 
 // ── fork Idempotency-Key ────────────────────────────────────────────────
 //

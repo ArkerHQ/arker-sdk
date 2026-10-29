@@ -14,8 +14,14 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(int(self.headers["Content-Length"]))
         self.send_response(207)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("X-Echo-Authorization", self.headers.get("Authorization", ""))
-        self.send_header("X-Echo-Key", self.headers.get("x-api-key", ""))
+        self.send_header(
+            "X-Echo-Authorization",
+            self.headers.get("Authorization", "").replace("\r", "").replace("\n", ""),
+        )
+        self.send_header(
+            "X-Echo-Key",
+            self.headers.get("x-api-key", "").replace("\r", "").replace("\n", ""),
+        )
         self.end_headers()
         self.wfile.write(body)
 
