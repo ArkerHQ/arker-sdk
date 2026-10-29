@@ -75,6 +75,13 @@ ROOTS = {
         ("sync", "Secret", "e2b:Secret", "arker.e2b:Secret"),
     ],
     "daytona": [
+        ("sync", "Daytona.volume", "daytona._sync.volume:VolumeService", "arker._daytona_volumes:VolumeService"),
+        (
+            "async",
+            "Daytona.volume",
+            "daytona._async.volume:AsyncVolumeService",
+            "arker._daytona_volumes:AsyncVolumeService",
+        ),
         ("sync", "Daytona", "daytona:Daytona", "arker.daytona:Daytona"),
         ("sync", "Sandbox", "daytona:Sandbox", "arker.daytona:Sandbox"),
         ("async", "Daytona", "daytona:AsyncDaytona", "arker.daytona:AsyncDaytona"),

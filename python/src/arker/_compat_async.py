@@ -82,7 +82,16 @@ def _cleanup_finished(task):
         )
 
 
-async def route(function, *, bridges=(), cleanup=None):
+async def _drain(task):
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+    return task.result()
+
+
+async def route(function, *, bridges=(), cleanup=None, drain_on_cancel=False):
     loop = asyncio.get_running_loop()
     task = asyncio.create_task(asyncio.to_thread(function))
     try:
@@ -92,6 +101,15 @@ async def route(function, *, bridges=(), cleanup=None):
     except asyncio.CancelledError:
         for bridge in bridges:
             bridge.cancel()
+
+        if drain_on_cancel:
+            try:
+                result = await _drain(task)
+            except Exception as error:
+                raise asyncio.CancelledError from error
+            if cleanup is not None:
+                await _drain(loop.create_task(call(cleanup, result)))
+            raise
 
         def discard(done):
             if done.cancelled() or done.exception() is not None or cleanup is None:

@@ -365,6 +365,7 @@ def routed_get(
     getters: dict[str, Any],
     *,
     resource: str | None = None,
+    require_unique: bool = False,
 ) -> tuple[str, Any] | None:
     cache_identifier = f"{resource}:{identifier}" if resource else identifier
     router = router_config(config, native_provider)
@@ -406,7 +407,7 @@ def routed_get(
         for name in router.existing.order
         if resource or provider_accepts_identifier(name, identifier, arker_enabled="arker" in router.existing.order)
     }
-    cache = _cache(router)
+    cache = None if require_unique else _cache(router)
     try:
         cached = cache.get(cache_identifier) if cache is not None else None
     except Exception:
@@ -423,7 +424,7 @@ def routed_get(
         with suppress(Exception):
             cache.delete(cache_identifier)
     order = [name for name in router.existing.order if name in getters and name != cached and name in eligible]
-    if router.existing.strategy == "race" and len(order) > 1:
+    if (require_unique or router.existing.strategy == "race") and len(order) > 1:
         results: queue.Queue[tuple[str, Any, BaseException | None]] = queue.Queue()
         completed: dict[str, tuple[Any, BaseException | None]] = {}
 
@@ -448,6 +449,8 @@ def routed_get(
             error = completed[name][1]
             if error is not None:
                 raise error
+        if require_unique and sum(completed[name][0] is not None for name in order) > 1:
+            raise ValueError(f"Resource name {identifier!r} is ambiguous across configured providers")
         for name in order:
             result = completed[name][0]
             if result is not None:

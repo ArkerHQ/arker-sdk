@@ -76,6 +76,12 @@ class AsyncDaytona:
             self._native = module.AsyncDaytona(*self._configuration._native_args, **self._configuration._native_kwargs)
         return self._native
 
+    @property
+    def volume(self):
+        from ._daytona_volumes import AsyncVolumeService
+
+        return AsyncVolumeService(self)
+
     def __getattr__(self, name):
         return getattr(self._native_client(), name)
 
@@ -94,7 +100,15 @@ class AsyncDaytona:
 
         bridge = NativeBridge(NativeOperations(), loop, creation_cleanup=lambda sandbox: sandbox.delete())
 
+        from ._daytona_volumes import NativeVolumeOperations, VolumeService
+
+        volumes = NativeBridge(NativeVolumeOperations(owner), loop)
+
         class Routed(Daytona):
+            @property
+            def volume(self):
+                return VolumeService(owner._configuration._arker_config, lambda: volumes)
+
             def _native_client(self):
                 return bridge
 
@@ -102,7 +116,7 @@ class AsyncDaytona:
         routed._arker_config = self._configuration._arker_config
         result = await route(
             lambda: getattr(routed, method)(*args, **kwargs),
-            bridges=[bridge],
+            bridges=[bridge, volumes],
             cleanup=(lambda sandbox: AsyncSandbox(sandbox).delete()) if method == "create" else None,
         )
         return AsyncSandbox(result)

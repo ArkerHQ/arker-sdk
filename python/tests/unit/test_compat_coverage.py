@@ -342,3 +342,20 @@ def test_e2b_inventory_paginator_roots_are_real_vendor_apis(style):
     }
     assert all(row["declared_by_shim"] for row in rows)
     assert all(hasattr(native, row["api"].split(".")[-1]) for row in rows)
+
+
+@pytest.mark.parametrize("style", ["sync", "async"])
+def test_daytona_volume_inventory_uses_real_native_methods(monkeypatch, capsys, style):
+    pytest.importorskip("daytona")
+    root = next(row for row in coverage.ROOTS["daytona"] if row[0] == style and row[1] == "Daytona.volume")
+    native = coverage.resolve(root[2])
+    monkeypatch.setattr(coverage, "ROOTS", {"daytona": [root]})
+    monkeypatch.setattr(coverage, "implementation_fingerprint", lambda: "unit-test")
+    monkeypatch.setattr(sys, "argv", ["compat_coverage.py"])
+    coverage.main()
+    report = json.loads(capsys.readouterr().out)
+    rows = {row["api"]: row for row in report["apis"]}
+    assert set(rows) == {f"Daytona.volume.{name}" for name in ("create", "get", "list", "delete")}
+    for name, row in rows.items():
+        assert row["declared_by_shim"] is True and row["status"] == "unverified"
+        assert row["signatures"] == coverage.signatures(getattr(native, name.rsplit(".", 1)[1]))

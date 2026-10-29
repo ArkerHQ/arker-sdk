@@ -146,8 +146,17 @@ class Daytona(UnsupportedMixin):
         self._native = module.Daytona(*self._native_args, **self._native_kwargs)
         return self._native
 
+    @property
+    def volume(self):
+        from ._daytona_volumes import VolumeService
+
+        return VolumeService(self._arker_config, lambda: self._native_client().volume)
+
     def create(self, *args: Any, **kwargs: Any) -> Sandbox:
         def create_native() -> Any:
+            from ._daytona_volumes import check_native_mounts
+
+            check_native_mounts(args, kwargs, self.volume)
             native = self._native_client()
             if native is None:
                 raise CompatibilityCreationNotStartedError("Native Daytona SDK is not installed")
@@ -193,8 +202,9 @@ class Daytona(UnsupportedMixin):
                     f"Daytona.create option(s) are not supported by Arker: {', '.join(unsupported)}"
                 )
             volumes = values.get("volumes")
-            if volumes is not None and (not isinstance(volumes, list) or volumes):
-                raise UnsupportedCompatibilityOption("Daytona.create volumes must be empty or omitted on Arker")
+            from ._daytona_volumes import resolve_mounts
+
+            mounts = resolve_mounts(volumes, self.volume)
             raw_resources = values.get("resources") or {}
             if is_dataclass(raw_resources) and not isinstance(raw_resources, type):
                 raw_resources = {key: value for key, value in asdict(raw_resources).items() if value is not None}
@@ -211,7 +221,7 @@ class Daytona(UnsupportedMixin):
                 **({"disk_mib": raw_resources["disk"] * 1024} if "disk" in raw_resources else {}),
                 **({"disk_mib": raw_resources["disk_mib"]} if "disk_mib" in raw_resources else {}),
             }
-            return arker_create(
+            vm = arker_create(
                 self._arker_config,
                 name=values.get("name"),
                 template_id=values.get("snapshot"),
@@ -223,6 +233,26 @@ class Daytona(UnsupportedMixin):
                     cidrs=values.get("networkAllowList", values.get("network_allow_list")),
                 ),
             )
+
+            if not mounts:
+                return vm
+            try:
+                from ._compat_e2b_mounts import mount_ready_command
+                from ._daytona_filesystem import guest_command
+
+                for filesystem_id, path in mounts:
+                    vm.create_mount(filesystem_id=filesystem_id, path=path)
+                command = mount_ready_command([path for _, path in mounts], 60)
+                result = run_command(vm, guest_command({"operation": "exec", "command": command}))
+                if result.exit_code:
+                    raise RuntimeError("Daytona volume mounts did not become accessible to the guest user")
+                return vm
+            except BaseException as error:
+                try:
+                    vm.delete()
+                except BaseException as cleanup:
+                    raise RuntimeError(f"Sandbox creation and cleanup failed for VM {vm.id}") from cleanup
+                raise error
 
         provider, result = routed_create(
             "daytona",
