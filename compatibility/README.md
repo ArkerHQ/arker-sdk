@@ -265,9 +265,24 @@ closures.
 An Arker app group is VM metadata, not a deployed Modal App: it has no fabricated
 native ID, and lookup without `create_if_missing=True` / `createIfMissing: true`
 is unsupported.
-Named Volume recipes are not mapped to Arker storage. Python `debian_slim`, image
-build steps and unknown native image handles are also
-unsupported on Arker; those requests fail before creating a VM. Native routes
+Prepared registry recipes support one layer containing `RUN` and explicit
+`CMD` and `ENTRYPOINT` instructions, using Python `setup_dockerfile_commands`
+or TypeScript `dockerfileCommands`. Both startup instructions must be supplied;
+`ENTRYPOINT []` explicitly clears an entrypoint. Inherited image environment,
+user and working directory are preserved. Preparation uses a separate private
+builder with a 900-second deadline and a temporary immutable capture retained
+for at most 300 seconds. The sandbox's timeout is applied to the final disk-only
+child, not the builder. The builder denies inbound traffic; the final child
+requires Arker authentication for ingress. This requires backend support for `start_image` on
+filesystem-only VM forks. Startup acknowledgement confirms command admission,
+not application readiness. Live timing and startup validation remain pending.
+
+Prepared recipes currently reject creation environment/secrets/workdir,
+build secrets, custom inbound policies, policy secrets, additional layers and
+other Dockerfile instructions. They do not bake sandbox secrets into shared
+sources or place them in startup command text. No prepared-image cache is used.
+Named Volume recipes, Python `debian_slim`, `add_python`, and unknown native
+image handles remain unsupported on Arker. Native routes
 continue to use native resources. The creation differential scenarios use the
 same workload arguments on all routes; native-only success does not certify the
 Arker route.

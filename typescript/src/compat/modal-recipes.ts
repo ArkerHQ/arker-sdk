@@ -1,4 +1,5 @@
 import type { App, Image, ModalClient, Secret } from "modal";
+import { preparedSteps } from "./modal-prepared.js";
 
 /** A sandbox grouping request, without a fabricated native app ID. */
 export class ModalAppRecipe {
@@ -13,15 +14,29 @@ export class ModalAppRecipe {
   }
 }
 
-const images = new WeakMap<Image, { tag: string; secret?: Secret; app?: ModalAppRecipe }>();
+type ImageRecipe = { tag: string; secret?: Secret; app?: ModalAppRecipe; commands: string[]; layers: number; unsupported: boolean };
+const images = new WeakMap<Image, ImageRecipe>();
 const secrets = new WeakMap<Secret, Readonly<Record<string, string>>>();
 
-export type RegistryImage = Image & { build(app: App | ModalAppRecipe): Promise<Image> };
+export type RegistryImage = {
+  build(app: App | ModalAppRecipe): Promise<Image>;
+  dockerfileCommands(...args: Parameters<Image["dockerfileCommands"]>): RegistryImage;
+} & Image;
 
 export function registryImage(client: ModalClient, tag: string, secret?: Secret): RegistryImage {
   const image = client.images.fromRegistry(tag, secret);
-  const recipe = { tag, secret, app: undefined as ModalAppRecipe | undefined };
+  return trackImage(image, { tag, secret, commands: [], layers: 0, unsupported: false });
+}
+
+function trackImage(image: Image, recipe: ImageRecipe): RegistryImage {
   images.set(image, recipe);
+  const extend = image.dockerfileCommands.bind(image);
+  image.dockerfileCommands = (commands, params) => {
+    const next = extend(commands, params);
+    if (next === image) return image;
+    return trackImage(next, { ...recipe, commands: [...recipe.commands, ...commands], layers: recipe.layers + 1,
+      unsupported: recipe.unsupported || Object.values(params ?? {}).some(value => value !== undefined && value !== false) });
+  };
   const build = image.build.bind(image);
   image.build = async (app: App | ModalAppRecipe) => {
     if (!(app instanceof ModalAppRecipe)) return build(app);
@@ -30,6 +45,13 @@ export function registryImage(client: ModalClient, tag: string, secret?: Secret)
     return image;
   };
   return image as RegistryImage;
+}
+
+export function registrySteps(image: unknown) {
+  const recipe = image && typeof image === "object" ? images.get(image as Image) : undefined;
+  if (!recipe?.commands.length) return undefined;
+  if (recipe.layers !== 1 || recipe.unsupported) throw new Error("Prepared images support one Dockerfile layer without build env, secrets or GPU options");
+  return preparedSteps(recipe.commands);
 }
 
 export function registry(image: unknown, app: unknown): string {
@@ -51,7 +73,8 @@ export function registryCredentials(image: unknown): { username: string; passwor
 }
 
 export async function buildNativeImage(image: Image, app: App): Promise<Image> {
-  return images.has(image) ? image.build(app) : image;
+  const recipe = images.get(image);
+  return recipe && (recipe.layers === 0 || recipe.app) ? image.build(app) : image;
 }
 
 export async function localSecret(client: ModalClient, entries: Record<string, string>, options?: Parameters<ModalClient["secrets"]["fromObject"]>[1]): Promise<Secret> {

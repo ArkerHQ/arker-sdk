@@ -61,6 +61,14 @@ class Image:
             raise ValueError("Registry secret requires REGISTRY_USERNAME and REGISTRY_PASSWORD")
         return {"username": values["REGISTRY_USERNAME"], "password": values["REGISTRY_PASSWORD"]}
 
+    def _steps(self):
+        commands = self._options.get("setup_dockerfile_commands")
+        if not commands:
+            return None
+        from ._modal_prepared import recipe_steps
+
+        return recipe_steps(commands)
+
     def _registry(self) -> str:
         if self._method != "from_registry":
             raise UnsupportedCompatibilityOption(
@@ -69,7 +77,6 @@ class Image:
         allowed = {"tag", "secret", "setup_dockerfile_commands", "force_build", "add_python"}
         if (
             set(self._options) - allowed
-            or self._options["setup_dockerfile_commands"]
             or self._options["force_build"] is not False
             or self._options["add_python"] is not None
         ):

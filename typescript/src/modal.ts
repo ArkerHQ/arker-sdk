@@ -10,9 +10,10 @@ import {
   type UniversalSandbox,
   shellQuote,
 } from "./compat/common.js";
-import { ModalAppRecipe, ModalVolumeRecipe, registryImage, registry, registryCredentials, localSecret, secretEnvironment, recipeService, creationDefaults } from "./compat/modal-recipes.js";
+import { ModalAppRecipe, ModalVolumeRecipe, registryImage, registry, registrySteps, registryCredentials, localSecret, secretEnvironment, recipeService, creationDefaults } from "./compat/modal-recipes.js";
 import { MODAL_DEFAULTS_MARKER, prepareExec, discardExec, writeDefaults } from "./compat/modal-defaults.js";
 import { createNativeModalProvider } from "./compat/modal-provider.js";
+import { IMAGE_WORKDIR, preparedFork, preparedMetadata } from "./compat/modal-prepared.js";
 import { rethrowModalExecError } from "./compat/modal-errors.js";
 import type { VM } from "./index.js";
 import { modalCommandHandle } from "./compat/modal-command.js";
@@ -133,6 +134,11 @@ export class Sandbox {
     try {
       const environment = secretEnvironment(opts?.secrets);
       const runOptions = toRunCommandOptions({ ...opts, secrets: [] }) ?? {};
+      const inheritedWorkdir = (this.#box as UniversalSandbox & { getInstance(): VM }).getInstance().metadata?.[IMAGE_WORKDIR];
+      if (runOptions.cwd === undefined && inheritedWorkdir !== undefined) {
+        if (typeof inheritedWorkdir !== "string" || !inheritedWorkdir.startsWith("/")) throw new Error("Invalid prepared image workdir");
+        runOptions.cwd = inheritedWorkdir;
+      }
       runOptions.env = { ...environment, ...runOptions.env };
       if (!this.#processes) throw new Error("Native Modal sandbox instance is unavailable");
       if (!argv.length || argv.some(arg => typeof arg !== "string")) throw new TypeError("Modal exec requires a nonempty array of string arguments");
@@ -207,6 +213,7 @@ export class ModalClient {
       fallbackProvider: createNativeModalProvider(() => this.#nativeClient()),
       routerConfigPath,
       arkerLifetimePolicyId: "computesdk-modal-lifetime",
+      arkerFork: preparedFork,
       mapArkerCreateOptions: ({ modalCreateParams, modalApp, modalImage, ...rest }) => {
         if (modalApp !== undefined || modalImage !== undefined) {
           if (!(modalApp instanceof ModalAppRecipe)) {
@@ -219,6 +226,11 @@ export class ModalClient {
         }
         const { timeoutMs, env, workdir, secrets, ...options } = (modalCreateParams ?? {}) as Record<string, unknown>;
         const defaults = creationDefaults({ env, workdir, secrets });
+        const steps = registrySteps(modalImage);
+        if (steps) {
+          if (Object.keys(defaults.env).length || workdir !== undefined) throw new Error("Prepared image startup cannot yet receive per-child environment, secrets or workdir");
+          rest = { ...rest, metadata: preparedMetadata((rest.metadata ?? {}) as object, steps) };
+        }
         if (Object.keys(defaults.env).length || workdir !== undefined) {
           rest = { ...rest, metadata: { ...(rest.metadata as Record<string, unknown> ?? {}), [MODAL_DEFAULTS_MARKER]: true } };
         }

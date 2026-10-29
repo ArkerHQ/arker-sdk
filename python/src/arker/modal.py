@@ -196,6 +196,11 @@ class Sandbox(UnsupportedMixin):
                 from ._modal_defaults import MARKER
 
                 metadata[MARKER] = True
+            steps = recipe._steps() if recipe is not None else None
+            if steps and (environment or creation_workdir is not None):
+                raise UnsupportedCompatibilityOption(
+                    "Prepared image startup cannot yet receive per-child environment, secrets or workdir"
+                )
             registry = recipe._registry() if recipe is not None else None
             registry_auth = recipe._registry_auth() if recipe is not None else None
             image_config = arker_config
@@ -232,7 +237,12 @@ class Sandbox(UnsupportedMixin):
                 "after_created": lifetime,
                 "action": "delete",
             }
-            vm = arker_create(image_config, image=registry, policies=policies, metadata=metadata or None)
+            fork = None
+            if steps:
+                from ._modal_prepared import create_prepared
+
+                fork = lambda client, request: create_prepared(client, request, steps)
+            vm = arker_create(image_config, image=registry, policies=policies, metadata=metadata or None, fork=fork)
             if environment or creation_workdir is not None:
                 from ._modal_defaults import write
 
@@ -298,6 +308,10 @@ class Sandbox(UnsupportedMixin):
 
             return self._native.exec(*command, **native_secrets(kwargs))
         workdir = kwargs.pop("workdir", kwargs.pop("cwd", None))
+        if workdir is None:
+            from ._modal_prepared import IMAGE_WORKDIR
+
+            workdir = (self._vm.metadata or {}).get(IMAGE_WORKDIR) if getattr(self._vm, "metadata", None) else None
         environment = kwargs.pop("env", None)
         timeout = kwargs.pop("timeout", None)
         timeout_ms = kwargs.pop("timeout_ms", kwargs.pop("timeoutMs", None))

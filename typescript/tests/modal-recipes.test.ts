@@ -42,7 +42,7 @@ test("recipes preserve native build ownership and error identity", async () => {
   const calls: unknown[] = [];
   const client = {
     apps: { fromName: async (...args: unknown[]) => { calls.push(args); return nativeApp; } },
-    images: { fromRegistry: (...args: unknown[]) => { calls.push(args); return { build: async (owner: unknown) => {
+    images: { fromRegistry: (...args: unknown[]) => { calls.push(args); return { dockerfileCommands: () => { throw new Error("unused image layer"); }, build: async (owner: unknown) => {
       assert.equal(owner, nativeApp); throw failure;
     } }; } },
   } as any;
