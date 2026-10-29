@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import * as Native from "e2b";
 import * as Shim from "../src/e2b.js";
@@ -7,7 +8,7 @@ import { recordEvidence } from "../scripts/compat-evidence.js";
 import { withLiveRouter } from "./compat-live-router.js";
 import { traceVendor } from "./compat-trace.js";
 
-const cases = ["running-timeout", "paused-timeout", "repeated-pause", "deleted-state"] as const;
+const cases = ["running-timeout", "paused-timeout", "repeated-pause", "deleted-state", "paused-command", "paused-read", "paused-pty"] as const;
 type Case = (typeof cases)[number];
 
 // Import substitution changes only Sandbox; errors must retain native identity.
@@ -20,7 +21,34 @@ export async function program(
   const notFound = (error: unknown) => error instanceof Native.SandboxNotFoundError
     && error.constructor === Native.SandboxNotFoundError;
   try {
-    if (scenario === "running-timeout") {
+    if (["paused-command", "paused-read", "paused-pty"].includes(scenario)) {
+      const marker = `/tmp/paused-admission-${randomUUID()}`;
+      await sandbox.files.write(`${marker}-input`, "paused-read-content");
+      const before = (await sandbox.commands.list()).map(process => process.pid).sort();
+      await assertDeadline(sandbox.sandboxId, true);
+      assert.equal(await sandbox.pause(), true);
+      let output = false;
+      let refusal: unknown;
+      try {
+        if (scenario === "paused-command") await sandbox.commands.run(`touch ${marker}`, {
+          requestTimeoutMs: 15_000, onStdout() { output = true; }, onStderr() { output = true; },
+        });
+        if (scenario === "paused-read") await sandbox.files.read(`${marker}-input`, { requestTimeoutMs: 15_000 });
+        if (scenario === "paused-pty") await sandbox.pty.create({
+          rows: 24, cols: 80, timeoutMs: 0, requestTimeoutMs: 15_000, onData() { output = true; },
+        });
+      } catch (error) { refusal = error; }
+      assert.equal((await sandbox.getInfo()).state, "paused");
+      assert.equal(await sandbox.isRunning(), false);
+      await assertDeadline(sandbox.sandboxId, false);
+      assert.equal(output, false);
+      const resumed = await Sandbox.connect(sandbox.sandboxId);
+      assert.deepEqual((await resumed.commands.list()).map(process => process.pid).sort(), before);
+      assert.equal(await resumed.files.exists(marker), false);
+      assert.equal(await resumed.files.read(`${marker}-input`), "paused-read-content");
+      assert.ok(refusal instanceof Native.SandboxNotRunningError);
+      assert.equal(refusal.constructor, Native.SandboxNotRunningError);
+    } else if (scenario === "running-timeout") {
       const before = await sandbox.getInfo();
       assert.equal(await sandbox.setTimeout(120_000), undefined);
       const shorter = await sandbox.getInfo();
