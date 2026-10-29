@@ -254,6 +254,9 @@ def test_private_files_reject_symlinks_hardlinks_and_unsafe_modes(tmp_path):
         helper.private_open(path, os.O_WRONLY | os.O_TRUNC)
     assert path.read_bytes() == b"preserve"
     path.chmod(0o600)
+    with os.fdopen(helper.private_open(path), "rb") as stream:
+        assert os.fstat(stream.fileno()).st_uid == 0
+        assert stream.read() == b"preserve"
     alias = tmp_path / "alias"
     alias.symlink_to(path)
     with pytest.raises(OSError):
