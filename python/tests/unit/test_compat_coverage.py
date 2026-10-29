@@ -359,3 +359,49 @@ def test_daytona_volume_inventory_uses_real_native_methods(monkeypatch, capsys, 
     for name, row in rows.items():
         assert row["declared_by_shim"] is True and row["status"] == "unverified"
         assert row["signatures"] == coverage.signatures(getattr(native, name.rsplit(".", 1)[1]))
+
+
+def test_missing_shim_keeps_native_methods_in_inventory(monkeypatch, capsys):
+    class Native:
+        def execute(self, command: str) -> None:
+            pass
+
+    Native.execute.__module__ = "blaxel.synthetic"
+
+    def resolve(reference):
+        if reference == "missing:Shim":
+            raise AttributeError("Shim")
+        return Native
+
+    monkeypatch.setattr(coverage, "ROOTS", {"vendor": [("sync", "Sandbox", "vendor:Native", "missing:Shim")]})
+    monkeypatch.setattr(coverage, "resolve", resolve)
+    monkeypatch.setattr(coverage.importlib.metadata, "version", lambda _: "1")
+    monkeypatch.setattr(coverage, "implementation_fingerprint", lambda: "unit-test")
+    monkeypatch.setattr(sys, "argv", ["compat_coverage.py", "--fail-on-unverified"])
+    with pytest.raises(SystemExit) as error:
+        coverage.main()
+    assert error.value.code == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["complete_inventory"] is True
+    assert report["missing_roots"] == []
+    assert report["missing_shim_roots"] == [{"root": "missing:Shim", "error": "Shim"}]
+    assert report["counts"] == {"unverified": 1}
+    assert report["apis"][0]["api"] == "Sandbox.execute"
+    assert report["apis"][0]["declared_by_shim"] is False
+
+
+@pytest.mark.parametrize("style", ["sync", "async"])
+def test_blaxel_delegated_services_are_discoverable(style):
+    pytest.importorskip("blaxel.core")
+    roots = [
+        row
+        for row in coverage.ROOTS["blaxel"]
+        if row[0] == style and row[1] in ("SandboxInstance.process", "SandboxInstance.fs")
+    ]
+    assert len(roots) == 2
+    for style, prefix, reference, shim_reference in roots:
+        native = coverage.resolve(reference)
+        shim = coverage.resolve(shim_reference)
+        assert native is shim
+        rows = list(coverage.surfaces("blaxel", style, prefix, native, shim))
+        assert rows and all(row["declared_by_shim"] for row in rows)

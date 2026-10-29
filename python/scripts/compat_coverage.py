@@ -127,16 +127,26 @@ ROOTS = {
             "sync",
             "SandboxInstance.process",
             "blaxel.core.sandbox.sync.process:SyncSandboxProcess",
-            "arker.blaxel:Process",
+            "blaxel.core.sandbox.sync.process:SyncSandboxProcess",
         ),
-        ("async", "SandboxInstance.process", "blaxel.core.sandbox.default.process:SandboxProcess", None),
+        (
+            "async",
+            "SandboxInstance.process",
+            "blaxel.core.sandbox.default.process:SandboxProcess",
+            "blaxel.core.sandbox.default.process:SandboxProcess",
+        ),
         (
             "sync",
             "SandboxInstance.fs",
             "blaxel.core.sandbox.sync.filesystem:SyncSandboxFileSystem",
-            "arker.blaxel:FileSystem",
+            "blaxel.core.sandbox.sync.filesystem:SyncSandboxFileSystem",
         ),
-        ("async", "SandboxInstance.fs", "blaxel.core.sandbox.default.filesystem:SandboxFileSystem", None),
+        (
+            "async",
+            "SandboxInstance.fs",
+            "blaxel.core.sandbox.default.filesystem:SandboxFileSystem",
+            "blaxel.core.sandbox.default.filesystem:SandboxFileSystem",
+        ),
     ],
 }
 
@@ -339,12 +349,19 @@ def main() -> None:
     rows = []
     versions = {}
     missing = []
+    missing_shims = []
     for provider, roots in ROOTS.items():
         try:
             versions[provider] = importlib.metadata.version(provider)
             for style, prefix, reference, shim_reference in roots:
                 try:
-                    discovered = list(surfaces(provider, style, prefix, resolve(reference), resolve(shim_reference)))
+                    native = resolve(reference)
+                    try:
+                        shim = resolve(shim_reference)
+                    except (ImportError, AttributeError) as error:
+                        missing_shims.append({"root": shim_reference, "error": str(error)})
+                        shim = None
+                    discovered = list(surfaces(provider, style, prefix, native, shim))
                     if not discovered:
                         missing.append({"root": reference, "error": "no public APIs discovered"})
                     rows.extend(discovered)
@@ -397,6 +414,7 @@ def main() -> None:
         "implementation_fingerprint": fingerprint,
         "complete_inventory": bool(rows) and not missing,
         "missing_roots": missing,
+        "missing_shim_roots": missing_shims,
         "counts": dict(Counter(row["status"] for row in rows)),
         "rejected_evidence": rejected_evidence,
         "signature_counts": {
@@ -417,6 +435,7 @@ def main() -> None:
     if args.fail_on_unverified and (
         not report["complete_inventory"]
         or rejected_evidence
+        or missing_shims
         or report["signature_counts"]["unknown"]
         or any(row["status"] == "unverified" or row["signatures"] != row["live_signatures"] for row in rows)
     ):
