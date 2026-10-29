@@ -47,7 +47,8 @@ def write_json(path, value):
 def identity(pid):
     try:
         # The parenthesized process name may contain spaces and parentheses.
-        return Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]
+        fields = Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1].split()
+        return None if fields[0] in {"Z", "X"} else fields[19]
     except (FileNotFoundError, ProcessLookupError):
         return None
 
@@ -179,21 +180,30 @@ def worker(request, ready_fd):
                 child.wait()
             write_json(directory / "error", {"error": str(error)})
         finally:
-            if ready_fd >= 0:
-                os.close(ready_fd)
-            if request.get("preserveDescendants"):
-                while True:
-                    try:
-                        os.waitpid(-1, 0)
-                    except ChildProcessError:
-                        break
-                    except InterruptedError:
-                        continue
-            control = request.get("_modalControl", "")
-            if isinstance(control, str) and re.fullmatch(r"exec-[0-9a-f]{32}\.json", control):
-                with contextlib.suppress(FileNotFoundError):
-                    (Path("/root/.arker-modal") / control).unlink()
-            (directory / "worker-complete").touch()
+            try:
+                if ready_fd >= 0:
+                    os.close(ready_fd)
+                if request.get("preserveDescendants"):
+                    while True:
+                        try:
+                            os.waitpid(-1, 0)
+                        except ChildProcessError:
+                            break
+                        except InterruptedError:
+                            continue
+                control = request.get("_modalControl", "")
+                if isinstance(control, str) and re.fullmatch(r"exec-[0-9a-f]{32}\.json", control):
+                    with contextlib.suppress(FileNotFoundError):
+                        (Path("/root/.arker-modal") / control).unlink()
+            except Exception as error:
+                diagnostic = f"Process cleanup failed: {type(error).__name__}: {error}"
+                stderr.write((diagnostic + "\n").encode())
+                error_path = directory / "error"
+                if error_path.exists():
+                    diagnostic = json.loads(error_path.read_text())["error"] + "; " + diagnostic
+                write_json(error_path, {"error": diagnostic})
+            finally:
+                (directory / "worker-complete").touch()
 
 
 def dispatch(request):
@@ -333,16 +343,16 @@ if __name__ == "__main__":
             if sys.argv[1] == "supervise":
                 directory = locate(current["name"])
                 while True:
-                    state = json.loads((directory / "state").read_text())
-                    if state.get("_preserveDescendants"):
-                        if (directory / "worker-complete").exists():
-                            break
-                        if identity(state["_workerPid"]) != state["_workerIdentity"]:
-                            raise RuntimeError("Process supervisor exited before its descendants completed")
-                    elif state["status"] in TERMINAL:
+                    if (directory / "worker-complete").exists():
+                        if (directory / "error").exists():
+                            raise RuntimeError(json.loads((directory / "error").read_text())["error"])
                         break
-                    if (directory / "error").exists():
-                        raise RuntimeError(json.loads((directory / "error").read_text())["error"])
+                    state = json.loads((directory / "state").read_text())
+                    if (
+                        identity(state["_workerPid"]) != state["_workerIdentity"]
+                        and not (directory / "worker-complete").exists()
+                    ):
+                        raise RuntimeError("Process supervisor exited before completion")
                     time.sleep(0.02)
         except Exception as error:
             print(

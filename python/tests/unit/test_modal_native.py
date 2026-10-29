@@ -41,6 +41,8 @@ def private_guest(tmp_path, monkeypatch):
         if path.startswith("/root/.arker-modal/"):
             (root / ".arker-modal" / Path(path).name).write_text(content)
         else:
+            if Path(path).name.startswith("arker-compat-process-"):
+                content = content.replace("/root/.arker-modal", str(root / ".arker-modal"))
             sync(path, content)
 
     vm.sync = private_sync

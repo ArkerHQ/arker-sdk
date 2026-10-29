@@ -422,3 +422,169 @@ def test_concurrent_processes_isolate_working_directory_and_environment(processe
         ]
         outputs = [future.result().stdout for future in futures]
     assert outputs == [f"one|{first}\n", f"two|{second}\n"]
+
+
+@pytest.mark.parametrize("prior_error", [None, "original worker failure"])
+def test_modal_control_cleanup_failure_publishes_completion_and_diagnostic(tmp_path, monkeypatch, prior_error):
+    import json
+    import os
+    import runpy
+
+    import arker
+
+    guest = runpy.run_path(str(Path(arker.__file__).with_name("_guest_process.py")))
+    control = "exec-" + "a" * 32 + ".json"
+    unlink = Path.unlink
+
+    def denied(path, *args, **kwargs):
+        if path == Path("/root/.arker-modal") / control:
+            raise PermissionError("synthetic control cleanup denied")
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", denied)
+    (tmp_path / "input").touch()
+    if prior_error:
+        (tmp_path / "error").write_text(json.dumps({"error": prior_error}))
+    read_fd, write_fd = os.pipe()
+    try:
+        guest["worker"](
+            {
+                "_directory": str(tmp_path),
+                "command": "exit 17",
+                "workingDir": str(tmp_path),
+                "name": "cleanup-failure",
+                "_modalControl": control,
+            },
+            write_fd,
+        )
+    finally:
+        os.close(read_fd)
+    assert (tmp_path / "worker-complete").exists()
+    assert json.loads((tmp_path / "state").read_text())["exitCode"] == 17
+    assert "synthetic control cleanup denied" in (tmp_path / "stderr").read_text()
+    diagnostic = json.loads((tmp_path / "error").read_text())["error"]
+    assert "synthetic control cleanup denied" in diagnostic
+    if prior_error:
+        assert prior_error in diagnostic
+
+
+@pytest.mark.parametrize("preserve_descendants", [False, True])
+def test_supervisor_reports_cleanup_error_before_completion(tmp_path, preserve_descendants):
+    import json
+    import os
+    import sys
+
+    import arker
+
+    control = "exec-" + "b" * 32 + ".json"
+    private = tmp_path / "private"
+    (private / control).mkdir(parents=True)
+    script = tmp_path / "guest.py"
+    script.write_text(
+        Path(arker.__file__).with_name("_guest_process.py").read_text().replace("/root/.arker-modal", str(private))
+    )
+    payload = {
+        "action": "exec",
+        "name": "cleanup-failure",
+        "command": "exit 17",
+        "workingDir": str(tmp_path),
+        "preserveDescendants": preserve_descendants,
+        "_modalControl": control,
+    }
+    result = subprocess.run(
+        [sys.executable, str(script), "supervise", base64.b64encode(json.dumps(payload).encode()).decode()],
+        env={**os.environ, "ARKER_COMPAT_PROCESS_ROOT": str(tmp_path / "processes")},
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 1
+    assert "Process cleanup failed" in json.loads(result.stdout.splitlines()[-1])["error"]
+    directory = tmp_path / "processes" / hashlib.sha256(payload["name"].encode()).hexdigest()
+    assert (directory / "worker-complete").exists()
+    assert json.loads((directory / "state").read_text())["exitCode"] == 17
+
+
+def test_process_identity_rejects_actual_unreaped_zombie():
+    import os
+    import runpy
+    import select
+    import signal
+    import sys
+
+    import arker
+
+    identity = runpy.run_path(str(Path(arker.__file__).with_name("_guest_process.py")))["identity"]
+    child = subprocess.Popen([sys.executable, "-c", "import signal; signal.pause()"])
+    descriptor = os.pidfd_open(child.pid)
+    try:
+        live_identity = identity(child.pid)
+        assert live_identity is not None
+        assert live_identity == Path(f"/proc/{child.pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]
+        os.kill(child.pid, signal.SIGKILL)
+        poller = select.poll()
+        poller.register(descriptor, select.POLLIN)
+        assert poller.poll(5000), "owned process did not exit after SIGKILL"
+        result = os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)
+        assert result.si_status == signal.SIGKILL
+        assert Path(f"/proc/{child.pid}/stat").read_text().rsplit(") ", 1)[1].split()[0] == "Z"
+        assert identity(child.pid) is None
+    finally:
+        child.kill()
+        child.wait(timeout=5)
+        os.close(descriptor)
+
+
+@pytest.mark.parametrize("preserve_descendants", [False, True])
+def test_supervisor_reports_actual_worker_sigkill(tmp_path, preserve_descendants):
+    import contextlib
+    import json
+    import os
+    import select
+    import signal
+    import sys
+
+    import arker
+
+    payload = {
+        "action": "exec",
+        "name": "killed-worker",
+        "command": "pause",
+        "argv": [sys.executable, "-c", "import signal; signal.pause()"],
+        "workingDir": str(tmp_path),
+        "preserveDescendants": preserve_descendants,
+    }
+    supervisor = subprocess.Popen(
+        [
+            sys.executable,
+            str(Path(arker.__file__).with_name("_guest_process.py")),
+            "supervise",
+            base64.b64encode(json.dumps(payload).encode()).decode(),
+        ],
+        env={**os.environ, "ARKER_COMPAT_PROCESS_ROOT": str(tmp_path / "processes")},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    directory = tmp_path / "processes" / hashlib.sha256(payload["name"].encode()).hexdigest()
+    state = None
+    try:
+        assert select.select([supervisor.stdout], [], [], 5)[0], "supervisor did not publish readiness"
+        ready = json.loads(supervisor.stdout.readline())
+        assert ready["result"]["status"] == "running"
+        state = json.loads((directory / "state").read_text())
+        assert not (directory / "worker-complete").exists()
+        os.kill(state["_workerPid"], signal.SIGKILL)
+        output, _ = supervisor.communicate(timeout=5)
+        assert supervisor.returncode == 1
+        assert json.loads(output.splitlines()[-1])["error"] == "Process supervisor exited before completion"
+        assert not (directory / "worker-complete").exists()
+    finally:
+        if state is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(int(state["pid"]), signal.SIGKILL)
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(state["_workerPid"], signal.SIGKILL)
+        if supervisor.poll() is None:
+            supervisor.kill()
+        supervisor.communicate(timeout=5)
