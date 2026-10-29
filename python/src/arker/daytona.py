@@ -168,6 +168,7 @@ class Daytona(UnsupportedMixin):
                 values = {**params, **values}
             supported = {
                 "image",
+                "volumes",
                 "snapshot",
                 "name",
                 "resources",
@@ -191,6 +192,9 @@ class Daytona(UnsupportedMixin):
                 raise UnsupportedCompatibilityOption(
                     f"Daytona.create option(s) are not supported by Arker: {', '.join(unsupported)}"
                 )
+            volumes = values.get("volumes")
+            if volumes is not None and (not isinstance(volumes, list) or volumes):
+                raise UnsupportedCompatibilityOption("Daytona.create volumes must be empty or omitted on Arker")
             raw_resources = values.get("resources") or {}
             if is_dataclass(raw_resources) and not isinstance(raw_resources, type):
                 raw_resources = {key: value for key, value in asdict(raw_resources).items() if value is not None}
