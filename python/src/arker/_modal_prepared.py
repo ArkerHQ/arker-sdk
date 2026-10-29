@@ -5,6 +5,11 @@ import re
 import shlex
 from collections.abc import Mapping, Sequence
 
+try:
+    from builtins import BaseExceptionGroup, ExceptionGroup
+except ImportError:
+    from exceptiongroup import BaseExceptionGroup, ExceptionGroup
+
 CONFIG_PATH = "/etc/arker/image-config.json"
 PROFILE_PATH = "/etc/profile.d/99-arker-image.sh"
 
@@ -75,7 +80,6 @@ def finish_prepared(
     include the independently validated sandbox lifetime, never build time.
     """
     import asyncio
-    import builtins
     from copy import deepcopy
 
     from .computer import VM, ArkerError
@@ -150,9 +154,7 @@ def finish_prepared(
             except Exception as error:
                 failures.append(error)
         if failures:
-            raise builtins.BaseExceptionGroup(
-                "Prepared image creation and cleanup failed", [primary, *failures]
-            ) from primary
+            raise BaseExceptionGroup("Prepared image creation and cleanup failed", [primary, *failures]) from primary
         raise
 
 
@@ -173,7 +175,6 @@ def recipe_steps(commands):
 
 def create_prepared(client, request, steps, *, build_timeout=900):
     """Build on a private temporary VM; apply the sandbox lifetime only to its child."""
-    import builtins
     import time
     from copy import deepcopy
 
@@ -216,7 +217,7 @@ def create_prepared(client, request, steps, *, build_timeout=900):
                 resource.delete()
             except Exception as cleanup:
                 cleanup.vm_id = resource.id
-                raise builtins.ExceptionGroup("Prepared allocation and cleanup failed", [primary, cleanup]) from primary
+                raise ExceptionGroup("Prepared allocation and cleanup failed", [primary, cleanup]) from primary
         raise
     transferred = False
     try:
@@ -246,7 +247,7 @@ def create_prepared(client, request, steps, *, build_timeout=900):
                     try:
                         builder.delete_session(session.session_id)
                     except Exception as cleanup:
-                        raise builtins.BaseExceptionGroup(
+                        raise BaseExceptionGroup(
                             "Build command and session cleanup failed", [primary, cleanup]
                         ) from primary
                     raise
@@ -276,5 +277,5 @@ def create_prepared(client, request, steps, *, build_timeout=900):
                 builder.delete()
             except Exception as cleanup:
                 cleanup.vm_id = builder.id
-                raise builtins.BaseExceptionGroup("Prepared build and cleanup failed", [primary, cleanup]) from primary
+                raise BaseExceptionGroup("Prepared build and cleanup failed", [primary, cleanup]) from primary
         raise

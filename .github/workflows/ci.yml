@@ -54,8 +54,18 @@ jobs:
       - run: uv run --locked --group dev --extra test python -m pytest
 
   python-compat:
-    name: python vendor compatibility
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.12"
+            name: python vendor compatibility
+            pytest-args: ""
+          - python: "3.10"
+            name: python 3.10 compatibility
+            pytest-args: "--ignore-glob=tests/unit/test_e2b_*.py"
     defaults:
       run:
         working-directory: python
@@ -65,9 +75,9 @@ jobs:
         with:
           enable-cache: true
       - name: Install pinned vendor SDKs without credentials
-        run: uv sync --locked --python 3.12 --group dev --extra test --extra compat
+        run: uv sync --locked --python ${{ matrix.python }} --group dev --extra test --extra compat
       - name: Run native compatibility unit regressions
-        run: uv run --locked --python 3.12 --group dev --extra test --extra compat python -m pytest
+        run: uv run --locked --python ${{ matrix.python }} --group dev --extra test --extra compat python -m pytest ${{ matrix.pytest-args }}
       - name: Verify root-only private file permissions
         run: >-
           sudo .venv/bin/python -m pytest

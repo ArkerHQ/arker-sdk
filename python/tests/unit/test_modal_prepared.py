@@ -1,10 +1,9 @@
-import builtins
 import json
 import subprocess
 
 import pytest
 
-from arker._modal_prepared import image_metadata
+from arker._modal_prepared import ExceptionGroup, image_metadata
 
 
 def metadata(**changes):
@@ -157,7 +156,7 @@ def test_prepared_cleanup_failure_preserves_primary_and_owned_id():
         def delete(self):
             raise cleanup
 
-    with pytest.raises(builtins.ExceptionGroup) as caught:
+    with pytest.raises(ExceptionGroup) as caught:
         finish_prepared(FailedBuilder("builder", calls), encoded_metadata=metadata(), final_policies={})
     assert caught.value.exceptions == (primary, cleanup)
     assert cleanup.vm_id == "builder"

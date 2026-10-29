@@ -450,6 +450,7 @@ def test_e2b_nested_native_surface_delegates_provider_extensions() -> None:
 
 
 def test_e2b_native_git_runs_workflow_against_local_repository(tmp_path):
+    pytest.importorskip("e2b")
     from e2b.sandbox_sync.git import Git
 
     def run(command, **options):

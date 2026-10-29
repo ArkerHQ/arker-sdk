@@ -121,7 +121,10 @@ async def program(Client, progress=lambda stage: None, scenario="buffered-filesy
                 if cleanup is None:
                     cleanup = error
         if primary is not None and cleanup is not None:
-            primary.add_note("Owned-resource cleanup also failed; verify deletion independently.")
+            primary.__notes__ = [
+                *getattr(primary, "__notes__", ()),
+                "Owned-resource cleanup also failed; verify deletion independently.",
+            ]
         if primary is None and cleanup is not None:
             raise cleanup
 

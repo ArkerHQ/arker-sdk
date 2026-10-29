@@ -22,6 +22,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from typing_extensions import get_overloads
+
 ROOTS = {
     "e2b": [
         ("sync", "Sandbox", "e2b:Sandbox", "arker.e2b:Sandbox"),
@@ -224,7 +226,7 @@ def signature(member: Any) -> str | None:
 
 
 def signatures(member):
-    return [value for method in (typing.get_overloads(member) or [member]) if (value := signature(method))]
+    return [value for method in (get_overloads(member) or [member]) if (value := signature(method))]
 
 
 def verified_scenarios(api, evidence, version, fingerprint, required_signature=None):

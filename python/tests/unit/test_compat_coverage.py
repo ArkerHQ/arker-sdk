@@ -330,6 +330,7 @@ def test_empty_vendor_surfaces_cannot_pass_the_strict_gate(monkeypatch, capsys):
 
 @pytest.mark.parametrize("style", ["sync", "async"])
 def test_e2b_inventory_paginator_roots_are_real_vendor_apis(style):
+    pytest.importorskip("e2b")
     roots = [root for root in coverage.ROOTS["e2b"] if root[0] == style and root[1] == "SandboxPaginator"]
     assert len(roots) == 1
     _, prefix, reference, shim_reference = roots[0]
