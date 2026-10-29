@@ -118,6 +118,7 @@ def test_arker_cancelled_control_operation_finishes_without_deleting_lookup(monk
 
 
 def test_cancelled_arker_exec_kills_only_its_late_process(monkeypatch):
+    pytest.importorskip("modal")
     started, release, killed = threading.Event(), threading.Event(), threading.Event()
     calls = []
 

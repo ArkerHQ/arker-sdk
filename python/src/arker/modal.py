@@ -134,12 +134,17 @@ class Sandbox(UnsupportedMixin):
                 raise UnsupportedCompatibilityOption(
                     f"Sandbox.create option(s) are not supported by Arker: {', '.join(names)}"
                 )
-            from modal.exception import InvalidError
-            from modal_proto import api_pb2
-
-            lifetime = api_pb2.Sandbox(timeout_secs=timeout).timeout_secs or 300
+            api_pb2 = import_optional("modal_proto.api_pb2")
+            if api_pb2 is not None:
+                lifetime = api_pb2.Sandbox(timeout_secs=timeout).timeout_secs or 300
+            else:
+                if timeout is not None and not isinstance(timeout, int):
+                    raise TypeError("timeout must be an integer number of seconds")
+                lifetime = timeout or 300
             if not 10 <= lifetime <= 86_400:
-                raise InvalidError("Timeout must be between 10s and 86400s (inclusive).")
+                exceptions = import_optional("modal.exception")
+                error = exceptions.InvalidError if exceptions is not None else ValueError
+                raise error("Timeout must be between 10s and 86400s (inclusive).")
             configured = (arker_config or {}).get("policies") or {}
             if "policies" in configured:
                 raise UnsupportedCompatibilityOption("Modal lifetime requires named policies, not ordered policies")

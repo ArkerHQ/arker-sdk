@@ -67,6 +67,8 @@ async def invoke(target, name, *args, **kwargs):
     if name == "exec":
 
         def discard(process):
+            if target._processes is None:
+                return
             from modal._utils.async_utils import synchronizer
 
             native = synchronizer._translate_in(process)

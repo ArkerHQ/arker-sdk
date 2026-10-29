@@ -58,6 +58,7 @@ def test_explicit_lifetime(requests, asynchronous, timeout, expected):
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize("timeout", [-1, 1.5, True, 1, 9, 86401, 4294967296])
 def test_invalid_lifetime_preserves_native_error_before_fork(requests, asynchronous, timeout):
+    pytest.importorskip("modal")
     from modal.exception import InvalidError
     from modal_proto import api_pb2
 
@@ -117,3 +118,27 @@ def test_native_timeout_forwarding_is_unchanged(monkeypatch, timeout):
     monkeypatch.setattr(shim, "routed_create", lambda name, config, creators: ("modal", creators["modal"]()))
     assert shim.Sandbox.create(timeout=timeout).object_id == "sb-owned"
     assert calls == [{"timeout": timeout}]
+
+
+@pytest.mark.parametrize(
+    "timeout,lifetime,error",
+    [
+        (None, 300, None),
+        (0, 300, None),
+        (10, 10, None),
+        (86400, 86400, None),
+        (-1, None, ValueError),
+        (1.5, None, TypeError),
+        (True, None, ValueError),
+        (86401, None, ValueError),
+    ],
+)
+def test_lifetime_without_optional_vendor(requests, monkeypatch, timeout, lifetime, error):
+    monkeypatch.setattr(shim, "import_optional", lambda _: None)
+    if error:
+        with pytest.raises(error):
+            shim.Sandbox.create(timeout=timeout, arker={"source": "fixture"})
+        assert requests == []
+    else:
+        shim.Sandbox.create(timeout=timeout, arker={"source": "fixture"})
+        assert requests[0]["policies"]["rules"]["computesdk-modal-lifetime"]["after_created"] == lifetime
