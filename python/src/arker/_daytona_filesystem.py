@@ -8,7 +8,8 @@ import shlex
 import stat
 from importlib.resources import files
 
-from ._compat import UnsupportedCompatibilityOption, UnsupportedMixin, run_command
+from ._compat import UnsupportedMixin, run_command
+from ._daytona_request import async_request_timeout, request_timeout
 
 _SOURCE = files("arker").joinpath("_guest_daytona_filesystem.py").read_text()
 
@@ -20,11 +21,6 @@ def guest_command(request):
         + " "
         + shlex.quote(json.dumps(request))
     )
-
-
-def check_timeout(value, default=None):
-    if value != default:
-        raise UnsupportedCompatibilityOption("Custom Daytona filesystem timeouts are not supported on Arker")
 
 
 def local_file(path, data=None):
@@ -76,8 +72,8 @@ class FileSystem(UnsupportedMixin):
             raise DaytonaBadRequestError("path must be a nonempty string without NUL", status_code=400)
         return guest_command(dict(operation=operation, path=path, **options))
 
+    @request_timeout
     def _call(self, operation, path, request_timeout=None, **options):
-        check_timeout(request_timeout)
         return json.loads(self._run(self._command(operation, path, **options)))
 
     def _transfer(self, operation, path, data=None, *, timeout=1800):
@@ -201,40 +197,32 @@ class AsyncFileSystem:
     def __init__(self, vm):
         self._sync = FileSystem(vm, asynchronous=True)
 
-    async def create_folder(self, path: str, mode: str, request_timeout: float | None = None) -> None:
-        from ._compat_async import call
+    async def _metadata(self, function, *args):
+        from ._compat_async import route
 
-        return await call(self._sync.create_folder, path, mode, request_timeout)
+        async with async_request_timeout(function, args, {}) as requests:
+            return await route(lambda: function(*args), bridges=(requests,), drain_on_cancel=True)
+
+    async def create_folder(self, path: str, mode: str, request_timeout: float | None = None) -> None:
+        return await self._metadata(self._sync.create_folder, path, mode, request_timeout)
 
     async def delete_file(self, path: str, recursive: bool = False, request_timeout: float | None = None) -> None:
-        from ._compat_async import call
-
-        return await call(self._sync.delete_file, path, recursive, request_timeout)
+        return await self._metadata(self._sync.delete_file, path, recursive, request_timeout)
 
     async def get_file_info(self, path: str, request_timeout: float | None = None):
-        from ._compat_async import call
-
-        return await call(self._sync.get_file_info, path, request_timeout)
+        return await self._metadata(self._sync.get_file_info, path, request_timeout)
 
     async def list_files(self, path: str, depth: int | None = None, request_timeout: float | None = None):
-        from ._compat_async import call
-
-        return await call(self._sync.list_files, path, depth, request_timeout)
+        return await self._metadata(self._sync.list_files, path, depth, request_timeout)
 
     async def find_files(self, path: str, pattern: str, request_timeout: float | None = None):
-        from ._compat_async import call
-
-        return await call(self._sync.find_files, path, pattern, request_timeout)
+        return await self._metadata(self._sync.find_files, path, pattern, request_timeout)
 
     async def search_files(self, path: str, pattern: str, request_timeout: float | None = None):
-        from ._compat_async import call
-
-        return await call(self._sync.search_files, path, pattern, request_timeout)
+        return await self._metadata(self._sync.search_files, path, pattern, request_timeout)
 
     async def move_files(self, source: str, destination: str, request_timeout: float | None = None) -> None:
-        from ._compat_async import call
-
-        return await call(self._sync.move_files, source, destination, request_timeout)
+        return await self._metadata(self._sync.move_files, source, destination, request_timeout)
 
     async def set_file_permissions(
         self,
@@ -244,9 +232,7 @@ class AsyncFileSystem:
         group: str | None = None,
         request_timeout: float | None = None,
     ) -> None:
-        from ._compat_async import call
-
-        return await call(self._sync.set_file_permissions, path, mode, owner, group, request_timeout)
+        return await self._metadata(self._sync.set_file_permissions, path, mode, owner, group, request_timeout)
 
     async def download_file_stream(self, remote_path, timeout=1800, on_progress=None, cancel_event=None):
         from ._daytona_streams import async_download

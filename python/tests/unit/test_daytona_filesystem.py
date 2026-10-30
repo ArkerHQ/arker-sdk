@@ -19,7 +19,7 @@ from daytona_toolbox_api_client import FileInfo
 from daytona_toolbox_api_client_async import FileInfo as AsyncFileInfo
 
 from arker import _daytona_filesystem as implementation
-from arker._compat import CommandResult, UnsupportedCompatibilityOption
+from arker._compat import CommandResult
 from arker._compat_daytona_async import AsyncSandbox
 from arker.daytona import Sandbox
 
@@ -157,8 +157,7 @@ def test_transfer_zero_disables_timeout_and_invalid_path_still_fails(guest):
     fs = guest[0].fs
     fs.upload_file(b"x", "x", timeout=0)
     assert fs.download_file("x", 0) == b"x"
-    with pytest.raises(UnsupportedCompatibilityOption):
-        fs.list_files(".", request_timeout=1)
+    assert fs.list_files(".", request_timeout=1)
     with pytest.raises(DaytonaBadRequestError):
         fs.upload_file(b"x", "")
 

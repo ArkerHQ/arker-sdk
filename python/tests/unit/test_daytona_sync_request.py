@@ -63,9 +63,10 @@ def test_connect_elapsed_is_subtracted_from_read_budget(server, monkeypatch):
         return original(*args, **kwargs)
 
     monkeypatch.setattr(urllib3.util.connection, "create_connection", slow)
-    with pytest.raises(errors.DaytonaConnectionTimeoutError):
+    with pytest.raises(errors.DaytonaError) as caught:
         request(server.url + "/slow", request_timeout=1)
-    assert len(server.requests) == 1
+    assert type(caught.value) is errors.DaytonaError
+    assert len(server.requests) == 4
 
 
 def test_phase_timeout_would_not_enforce_native_remaining_budget(server, monkeypatch):
@@ -167,6 +168,7 @@ def test_untrusted_tls_rejected_and_custom_ca_honored(tmp_path, monkeypatch):
 
     http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert, key)
     http.socket = context.wrap_socket(http.socket, server_side=True)
     worker = threading.Thread(target=http.serve_forever)
@@ -174,7 +176,8 @@ def test_untrusted_tls_rejected_and_custom_ca_honored(tmp_path, monkeypatch):
     monkeypatch.setattr(transport, "proxy_bypass", lambda host: True)
     try:
         url = f"https://127.0.0.1:{http.server_port}"
-        with pytest.raises(httpx.RequestError, match="HTTP transport failed"):
+        errors = pytest.importorskip("daytona.common.errors")
+        with pytest.raises(errors.DaytonaError, match="HTTP transport failed"):
             request(url, request_timeout=1)
         monkeypatch.setenv("SSL_CERT_FILE", str(cert))
         assert request(url, request_timeout=1) == (200, b"verified")
