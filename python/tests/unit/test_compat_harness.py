@@ -14,15 +14,21 @@ def harness(monkeypatch):
     return importlib.import_module("compat_program"), importlib.import_module("compat_evidence")
 
 
+@pytest.mark.parametrize("signatures", [None, {"Sandbox.create": ["(template=None)"]}])
 @pytest.mark.parametrize("failure", [None, RuntimeError("program"), asyncio.CancelledError()])
 @pytest.mark.parametrize("route,shim", [("blaxel", False), ("blaxel", True), ("arker", True)])
-def test_scenario_records_completion_and_failure_identity(harness, monkeypatch, failure, route, shim):
+def test_scenario_records_completion_and_failure_identity(harness, monkeypatch, failure, route, shim, signatures):
     _, evidence = harness
     records, apis = [], set()
-    monkeypatch.setattr(evidence, "record", lambda *args: records.append(args))
+
+    def capture(*args, **kwargs):
+        assert kwargs == {"signatures": signatures}
+        records.append(args)
+
+    monkeypatch.setattr(evidence, "record", capture)
 
     def run():
-        with evidence.record_scenario("blaxel", "sync", route, shim, "example", apis):
+        with evidence.record_scenario("blaxel", "sync", route, shim, "example", apis, signatures=signatures):
             apis.add("Sandbox.create")
             if failure is not None:
                 raise failure
@@ -48,7 +54,7 @@ def test_scenario_records_completion_and_failure_identity(harness, monkeypatch, 
 def test_cleanup_failure_cannot_record_a_passing_scenario(harness, monkeypatch):
     _, evidence = harness
     records = []
-    monkeypatch.setattr(evidence, "record", lambda *args: records.append(args))
+    monkeypatch.setattr(evidence, "record", lambda *args, **kwargs: records.append(args))
     with (
         pytest.raises(RuntimeError, match="cleanup"),
         evidence.record_scenario("modal", "sync", "arker", True, "cleanup", []),
