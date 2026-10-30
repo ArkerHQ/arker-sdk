@@ -76,7 +76,7 @@ class PtyHandle:
             self._offset = response["nextOffset"]
             if response["eof"]:
                 self.exit_code = response["exitCode"]
-                self.error = "non-zero exit" if self.exit_code else None
+                self.error = response.get("terminationSignal") or ("non-zero exit" if self.exit_code else None)
                 self._connected = False
             return base64.b64decode(response["data"])
 

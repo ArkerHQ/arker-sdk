@@ -119,9 +119,9 @@ export class GuestProcesses {
 
   list(options?: { includeOutput?: boolean }): Promise<GuestProcessResult[]> { return this.call("list", options); }
 
-  async readOutput(identifier: string, stream: "stdout" | "stderr", offset: number, signal?: AbortSignal): Promise<{ data: Uint8Array; nextOffset: number; size: number; eof: boolean; exitCode: number | null }> {
+  async readOutput(identifier: string, stream: "stdout" | "stderr", offset: number, signal?: AbortSignal): Promise<{ data: Uint8Array; nextOffset: number; size: number; eof: boolean; exitCode: number | null; terminationSignal?: string | null }> {
     signal?.throwIfAborted();
-    const result = await this.call<{ data: string; nextOffset: number; size: number; eof: boolean; exitCode: number | null }>("readStream", { identifier, stream, offset, limit: 65536 });
+    const result = await this.call<{ data: string; nextOffset: number; size: number; eof: boolean; exitCode: number | null; terminationSignal?: string | null }>("readStream", { identifier, stream, offset, limit: 65536 });
     signal?.throwIfAborted();
     return { ...result, data: Buffer.from(result.data, "base64") };
   }

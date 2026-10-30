@@ -75,7 +75,7 @@ class Handle implements TerminalHandle {
         if (chunk.data.length && onData) await this.callbackContext.run(true, () => onData(chunk.data));
         if (chunk.eof) {
           this.exitCode = chunk.exitCode ?? undefined;
-          this.error = this.exitCode ? "non-zero exit" : undefined;
+          this.error = chunk.terminationSignal ?? (this.exitCode ? "non-zero exit" : undefined);
           this.connected = false;
         } else if (!chunk.data.length) await delay(20);
       }

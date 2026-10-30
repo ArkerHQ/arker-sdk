@@ -512,7 +512,15 @@ def dispatch(request):
             data = output.read(limit)
             end = output.tell()
             size = os.fstat(output.fileno()).st_size
+        termination_signal = None
+        return_code = state.get("_returnCode")
+        if state["status"] in TERMINAL and isinstance(return_code, int) and return_code < 0:
+            try:
+                termination_signal = signal.Signals(-return_code).name
+            except ValueError:
+                termination_signal = f"signal {-return_code}"
         return {
+            "terminationSignal": termination_signal,
             "data": base64.b64encode(data).decode(),
             "nextOffset": end,
             "size": size,

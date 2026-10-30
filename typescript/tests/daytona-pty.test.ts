@@ -82,3 +82,21 @@ test("a terminal callback can await disconnect without awaiting itself", async (
     GuestProcesses.prototype.readOutput = original.read;
   }
 });
+
+for (const terminationSignal of [null, "SIGKILL"]) {
+  test(`exit137 preserves actual signal metadata: ${terminationSignal}`, async () => {
+    const original = { exec: GuestProcesses.prototype.exec, read: GuestProcesses.prototype.readOutput };
+    GuestProcesses.prototype.exec = async () => ({ name: "owned" } as GuestProcessResult);
+    GuestProcesses.prototype.readOutput = async () => ({ data: new Uint8Array(), nextOffset: 0, size: 0,
+      eof: true, exitCode: 137, terminationSignal });
+    try {
+      const box = { runCommand: async () => ({ exitCode: 0, stdout: '["/home/daytona","/bin/bash"]' }) } as unknown as SandboxInterface;
+      const handle = await createDaytonaTerminals(box).createPty({ id: "term", onData: () => {} });
+      assert.deepEqual(await handle.wait(), { exitCode: 137, error: terminationSignal ?? "non-zero exit" });
+      await handle.disconnect();
+    } finally {
+      GuestProcesses.prototype.exec = original.exec;
+      GuestProcesses.prototype.readOutput = original.read;
+    }
+  });
+}

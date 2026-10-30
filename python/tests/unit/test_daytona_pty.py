@@ -161,3 +161,28 @@ def test_async_callback_can_disconnect_its_terminal(processes):
         assert manager.get("daytona-pty:terminal").status == "running"
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("killed", [False, True])
+def test_signal_exit_is_distinct_from_explicit_exit_137(processes, killed, asynchronous):
+    manager, directory = processes
+    _owner, handle = start(manager, directory, "import time; time.sleep(30)" if killed else "raise SystemExit(137)")
+
+    async def run_async():
+        terminal = AsyncPtyHandle(handle, lambda _: None)
+        if killed:
+            await terminal.kill()
+        result = await asyncio.wait_for(terminal.wait(), 5)
+        await terminal.disconnect()
+        return result
+
+    if asynchronous:
+        result = asyncio.run(run_async())
+    else:
+        if killed:
+            handle.kill()
+        result = handle.wait(timeout=5)
+        handle.disconnect()
+    assert result.exit_code == 137
+    assert result.error == ("SIGKILL" if killed else "non-zero exit")
