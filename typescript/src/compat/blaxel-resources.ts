@@ -197,6 +197,9 @@ class Resources {
 }
 
 export class DriveInstance extends NativeDrive {
+  static [Symbol.hasInstance](value: unknown): boolean {
+    return Function.prototype[Symbol.hasInstance].call(this === DriveInstance ? NativeDrive : this, value);
+  }
   static override create(config: Parameters<typeof NativeDrive.create>[0], options: BlaxelResourceConfig = {}): Promise<NativeDrive> { return new Resources("drive", options).create(config) as Promise<NativeDrive>; }
   static override createIfNotExists(config: Parameters<typeof NativeDrive.create>[0], options: BlaxelResourceConfig = {}): Promise<NativeDrive> { return new Resources("drive", options).create(config, true) as Promise<NativeDrive>; }
   static override get(name: string, options: BlaxelResourceConfig = {}): Promise<NativeDrive> { return new Resources("drive", options).get(name) as Promise<NativeDrive>; }
@@ -205,6 +208,9 @@ export class DriveInstance extends NativeDrive {
   static override list(query?: DriveListQuery, options: BlaxelResourceConfig = {}): ReturnType<typeof NativeDrive.list> { return new Resources("drive", options).list(query) as ReturnType<typeof NativeDrive.list>; }
 }
 export class VolumeInstance extends NativeVolume {
+  static [Symbol.hasInstance](value: unknown): boolean {
+    return Function.prototype[Symbol.hasInstance].call(this === VolumeInstance ? NativeVolume : this, value);
+  }
   static override create(config: Parameters<typeof NativeVolume.create>[0], options: BlaxelResourceConfig = {}): Promise<NativeVolume> { return new Resources("volume", options).create(config) as Promise<NativeVolume>; }
   static override createIfNotExists(config: Parameters<typeof NativeVolume.create>[0], options: BlaxelResourceConfig = {}): Promise<NativeVolume> { return new Resources("volume", options).create(config, true) as Promise<NativeVolume>; }
   static override get(name: string, options: BlaxelResourceConfig = {}): Promise<NativeVolume> { return new Resources("volume", options).get(name) as Promise<NativeVolume>; }

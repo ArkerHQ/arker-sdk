@@ -8,6 +8,21 @@ import { DriveInstance, VolumeInstance } from "../src/blaxel.js";
 import { Arker, ArkerError } from "../src/index.js";
 import { preserveEnvironment, preserveProperties } from "./provider-fixtures.js";
 
+test("native resources preserve imported instance checks without branding subclasses", () => {
+  const model = { metadata: { name: "data" }, spec: {} };
+  for (const [Facade, Native] of [[DriveInstance, NativeDrive], [VolumeInstance, NativeVolume]] as const) {
+    const native = new Native(model);
+    assert.ok(native instanceof Facade);
+    assert.ok(!({} instanceof Facade));
+  }
+  class SpecializedDrive extends DriveInstance {}
+  class SpecializedVolume extends VolumeInstance {}
+  assert.ok(!(new NativeDrive(model) instanceof SpecializedDrive));
+  assert.ok(!(new NativeVolume(model) instanceof SpecializedVolume));
+  assert.ok(new SpecializedDrive(model) instanceof SpecializedDrive);
+  assert.ok(new SpecializedVolume(model) instanceof SpecializedVolume);
+});
+
 async function setup(t: TestContext, order = ["arker"]) {
   preserveEnvironment(t, "ARKER_API_KEY", "ARKER_BASE_URL", "COMPUTESDK_ROUTER_CONFIG");
   process.env.ARKER_API_KEY = "test-key";

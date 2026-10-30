@@ -80,6 +80,27 @@ def call(method, *args, **kwargs):
 
 
 @pytest.mark.parametrize("name", ["SyncDriveInstance", "DriveInstance", "SyncVolumeInstance", "VolumeInstance"])
+def test_native_results_keep_imported_resource_instance_checks(name):
+    from blaxel.core.client.models import Drive, DriveSpec, Metadata, Volume, VolumeSpec
+
+    cls = getattr(blaxel, name)
+    model = (
+        Drive(metadata=Metadata(name="data"), spec=DriveSpec())
+        if cls._kind == "drive"
+        else Volume(metadata=Metadata(name="data"), spec=VolumeSpec())
+    )
+    native = cls._native(model)
+    assert isinstance(native, cls)
+    assert not isinstance(object(), cls)
+
+    class Specialized(cls):
+        pass
+
+    assert not isinstance(native, Specialized)
+    assert isinstance(Specialized(model), Specialized)
+
+
+@pytest.mark.parametrize("name", ["SyncDriveInstance", "DriveInstance", "SyncVolumeInstance", "VolumeInstance"])
 def test_one_import_routes_resource_lifecycle_and_native_models(setup, name):
     backend, _ = setup
     cls = getattr(blaxel, name)

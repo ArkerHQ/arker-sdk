@@ -265,7 +265,15 @@ class _BoundOperation:
         return wraps(native)(invoke)
 
 
-class _Resources:
+class _ResourceType(type):
+    def __instancecheck__(cls, instance):
+        # Native routes retain their original objects; only the public facade
+        # accepts that native brand, not customer subclasses of the facade.
+        native = cls.__dict__.get("_native")
+        return isinstance(instance, native) if native is not None else super().__instancecheck__(instance)
+
+
+class _Resources(metaclass=_ResourceType):
     delete = _BoundOperation("delete")
     update = _BoundOperation("update")
     _asynchronous = False
