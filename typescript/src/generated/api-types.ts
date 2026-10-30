@@ -967,6 +967,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/vms/{id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                id: components["parameters"]["VmId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop guest execution and retain its filesystem
+         * @description Forcefully ends guest processes and retains the filesystem for explicit cold start. Does not promise graceful signal delivery. Memory restore is refused after stopping; unrelated policies remain unchanged.
+         */
+        post: operations["stopVm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/vms/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                id: components["parameters"]["VmId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive a stopped VM filesystem
+         * @description Requires a stopped VM. Publishes recoverable filesystem state before removing local storage; does not wake the guest. Explicit resume cold-starts the same VM.
+         */
+        post: operations["archiveVm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2095,7 +2141,7 @@ export interface components {
          * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
          * @enum {string}
          */
-        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "openVmPort" | "openVmSocket" | "mintSessionPtyTicket" | "createFileTransferDelegation" | "downloadFileTransfer" | "uploadFileTransfer" | "pauseVm" | "resumeVm" | "getVmLifecycle" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey" | "setVmDeadline" | "forkNamed" | "registerDaemonActivity";
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "openVmPort" | "openVmSocket" | "mintSessionPtyTicket" | "createFileTransferDelegation" | "downloadFileTransfer" | "uploadFileTransfer" | "pauseVm" | "resumeVm" | "getVmLifecycle" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey" | "setVmDeadline" | "forkNamed" | "registerDaemonActivity" | "stopVm" | "archiveVm";
         /** @enum {string} */
         HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
         /**
@@ -3911,10 +3957,10 @@ export interface components {
             /** @description Identifier of the VM whose lifecycle state is returned. */
             vm_id: string;
             /**
-             * @description Running means the guest is executing. Idle is automatic suspension, not an explicit customer pause.
+             * @description Running means the guest is executing. Idle is automatic suspension, not an explicit customer pause. Stopped requires filesystem cold start; archived is stopped with durably published, evicted local storage.
              * @enum {string}
              */
-            state: "running" | "idle" | "paused" | "terminated";
+            state: "running" | "idle" | "paused" | "terminated" | "stopped" | "archived";
             /** @description Saved explicit pause mode, or null when no explicit pause mode is saved. */
             mode: components["schemas"]["VmPauseMode"] | null;
             /** @description True only for a confirmed explicit customer pause. */
@@ -4033,6 +4079,30 @@ export interface components {
              * @description Guest /proc/sys/kernel/random/boot_id observed with the daemon identity.
              */
             boot_id: string;
+        };
+        StopVmRequest: Record<string, never>;
+        StopVmResponse: {
+            /** @description Identifier of the VM. */
+            vm_id: string;
+            /**
+             * @description Confirmed customer lifecycle state after the operation.
+             * @enum {string}
+             */
+            state: "stopped";
+            /** @description True when the VM was already explicitly stopped before this request. */
+            already_stopped: boolean;
+        };
+        ArchiveVmRequest: Record<string, never>;
+        ArchiveVmResponse: {
+            /** @description Identifier of the VM. */
+            vm_id: string;
+            /**
+             * @description Confirmed customer lifecycle state after the operation.
+             * @enum {string}
+             */
+            state: "archived";
+            /** @description True when the VM was already explicitly archived before this request. */
+            already_archived: boolean;
         };
     };
     responses: {
@@ -6617,6 +6687,84 @@ export interface operations {
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
+        };
+    };
+    stopVm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                id: components["parameters"]["VmId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StopVmRequest"];
+            };
+        };
+        responses: {
+            /** @description Pause a VM. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StopVmResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            402: components["responses"]["PaymentRequiredError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["ConflictOrInvalidStateOrResourceBusyError"];
+            413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["CapacityUnavailableOrUnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
+        };
+    };
+    archiveVm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                id: components["parameters"]["VmId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArchiveVmRequest"];
+            };
+        };
+        responses: {
+            /** @description Pause a VM. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveVmResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            402: components["responses"]["PaymentRequiredError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["ConflictOrInvalidStateOrResourceBusyError"];
+            413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["QuotaExceededOrRateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["CapacityUnavailableOrUnavailableError"];
             504: components["responses"]["GatewayTimeoutError"];
         };
     };

@@ -331,7 +331,7 @@
               "type": "string",
               "format": "uuid"
             },
-            "description": "Filter the caller organization’s VMs by pool membership."
+            "description": "Filter the caller organization\u2019s VMs by pool membership."
           },
           {
             "name": "metadata_filter",
@@ -4051,6 +4051,152 @@
         },
         "description": "Register a native daemon before exposing its request endpoint. Requires vm:run and VM ownership. Verifies the guest boot ID and process start time, then places the daemon in an inherited cgroup. Live descendants prevent automatic idle pause and suspend; the daemon itself does not. Registration does not cover queued work without a live child, does not change deadlines or explicit deletion, and does not grant network or secret access. Repeat registration on the same live process is idempotent. Unsupported runtimes and guests refuse registration."
       }
+    },
+    "/v1/vms/{id}/stop": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/VmId"
+        }
+      ],
+      "post": {
+        "operationId": "stopVm",
+        "tags": [
+          "VMs"
+        ],
+        "summary": "Stop guest execution and retain its filesystem",
+        "description": "Forcefully ends guest processes and retains the filesystem for explicit cold start. Does not promise graceful signal delivery. Memory restore is refused after stopping; unrelated policies remain unchanged.",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequiredError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ConflictOrInvalidStateOrResourceBusyError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/CapacityUnavailableOrUnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
+          },
+          "200": {
+            "description": "Pause a VM.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StopVmResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLargeError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StopVmRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/vms/{id}/archive": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/VmId"
+        }
+      ],
+      "post": {
+        "operationId": "archiveVm",
+        "tags": [
+          "VMs"
+        ],
+        "summary": "Archive a stopped VM filesystem",
+        "description": "Requires a stopped VM. Publishes recoverable filesystem state before removing local storage; does not wake the guest. Explicit resume cold-starts the same VM.",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequiredError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ConflictOrInvalidStateOrResourceBusyError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/CapacityUnavailableOrUnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
+          },
+          "200": {
+            "description": "Pause a VM.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveVmResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLargeError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveVmRequest"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4965,7 +5111,7 @@
         }
       },
       "RateLimitedError": {
-        "description": "HTTP 429: A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service’s quota or credentials.",
+        "description": "HTTP 429: A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service\u2019s quota or credentials.",
         "x-http-status": 429,
         "headers": {
           "Retry-After": {
@@ -5938,7 +6084,7 @@
           "action"
         ],
         "additionalProperties": false,
-        "description": "One policy rule. `match` AND's its present fields (absent ⇒ catch-all).",
+        "description": "One policy rule. `match` AND's its present fields (absent \u21d2 catch-all).",
         "properties": {
           "type": {
             "type": "string",
@@ -6036,7 +6182,7 @@
                 "type": "string"
               }
             },
-            "description": "Header name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, `\"authorization\": [\"Bearer $arker_api_key\"]` or `\"x-api-key\": [\"$arker_api_key\"]` matches an API key of the VM's organization."
+            "description": "Header name \u2192 any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, `\"authorization\": [\"Bearer $arker_api_key\"]` or `\"x-api-key\": [\"$arker_api_key\"]` matches an API key of the VM's organization."
           },
           "query_params": {
             "type": "object",
@@ -6046,7 +6192,7 @@
                 "type": "string"
               }
             },
-            "description": "Query parameter name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, parameters named `arker_*` are removed from a `GET` request's URL by a redirect that keeps them in a cookie, so the rest of a browsing session carries them without the URL showing them."
+            "description": "Query parameter name \u2192 any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, parameters named `arker_*` are removed from a `GET` request's URL by a redirect that keeps them in a cookie, so the rest of a browsing session carries them without the URL showing them."
           },
           "body_contains": {
             "description": "Substrings that must appear in the request body.",
@@ -6155,7 +6301,7 @@
       "Rewrite": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${…}`-braced), `${header:NAME}` (the request's header NAME, on inbound rules), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged.",
+        "description": "Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${\u2026}`-braced), `${header:NAME}` (the request's header NAME, on inbound rules), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged.",
         "properties": {
           "host": {
             "description": "Replacement request host.",
@@ -9093,7 +9239,9 @@
           "revokeApiKey",
           "setVmDeadline",
           "forkNamed",
-          "registerDaemonActivity"
+          "registerDaemonActivity",
+          "stopVm",
+          "archiveVm"
         ],
         "description": "Exact operationId values declared by this API. Refresh this enum when operations are added or removed."
       },
@@ -11050,7 +11198,7 @@
         "unevaluatedProperties": false
       },
       "RateLimited": {
-        "description": "A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service’s quota or credentials.",
+        "description": "A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service\u2019s quota or credentials.",
         "x-http-status": 429,
         "allOf": [
           {
@@ -12317,7 +12465,7 @@
           "action"
         ],
         "additionalProperties": false,
-        "description": "One network policy rule, keyed by its id in a policy's `rules`. `match` ANDs its present fields (absent ⇒ catch-all). Rules are evaluated highest `priority` first, and the first rule that matches decides.",
+        "description": "One network policy rule, keyed by its id in a policy's `rules`. `match` ANDs its present fields (absent \u21d2 catch-all). Rules are evaluated highest `priority` first, and the first rule that matches decides.",
         "properties": {
           "type": {
             "type": "string",
@@ -14185,9 +14333,11 @@
               "running",
               "idle",
               "paused",
-              "terminated"
+              "terminated",
+              "stopped",
+              "archived"
             ],
-            "description": "Running means the guest is executing. Idle is automatic suspension, not an explicit customer pause."
+            "description": "Running means the guest is executing. Idle is automatic suspension, not an explicit customer pause. Stopped requires filesystem cold start; archived is stopped with durably published, evicted local storage."
           },
           "mode": {
             "anyOf": [
@@ -14415,7 +14565,9 @@
         "properties": {
           "intent_version": {
             "type": "integer",
-            "enum": [1],
+            "enum": [
+              1
+            ],
             "description": "Require the version 1 daemon intent reader. Sending this field makes older servers reject enrollment instead of acknowledging cgroup-only activity tracking."
           },
           "pid": {
@@ -14434,6 +14586,68 @@
             "type": "string",
             "format": "uuid",
             "description": "Guest /proc/sys/kernel/random/boot_id observed with the daemon identity."
+          }
+        }
+      },
+      "StopVmRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "StopVmResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "vm_id",
+          "state",
+          "already_stopped"
+        ],
+        "properties": {
+          "vm_id": {
+            "type": "string",
+            "description": "Identifier of the VM."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "stopped"
+            ],
+            "description": "Confirmed customer lifecycle state after the operation."
+          },
+          "already_stopped": {
+            "type": "boolean",
+            "description": "True when the VM was already explicitly stopped before this request."
+          }
+        }
+      },
+      "ArchiveVmRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "ArchiveVmResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "vm_id",
+          "state",
+          "already_archived"
+        ],
+        "properties": {
+          "vm_id": {
+            "type": "string",
+            "description": "Identifier of the VM."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "archived"
+            ],
+            "description": "Confirmed customer lifecycle state after the operation."
+          },
+          "already_archived": {
+            "type": "boolean",
+            "description": "True when the VM was already explicitly archived before this request."
           }
         }
       }

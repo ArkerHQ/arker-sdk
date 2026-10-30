@@ -532,6 +532,8 @@ OpenApiOperationId: TypeAlias = Literal[
     'setVmDeadline',
     'forkNamed',
     'registerDaemonActivity',
+    'stopVm',
+    'archiveVm',
 ]
 
 
@@ -1740,7 +1742,7 @@ class ResumeVmResponse:
 @dataclass(frozen=True)
 class VmLifecycleResponse:
     vm_id: str
-    state: Literal['running', 'idle', 'paused', 'terminated']
+    state: Literal['running', 'idle', 'paused', 'terminated', 'stopped', 'archived']
     mode: VmPauseMode | None
     customer_paused: bool
     started_at: str
@@ -1792,6 +1794,30 @@ class RegisterDaemonActivityRequest:
     start_ticks: int
     boot_id: str
     intent_version: Literal[1] | None = None
+
+
+@dataclass(frozen=True)
+class StopVmRequest:
+    pass
+
+
+@dataclass(frozen=True)
+class StopVmResponse:
+    vm_id: str
+    state: Literal['stopped']
+    already_stopped: bool
+
+
+@dataclass(frozen=True)
+class ArchiveVmRequest:
+    pass
+
+
+@dataclass(frozen=True)
+class ArchiveVmResponse:
+    vm_id: str
+    state: Literal['archived']
+    already_archived: bool
 
 
 @dataclass(frozen=True)
@@ -2135,6 +2161,16 @@ class SetVmDeadlineParameters:
 
 @dataclass(frozen=True)
 class RegisterDaemonActivityParameters:
+    id: str
+
+
+@dataclass(frozen=True)
+class StopVmParameters:
+    id: str
+
+
+@dataclass(frozen=True)
+class ArchiveVmParameters:
     id: str
 
 
