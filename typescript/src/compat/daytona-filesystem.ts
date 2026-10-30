@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { open } from "node:fs/promises";
 import { constants } from "node:fs";
-import { DaytonaError, DaytonaBadRequestError, DaytonaForbiddenError, DaytonaNotFoundError, type FileInfo, type FilePermissionsParams, type FileUpload, type FileDownloadRequest, type FileDownloadResponse } from "@daytona/sdk";
+import { DaytonaError, DaytonaBadRequestError, DaytonaForbiddenError, DaytonaNotFoundError, type DownloadStreamOptions, type UploadStreamOptions, type UploadSource, type FileInfo, type FilePermissionsParams, type FileUpload, type FileDownloadRequest, type FileDownloadResponse } from "@daytona/sdk";
 import { ArkerError, type VM } from "../index.js";
 import { assertSupportedObjectKeys, guardUnsupported, shellQuote, type UniversalSandbox } from "./common.js";
+import { downloadStream, uploadStream } from "./daytona-streams.js";
 import source from "./daytona-filesystem.generated.js";
 
 function filesystemError(message: string, status: number): DaytonaError {
@@ -92,6 +93,21 @@ export class DaytonaFileSystem {
   async setFilePermissions(path: string, permissions: FilePermissionsParams): Promise<void> {
     assertSupportedObjectKeys(permissions, ["mode", "owner", "group"], "daytona", "fs.setFilePermissions");
     await this.call("permissions", path, permissions);
+  }
+  private streamContext() {
+    return { vm: (this.box as unknown as { getInstance(): VM }).getInstance(),
+      run: (command: string) => this.run(command), command: (operation: string, path: string) => this.command(operation, path) };
+  }
+  async downloadFileStream(path: string, timeoutOrOptions: number | DownloadStreamOptions = {}) {
+    const options = typeof timeoutOrOptions === "number" ? { timeout: timeoutOrOptions } : timeoutOrOptions;
+    assertSupportedObjectKeys(options, ["timeout", "signal", "onProgress"], "daytona", "fs.downloadFileStream");
+    checkTimeout(options.timeout);
+    return downloadStream(this.streamContext(), path, options);
+  }
+  async uploadFileStream(source: UploadSource, path: string, options: UploadStreamOptions = {}): Promise<void> {
+    assertSupportedObjectKeys(options, ["timeout", "signal", "onProgress"], "daytona", "fs.uploadFileStream");
+    checkTimeout(options.timeout);
+    await uploadStream(this.streamContext(), source, path, options);
   }
   async uploadFile(file: Buffer, remotePath: string, timeout?: number): Promise<void>;
   async uploadFile(localPath: string, remotePath: string, timeout?: number): Promise<void>;

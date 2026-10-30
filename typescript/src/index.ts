@@ -1570,7 +1570,7 @@ export class VM {
       const handle = await fsp.open(localTar, "r");
       try {
         const { size } = await handle.stat();
-        await this.syncWriteChunks(remoteTar, size, async (start, length) => {
+        await this._syncWriteChunks(remoteTar, size, async (start, length) => {
           const buffer = Buffer.alloc(length);
           let offset = 0;
           while (offset < length) {
@@ -1621,12 +1621,40 @@ export class VM {
     return new Uint8Array(await signed.arrayBuffer());
   }
 
-  private async syncWriteInline(path: string, data: Uint8Array, options: SyncOptions): Promise<void> {
-    await this.syncWriteChunks(path, data.length, async (start, length) => data.subarray(start, start + length), options);
+  /** @internal */
+  async *_syncReadChunks(path: string, signal?: AbortSignal): AsyncGenerator<Uint8Array> {
+    const response = await this._client._request<SyncReadInlineResponse | SyncReadPresignedResponse>(
+      "POST", `${vmPath(this.id)}/sync`, { op: "read", path }, this.baseUrl,
+      undefined, undefined, true, { signal },
+    );
+    if ("content" in response) {
+      const bytes = decodeBytes(response.content, response.encoding);
+      for (let offset = 0; offset < bytes.length; offset += 65536) yield bytes.subarray(offset, offset + 65536);
+      return;
+    }
+    const signed = await this._client._download(response.presigned_url, { signal });
+    if (!signed.ok) {
+      await signed.body?.cancel();
+      throw new ArkerError("internal", `signed GET failed: ${signed.status}`, signed.status);
+    }
+    const reader = signed.body?.getReader();
+    if (!reader) return;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        for (let offset = 0; offset < value.length; offset += 65536) yield value.subarray(offset, offset + 65536);
+      }
+    } finally { await reader.cancel(); reader.releaseLock(); }
   }
 
-  private async syncWriteChunks(
-    path: string, size: number, read: (start: number, length: number) => Promise<Uint8Array>, options: SyncOptions = {},
+  private async syncWriteInline(path: string, data: Uint8Array, options: SyncOptions): Promise<void> {
+    await this._syncWriteChunks(path, data.length, async (start, length) => data.subarray(start, start + length), options);
+  }
+
+  /** @internal */
+  async _syncWriteChunks(
+    path: string, size: number, read: (start: number, length: number) => Promise<Uint8Array>, options: SyncOptions = {}, transport?: RequestTransportOptions,
   ): Promise<void> {
     const isSecret = options.isSecret ?? false;
     const uploadId = ulid();
@@ -1637,12 +1665,12 @@ export class VM {
       result = await this.sendOneWrite({
         path, size, upload_id: uploadId, content: bytesToBase64(data),
         start, end, is_secret: isSecret,
-      });
+      }, transport);
     }
     assertWriteComplete(result!, "inline write");
   }
 
-  private async sendOneWrite(entry: SyncWriteEntry): Promise<SyncWriteResult> {
+  private async sendOneWrite(entry: SyncWriteEntry, transport?: RequestTransportOptions): Promise<SyncWriteResult> {
     let lastError: ArkerError | undefined;
     const attempts = this._client._retryAttempts();
     for (let attempt = 0; attempt < attempts; attempt++) {
@@ -1650,14 +1678,14 @@ export class VM {
         op: "write",
         writes: [entry],
       };
-      const response = await this._client._request<SyncWriteResponse>("POST", `${vmPath(this.id)}/sync`, request, this.baseUrl);
+      const response = await this._client._request<SyncWriteResponse>("POST", `${vmPath(this.id)}/sync`, request, this.baseUrl, undefined, undefined, undefined, transport);
       const result = response.results[0];
       if (!result) throw new ArkerError("internal", "write response missing results[0]", 200);
       const error = result.error ?? undefined;
       if (!error) return result;
       lastError = serverError(error, 200, true);
       if (!isRetryable(200, lastError, true) || attempt === attempts - 1) break;
-      await sleep(this._client._retryDelay(attempt));
+      await abortableDelay(this._client._retryDelay(attempt), transport?.signal);
     }
     throw lastError ?? new ArkerError("internal", "write failed", 200);
   }

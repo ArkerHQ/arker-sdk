@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 import os
 import pwd
 import shutil
@@ -141,14 +142,14 @@ def test_async_filesystem_preserves_native_model_types(guest):
     asyncio.run(program())
 
 
-def test_untranslated_options_and_streams_fail_closed(guest):
+def test_untranslated_options_fail_closed(guest):
     fs = guest[0].fs
     with pytest.raises(UnsupportedCompatibilityOption):
         fs.upload_file(b"x", "x", timeout=0)
     with pytest.raises(UnsupportedCompatibilityOption):
         fs.list_files(".", request_timeout=1)
-    with pytest.raises(AttributeError):
-        _ = fs.upload_file_stream
+    with pytest.raises(UnsupportedCompatibilityOption):
+        fs.upload_file_stream(b"x", "x", timeout=0)
     with pytest.raises(DaytonaBadRequestError):
         fs.upload_file(b"x", "")
 
@@ -424,3 +425,313 @@ def test_download_invalid_local_parent_returns_bulk_error_without_mutation(monke
     assert result.error
     assert result.result is None
     assert parent.read_bytes() == b"keep"
+
+
+@pytest.fixture
+def streamed_guest(guest):
+    sandbox, _home, _uid, stages = guest
+
+    def chunks(path):
+        stages.append(Path(path))
+        with open(path, "rb") as stream:
+            while chunk := stream.read(65536):
+                yield chunk
+
+    def writes(path, size, read):
+        stages.append(Path(path))
+        with open(path, "wb") as stream:
+            for offset in range(0, max(size, 1), 65536):
+                stream.write(read(offset, min(size - offset, 65536)))
+
+    sandbox.fs._vm._sync_read_chunks = chunks
+    sandbox.fs._vm._sync_write_chunks = writes
+    return guest
+
+
+def test_streamed_transfer_preserves_binary_progress_and_caller_ownership(streamed_guest):
+    import io
+
+    sandbox, _home, _, _ = streamed_guest
+    payload = bytes(range(256)) * 1025
+    source = io.BytesIO(b"prefix" + payload)
+    source.seek(6)
+    sent, received = [], []
+    sandbox.fs.upload_file_stream(source, "streamed", on_progress=sent.append)
+    assert not source.closed
+    assert source.tell() == 6 + len(payload)
+    chunks = list(sandbox.fs.download_file_stream("streamed", on_progress=received.append))
+    assert b"".join(chunks) == payload
+    assert max(map(len, chunks)) <= 65536
+    assert sent[-1].bytes_sent == received[-1].bytes_received == len(payload)
+    assert all(a.bytes_received < b.bytes_received for a, b in itertools.pairwise(received))
+
+
+def test_download_stream_close_and_cancellation_remove_staging(streamed_guest):
+    import threading
+
+    from daytona import DaytonaError
+
+    sandbox, _, _, stages = streamed_guest
+    sandbox.fs.upload_file(b"a" * 150000, "streamed")
+    stream = sandbox.fs.download_file_stream("streamed")
+    assert next(stream) == b"a" * 65536
+    staged = stages[-1]
+    assert staged.exists()
+    stream.close()
+    assert not staged.parent.exists()
+    cancel = threading.Event()
+    stream = sandbox.fs.download_file_stream("streamed", cancel_event=cancel)
+    next(stream)
+    cancel.set()
+    with pytest.raises(DaytonaError, match="Download cancelled"):
+        next(stream)
+    assert not stages[-1].parent.exists()
+
+
+def test_unknown_length_upload_reads_bounded_chunks_and_preserves_reader(streamed_guest):
+    sandbox, _, _, _ = streamed_guest
+
+    class Reader:
+        def __init__(self):
+            self.remaining = 200000
+            self.calls = []
+
+        def read(self, size):
+            assert 0 < size <= 65536
+            self.calls.append(size)
+            data = b"z" * min(self.remaining, size)
+            self.remaining -= len(data)
+            return data
+
+    source = Reader()
+    sandbox.fs.upload_file_stream(source, "unknown")
+    assert len(source.calls) > 2
+    assert sandbox.fs.download_file("unknown") == b"z" * 200000
+
+
+def test_stream_upload_cancel_does_not_replace_destination(streamed_guest):
+    import io
+    import threading
+
+    from daytona import DaytonaError
+
+    sandbox, _, _, stages = streamed_guest
+    sandbox.fs.upload_file(b"original", "cancelled")
+    cancel = threading.Event()
+    source = io.BytesIO(b"a" * 200000)
+    with pytest.raises(DaytonaError, match="Upload cancelled"):
+        sandbox.fs.upload_file_stream(source, "cancelled", on_progress=lambda _: cancel.set(), cancel_event=cancel)
+    assert not source.closed
+    assert not stages[-1].parent.exists()
+    assert sandbox.fs.download_file("cancelled") == b"original"
+
+
+def test_async_streams_await_progress_and_close_on_early_exit(streamed_guest):
+    import io
+
+    from arker._daytona_filesystem import AsyncFileSystem
+
+    sandbox, _, _, stages = streamed_guest
+    fs = AsyncFileSystem(sandbox.fs._vm)
+
+    async def scenario():
+        progress = []
+
+        async def receive(value):
+            await asyncio.sleep(0)
+            progress.append(value)
+
+        source = io.BytesIO(b"q" * 150000)
+        await fs.upload_file_stream(source, "async", on_progress=receive)
+        assert not source.closed
+        iterator = await fs.download_file_stream("async", on_progress=receive)
+        assert await anext(iterator) == b"q" * 65536
+        await iterator.aclose()
+        assert not stages[-1].parent.exists()
+        assert progress[-1].bytes_received == 65536
+
+    asyncio.run(scenario())
+
+
+def test_presigned_stream_closes_without_reading_remainder(monkeypatch):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    import arker.computer as computer
+    from arker.computer import VM
+
+    events = []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def iter_bytes(self, chunk_size):
+            assert chunk_size == 65536
+            events.append("read")
+            yield b"first"
+            pytest.fail("early close must not consume the remainder")
+
+    @contextmanager
+    def stream(*args, **kwargs):
+        try:
+            yield Response()
+        finally:
+            events.append("closed")
+
+    monkeypatch.setattr(computer._http_client, "stream", stream)
+    client = SimpleNamespace(
+        _request=lambda *args, **kwargs: {
+            "ok": True,
+            "op": "read",
+            "path": "/file",
+            "size": 100000,
+            "presigned_url": "https://storage.invalid/file",
+            "expires_in": 900,
+            "method": "GET",
+        }
+    )
+    vm = VM(client, "vm-test", base_url="https://api.invalid")
+    chunks = vm._sync_read_chunks("/file")
+    assert next(chunks) == b"first"
+    chunks.close()
+    assert events == ["read", "closed"]
+
+
+def test_stream_double_failure_retains_primary_cleanup_and_owned_stage():
+    from arker._daytona_streams import staging
+
+    primary = ValueError("transfer failed")
+    cleanup = OSError("cleanup failed")
+    commands = []
+
+    def run(command):
+        commands.append(command)
+        if command.startswith("rm "):
+            raise cleanup
+
+    with pytest.raises(RuntimeError) as caught, staging(types.SimpleNamespace(_run=run)) as path:
+        raise primary
+    error = caught.value
+    assert error.primary_error is primary
+    assert error.cleanup_error is cleanup
+    assert error.__cause__ is cleanup
+    assert error.staging_directory == str(Path(path).parent)
+    assert error.staging_directory in str(error)
+    assert len(commands) == 2
+
+
+def test_async_stream_double_cancel_drains_reader_before_cleanup():
+    import threading
+
+    from arker._daytona_streams import async_download
+
+    started = threading.Event()
+    release = threading.Event()
+    reading = threading.Event()
+    closed = threading.Event()
+    cleaned = threading.Event()
+
+    def chunks(path):
+        try:
+            reading.set()
+            started.set()
+            assert release.wait(5), "test must release blocked reader"
+            reading.clear()
+            yield b"chunk"
+        finally:
+            reading.clear()
+            closed.set()
+
+    def run(command):
+        if command.startswith("rm "):
+            assert not reading.is_set(), "cleanup raced the blocked reader"
+            cleaned.set()
+
+    fs = types.SimpleNamespace(
+        _command=lambda *args: "read",
+        _run=run,
+        _vm=types.SimpleNamespace(_sync_read_chunks=chunks),
+    )
+
+    async def program():
+        stream = async_download(fs, "file", None, None)
+        task = asyncio.create_task(anext(stream))
+        try:
+            assert await asyncio.to_thread(started.wait, 5)
+            task.cancel()
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            task.cancel()
+            done, _ = await asyncio.wait({task}, timeout=0.05)
+            assert not done, "repeated cancellation must still wait for the gated reader"
+            assert not cleaned.is_set()
+        finally:
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        assert closed.is_set() and cleaned.is_set()
+
+    asyncio.run(program())
+
+
+def test_stream_uncertain_mkdir_reports_owned_candidate_without_blind_cleanup():
+    from arker._daytona_streams import staging
+
+    primary = OSError("lost mkdir response")
+    calls = []
+
+    def run(command):
+        calls.append(command)
+        raise primary
+
+    with pytest.raises(OSError) as caught, staging(types.SimpleNamespace(_run=run)):
+        pytest.fail("uncertain staging must not proceed")
+    assert caught.value is primary
+    assert primary.staging_directory.startswith("/tmp/.arker-daytona-fs-")
+    assert primary.staging_directory in primary.__notes__[0]
+    assert len(calls) == 1
+
+
+def test_stream_owned_files_attempt_all_closes_and_retain_all_errors():
+    from arker._daytona_streams import TransferCleanupError, transfer_files
+
+    primary = DaytonaNotFoundError("native primary", status_code=404)
+    first = OSError("first close")
+    second = OSError("second close")
+    calls = []
+
+    def resource(name, error):
+        def close():
+            calls.append(name)
+            raise error
+
+        return types.SimpleNamespace(close=close)
+
+    with pytest.raises(TransferCleanupError) as caught, transfer_files() as own:
+        own(resource("first", first), "/owned/first")
+        own(resource("second", second), "/owned/second")
+        raise primary
+    assert calls == ["second", "first"]
+    assert caught.value.primary_error is primary
+    assert caught.value.cleanup_errors == (second, first)
+    assert "/owned/first" in str(caught.value) and "/owned/second" in str(caught.value)
+
+
+def test_stream_success_cleanup_failure_preserves_identity_and_owned_stage():
+    from arker._daytona_streams import staging
+
+    cleanup = OSError("cleanup failed")
+    calls = []
+
+    def run(command):
+        calls.append(command)
+        if command.startswith("rm "):
+            raise cleanup
+
+    with pytest.raises(OSError) as caught, staging(types.SimpleNamespace(_run=run)) as path:
+        pass
+    assert caught.value is cleanup
+    assert cleanup.staging_directory == str(Path(path).parent)
+    assert cleanup.staging_directory in cleanup.__notes__[0]
+    assert len(calls) == 2

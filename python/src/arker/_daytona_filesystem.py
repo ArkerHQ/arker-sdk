@@ -1,4 +1,4 @@
-"""Daytona's buffered filesystem API over identity-bound guest operations."""
+"""Daytona's filesystem API over identity-bound guest operations."""
 
 from __future__ import annotations
 
@@ -141,6 +141,18 @@ class FileSystem(UnsupportedMixin):
     ) -> None:
         self._call("permissions", path, request_timeout, mode=mode, owner=owner, group=group)
 
+    def download_file_stream(self, remote_path, timeout=1800, on_progress=None, cancel_event=None):
+        from ._daytona_streams import download
+
+        check_timeout(timeout, 1800)
+        return download(self, remote_path, on_progress, cancel_event)
+
+    def upload_file_stream(self, source, remote_path, timeout=1800, on_progress=None, cancel_event=None):
+        from ._daytona_streams import upload
+
+        check_timeout(timeout, 1800)
+        return upload(self, source, remote_path, on_progress, cancel_event)
+
     def upload_file(self, src: str | bytes, dst: str, timeout: int = 1800) -> None:
         check_timeout(timeout, 1800)
         if not isinstance(src, (str, bytes, bytearray)):
@@ -235,6 +247,18 @@ class AsyncFileSystem:
         from ._compat_async import call
 
         return await call(self._sync.set_file_permissions, path, mode, owner, group, request_timeout)
+
+    async def download_file_stream(self, remote_path, timeout=1800, on_progress=None, cancel_event=None):
+        from ._daytona_streams import async_download
+
+        check_timeout(timeout, 1800)
+        return async_download(self._sync, remote_path, on_progress, cancel_event)
+
+    async def upload_file_stream(self, source, remote_path, timeout=1800, on_progress=None, cancel_event=None):
+        from ._daytona_streams import async_upload
+
+        check_timeout(timeout, 1800)
+        await async_upload(self._sync, source, remote_path, on_progress, cancel_event)
 
     async def upload_file(self, src: str | bytes, dst: str, timeout: int = 1800) -> None:
         from ._compat_async import call

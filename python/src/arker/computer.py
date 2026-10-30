@@ -1093,6 +1093,27 @@ class VM:
         signed.raise_for_status()
         return signed.content
 
+    def _sync_read_chunks(self, path: str, chunk_size: int = 64 * 1024):
+        request = SyncReadOperationRequest(op="read", path=path)
+        payload = self._client._request(
+            "POST",
+            f"{_vm_path(self.id)}/sync",
+            request,
+            base_url=self.base_url,
+            retry_network_failures=True,
+        )
+        response = _decode_value(SyncReadResponse, payload)
+        if isinstance(response, SyncReadInlineResponse):
+            data = _decode_bytes(response.content, response.encoding)
+            for offset in range(0, len(data), chunk_size):
+                yield data[offset : offset + chunk_size]
+        elif isinstance(response, SyncReadPresignedResponse):
+            with _http_client.stream("GET", response.presigned_url, timeout=300) as transfer:
+                transfer.raise_for_status()
+                yield from transfer.iter_bytes(chunk_size=chunk_size)
+        else:
+            raise ArkerError("internal", "unrecognized sync read response", 200)
+
     def _sync_write_inline(self, path: str, data: bytes) -> None:
         self._sync_write_chunks(path, len(data), lambda start, length: data[start : start + length])
 

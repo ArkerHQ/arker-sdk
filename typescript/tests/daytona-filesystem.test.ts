@@ -4,6 +4,8 @@ import { mkdtempSync, chmodSync, statSync, readFileSync, writeFileSync, symlinkS
 import { tmpdir, userInfo } from "node:os";
 import { join, dirname } from "node:path";
 import { test } from "node:test";
+import { Readable } from "node:stream";
+import { finished } from "node:stream/promises";
 import { DaytonaBadRequestError, DaytonaForbiddenError, DaytonaNotFoundError } from "@daytona/sdk";
 import { Sandbox } from "../src/daytona.js";
 
@@ -29,7 +31,19 @@ function guest() {
         return { stdout: "", stderr: String(error.stderr), exitCode: error.status ?? 1 };
       }
     },
-    getInstance: () => ({ sync: async (path: string, data?: Uint8Array) => {
+    getInstance: () => ({
+      async *_syncReadChunks(path: string) {
+        stages.push(path);
+        const bytes = readFileSync(path);
+        for (let offset = 0; offset < bytes.length; offset += 65536) yield bytes.subarray(offset, offset + 65536);
+      },
+      async _syncWriteChunks(path: string, size: number, read: (offset: number, length: number) => Promise<Uint8Array>) {
+        stages.push(path);
+        const chunks: Uint8Array[] = [];
+        for (let offset = 0; offset < size; offset += 65536) chunks.push(await read(offset, Math.min(65536, size - offset)));
+        writeFileSync(path, Buffer.concat(chunks));
+      },
+      sync: async (path: string, data?: Uint8Array) => {
       stages.push(path);
       assert.equal(statSync(dirname(path)).mode & 0o777, 0o700);
       assert.ok(statSync(path).isFile());
@@ -96,7 +110,7 @@ test("Daytona guest identity prevents symlink privilege escalation and rejects F
     await assert.rejects(fs.uploadFile(Buffer.from("bad"), "fifo"), DaytonaBadRequestError);
     await assert.rejects(fs.downloadFile("owned", 0), /timeouts are not supported/);
     await assert.rejects(fs.listFiles(".", { depth: 0 }), /depth/);
-    assert.throws(() => (fs as any).downloadFileStream("owned"), /not supported/);
+    await assert.rejects(fs.downloadFileStream("owned", 0), /timeouts are not supported/);
   } finally { g.close(); }
 });
 
@@ -186,4 +200,39 @@ test("Daytona home lookup preserves native routing and rejects failed guest comm
     runCommand: async () => ({ stdout: "", stderr: "", exitCode: 1 }),
   }]) as Sandbox;
   await assert.rejects(failed.getUserHomeDir(), /Failed to get user home directory/);
+});
+
+
+test("Daytona streams preserve binary data, progress and unknown-length input", async () => {
+  const g = guest();
+  try {
+    const bytes = Buffer.from(Array.from({ length: 200003 }, (_, i) => i % 256));
+    const sent: number[] = [];
+    await g.sandbox.fs.uploadFileStream(Readable.from([bytes.subarray(0, 17), bytes.subarray(17)]), "streamed", {
+      onProgress: progress => sent.push(progress.bytesSent),
+    });
+    const received: number[] = [];
+    const stream = await g.sandbox.fs.downloadFileStream("streamed", { onProgress: progress => received.push(progress.bytesReceived) });
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    assert.deepEqual(Buffer.concat(chunks), bytes);
+    assert.equal(sent.at(-1), bytes.length);
+    assert.equal(received.at(-1), bytes.length);
+  } finally { g.close(); }
+});
+
+test("Daytona download destroys unconsumed streams and cleans staging", async () => {
+  const g = guest();
+  try {
+    await g.sandbox.fs.uploadFile(Buffer.from("content"), "streamed");
+    const stream = await g.sandbox.fs.downloadFileStream("streamed");
+    const completion = finished(stream);
+    stream.destroy();
+    await assert.rejects(completion, { code: "ERR_STREAM_PREMATURE_CLOSE" });
+    const controller = new AbortController();
+    const cancelled = await g.sandbox.fs.downloadFileStream("streamed", { signal: controller.signal });
+    const cancellation = finished(cancelled);
+    controller.abort();
+    await assert.rejects(cancellation, /Download cancelled/);
+  } finally { g.close(); }
 });
