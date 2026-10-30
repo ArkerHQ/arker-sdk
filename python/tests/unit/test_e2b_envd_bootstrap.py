@@ -41,7 +41,7 @@ def guest(tmp_path, monkeypatch):
             state.closed = True
             events.append("block")
 
-        def release_external(self):
+        def release_external(self, *, if_present=False):
             state.closed = False
             events.append("release")
             if state.release_fails:
@@ -527,3 +527,67 @@ def test_traffic_token_is_private_stable_and_not_inherited_by_child(guest):
     assert helper.load(Path(first["state_path"]))["traffic_access_token"] == token
     public_child = guest.ensure(vm="public-child")
     assert "traffic_access_token" not in helper.load(Path(public_child["state_path"]))
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_lifetime_bootstrap_keeps_existing_descriptor_blocked_until_monitor_publish(guest, existing):
+    if existing:
+        guest.ensure()
+        assert not guest.state.closed
+    guest.ensure(retain_activity=True)
+    assert guest.state.closed
+    assert guest.events[-1] != "release"
+
+
+@pytest.mark.parametrize("failure", ["admission", "terminal", "dead-monitor"])
+def test_failed_lifetime_admission_cannot_reopen_existing_client_ingress(guest, monkeypatch, failure):
+    from arker import _compat_e2b_bootstrap as bootstrap
+    from arker._compat_e2b_lifetime import retain_envd
+
+    guest.ensure()  # An existing descriptor and token may already be in use.
+    guest.ensure(retain_activity=True)
+    assert guest.state.closed
+    current = helper.lifetime(json.dumps({"vm_id": "vm-a", "session_id": "owned"}))
+    helper.save(helper.vm_directory("vm-a") / "monitor.json", {"lifetime": current, "process": {"pid": 777}})
+    monkeypatch.setattr(helper, "same_process", lambda record: record["pid"] != 777)
+
+    def invoke(vm, operation, argument):
+        return helper.lifetime(argument) if operation == "lifetime" else helper.publish(argument)
+
+    monkeypatch.setattr(bootstrap, "guest_json", invoke)
+
+    def run(*args, **kwargs):
+        if failure == "admission":
+            raise RuntimeError("admission refused")
+        return SimpleNamespace(type="background", run_id="held")
+
+    vm = SimpleNamespace(
+        id="vm-a",
+        run=run,
+        get_run=lambda _: SimpleNamespace(
+            vm_id="vm-a",
+            session_id="owned",
+            state="completed" if failure == "terminal" else "running",
+            stdout=json.dumps({"ready": True, "lifetime": current}) + "\n",
+        ),
+    )
+    with pytest.raises((RuntimeError, helper.BootstrapError)):
+        retain_envd(vm)
+    assert guest.state.closed
+
+
+def test_lifetime_publish_revalidates_identity_then_opens_ingress(guest):
+    guest.ensure(retain_activity=True)
+    current = helper.lifetime(json.dumps({"vm_id": "vm-a", "session_id": "owned"}))
+    helper.save(helper.vm_directory("vm-a") / "monitor.json", {"lifetime": current, "process": {"pid": 777}})
+    inc = current["incarnation"]
+    argument = json.dumps([inc["vm_id"], inc["pid"], inc["start"], inc["boot_id"], current["session_id"]])
+    assert guest.state.closed
+    assert helper.publish(argument) == {"ready": True}
+    assert not guest.state.closed
+    assert helper.publish(argument) == {"ready": True}
+    active = helper.load(guest.root / "active.json")
+    helper.save(guest.root / "active.json", {**active, "start": "replaced"})
+    with pytest.raises(helper.BootstrapError, match="lifetime_identity_mismatch"):
+        helper.publish(argument)
+    assert guest.state.closed

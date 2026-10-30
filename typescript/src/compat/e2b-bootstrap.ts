@@ -6,10 +6,11 @@ import type { VM } from "../index.js";
 import type { EnvdDescriptor } from "./e2b-data-plane.js";
 import { stageEnvdArtifact } from "./e2b-artifact.js";
 import { createdTrafficToken, rememberTrafficToken } from "./e2b-network.js";
+import { retainEnvd } from "./e2b-lifetime.js";
 import { guestScript, manifest } from "./e2b-envd-guest.generated.js";
 
-const scriptPath = "/root/.arker-envd-bootstrap.py";
-const quote = (value: string) => `'${value.replace(/'/g, `'"'"'`)}'`;
+export const scriptPath = "/root/.arker-envd-bootstrap.py";
+export const quote = (value: string) => `'${value.replace(/'/g, `'"'"'`)}'`;
 export interface EnvdReadiness {
   readonly ready: true; readonly reused: boolean; readonly port: number;
   readonly state_path: string; readonly version: string; readonly arch: "amd64" | "arm64";
@@ -18,7 +19,7 @@ interface Prepared {
   root_path: string; request_directory: string; state_path: string;
   existing_state_path: string | null; arch: "amd64" | "arm64";
 }
-async function guestJson(vm: VM, operation: "prepare" | "verify" | "ensure", argument: string) {
+export async function guestJson(vm: VM, operation: "prepare" | "verify" | "ensure" | "lifetime" | "publish", argument: string) {
   const result = await vm.run(`python3 ${quote(scriptPath)} ${operation} ${quote(argument)}`,
     { timeout: 120, end_after_all_subprocesses: false });
   if (result.exitCode !== 0) throw new Error("Guest bootstrap failed; no descriptor was produced");
@@ -75,9 +76,10 @@ Promise<readonly [EnvdDescriptor, EnvdReadiness]> {
   const candidate = verified.verified ? null : await stageEnvdArtifact(vm, root, manifest.artifacts[prepared.arch],
     options.cacheDirectory ?? join(homedir(), ".cache", "arker", "envd"));
   const request = `${prepared.request_directory}/${randomUUID()}.json`;
-  await vm.sync(request, JSON.stringify({ vm_id: vm.id, token, traffic_access_token: appToken, artifact_path: candidate, offline: true, ...(options.envs !== undefined ? { envs: options.envs } : {}) }), { isSecret: true });
+  await vm.sync(request, JSON.stringify({ vm_id: vm.id, token, traffic_access_token: appToken, artifact_path: candidate, offline: true, retain_activity: true, ...(options.envs !== undefined ? { envs: options.envs } : {}) }), { isSecret: true });
   const ready: EnvdReadiness = await guestJson(vm, "ensure", request);
   if (ready.ready !== true || ready.port !== 49983 || ready.version !== manifest.version) throw new Error("Guest bootstrap did not establish readiness");
+  await retainEnvd(vm);
   rememberTrafficToken(vm, appToken);
   const current = await vm.refresh();
   if (!current.hostname?.includes(".")) throw new Error("Missing VM endpoint");

@@ -17,7 +17,9 @@ for (const existing of [false, true]) test(`bootstrap secret request and existin
   const entry = manifest.artifacts.amd64 as { sha256: string };
   const original = entry.sha256; entry.sha256 = sha;
   const writes: any[] = [];
+  const lifetime = {incarnation: {vm_id: "vm-a", pid: 10, start: "20", boot_id: "boot"}, session_id: "hold"};
   const vm = {
+    getRun: async () => ({state:"running", vm_id:"vm-a", session_id:"hold", stdoutBytes: Buffer.from(JSON.stringify({ready:true,lifetime})+"\n")}),
     id: "vm-a", refresh: async () => ({ hostname: "vm-a.example.com" }),
     sync: async (path: string, data?: any, options?: any) => {
       if (data === undefined) return Buffer.from(JSON.stringify({ vm_id: "vm-a", token, traffic_access_token: "b".repeat(43) }));
@@ -26,6 +28,12 @@ for (const existing of [false, true]) test(`bootstrap secret request and existin
     run: async (command: string, options?: any) => {
       assert.ok(!command.includes(token));
       assert.ok(!command.includes("synthetic-value"));
+      if (command.includes(" publish ")) return {exitCode:0, stdout:JSON.stringify({ready:true})};
+      if (command.includes(" lifetime ")) return {exitCode:0, stdout:JSON.stringify(lifetime)};
+      if (command.includes(" monitor ")) {
+        assert.equal(options.timeout, 0); assert.equal(options.session_id, "hold");
+        return {type:"background", runId:"held"};
+      }
       if (command.includes(" prepare ")) return { exitCode: 0, stdout: JSON.stringify({
         root_path: root, request_directory: root + "/requests", state_path: root + "/state.json",
         existing_state_path: existing ? root + "/state.json" : null, arch: "amd64",
@@ -51,6 +59,7 @@ for (const existing of [false, true]) test(`bootstrap secret request and existin
     assert.equal(Object.hasOwn(request, "envs"), envs !== undefined);
     if (envs !== undefined) assert.deepEqual(request.envs, envs);
     assert.equal(request.offline, true);
+    assert.equal(request.retain_activity, true);
     if (verified) {
       assert.equal(request.artifact_path, null);
       assert.ok(writes.every(write => !write.path.includes("/.candidate-")));

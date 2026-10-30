@@ -40,6 +40,13 @@ must pass with fresh evidence before claiming parity.
   creation. Local clients are closed even when the originating event loop shuts
   down; cancellation also prevents a later busy-response retry. Fresh live
   comparisons of this implementation remain required.
+- E2B on Arker retains a dedicated run for the verified native daemon lifetime.
+  This intentionally keeps even an idle sandbox active and incurring compute
+  charges; client disconnect does not release it. Reconnect reuses the same
+  VM-bound run. Explicit pause and lifetime deletion remain the stopping
+  mechanisms, and their interaction with this hold still requires live
+  qualification across full-memory and filesystem resume. Local pidfd tests
+  do not establish those guest lifecycle guarantees.
 - E2B sandbox expiry, request timeouts, cancellation, streamed reads, process
   enumeration and native error identities have unverified or unsupported cases.
 - Daytona custom users, image working-directory/shell selection, streaming,

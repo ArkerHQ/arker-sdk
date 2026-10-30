@@ -14,6 +14,10 @@ ROOT = "/root/.arker/e2b-envd"
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("envs", [None, {}, {"CUSTOM": "private-value"}])
 def test_bootstrap_uses_secret_sync_and_recovers_existing_token(monkeypatch, tmp_path, existing, envs):
+    from arker import _compat_e2b_lifetime
+
+    retained = []
+    monkeypatch.setattr(_compat_e2b_lifetime, "retain_envd", lambda vm: retained.append(vm.id))
     writes, commands = [], []
     prepared = {
         "root_path": ROOT,
@@ -62,10 +66,12 @@ def test_bootstrap_uses_secret_sync_and_recovers_existing_token(monkeypatch, tmp
     assert descriptor.endpoint == "https://vm-a-49983.example.com"
     assert descriptor.envd_access_token == TOKEN and TOKEN not in repr(descriptor)
     assert result == ready
+    assert retained == [vm.id]
     request = json.loads(writes[-1][1])
     assert request["traffic_access_token"] == ("b" * 43 if existing else None)
     assert request["token"] == TOKEN
     assert request["offline"] is True
+    assert request["retain_activity"] is True
     if existing:
         assert request["artifact_path"] is None
     else:

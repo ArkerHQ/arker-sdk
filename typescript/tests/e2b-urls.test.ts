@@ -113,6 +113,7 @@ test("read-only delegation and finite parent lifetime constrain local URLs", asy
 function facadeVM(failDelegation = false) {
   const calls: string[] = [];
   const root = "/root/.arker/e2b-envd";
+  const lifetime = { incarnation: { vm_id: "owned", pid: 10, start: "20", boot_id: "boot" }, session_id: "hold" };
   const vm: any = {
     id: "owned", baseUrl: "https://api.example.test",
     _client: {
@@ -126,7 +127,31 @@ function facadeVM(failDelegation = false) {
     },
     refresh: async () => ({ hostname: "owned.example.test" }),
     sync: async (_path: string, data?: unknown) => data === undefined ? Buffer.from(JSON.stringify({ vm_id: "owned", token: "a".repeat(43) })) : undefined,
-    run: async (command: string) => {
+    getRun: async (runId: string) => {
+      assert.equal(runId, "monitor-run");
+      calls.push("ready");
+      return { state: "running", vm_id: "owned", session_id: "hold",
+        stdoutBytes: Buffer.from(JSON.stringify({ ready: true, lifetime }) + "\n") };
+    },
+    run: async (command: string, options?: any) => {
+      if (command.includes(" lifetime ")) {
+        calls.push("inspect");
+        return { exitCode: 0, stdout: JSON.stringify(lifetime) };
+      }
+      if (command.includes(" monitor ")) {
+        assert.deepEqual(options, {
+          session_id: "hold", timeout: 0, time_to_background: 0,
+          end_after_all_subprocesses: false, idempotencyKey: options.idempotencyKey,
+        });
+        assert.match(options.idempotencyKey, /^[a-f0-9]{64}$/);
+        calls.push("admit");
+        return { type: "background", runId: "monitor-run" };
+      }
+      if (command.includes(" publish ")) {
+        assert.deepEqual(calls, ["inspect", "admit", "ready"]);
+        calls.push("publish");
+        return { exitCode: 0, stdout: JSON.stringify({ ready: true }) };
+      }
       if (command.includes(" prepare ")) return { exitCode: 0, stdout: JSON.stringify({ root_path: root, request_directory: root + "/requests", state_path: root + "/state.json", existing_state_path: root + "/state.json", arch: "amd64" }) };
       if (command.includes(" verify ")) return { exitCode: 0, stdout: JSON.stringify({ verified: true, arch: "amd64" }) };
       if (command.includes(" ensure ")) return { exitCode: 0, stdout: JSON.stringify({ ready: true, port: 49983, version: "0.10.2" }) };
@@ -146,11 +171,11 @@ test("facade preparation retains local URL authority and failure cleans up owned
     const sandbox = new (Sandbox as any)(box, undefined, undefined, plane);
     verifyURL(await sandbox.downloadUrl("~/file"));
     verifyURL(await sandbox.uploadUrl());
-    assert.deepEqual(calls, ["delegate"]);
+    assert.deepEqual(calls, ["inspect", "admit", "ready", "publish", "delegate"]);
   } finally { plane.close(); }
   const failed = facadeVM(true);
   await assert.rejects((Sandbox as any).wrap(failed.box, { deleteOnValidationFailure: true }), /delegation unavailable/);
-  assert.deepEqual(failed.calls, ["delegate", "delete"]);
+  assert.deepEqual(failed.calls, ["inspect", "admit", "ready", "publish", "delegate", "delete"]);
 });
 
 test("shared wire vector matches Rust verifier fixture", async () => {

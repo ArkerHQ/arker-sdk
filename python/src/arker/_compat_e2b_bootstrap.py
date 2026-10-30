@@ -136,6 +136,7 @@ def bootstrap_envd(vm, *, token=None, envs=None, cache_directory=CACHE):
                 "traffic_access_token": app_token,
                 "artifact_path": candidate,
                 "offline": True,
+                "retain_activity": True,
                 **({"envs": envs} if envs is not None else {}),
             }
         ).encode(),
@@ -143,6 +144,9 @@ def bootstrap_envd(vm, *, token=None, envs=None, cache_directory=CACHE):
     ready = guest_json(vm, "ensure", request)
     if ready.get("ready") is not True or ready.get("port") != 49983 or ready.get("version") != envd_version():
         raise RuntimeError("Guest bootstrap did not establish readiness")
+    from ._compat_e2b_lifetime import retain_envd
+
+    retain_envd(vm)
     remember_traffic_token(vm, app_token)
     current = vm.refresh()
     first, rest = current.hostname.split(".", 1)

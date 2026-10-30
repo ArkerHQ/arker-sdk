@@ -31,6 +31,7 @@ import os
 import platform
 import pwd
 import re
+import select
 import shlex
 import stat
 import subprocess
@@ -196,8 +197,14 @@ class Isolation:
                     if rules[index] == rules[0] and run([tool, "-w", "2", "-D", rule[0], str(index + 1)]).returncode:
                         raise BootstrapError("isolation_unavailable")
 
-    def release_external(self):
+    def release_external(self, *, if_present=False):
         for tool in ("iptables", "ip6tables"):
+            if if_present:
+                present = run([tool, "-w", "2", "-C", *self.external]).returncode
+                if present == 1:
+                    continue
+                if present != 0:
+                    raise BootstrapError("isolation_release_failed")
             if run([tool, "-w", "2", "-D", *self.external]).returncode:
                 raise BootstrapError("isolation_release_failed")
         # Non-root local access stays blocked, including across a memory fork.
@@ -495,7 +502,8 @@ def start(config, state_path):
                             raise BootstrapError("environment_setup_failed")
                     save(state_path, saved)
                     save(active_path, {**active, "vm_id": vm_id})
-                    isolation.release_external()
+                    if config.get("retain_activity") is not True:
+                        isolation.release_external()
                     ready = True
                     return {
                         "ready": True,
@@ -544,7 +552,8 @@ def start(config, state_path):
         status, _ = request("/init", body=initialization, record=record)
         if status != 204 or not authenticated(token, marker, record):
             raise BootstrapError("authentication_setup_failed")
-        isolation.release_external()
+        if config.get("retain_activity") is not True:
+            isolation.release_external()
         ready = True
         return {
             "ready": True,
@@ -565,6 +574,102 @@ def start(config, state_path):
                     process.wait(timeout=5)
 
 
+def lifetime(argument):
+    """Select one dedicated host session for this VM's daemon incarnation."""
+    request = json.loads(argument)
+    vm_id = request["vm_id"]
+    directory = vm_directory(vm_id)
+    lock = private_open(ROOT / "lock", os.O_RDWR | os.O_CREAT)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        active = load(ROOT / "active.json")
+        if active["vm_id"] != vm_id or not same_process(active) or not owns_listener(active):
+            raise BootstrapError("daemon_identity_mismatch")
+        incarnation = {
+            "vm_id": vm_id,
+            "pid": active["pid"],
+            "start": active["start"],
+            "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+        }
+        expected = request.get("incarnation")
+        if expected is not None and expected != incarnation:
+            raise BootstrapError("daemon_identity_mismatch")
+        path = directory / "lifetime.json"
+        current = load(path) if path.exists() else None
+        if current is None or current["incarnation"] != incarnation:
+            current = {"incarnation": incarnation, "session_id": None}
+        candidate = request.get("session_id")
+        if candidate is not None:
+            if not isinstance(candidate, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", candidate):
+                raise BootstrapError("invalid_session")
+            if current["session_id"] is None:
+                current["session_id"] = candidate
+                save(path, current)
+        return current
+    finally:
+        os.close(lock)
+
+
+def monitor(argument):
+    """Hold a host run until the exact daemon exits; never signal the daemon."""
+    vm_id, pid, start_ticks, boot_id, session_id = json.loads(argument)
+    expected = {
+        "incarnation": {"vm_id": vm_id, "pid": pid, "start": start_ticks, "boot_id": boot_id},
+        "session_id": session_id,
+    }
+    current = lifetime(json.dumps({"vm_id": expected["incarnation"]["vm_id"]}))
+    if current != expected or current["session_id"] is None:
+        raise BootstrapError("lifetime_identity_mismatch")
+    descriptor = os.pidfd_open(current["incarnation"]["pid"])
+    try:
+        # Validate again after opening: PID reuse must not turn this into a hold
+        # on a different daemon. A pidfd remains bound across full-memory pause.
+        if lifetime(json.dumps({"vm_id": current["incarnation"]["vm_id"]})) != current:
+            raise BootstrapError("lifetime_identity_mismatch")
+        events = select.poll()
+        events.register(descriptor, select.POLLIN)
+        if events.poll(0):
+            raise BootstrapError("daemon_exited")
+        save(vm_directory(vm_id) / "monitor.json", {"lifetime": current, "process": fingerprint(os.getpid())})
+        print(json.dumps({"ready": True, "lifetime": current}), flush=True)
+        events.poll()
+    finally:
+        os.close(descriptor)
+
+
+def publish(argument):
+    """Open ingress only after the caller has verified the retained host run."""
+    vm_id, pid, start_ticks, boot_id, session_id = json.loads(argument)
+    expected = {
+        "incarnation": {"vm_id": vm_id, "pid": pid, "start": start_ticks, "boot_id": boot_id},
+        "session_id": session_id,
+    }
+    lock = private_open(ROOT / "lock", os.O_RDWR | os.O_CREAT)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        active = load(ROOT / "active.json")
+        held = load(vm_directory(vm_id) / "monitor.json")
+        if (
+            active["vm_id"] != vm_id
+            or active["pid"] != pid
+            or active["start"] != start_ticks
+            or Path("/proc/sys/kernel/random/boot_id").read_text().strip() != boot_id
+            or not same_process(active)
+            or not owns_listener(active)
+            or held["lifetime"] != expected
+            or not same_process(held["process"])
+            or load(vm_directory(vm_id) / "lifetime.json") != expected
+        ):
+            raise BootstrapError("lifetime_identity_mismatch")
+        Isolation().release_external(if_present=True)
+        return {"ready": True}
+    except Exception:
+        Isolation().block()
+        raise
+    finally:
+        os.close(lock)
+
+
 def main():
     try:
         if len(sys.argv) != 3:
@@ -573,6 +678,13 @@ def main():
             result = prepare(sys.argv[2])
         elif sys.argv[1] == "verify":
             result = verify(sys.argv[2])
+        elif sys.argv[1] == "lifetime":
+            result = lifetime(sys.argv[2])
+        elif sys.argv[1] == "publish":
+            result = publish(sys.argv[2])
+        elif sys.argv[1] == "monitor":
+            monitor(sys.argv[2])
+            return
         elif sys.argv[1] == "ensure":
             result = ensure(Path(sys.argv[2]))
         else:
