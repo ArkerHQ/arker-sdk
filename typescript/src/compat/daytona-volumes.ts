@@ -288,7 +288,9 @@ export class DaytonaVolumeService {
     if (mounts.length === 0) return;
     const vm = (box as UniversalSandbox & { getInstance(): unknown }).getInstance() as VM;
     try {
-      for (const mount of mounts) await vm.createMount(mount);
+      for (const { filesystemId, mountPath, subpath } of mounts) {
+        await vm.createMount({ filesystemId, path: mountPath, subpath });
+      }
       const result = await box.runCommand(daytonaGuestCommand({ operation: "exec", command: readyCommand(mounts.map((mount) => mount.mountPath)) }));
       if (result.exitCode !== 0) throw new Error("Daytona volume mounts did not become accessible to the guest user");
     } catch (error) {

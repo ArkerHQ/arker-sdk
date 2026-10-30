@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { Daytona as NativeDaytona, DaytonaAuthenticationError, DaytonaConflictError, DaytonaForbiddenError, DaytonaNotFoundError, DaytonaUnprocessableEntityError } from "@daytona/sdk";
 
-import { Arker, ArkerError } from "../src/index.js";
+import { Arker, ArkerError, VM } from "../src/index.js";
 import { Daytona } from "../src/daytona.js";
 import { DaytonaVolumeService } from "../src/compat/daytona-volumes.js";
 import { preserveEnvironment, preserveProperties } from "./provider-fixtures.js";
@@ -298,7 +298,7 @@ test("attachment waits as the Daytona guest and cleans up a failed new VM", asyn
     async destroy() { calls.push("destroy"); },
   };
   await assert.rejects(service.attach(box as never, [{ filesystemId: "dir_one", mountPath: "/mnt/shared" }]), /did not become accessible/);
-  assert.deepEqual(calls[0], { filesystemId: "dir_one", mountPath: "/mnt/shared" });
+  assert.deepEqual(calls[0], { filesystemId: "dir_one", path: "/mnt/shared", subpath: undefined });
   assert.match(calls[1] as string, /setpriv --reuid=daytona/);
   assert.match(calls[1] as string, /mountinfo/);
   assert.equal(calls[2], "destroy");
@@ -382,4 +382,29 @@ test("native create preserves vendor volume payloads and error identity", async 
     await shim[Symbol.asyncDispose]();
     await native[Symbol.asyncDispose]();
   }
+});
+
+
+test("attachment serializes the requested guest path and subpath", async () => {
+  const service = new DaytonaVolumeService({ apiKey: "arker-test" }, () => nativeService().service as never);
+  const client = new Arker({ apiKey: "arker-test" });
+  const requests: unknown[] = [];
+  client._request = async (method: string, path: string, body: unknown) => {
+    requests.push({ method, path, body });
+    return {} as never;
+  };
+  const vm = new VM(client, "vm-one", "https://unit.invalid/api");
+  const box = {
+    getInstance: () => vm,
+    async runCommand() { return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 }; },
+    async destroy() { assert.fail("successful attachment must not delete the sandbox"); },
+  };
+  await service.attach(box as never, [
+    { filesystemId: "dir_one", mountPath: "/mnt/shared" },
+    { filesystemId: "dir_two", mountPath: "/mnt/subtree", subpath: "nested" },
+  ]);
+  assert.deepEqual(requests, [
+    { method: "POST", path: "/v1/vms/vm-one/mounts", body: { filesystem_id: "dir_one", path: "/mnt/shared" } },
+    { method: "POST", path: "/v1/vms/vm-one/mounts", body: { filesystem_id: "dir_two", path: "/mnt/subtree", subpath: "nested" } },
+  ]);
 });
