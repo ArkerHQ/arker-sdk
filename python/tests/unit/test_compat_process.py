@@ -903,3 +903,27 @@ def test_resize_reports_worker_error_even_while_worker_identity_is_alive(process
     finally:
         os.kill(worker_pid, signal.SIGCONT)
         pool.shutdown(wait=True)
+
+
+@pytest.mark.parametrize("missing", ["pidfd_open", "pidfd_send_signal", "kernel"])
+def test_descendant_support_is_checked_before_process_launch(tmp_path, monkeypatch, missing):
+    import importlib.util
+    import os
+    import signal
+
+    source = Path(__file__).parents[2] / "src/arker/_guest_process.py"
+    spec = importlib.util.spec_from_file_location("guest_pidfd_preflight", source)
+    guest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guest)
+    monkeypatch.setattr(guest, "ROOT", tmp_path)
+    if missing == "kernel":
+
+        def unavailable(*args):
+            raise OSError("pidfd unavailable")
+
+        monkeypatch.setattr(os, "pidfd_open", unavailable)
+    else:
+        monkeypatch.delattr(os if missing == "pidfd_open" else signal, missing)
+    with pytest.raises(RuntimeError, match="Descendant supervision requires"):
+        guest.dispatch({"action": "exec", "preserveDescendants": True, "command": "touch forbidden"})
+    assert list(tmp_path.iterdir()) == []

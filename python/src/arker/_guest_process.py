@@ -336,6 +336,19 @@ def dispatch(request):
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     action = request["action"]
     if action == "exec":
+        if request.get("preserveDescendants"):
+            if not callable(getattr(os, "pidfd_open", None)) or not callable(
+                getattr(signal, "pidfd_send_signal", None)
+            ):
+                raise RuntimeError("Descendant supervision requires Python 3.9+ and Linux pidfd support")
+            try:
+                descriptor = os.pidfd_open(os.getpid())
+                try:
+                    signal.pidfd_send_signal(descriptor, 0)
+                finally:
+                    os.close(descriptor)
+            except OSError as error:
+                raise RuntimeError("Descendant supervision requires permitted Linux pidfd operations") from error
         if "tty" in request:
             terminal_size(request["tty"])
         if "ttyOutput" in request and (
