@@ -42,7 +42,7 @@ from jsonschema.exceptions import ValidationError as SchemaValidationError
 from pydantic import TypeAdapter, ValidationError
 
 from ._port import PortStream
-from ._request_timeout import has_transport_timeout, request_executor, transport_timeout
+from ._request_timeout import has_transport_timeout, request_executor, request_wait, transport_timeout
 from .generated.api_models import (
     ApiKeyScope,
     BackgroundRunResponse,
@@ -932,7 +932,7 @@ class VM:
         delay = RUN_POLL_INITIAL_S
         consecutive_failures = 0
         while True:
-            time.sleep(delay)
+            request_wait(delay)
             try:
                 run = self.get_run(run_id)
             except ArkerError as e:
@@ -1867,7 +1867,7 @@ def _request_json(
             if _can_retry_again(retry, attempt, deadline, delay) and (
                 (max_queueing_s and retry.attempts > 1) or attempt < retry.attempts - 1
             ):
-                time.sleep(delay)
+                request_wait(delay)
                 attempt += 1
                 continue
             raise ArkerError("unavailable", str(error), 0) from error
@@ -1882,7 +1882,7 @@ def _request_json(
             if _can_retry_again(retry, attempt, deadline, delay) and (
                 (max_queueing_s and retry.attempts > 1) or attempt < retry.attempts - 1
             ):
-                time.sleep(delay)
+                request_wait(delay)
                 attempt += 1
                 continue
 

@@ -16,7 +16,7 @@ from ._request_timeout import request_executor_scope, request_timeout_scope
 
 
 class _ResponseDeadline(httpx.ReadTimeout):
-    """An elapsed total response budget, distinct from transport phase timeouts."""
+    """An elapsed async logical-call budget, distinct from transport phase timeouts."""
 
 
 def normalized_timeout(value):
@@ -68,6 +68,7 @@ async def async_request_timeout(function, args, kwargs):
     parameters = inspect.signature(function).bind(*args, **kwargs).arguments
     seconds = normalized_timeout(parameters.get("request_timeout"))
     loop = asyncio.get_running_loop()
+    deadline = None if seconds is None else loop.time() + seconds
     pending = set()
     cancelled = False
 
@@ -80,12 +81,22 @@ async def async_request_timeout(function, args, kwargs):
 
     async with httpx.AsyncClient(http2=False, timeout=None) as client:
 
-        async def request(method, url, headers, data, timeout):
+        async def bounded(operation):
             if cancelled:
                 raise asyncio.CancelledError
+            remaining = None if deadline is None else deadline - loop.time()
+            if remaining is not None and remaining <= 0:
+                raise _ResponseDeadline("Logical API call timeout")
             task = asyncio.current_task()
             pending.add(task)
+            try:
+                return await asyncio.wait_for(operation(), remaining)
+            except asyncio.TimeoutError as cause:
+                raise _ResponseDeadline("Logical API call timeout") from cause
+            finally:
+                pending.discard(task)
 
+        async def request(method, url, headers, data, timeout):
             async def receive():
                 async with client.stream(method, url, headers=headers, content=data, timeout=None) as response:
                     try:
@@ -96,15 +107,14 @@ async def async_request_timeout(function, args, kwargs):
                         raise
                     return response.status_code, content
 
-            try:
-                return await asyncio.wait_for(receive(), seconds)
-            except asyncio.TimeoutError as cause:
-                raise _ResponseDeadline("HTTP response timeout") from cause
-            finally:
-                pending.discard(task)
+            return await bounded(receive)
+
+        def wait(delay):
+            return asyncio.run_coroutine_threadsafe(bounded(lambda: asyncio.sleep(delay)), loop).result()
 
         def execute(method, url, headers, data, timeout):
             return asyncio.run_coroutine_threadsafe(request(method, url, headers, data, timeout), loop).result()
 
+        execute.wait = wait
         with request_executor_scope(execute):
             yield Requests()

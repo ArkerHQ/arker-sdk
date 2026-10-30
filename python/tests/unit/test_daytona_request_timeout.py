@@ -10,7 +10,7 @@ import pytest
 from arker import computer
 from arker._compat_daytona_async import _AsyncProcess
 from arker._daytona_request import normalized_timeout, request_timeout
-from arker._request_timeout import request_executor, transport_timeout, without_request_timeout
+from arker._request_timeout import request_executor, request_wait, transport_timeout, without_request_timeout
 
 
 @pytest.fixture
@@ -132,17 +132,24 @@ def test_accepted_session_is_not_killed_on_response_timeout(monkeypatch, lost_st
     assert killed == []
 
 
-def test_async_timeout_restarts_for_each_http_response(drip_server):
-    # Each response completes below two seconds; together they exceed that duration.
+def test_async_nested_process_calls_share_one_deadline(drip_server):
+    errors = pytest.importorskip("daytona.common.errors")
+    expected = errors.DaytonaConnectionTimeoutError if asyncio.TimeoutError is TimeoutError else errors.DaytonaError
+    completed = []
+
     @request_timeout
     def get_session(identifier, request_timeout=None):
-        return [computer._http("GET", drip_server, {}, None)[1] for _ in range(2)]
+        for _ in range(2):
+            completed.append(process(drip_server).get_session(identifier, request_timeout=request_timeout))
 
     async def run():
-        assert await _AsyncProcess(SimpleNamespace(get_session=get_session)).get_session("s", request_timeout=2) == [
-            b"done",
-            b"done",
-        ]
+        started = time.monotonic()
+        with pytest.raises(expected) as caught:
+            await _AsyncProcess(SimpleNamespace(get_session=get_session)).get_session("s", request_timeout=2)
+        assert type(caught.value) is expected
+        assert 1.9 <= time.monotonic() - started < 2.3
+        assert completed == [b"done"]
+        assert request_executor() is None
 
     asyncio.run(run())
 
@@ -154,6 +161,31 @@ def test_async_cancellation_closes_inflight_http_before_draining_thread(drip_ser
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(task, 0.5)
+        assert request_executor() is None
+
+    asyncio.run(run())
+
+
+def test_cleanup_after_logical_deadline_uses_independent_transport(drip_server):
+    errors = pytest.importorskip("daytona.common.errors")
+    expected = errors.DaytonaConnectionTimeoutError if asyncio.TimeoutError is TimeoutError else errors.DaytonaError
+    cleaned = []
+
+    @request_timeout
+    def get_session(identifier, request_timeout=None):
+        try:
+            request_wait(2)
+        except httpx.TimeoutException:
+            with without_request_timeout():
+                assert request_executor() is None
+                cleaned.append(computer._http("GET", drip_server, {}, None)[1])
+            raise
+
+    async def run():
+        with pytest.raises(expected) as caught:
+            await _AsyncProcess(SimpleNamespace(get_session=get_session)).get_session("s", request_timeout=1)
+        assert type(caught.value) is expected
+        assert cleaned == [b"done"]
         assert request_executor() is None
 
     asyncio.run(run())

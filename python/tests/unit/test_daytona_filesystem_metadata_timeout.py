@@ -221,13 +221,35 @@ def test_async_cancellation_drains_http_worker(endpoint):
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("native", [True, False])
+@pytest.mark.parametrize("delay", [0.35, 0.65])
+def test_async_logical_call_has_one_native_total_budget(endpoint, native, delay):
+    # Import before timing so module loading is not part of the HTTP oracle.
+    import daytona_toolbox_api_client_async  # noqa: F401
+    from daytona._async.filesystem import AsyncFileSystem as NativeFileSystem  # noqa: F401
+
+    url, calls, settings, _ = endpoint
+    settings.update(parts=2, delay=1.3 if native else delay)
+    if not native:
+        settings["poll"] = True
+    expected = DaytonaError if asyncio.TimeoutError is not TimeoutError else DaytonaConnectionTimeoutError
+    started = time.monotonic()
+    with pytest.raises(expected) as caught:
+        asyncio.run(async_info(url, native, 1))
+    elapsed = time.monotonic() - started
+    assert type(caught.value) is expected
+    assert 0.9 <= elapsed < 1.45
+    expected_calls = ["GET"] if native else ["POST", "GET"] if delay == 0.35 else ["POST"]
+    assert [method for method, _, _ in calls] == expected_calls
+
+
 @pytest.mark.parametrize("asynchronous", [True, False])
-def test_each_http_response_has_its_own_budget(endpoint, asynchronous):
+def test_sync_response_budgets_and_disabled_async_deadline_allow_compound_call(endpoint, asynchronous):
     url, calls, settings, _ = endpoint
     settings.update(poll=True, parts=2, delay=0.65)
     started = time.monotonic()
     if asynchronous:
-        result = asyncio.run(async_info(url, False, 1))
+        result = asyncio.run(async_info(url, False, 0))
     else:
         with sync_fs(url, False) as fs:
             result = fs.get_file_info("file", request_timeout=1)
@@ -257,7 +279,10 @@ def test_mutation_timeout_does_not_replay_or_kill_guest(endpoint, asynchronous):
 
 
 @pytest.mark.parametrize("lost_start_ack", [False, True])
-def test_async_accepted_creation_total_timeout_keeps_identity_without_killing(endpoint, monkeypatch, lost_start_ack):
+@pytest.mark.parametrize("compound", [False, True])
+def test_async_accepted_creation_total_timeout_keeps_identity_without_killing(
+    endpoint, monkeypatch, lost_start_ack, compound
+):
     from types import SimpleNamespace
 
     from arker import _daytona_sessions as sessions
@@ -266,7 +291,7 @@ def test_async_accepted_creation_total_timeout_keeps_identity_without_killing(en
     from arker._daytona_request import is_response_timeout, request_timeout
 
     url, calls, settings, _ = endpoint
-    settings["stall"] = True
+    settings.update(stall=not compound, parts=2, delay=0.65)
     killed = []
     owner = sessions.SessionProcess()
     owner._vm = object()
@@ -277,12 +302,18 @@ def test_async_accepted_creation_total_timeout_keeps_identity_without_killing(en
         return computer._http("POST", url, {}, b"{}")
 
     def start(options):
-        if lost_start_ack:
-            return computer._http("POST", url, {}, b"{}")
+        if compound or lost_start_ack:
+            computer._http("POST", url, {}, b"{}")
         return SimpleNamespace(name=options["name"])
 
     owner.get_session = get_session
-    monkeypatch.setattr(sessions, "run_command", lambda *args: SimpleNamespace(stdout='["/home/daytona",1000]'))
+
+    def preflight(*args):
+        if compound and lost_start_ack:
+            computer._http("POST", url, {}, b"{}")
+        return SimpleNamespace(stdout='["/home/daytona",1000]')
+
+    monkeypatch.setattr(sessions, "run_command", preflight)
     monkeypatch.setattr(
         sessions,
         "GuestProcesses",
@@ -300,5 +331,5 @@ def test_async_accepted_creation_total_timeout_keeps_identity_without_killing(en
     assert not is_response_timeout(DaytonaError("unrelated failure"))
     assert caught.value.session_id == "owned"
     assert caught.value.process_id.startswith("daytona-session:")
-    assert len(calls) == 1
+    assert len(calls) == (2 if compound else 1)
     assert killed == []

@@ -19,7 +19,7 @@ from ._compat import import_optional, run_command
 from ._compat_process import GuestProcesses
 from ._daytona_request import is_response_timeout
 from ._daytona_request import request_timeout as response_timeout
-from ._request_timeout import without_request_timeout
+from ._request_timeout import request_wait, without_request_timeout
 from .computer import CompletedRunResult
 
 _PREFIX = "daytona-session:"
@@ -116,7 +116,7 @@ class SessionProcess:
                     current = manager.get(started.name)
                     if current.status != "running" or time.monotonic() >= deadline:
                         raise
-                    time.sleep(0.02)
+                    request_wait(0.02)
         except BaseException as primary:
             primary.session_id = session_id
             primary.process_id = started.name
@@ -166,7 +166,7 @@ class SessionProcess:
         while command["exit_code"] is None:
             if deadline is not None and time.monotonic() >= deadline:
                 raise TimeoutError("Timed out waiting for session command; command continues running")
-            time.sleep(0.02)
+            request_wait(0.02)
             command = self._session_call("command", session_id=session_id, command_id=command["id"])
         logs = self.get_session_command_logs(session_id, command["id"])
         return model(
@@ -241,7 +241,7 @@ class SessionProcess:
             )
             offset += response["written"]
             if response["written"] == 0:
-                time.sleep(0.02)
+                request_wait(0.02)
 
     @response_timeout
     def delete_session(self, session_id, request_timeout=None):

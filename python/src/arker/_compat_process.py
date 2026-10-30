@@ -12,6 +12,7 @@ from importlib.resources import files
 from typing import Any
 
 from ._compat import CommandResult
+from ._request_timeout import request_wait
 from .computer import REQUEST_TIMEOUT_S, VM, CompletedRunResult
 
 
@@ -110,7 +111,7 @@ class GuestProcesses:
                     raise RuntimeError(current.stderr or "Guest process supervisor stopped before reporting readiness")
                 if time.monotonic() >= deadline:
                     raise TimeoutError("Guest process supervisor did not report readiness")
-                time.sleep(0.02)
+                request_wait(0.02)
         else:
             with self._control_lock:
                 if self._control_session is None:
@@ -173,7 +174,7 @@ class GuestProcesses:
                 return current
             if deadline is not None and time.monotonic() >= deadline:
                 raise TimeoutError(f"Timed out waiting for process {identifier}")
-            time.sleep(
+            request_wait(
                 interval / 1000 if deadline is None else min(interval / 1000, max(0, deadline - time.monotonic()))
             )
 

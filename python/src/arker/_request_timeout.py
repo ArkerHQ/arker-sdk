@@ -1,5 +1,6 @@
 """Context-local HTTP phase timeouts, independent of operation deadlines."""
 
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -52,3 +53,12 @@ def request_executor_scope(executor):
         yield
     finally:
         _executor.reset(token)
+
+
+def request_wait(seconds):
+    """Wait between requests within an async logical deadline when one is active."""
+    wait = getattr(request_executor(), "wait", None)
+    if wait is None:
+        time.sleep(seconds)
+    else:
+        wait(seconds)
