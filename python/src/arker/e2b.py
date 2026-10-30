@@ -22,6 +22,8 @@ from ._compat import (
     run_command,
 )
 from ._compat_e2b_async import AsyncSandbox as AsyncSandbox
+from ._compat_e2b_create import creation_key, intent_hash, outbound_guard
+from ._compat_e2b_create import network_options as e2b_network_options
 from ._compat_e2b_lifecycle import Lifecycle, _control, _options, _timeout, configure_transport, transport_timeout
 from ._compat_e2b_mounts import (
     AsyncVolume as AsyncVolume,
@@ -154,6 +156,7 @@ class Sandbox(UnsupportedMixin):
         allow_internet_access = kwargs.pop("allow_internet_access", kwargs.pop("allowInternetAccess", None))
         arker_config = pop_arker_config(kwargs)
         native = cls._native_sandbox()
+        key = creation_key(kwargs.get("idempotency_key"))
 
         def create_native() -> Any:
             check_mount_backend(kwargs.get("volume_mounts"), "e2b")
@@ -181,6 +184,7 @@ class Sandbox(UnsupportedMixin):
                 ),
                 "e2b": create_native,
             },
+            creation_key=key,
         )
         if provider == "arker":
             sandbox = None
@@ -204,7 +208,8 @@ class Sandbox(UnsupportedMixin):
                         if sandbox is not None and sandbox._data_plane is not None:
                             sandbox._data_plane.close()
                     finally:
-                        result.delete()
+                        if key is None:
+                            result.delete()
                 except BaseException as cleanup_error:
                     raise RuntimeError(f"Sandbox creation and cleanup failed for VM {result.id}") from cleanup_error
                 raise
@@ -225,6 +230,7 @@ class Sandbox(UnsupportedMixin):
             if key
             not in {
                 "volume_mounts",
+                "idempotency_key",
                 "network",
                 "envs",
                 "metadata",
@@ -270,16 +276,19 @@ class Sandbox(UnsupportedMixin):
         configured_rules = (arker_config.get("policies") or {}).get("rules", {})
         if _E2B_LIFETIME_POLICY_ID in configured_rules:
             raise ValueError(f"policy id {_E2B_LIFETIME_POLICY_ID!r} is reserved for the E2B sandbox lifetime")
-        network_options = native_options.get("network") or {}
-        if not isinstance(network_options, dict) or set(network_options) - {"allow_public_traffic"}:
-            raise UnsupportedCompatibilityOption("Arker E2B network supports only allow_public_traffic")
+        network_options, outbound = e2b_network_options(native_options.get("network"))
+        native_options = {**native_options, "network": network_options}
         public = network_options.get("allow_public_traffic", True)
         if not isinstance(public, bool):
             raise TypeError("network.allow_public_traffic must be a boolean")
+        key = creation_key(native_options.get("idempotency_key"))
         network = compat_network_policies(block_all=allow_internet_access is False)
+        if key is not None and network:
+            network = outbound_guard(next(iter(network["rules"].values())))
         policies = {
             "rules": {
                 **((network or {}).get("rules", {})),
+                **((outbound or {}).get("rules", {})),
                 _E2B_LIFETIME_POLICY_ID: {
                     "type": "schedule",
                     "after_created": lifetime,
@@ -299,7 +308,11 @@ class Sandbox(UnsupportedMixin):
 
         def fork(client, request):
             configure_transport(client, native_options.get("request_timeout"))
-            return fork_with_traffic(client, request, public)
+            if key is not None:
+                import hashlib
+
+                request["idempotency_key"] = hashlib.sha256(("e2b:create:" + key).encode()).hexdigest()
+            return fork_with_traffic(client, request, public, creation_key=key)
 
         return arker_create(
             arker_config,
@@ -312,6 +325,11 @@ class Sandbox(UnsupportedMixin):
                     "metadata": dict(metadata),
                     "source": source,
                     "envd_version": envd_version(),
+                    **(
+                        {"creation_intent": intent_hash(template_id, lifetime, allow_internet_access, native_options)}
+                        if key is not None
+                        else {}
+                    ),
                     **(
                         {"network": {"allow_public_traffic": public}}
                         if "allow_public_traffic" in network_options

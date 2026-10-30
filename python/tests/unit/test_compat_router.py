@@ -693,3 +693,29 @@ def test_cached_miss_invalidates_but_error_preserves_hint(router_file, strategy)
     assert cache.get("shared") == "e2b"
     assert routed_get("shared", "e2b", config, {"e2b": lambda: None, "arker": lambda: None}) is None
     assert cache.get("shared") is None
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_keyed_weighted_creation_is_stable_without_fallback(tmp_path, monkeypatch, reverse):
+    from arker._compat import CompatibilityCreationNotStartedError
+
+    path = tmp_path / "keyed.json"
+    weights = {"arker": 50, "e2b": 50}
+    if reverse:
+        weights = dict(reversed(list(weights.items())))
+    _write_router(path, create={"strategy": "weighted", "weights": weights, "fallback": ["e2b", "arker"]})
+    config = {"router_config_path": str(path)}
+    creators = {name: lambda name=name: types.SimpleNamespace(id=name) for name in weights}
+    observed = [routed_create("e2b", config, creators, creation_key="repeat-key")[0] for _ in range(20)]
+    assert set(observed) == {"arker"}  # Shared cross-language SHA-256 routing vector.
+    calls = []
+
+    def fail():
+        calls.append("arker")
+        raise CompatibilityCreationNotStartedError("provider unavailable")
+
+    creators["arker"] = fail
+    creators["e2b"] = lambda: pytest.fail("keyed creation must never change owner")
+    with pytest.raises(CompatibilityCreationNotStartedError):
+        routed_create("e2b", config, creators, creation_key="repeat-key")
+    assert calls == ["arker"]

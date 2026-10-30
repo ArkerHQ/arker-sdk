@@ -107,10 +107,40 @@ def traffic_policies(source, configured, public):
     return {**configured, "rules": rules, "secrets": {**configured.get("secrets", {}), SECRET: token}}, token
 
 
-def fork_with_traffic(client, request, public):
+def fork_with_traffic(client, request, public, *, creation_key=None):
     source = request.get("source_vm_id") or request.get("source_vm_name")
     policies = client.get_vm(source).policies if source else None
+    existing = _dict(policies).get("rules", {})
+    for name, rule in (request.get("policies") or {}).get("rules", {}).items():
+        if name.startswith("e2b-egress-") and name in existing and existing[name] != rule:
+            raise ValueError("Outbound policy would replace an inherited restriction")
     policies, token = traffic_policies(policies, request.get("policies"), public)
-    vm = client.fork(**{**request, "policies": policies})
+    if creation_key is not None and token is not None:
+        import base64
+        import hashlib
+        import hmac
+
+        # The caller key is public. Bind the traffic secret to the authenticated
+        # creator so keyed retries remain stable without exposing its secret.
+        token = (
+            base64.urlsafe_b64encode(
+                hmac.new(client._api_key.encode(), ("e2b:traffic:" + creation_key).encode(), hashlib.sha256).digest()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        policies["secrets"][SECRET] = token
+    from .computer import ArkerError
+
+    try:
+        vm = client.fork(**{**request, "policies": policies})
+    except ArkerError as error:
+        if creation_key is not None and error.status == 409 and error.code == "idempotency_conflict":
+            from e2b import SandboxException
+
+            raise SandboxException(
+                "Idempotency key was already used with a different request", status_code=409
+            ) from error
+        raise
     remember_traffic_token(vm, token)
     return vm

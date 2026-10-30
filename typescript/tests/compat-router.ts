@@ -554,3 +554,27 @@ async function testCachedMissInvalidatesButErrorPreservesHint(): Promise<void> {
 }
 await testCachedMissInvalidatesButErrorPreservesHint();
 console.log("PASS compat router");
+
+
+async function testKeyedCreationKeepsItsOwner(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "arker-router-keyed-"));
+  for (const weights of [{ arker: 50, e2b: 50 }, { e2b: 50, arker: 50 }]) {
+    const path = await config(directory, {
+      version: 1,
+      existing: { strategy: "priority", order: ["e2b", "arker"] },
+      create: { strategy: "weighted", weights, fallback: ["e2b", "arker"] },
+    });
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const routed = createRoutedProvider([provider("arker"), provider("e2b")], path, undefined, () => "repeat-key");
+      assert.equal((await routed.instances!.create()).provider, "arker");
+    }
+    let calls = 0;
+    const routed = createRoutedProvider([
+      provider("arker", { create: async () => { calls++; throw new CompatibilityCreationNotStartedError("unavailable"); } }),
+      provider("e2b", { create: async () => assert.fail("keyed create cannot change owner") }),
+    ], path, undefined, () => "repeat-key");
+    await assert.rejects(routed.instances!.create(), CompatibilityCreationNotStartedError);
+    assert.equal(calls, 1);
+  }
+}
+await testKeyedCreationKeepsItsOwner();

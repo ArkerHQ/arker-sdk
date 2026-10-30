@@ -207,7 +207,9 @@ def test_cancelled_exported_sandbox_cleans_up_after_mount_settles(client, monkey
     vm.create_mount.side_effect = mount
     vm.delete.side_effect = delete
     monkeypatch.setattr(shim, "arker_create", lambda *a, **kw: vm)
-    monkeypatch.setattr(shim, "routed_create", lambda _name, _config, creators: ("arker", creators["arker"]()))
+    monkeypatch.setattr(
+        shim, "routed_create", lambda _name, _config, creators, *, creation_key=None: ("arker", creators["arker"]())
+    )
     monkeypatch.setattr(bootstrap, "bootstrap_envd", lambda current: (object(), {}))
     monkeypatch.setattr(shim, "run_command", lambda *a, **kw: SimpleNamespace(exit_code=0))
 
@@ -330,7 +332,9 @@ def test_sandbox_creation_mounts_waits_and_cleans_child(client, monkeypatch, asy
 
     vm.create_mount.side_effect = attach
     monkeypatch.setattr(shim, "arker_create", lambda *a, **kw: vm)
-    monkeypatch.setattr(shim, "routed_create", lambda _name, _config, creators: ("arker", creators["arker"]()))
+    monkeypatch.setattr(
+        shim, "routed_create", lambda _name, _config, creators, *, creation_key=None: ("arker", creators["arker"]())
+    )
     from arker import _compat_e2b_bootstrap as bootstrap
     from arker import _compat_e2b_data_plane as data_plane
 
@@ -385,7 +389,9 @@ def test_sandbox_backend_mismatch_refuses_before_creation(client, monkeypatch):
         shim.Sandbox._create_arker({}, None, None, None, {"volume_mounts": {"/workspace/shared": Volume("id", "data")}})
     native = Mock()
     monkeypatch.setattr(shim.Sandbox, "_native_sandbox", lambda: native)
-    monkeypatch.setattr(shim, "routed_create", lambda _n, _c, creators: ("e2b", creators["e2b"]()))
+    monkeypatch.setattr(
+        shim, "routed_create", lambda _n, _c, creators, *, creation_key=None: ("e2b", creators["e2b"]())
+    )
     with pytest.raises(shim.UnsupportedCompatibilityOption, match="Arker sandbox"):
         shim.Sandbox.create(volume_mounts={"/workspace/shared": Volumes(client).create("data")})
     native.create.assert_not_called()
@@ -398,7 +404,9 @@ def test_native_mounts_and_volume_options_are_delegated_unchanged(monkeypatch):
     native = Mock()
     native.create.return_value = SimpleNamespace(sandbox_id="native")
     monkeypatch.setattr(shim.Sandbox, "_native_sandbox", lambda: native)
-    monkeypatch.setattr(shim, "routed_create", lambda _n, _c, creators: ("e2b", creators["e2b"]()))
+    monkeypatch.setattr(
+        shim, "routed_create", lambda _n, _c, creators, *, creation_key=None: ("e2b", creators["e2b"]())
+    )
     mounts = {"/workspace/shared": volume}
     shim.Sandbox.create(volume_mounts=mounts)
     assert native.create.call_args.kwargs["volume_mounts"] is mounts

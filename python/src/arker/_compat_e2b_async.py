@@ -15,7 +15,12 @@ async def _route(method, *args, **kwargs):
     loop = asyncio.get_running_loop()
     module = import_optional("e2b")
     native = getattr(module, "AsyncSandbox", None) if module else None
-    bridge = NativeBridge(native, loop, creation_cleanup=lambda sandbox: sandbox.kill()) if native else None
+    owns_creation = method == "create" and kwargs.get("idempotency_key") is None
+    bridge = (
+        NativeBridge(native, loop, creation_cleanup=(lambda sandbox: sandbox.kill()) if owns_creation else None)
+        if native
+        else None
+    )
 
     class Routed(Sandbox):
         def _prepare_data_plane(self, *, envs=None):
@@ -33,7 +38,7 @@ async def _route(method, *args, **kwargs):
     return await route(
         lambda: getattr(Routed, method)(*args, **kwargs),
         bridges=[bridge] if bridge else [],
-        cleanup=(lambda result: result.kill()) if method == "create" else None,
+        cleanup=(lambda result: result.kill()) if owns_creation else None,
     )
 
 
@@ -104,7 +109,10 @@ class AsyncSandbox:
             await sandbox._prepare_data_plane()
         except BaseException:
             try:
-                await sandbox.kill()
+                if kwargs.get("idempotency_key") is None:
+                    await sandbox.kill()
+                elif sandbox._data_plane is not None:
+                    await sandbox._data_plane.aclose()
             except BaseException as cleanup_error:
                 raise RuntimeError(
                     f"Sandbox creation and cleanup failed for VM {sandbox.sandbox_id}"

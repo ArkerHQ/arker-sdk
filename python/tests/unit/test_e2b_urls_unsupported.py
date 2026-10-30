@@ -159,7 +159,7 @@ def test_basic_create_and_commands_continue_when_only_file_urls_are_unsupported(
     error = unsupported()
     vm, calls = vm_fixture(error)
     vm._client._api_key = "test-key"
-    monkeypatch.setattr(shim, "routed_create", lambda *args: ("arker", vm))
+    monkeypatch.setattr(shim, "routed_create", lambda *args, creation_key=None: ("arker", vm))
     monkeypatch.setattr(bootstrap, "bootstrap_envd", lambda *args, **kwargs: (DESCRIPTOR, {"ready": True}))
     plane = SimpleNamespace(commands=SimpleNamespace(run=lambda command: command), files=object(), git=object())
     monkeypatch.setattr(data_plane, "create_data_plane", lambda *args, **kwargs: plane)

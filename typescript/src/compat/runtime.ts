@@ -21,6 +21,7 @@ export interface CreateCompatSdkOptions {
   mapArkerForkMetadata?: ForkMetadataMapper;
   arkerFork?: ForkExecutor;
   arkerLifetimePolicyId?: string;
+  creationKey?: (options: unknown) => string | undefined;
   arkerGet?: (client: Arker, id: string, transport?: RequestTransportOptions) => Promise<VM>;
   mapArkerCreateOptions?: (options: Record<string, unknown>) => Record<string, unknown>;
   prepareArkerCreateOptions?: (options: Record<string, unknown>) => Promise<{ options: Record<string, unknown>; context: unknown }>;
@@ -45,7 +46,7 @@ export function createCompatRouter(options: CreateCompatSdkOptions) {
   return createRoutedProvider([
     ...(arker ? [arker] : []),
     options.fallbackProvider as any,
-  ], options.routerConfigPath ?? globalThis.process?.env?.COMPUTESDK_ROUTER_CONFIG);
+  ], options.routerConfigPath ?? globalThis.process?.env?.COMPUTESDK_ROUTER_CONFIG, undefined, options.creationKey);
 }
 
 export function createCompatSdk(options: CreateCompatSdkOptions): CompatSdk {

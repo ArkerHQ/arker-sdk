@@ -9,7 +9,7 @@ import {
   FileType,
 } from "e2b";
 import { Sandbox } from "../src/e2b.js";
-import { Arker, type VM } from "../src/index.js";
+import { Arker, ArkerError, type VM } from "../src/index.js";
 import { rememberTrafficToken } from "../src/compat/e2b-network.js";
 import { createArkerComputeProvider } from "../src/compat/arker-provider.js";
 import { createNativeE2BProvider } from "../src/compat/e2b-provider.js";
@@ -387,4 +387,68 @@ test("late creation cancellation still deletes when native component close fails
     return true;
   });
   assert.equal(deleted, 1);
+});
+
+for (const cancelled of [false, true]) test(`keyed replay preparation failure preserves sandbox ownership (cancelled=${cancelled})`, async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "ARKER_BASE_URL", "COMPUTESDK_ROUTER_CONFIG");
+  process.env.ARKER_API_KEY = "test-only-creator";
+  process.env.ARKER_BASE_URL = "https://example.invalid";
+  delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  preserveProperties(t, Arker.prototype, "getVm", "fork", "_request");
+  const factory = Sandbox as unknown as { dataPlane: (box: { getInstance(): VM }) => Promise<unknown> };
+  preserveProperties(t, factory, "dataPlane");
+  const requests: unknown[] = [];
+  Arker.prototype.getVm = (async () => ({ policies: undefined })) as unknown as typeof Arker.prototype.getVm;
+  Arker.prototype.fork = async function (request) { requests.push(structuredClone(request)); return this.vm("existing-child"); };
+  Arker.prototype._request = async () => assert.fail("failed keyed retry must not delete existing child");
+  const failure = new Error("preparation failed");
+  let controller: AbortController;
+  factory.dataPlane = async () => {
+    if (cancelled) controller.abort(failure);
+    throw failure;
+  };
+  for (const value of ["one", "one", "two"]) {
+    controller = new AbortController();
+    await assert.rejects(Sandbox.create("template", {
+      idempotencyKey: "a".repeat(255), envs: { VALUE: value }, network: { allowPublicTraffic: false },
+      signal: controller.signal,
+    }), error => error === failure);
+  }
+  assert.deepEqual(requests[0], requests[1]);
+  const [first, , changed] = requests as any[];
+  assert.equal(first.idempotencyKey.length, 64);
+  assert.equal(first.idempotencyKey, changed.idempotencyKey);
+  assert.notDeepEqual(first.metadata, changed.metadata);
+  assert.ok(!JSON.stringify(requests).includes("test-only-creator"));
+});
+
+test("public keyed facade replays one sandbox and translates only idempotency conflicts", async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "ARKER_BASE_URL", "COMPUTESDK_ROUTER_CONFIG");
+  process.env.ARKER_API_KEY = "test-only-creator";
+  process.env.ARKER_BASE_URL = "https://example.invalid";
+  delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  preserveProperties(t, Arker.prototype, "getVm", "fork", "_request");
+  const factory = Sandbox as unknown as { dataPlane: () => Promise<unknown> };
+  preserveProperties(t, factory, "dataPlane");
+  factory.dataPlane = async () => ({ close() {} });
+  Arker.prototype.getVm = (async () => ({ policies: undefined })) as unknown as typeof Arker.prototype.getVm;
+  Arker.prototype._request = async () => { throw new Error("no hostname"); };
+  const claims = new Map<string, { payload: string; vm: VM }>();
+  Arker.prototype.fork = async function(request) {
+    const key = request.idempotencyKey!;
+    const payload = JSON.stringify(request);
+    const previous = claims.get(key);
+    if (previous) {
+      if (previous.payload !== payload) throw new ArkerError("idempotency_conflict", "different request", 409);
+      return previous.vm;
+    }
+    const vm = this.vm("existing-child");
+    claims.set(key, {payload, vm});
+    return vm;
+  };
+  const create = (value: string) => Sandbox.create("template", { idempotencyKey: "repeat-key", envs: { VALUE: value }, network: { allowPublicTraffic: false } });
+  const first = await create("one"), second = await create("one");
+  assert.equal(first.sandboxId, second.sandboxId);
+  assert.equal(claims.size, 1);
+  await assert.rejects(create("two"), error => error instanceof SandboxError && error.statusCode === 409);
 });

@@ -181,3 +181,57 @@ def test_async_race_checks_metadata_miss_without_connecting(configure_router, mo
         ),
         ("POST", "/v1/vms/arker/file-transfer-delegation", {}),
     ]
+
+
+@run_async
+async def test_cancelled_keyed_native_replay_never_deletes_existing_sandbox(configure_router, monkeypatch):
+    native = pytest.importorskip("e2b")
+    configure_router(["e2b", "arker"])
+    entered, completed = asyncio.Event(), asyncio.Event()
+
+    async def kill():
+        pytest.fail("replayed native sandbox is not owned by this call")
+
+    class Native:
+        @classmethod
+        async def create(cls, *args, **kwargs):
+            assert kwargs["idempotency_key"] == "repeat-key"
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                completed.set()
+                return types.SimpleNamespace(sandbox_id="existing-native", kill=kill)
+
+    monkeypatch.setattr(native, "AsyncSandbox", Native)
+    monkeypatch.setattr(shim, "arker_create", lambda *a, **k: pytest.fail("must not fall back"))
+    await cancel_creation(shim.AsyncSandbox.create(idempotency_key="repeat-key"), entered, completed)
+
+
+@run_async
+async def test_cancelled_keyed_arker_replay_is_drained_without_deletion(configure_router, monkeypatch):
+    import threading
+
+    configure_router(["arker"])
+    entered, release, completed = threading.Event(), threading.Event(), threading.Event()
+
+    def create(*args, **kwargs):
+        entered.set()
+        assert release.wait(2)
+        return types.SimpleNamespace(id="existing-arker", delete=lambda: pytest.fail("replay is not owned"))
+
+    def prepare(self, **kwargs):
+        completed.set()
+
+    monkeypatch.setattr(shim, "arker_create", create)
+    monkeypatch.setattr("arker._compat_e2b_bootstrap.bootstrap_envd", lambda *a, **k: ({}, False))
+    monkeypatch.setattr("arker._compat_e2b_urls.prepare_file_urls", prepare)
+    pending = asyncio.create_task(shim.AsyncSandbox.create("ubuntu", idempotency_key="repeat-key"))
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        pending.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+    finally:
+        release.set()
+    assert await asyncio.to_thread(completed.wait, 1)

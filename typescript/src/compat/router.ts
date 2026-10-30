@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { CompatibilityCreationNotStartedError } from "./common.js";
@@ -149,10 +149,10 @@ export function parseRouterConfig(value: unknown, providers: Iterable<string>): 
   return { version: 1, existing, create, ...(cache ? { cache } : {}) };
 }
 
-function selectWeighted(weights: Record<string, number>): string {
+function selectWeighted(weights: Record<string, number>, sample = Math.random()): string {
   const scale = Math.max(...Object.values(weights));
   const entries = Object.entries(weights).map(([provider, weight]) => [provider, weight / scale] as const);
-  let point = Math.min(Math.max(Math.random(), 0), 1 - Number.EPSILON)
+  let point = Math.min(Math.max(sample, 0), 1 - Number.EPSILON)
     * entries.reduce((total, [, weight]) => total + weight, 0);
   for (const [provider, weight] of entries) {
     if (point < weight) return provider;
@@ -304,6 +304,7 @@ export function createRoutedProvider(
   providers: Provider[],
   routerConfigPath?: string,
   resource?: { namespace: string; identifier(instance: any): string | undefined; requireUnique?: boolean },
+  creationKey?: (options: unknown) => string | undefined,
 ): Provider & {
   list(): Promise<any[]>;
   getOwner(id: string): Promise<{ provider: string; instance?: any } | null>;
@@ -422,12 +423,19 @@ export function createRoutedProvider(
     instances: {
       async create(options?: unknown) {
         const router = await configured;
-        const order = router.create.strategy === "priority"
+        const key = creationKey?.(options);
+        const weighted = router.create.strategy === "weighted" ? router.create.weights : {};
+        const first = () => key === undefined ? selectWeighted(weighted) : selectWeighted(
+          Object.fromEntries(Object.entries(weighted).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)),
+          parseInt(createHash("sha256").update(key).digest("hex").slice(0, 13), 16) / 2 ** 52,
+        );
+        let order = router.create.strategy === "priority"
           ? router.create.order
           : [
-            selectWeighted(router.create.weights),
+            first(),
             ...(router.create.fallback ?? Object.keys(router.create.weights)),
           ].filter((name, index, values) => values.indexOf(name) === index);
+        if (key !== undefined) order = order.slice(0, 1);
         let lastError: unknown;
         for (const name of order) {
           const provider = byName.get(name)!;

@@ -1,7 +1,9 @@
-import { randomBytes } from "node:crypto";
-import type { Arker, ForkOptions, VM } from "../index.js";
+import { canonicalHash } from "./e2b-create.js";
+import { randomBytes, createHmac } from "node:crypto";
+import { ArkerError, type Arker, type ForkOptions, type VM } from "../index.js";
+import { SandboxError } from "e2b";
 
-export interface E2BNetworkOptions { allowPublicTraffic?: boolean }
+export interface E2BNetworkOptions { allowPublicTraffic?: boolean; allowOut?: unknown; denyOut?: unknown; dnsServers?: unknown }
 const APP = "computesdk-e2b-apps";
 const CONTROL = "computesdk-e2b-envd";
 const SECRET = "computesdk-e2b-traffic";
@@ -14,7 +16,7 @@ export function rememberTrafficToken(vm: VM, token: string | null): void { token
 export function validateE2BNetwork(network: E2BNetworkOptions | undefined): void {
   if (network === undefined) return;
   if (!network || typeof network !== "object" || Array.isArray(network)) throw new TypeError("network must be an object");
-  const unsupported = Object.keys(network).filter(key => key !== "allowPublicTraffic");
+  const unsupported = Object.keys(network).filter(key => !["allowPublicTraffic", "allowOut", "denyOut", "dnsServers"].includes(key));
   if (unsupported.length) throw new TypeError(`Unsupported network option(s): ${unsupported.join(", ")}`);
   if (network.allowPublicTraffic !== undefined && typeof network.allowPublicTraffic !== "boolean") throw new TypeError("network.allowPublicTraffic must be a boolean");
 }
@@ -60,11 +62,32 @@ export function trafficPolicies(source: Policies | undefined, configured: Polici
   } };
 }
 
-export async function forkWithTraffic(client: Arker, request: ForkOptions, publicTraffic: boolean): Promise<VM> {
+export async function forkWithTraffic(client: Arker, request: ForkOptions, publicTraffic: boolean, creationKey?: string): Promise<VM> {
   const source = request.source_vm_id ?? request.source_vm_name;
   const policies = source ? (await client.getVm(source)).policies : undefined;
+  for (const [name, rule] of Object.entries(request.policies?.rules ?? {})) {
+    if (name.startsWith("e2b-egress-") && policies?.rules?.[name] && canonicalHash(policies.rules[name]) !== canonicalHash(rule)) {
+      throw new Error("Outbound policy would replace an inherited restriction");
+    }
+  }
   const plan = trafficPolicies(policies ?? undefined, request.policies ?? undefined, publicTraffic);
-  const vm = await client.fork({ ...request, policies: plan.policies });
+  if (creationKey !== undefined && plan.token !== null) {
+    const authorization = client._authHeaders().authorization;
+    if (!authorization?.startsWith("Bearer ")) throw new Error("Missing Arker transport credentials");
+    plan.token = createHmac("sha256", authorization.slice(7)).update("e2b:traffic:" + creationKey).digest("base64url");
+    plan.policies.secrets = { ...plan.policies.secrets, [SECRET]: plan.token };
+  }
+  let vm: VM;
+  try {
+    vm = await client.fork({ ...request, policies: plan.policies });
+  } catch (error) {
+    if (creationKey !== undefined && error instanceof ArkerError && error.status === 409 && error.code === "idempotency_conflict") {
+      const conflict = new SandboxError("Idempotency key was already used with a different request");
+      conflict.statusCode = 409;
+      throw conflict;
+    }
+    throw error;
+  }
   rememberTrafficToken(vm, plan.token);
   return vm;
 }

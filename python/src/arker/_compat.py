@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import importlib
 import os
 import queue
@@ -337,15 +338,25 @@ def routed_create(
     *,
     resource: str | None = None,
     resource_id: Callable[[Any], str] | None = None,
+    creation_key: str | None = None,
 ) -> tuple[str, Any]:
     router = router_config(config, native_provider, providers=creators)
     if router.create.strategy == "weighted":
         _validate_router_providers([*router.create.weights, *router.create.fallback], creators)
-        first = select_weighted_provider(router.create.weights)
+        weights = router.create.weights
+        if creation_key is None:
+            first = select_weighted_provider(weights)
+        else:
+            sample = int(hashlib.sha256(creation_key.encode()).hexdigest()[:13], 16) / 2**52
+            first = select_weighted_provider(dict(sorted(weights.items())), random_value=sample)
         order = (first, *(name for name in router.create.fallback if name != first))
     else:
         _validate_router_providers(list(router.create.order), creators)
         order = router.create.order
+    # A keyed retry must not move to another provider after a prior attempt.
+    # Determinism is scoped to unchanged routing configuration and credentials.
+    if creation_key is not None:
+        order = order[:1]
     last_error: Exception | None = None
     for name in order:
         try:

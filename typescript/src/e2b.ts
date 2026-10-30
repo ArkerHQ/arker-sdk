@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { creationKey, outboundPolicy, creationIntent, resolveNetwork, guardName } from "./compat/e2b-create.js";
 import { forkArker } from "./compat/e2b-fork.js";
 import { ArkerComputeSandbox } from "./compat/arker-provider.js";
 import { listSandboxes, type E2BListOptions, type E2BPaginator } from "./compat/e2b-list.js";
@@ -26,11 +28,14 @@ export type { CommandResult as CommandExitResult, SandboxForkOpts } from "e2b";
 const descriptors = new WeakMap<E2BDataPlane, EnvdDescriptor>();
 
 type NativeSandbox = Pick<VendorSandbox, "fork" | "kill" | "getHost" | "commands" | "files" | "git" | "pty" | "trafficAccessToken">;
-const E2B_CREATE_OPTION_KEYS = ["timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess", "volumeMounts", "network", "template", "apiKey", "secure", "validateApiKey", "debug", "lifecycle", "requestTimeoutMs", "signal"] as const;
+const E2B_CREATE_OPTION_KEYS = ["idempotencyKey", "timeout", "timeoutMs", "routerConfigPath", "envs", "metadata", "allowInternetAccess", "volumeMounts", "network", "template", "apiKey", "secure", "validateApiKey", "debug", "lifecycle", "requestTimeoutMs", "signal"] as const;
 
 function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMounts, lookupOptions?: SandboxApiOpts) {
   const { mode: _mode, keepMemory: _keepMemory, onResume: _onResume, timeoutMs: _timeout, ...apiOptions } =
     (lookupOptions ?? {}) as SandboxPauseOpts & SandboxConnectOpts;
+  let key: string | undefined;
+  let intent: string | undefined;
+  let outbound: ReturnType<typeof outboundPolicy>;
   let network: E2BNetworkOptions | undefined;
   let transport: { requestTimeoutMs?: number; signal?: AbortSignal } = {};
   const fallbackProvider = createNativeE2BProvider(apiOptions);
@@ -44,11 +49,22 @@ function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMount
   return {
     fallbackProvider,
     routerConfigPath,
+    creationKey: (options: unknown) => creationKey((options as Record<string, unknown> | undefined)?.idempotencyKey),
     arkerLookupTransport: lookupOptions ? lifecycleTransport(lookupOptions) : undefined,
-    mapArkerForkMetadata: (request: import("./index.js").ForkOptions, metadata: unknown) => e2bForkMetadata(request, metadata, network),
+    mapArkerForkMetadata: (request: import("./index.js").ForkOptions, metadata: unknown) => {
+      const result = e2bForkMetadata(request, metadata, network);
+      if (intent !== undefined && result) (result.arker_e2b as Record<string, unknown>).creation_intent = intent;
+      return result;
+    },
     arkerFork: (client: import("./index.js").Arker, request: import("./index.js").ForkOptions) => {
       configureTransport(client, transport.requestTimeoutMs, transport.signal);
-      return forkWithTraffic(client, request, network?.allowPublicTraffic ?? true);
+      if (outbound) request.policies = { ...request.policies, rules: { ...request.policies?.rules, ...outbound.rules } };
+      if (key !== undefined && request.policies?.rules) {
+        request.policies.rules = Object.fromEntries(Object.entries(request.policies.rules).map(([name, rule]) =>
+          [name.startsWith("computesdk-egress-") ? guardName(rule) : name, rule]));
+      }
+      if (key !== undefined) request.idempotencyKey = createHash("sha256").update("e2b:create:" + key).digest("hex");
+      return forkWithTraffic(client, request, network?.allowPublicTraffic ?? true, key);
     },
     mapArkerCreateOptions: (values: Record<string, unknown>) => {
       assertSupportedObjectKeys(values, [...E2B_CREATE_OPTION_KEYS, "templateId"], "e2b", "Sandbox.create");
@@ -63,13 +79,16 @@ function routingOptions(routerConfigPath?: string, volumeMounts?: E2BVolumeMount
         }
         if (lifecycle.autoResume !== undefined && lifecycle.autoResume !== false) throw new Error("Arker Sandbox.create supports only autoResume=false");
       }
+      key = creationKey(values.idempotencyKey);
       transport = { requestTimeoutMs: validateRequestTimeout(values.requestTimeoutMs as number | undefined), signal: values.signal as AbortSignal | undefined };
       transport.signal?.throwIfAborted();
       validateEnvdEnvs(values.envs as Record<string, string> | undefined);
       validateE2BNetwork(values.network as E2BNetworkOptions | undefined);
-      network = values.network as E2BNetworkOptions | undefined;
+      network = resolveNetwork(values.network as E2BNetworkOptions | undefined);
+      outbound = outboundPolicy(network);
+      if (key !== undefined) intent = creationIntent({ ...values, network: network ?? {} }, volumeMounts);
       if (volumeMounts !== undefined) checkMountBackend(volumeMounts, "arker");
-      const { volumeMounts: _mounts, network: _network, envs: _envs, timeoutMs: _timeoutMs,
+      const { idempotencyKey: _key, volumeMounts: _mounts, network: _network, envs: _envs, timeoutMs: _timeoutMs,
         apiKey: _apiKey, secure: _secure, validateApiKey: _validateApiKey, debug: _debug, lifecycle: _lifecycle, requestTimeoutMs: _requestTimeoutMs, signal: _signal, template, ...rest } = values;
       return { ...rest, ...(template !== undefined && rest.templateId === undefined ? { templateId: template } : {}), timeout: e2bTimeoutDuration(resolveTimeout(values as CreateOptions) ?? 300_000) };
     },
@@ -159,7 +178,7 @@ export class Sandbox {
     });
     try {
       if (box.provider !== "arker" || !opts?.volumeMounts || !Object.keys(opts.volumeMounts).length) {
-        return await Sandbox.wrap(box, { deleteOnValidationFailure: true, envs: opts?.envs, signal: opts?.signal });
+        return await Sandbox.wrap(box, { deleteOnValidationFailure: opts?.idempotencyKey === undefined, envs: opts?.envs, signal: opts?.signal });
       }
       const vm = (box as UniversalSandbox & { getInstance(): VM }).getInstance();
       let sandbox: Sandbox | undefined;
@@ -172,7 +191,7 @@ export class Sandbox {
         opts?.signal?.throwIfAborted();
         return sandbox;
       } catch (error) {
-        return Sandbox.discard(error, () => sandbox?.closeDataPlane(), vm);
+        return Sandbox.discard(error, () => sandbox?.closeDataPlane(), opts?.idempotencyKey === undefined ? vm : undefined);
       }
     } finally {
       if (box.provider === "arker") finishInitialization((box as UniversalSandbox & { getInstance(): VM }).getInstance());

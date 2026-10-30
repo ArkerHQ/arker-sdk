@@ -1,0 +1,34 @@
+[
+  {
+    "template": "template",
+    "timeout": 300,
+    "internet": null,
+    "options": {
+      "envs": {
+        "VALUE": "one"
+      }
+    },
+    "hash": "b824686450086c245d03dcb1f559f356fe10d7deb09b6fad2a1c356672a0cbed"
+  },
+  {
+    "template": "template",
+    "timeout": 3,
+    "internet": true,
+    "options": {
+      "metadata": {
+        "😀": "a",
+        "": "b"
+      },
+      "network": {
+        "allow_out": [
+          "example.com"
+        ],
+        "deny_out": [
+          "0.0.0.0/0"
+        ],
+        "dns_servers": []
+      }
+    },
+    "hash": "44a1fb3698106625224215c72aae22c5292b308e56cd0b66ed45812c3a64b3fa"
+  }
+]
