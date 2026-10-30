@@ -89,3 +89,4 @@ def test_modal_pty_real_guest_streams_and_exit(private_guest, aio):
     assert output == "[true, true, true]\r\nerror-marker\r\n"
     assert error == ""
     assert code == 7
+    assert list((private_guest.directory / "guest-root" / ".arker-modal").glob("exec-*.json")) == []

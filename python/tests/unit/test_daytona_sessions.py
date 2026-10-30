@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import importlib.util
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -24,7 +25,27 @@ def session(tmp_path):
     helper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helper)
     identifier = "test-" + uuid.uuid4().hex
-    process = subprocess.Popen([sys.executable, str(source), "serve", identifier], cwd=tmp_path, start_new_session=True)
+    # Emulate a login account even when the test runner is the non-login nobody user.
+    login_shell = tmp_path / "login-shell"
+    selected = tmp_path / "selected-shell"
+    login_shell.write_text("#!/bin/sh\nprintf selected > " + shlex.quote(str(selected)) + "\nexec /bin/sh\n")
+    login_shell.chmod(0o700)
+    launcher = """import pwd, runpy, sys
+lookup = pwd.getpwuid
+
+def account(uid):
+    fields = list(lookup(uid))
+    fields[6] = sys.argv[3]
+    return pwd.struct_passwd(fields)
+
+pwd.getpwuid = account
+runpy.run_path(sys.argv[1])["serve"](sys.argv[2])
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", launcher, str(source), identifier, str(login_shell)],
+        cwd=tmp_path,
+        start_new_session=True,
+    )
     owner = SessionProcess()
     owner._session_call = lambda action, request_timeout=None, **values: helper.call({"action": action, **values})
     try:
@@ -268,3 +289,12 @@ def test_creation_cleanup_failure_preserves_readiness_error_and_owned_id(monkeyp
     assert len(killed) == 1
     assert killed[0].startswith("daytona-session:")
     assert killed[0] != "public-session"
+
+
+def test_session_uses_account_shell_and_preserves_runner_identity(session, tmp_path):
+    owner, identifier = session
+    result = owner.execute_session_command(
+        identifier, SimpleNamespace(command='printf \'%s:%s\' "$(id -u)" "$(id -g)"'), timeout=5
+    )
+    assert result.stdout == f"{os.getuid()}:{os.getgid()}\n"
+    assert (tmp_path / "selected-shell").read_text() == "selected"
