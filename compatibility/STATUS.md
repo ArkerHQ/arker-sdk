@@ -44,21 +44,25 @@ must pass with fresh evidence before claiming parity.
   This intentionally keeps even an idle sandbox active and incurring compute
   charges; client disconnect does not release it. Reconnect reuses the same
   VM-bound run. Explicit pause and lifetime deletion remain the stopping
-  mechanisms, and their interaction with this hold still requires live
-  qualification across full-memory and filesystem resume. Local pidfd tests
-  do not establish those guest lifecycle guarantees.
+  mechanisms. Nine live scenarios across Python sync/async and TypeScript passed
+  on reference, shim-native and shim-Arker routes for unattended work, reconnect,
+  full-memory/filesystem pause, fork and expiry. Unexpected monitor death and
+  host-loss recovery remain unqualified; local pidfd tests do not prove them.
 - E2B sandbox expiry, request timeouts, cancellation, streamed reads, process
   enumeration and native error identities have unverified or unsupported cases.
 - Daytona custom users, image working-directory/shell selection, streaming,
   search/watch and timeout/error combinations remain incomplete. See the
   [filesystem contract](daytona-filesystem.md) for source prerequisites and
   [volume contract](daytona-volumes.md) for mount and deletion limits.
-- Modal retained-terminal lookup, polling, waiting and termination are implemented
-  but still lack passing live differential qualification.
+- Modal retained-terminal lookup, polling, waiting and termination are implemented.
+  The latest terminal comparison passed 14 of 18 cases; four native or shim-native
+  requested-termination cases failed. All six Arker cases passed, but this does
+  not establish complete differential equivalence.
 - Modal native Image/Secret/Volume handles are forwarded on native routes but
   have local registry/secret recipe support for Arker creation; opaque handles
-  and Volume recipes remain incomplete. Remote secrets, PTYs and broader
-  async/lifecycle behavior remain incomplete.
+  and Volume recipes remain incomplete. Exec PTY passed nine live cases across
+  Python sync/async and TypeScript on all three routes. Creation-time PTY,
+  remote secrets and broader async/lifecycle behavior remain incomplete.
 - Guest process helpers require Python; arbitrary Python-free images are not
   drop-in compatible. Preparing a source is an explicit prerequisite, not proof
   of default-image equivalence.
