@@ -46,6 +46,8 @@ must pass with fresh evidence before claiming parity.
   search/watch and timeout/error combinations remain incomplete. See the
   [filesystem contract](daytona-filesystem.md) for source prerequisites and
   [volume contract](daytona-volumes.md) for mount and deletion limits.
+- Modal retained-terminal lookup, polling, waiting and termination are implemented
+  but still lack passing live differential qualification.
 - Modal native Image/Secret/Volume handles are forwarded on native routes but
   have local registry/secret recipe support for Arker creation; opaque handles
   and Volume recipes remain incomplete. Remote secrets, PTYs and broader

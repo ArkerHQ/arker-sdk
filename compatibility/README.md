@@ -239,6 +239,11 @@ A source whose entrypoint launches a public daemon must be prepared with explici
 replace a customer's startup command. Custom-image user identity, native default
 image resolution and unattended daemon lifecycle are not fully qualified.
 
+The Blaxel daemon intent derivative is a staged prerelease, not publicly available,
+and awaits publication approval. It requires an intent-aware registration
+handshake (`intent_version: 1`) before bootstrap completes. Self-upgrade returns
+HTTP 409 while intent tracking is enabled; live background-work tests remain pending.
+
 ## Modal retained lifecycle
 
 On backends supporting retained lifecycle lookup, `from_id` / `fromId` can return
