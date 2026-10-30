@@ -1,4 +1,5 @@
-import { ConflictError, NotFoundError } from "modal";
+import { createRequire } from "node:module";
+import { ConflictError } from "modal";
 import type { ArkerError } from "../index.js";
 
 import { validateHttpError } from "../generated/error-validators.js";
@@ -21,9 +22,18 @@ export async function rethrowModalExecError(error: unknown, refresh: () => Promi
     if (!missingVm(observed)) throw error;
     deleted = true;
   }
-  const mapped = deleted
-    ? new NotFoundError("Sandbox is no longer available")
-    : new ConflictError("Sandbox is shutting down");
+  let mapped: Error;
+  if (deleted) {
+    const require = createRequire(typeof import.meta.url === "string" ? import.meta.url : __filename);
+    const { ClientError, Status } = createRequire(require.resolve("modal"))("nice-grpc");
+    mapped = new ClientError(
+      "/modal.task_command_router.TaskCommandRouter/TaskExecStart",
+      Status.NOT_FOUND,
+      "Sandbox is no longer available",
+    );
+  } else {
+    mapped = new ConflictError("Sandbox is shutting down");
+  }
   mapped.cause = error;
   throw mapped;
 }

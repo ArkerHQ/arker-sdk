@@ -253,6 +253,11 @@ explicit-termination outcome. Terminal handles cannot execute commands. Foreign,
 nonexistent, and purged IDs remain not found. Historical records without a known
 outcome and natural entrypoint completion do not have a synthesized exit code.
 
+Arker verifies ownership during `fromId`. Native TypeScript returns a lazy handle
+and can defer a missing-ID error until its first operation; that timing difference
+remains. Rejected execution on a retained TypeScript handle raises the native
+`ClientError` with `NOT_FOUND` (5).
+
 ## Modal creation recipes
 
 Arker supports plain registry-image recipes, local secret values, creation

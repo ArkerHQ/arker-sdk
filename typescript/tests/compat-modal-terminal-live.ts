@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NotFoundError, ModalClient as Native } from "modal";
+import { ModalClient as Native } from "modal";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const { ClientError, Status } = createRequire(require.resolve("modal"))("nice-grpc");
 import { ModalClient as Shim } from "../src/modal.js";
 
 interface CoreSandbox {
@@ -43,7 +46,13 @@ async function workload<A, I>(client: CoreClient<A, I>) {
     assert.equal(found.sandboxId, box.sandboxId);
     assert.equal(await found.poll(), reason === "deadline" ? 124 : 137);
     assert.equal(await found.wait(), reason === "deadline" ? 124 : 137);
-    await assert.rejects(found.exec(["true"]), error => error instanceof NotFoundError && error.constructor === NotFoundError);
+    await assert.rejects(found.exec(["true"]), (error: unknown) => {
+      assert.ok(error instanceof ClientError);
+      assert.equal(Object.getPrototypeOf(error), ClientError.prototype);
+      assert.equal((error as { code: number }).code, Status.NOT_FOUND);
+      assert.equal((error as { path: string }).path, "/modal.task_command_router.TaskCommandRouter/TaskExecStart");
+      return true;
+    });
     return box.sandboxId;
   } finally {
     await box.terminate();

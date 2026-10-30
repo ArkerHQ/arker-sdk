@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ConflictError, NotFoundError } from "modal";
+import { ConflictError } from "modal";
+import { createRequire } from "node:module";
+const require = createRequire(typeof import.meta.url === "string" ? import.meta.url : __filename);
+const { ClientError, Status } = createRequire(require.resolve("modal"))("nice-grpc");
 import { ArkerError } from "../src/index.js";
 import { Sandbox } from "../src/modal.js";
 import { GuestProcesses } from "../src/compat/guest-process.js";
@@ -21,10 +24,15 @@ for (const deleted of [false, true]) {
       const box = new Sandbox({ sandboxId: "owned", provider: "arker", getInstance: () => vm,
         runCommand: async () => { calls.push("guard"); throw error; },
       } as never);
-      const expected = deleted ? NotFoundError : ConflictError;
+      const expected = deleted ? ClientError : ConflictError;
       await assert.rejects(box.exec(["true"], staging ? { env: { VALUE: "synthetic" } } : undefined), e => {
+        assert.ok(e instanceof Error);
         assert.ok(e instanceof expected);
         assert.equal(Object.getPrototypeOf(e), expected.prototype);
+        if (deleted) {
+          assert.equal((e as Error & { code: number }).code, Status.NOT_FOUND);
+          assert.equal((e as Error & { path: string }).path, "/modal.task_command_router.TaskCommandRouter/TaskExecStart");
+        }
         assert.ok(e.cause === error || (e.cause instanceof AggregateError && e.cause.errors[0] === error));
         return true;
       });
