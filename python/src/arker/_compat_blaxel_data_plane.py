@@ -178,7 +178,7 @@ class BlaxelDataPlane:
         if not self.asynchronous:
             return self.client()
         if self._persistent_async is None:
-            self._persistent_async = self.async_client()
+            self._persistent_async = self.async_client(timeout=httpx.Timeout(300.0, connect=10.0))
         if self.closed:
             raise RuntimeError("Native Blaxel data plane is closed")
         return self._persistent_async

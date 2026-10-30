@@ -401,3 +401,49 @@ def test_daemon_redirects_cannot_escape_fixed_service(monkeypatch, asynchronous)
         finally:
             plane.close()
     assert seen == [49983, 49983]
+
+
+def test_async_filesystem_uses_native_persistent_client_timeouts(monkeypatch):
+    from blaxel.core.sandbox.default.action import SandboxAction
+
+    seen = []
+
+    def reply(request):
+        seen.append(request.extensions["timeout"])
+        return httpx.Response(200, content=b"native")
+
+    monkeypatch.setattr(adapter, "_AsyncTransport", lambda vm: httpx.MockTransport(reply))
+
+    async def exercise():
+        plane = adapter.BlaxelDataPlane(VM(), asynchronous=True)
+        native = SandboxAction(plane.fs.sandbox_config).get_client()
+        try:
+            expected = native.build_request("GET", "/filesystem/file").extensions["timeout"]
+            assert await plane.fs.read_binary("/file") == b"native"
+            assert seen == [expected]
+            assert plane.fs.get_client() is plane.process.get_client()
+        finally:
+            await native.aclose()
+            await plane.aclose()
+
+    asyncio.run(exercise())
+
+
+def test_direct_async_and_sync_clients_keep_native_defaults():
+    from blaxel.core.sandbox.sync.action import SyncSandboxAction
+
+    async def exercise():
+        plane = adapter.BlaxelDataPlane(VM(), asynchronous=True)
+        native_direct = httpx.AsyncClient()
+        native_sync = SyncSandboxAction(plane.fs.sandbox_config).get_client()
+        try:
+            direct = plane.async_client()
+            assert direct.timeout == native_direct.timeout
+            with plane.client() as sync:
+                assert sync.timeout == native_sync.timeout
+        finally:
+            native_sync.close()
+            await native_direct.aclose()
+            await plane.aclose()
+
+    asyncio.run(exercise())
