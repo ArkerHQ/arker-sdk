@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import os
 import re
 import time
@@ -211,3 +214,40 @@ def fork_sandbox(vm, target_name, options, config, cancelled=lambda: False):
         ),
     )
     return SandboxForkResponse.from_dict({"name": child.name, "type": "sandbox", "snapshotId": ""})
+
+
+def registry_configuration(value, image, config):
+    """Bind Docker basic credentials to the explicitly selected registry."""
+    if value is None or value == "":
+        return config
+    unsupported = "Arker supports docker_config auths with basic credentials for an explicit matching image registry"
+    try:
+        document = json.loads(value) if isinstance(value, str) else value
+        if not isinstance(document, dict) or set(document) != {"auths"}:
+            raise ValueError
+        auths = document["auths"]
+        if not isinstance(auths, dict):
+            raise ValueError
+        if not auths:
+            return config
+        if not isinstance(image, str) or "/" not in image:
+            raise ValueError
+        registry = image.split("/", 1)[0]
+        if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]+)?", registry):
+            raise ValueError
+        if not ("." in registry or ":" in registry or registry == "localhost"):
+            raise ValueError
+        if registry not in auths:
+            raise ValueError
+        selected = auths[registry]
+        if not isinstance(selected, dict) or set(selected) != {"auth"} or not isinstance(selected["auth"], str):
+            raise ValueError
+        decoded = base64.b64decode(selected["auth"], validate=True).decode("utf-8")
+        username, separator, password = decoded.partition(":")
+        if not separator or not username or "\0" in decoded:
+            raise ValueError
+    except (ValueError, TypeError, UnicodeError, binascii.Error):
+        raise UnsupportedCompatibilityOption(unsupported) from None
+    if config.get("registry_auth") is not None:
+        raise UnsupportedCompatibilityOption("docker_config conflicts with explicit Arker registry_auth")
+    return {**config, "registry_auth": {"username": username, "password": password}}

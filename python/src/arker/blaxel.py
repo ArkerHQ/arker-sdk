@@ -208,12 +208,18 @@ class SyncSandboxInstance(UnsupportedMixin):
         )
 
         def create_arker() -> VM:
-            from ._compat_blaxel_create import fork_named, image_configuration, lifetime_policies, validate_name
+            from ._compat_blaxel_create import (
+                fork_named,
+                image_configuration,
+                lifetime_policies,
+                registry_configuration,
+                validate_name,
+            )
             from ._compat_blaxel_data_plane import validate_native
 
             options = dict(kwargs)
             get_or_create = options.pop("create_if_not_exist", False)
-            supported = {"name", "image", "memory", "ttl", "envs", "runtime", "network", "labels"}
+            supported = {"name", "image", "memory", "ttl", "envs", "runtime", "network", "labels", "docker_config"}
             unknown = sorted(set(values) - supported)
             if options or unknown:
                 names = [*sorted(options), *unknown]
@@ -224,6 +230,9 @@ class SyncSandboxInstance(UnsupportedMixin):
                 raise UnsupportedCompatibilityOption(
                     "SandboxInstance.create option(s) are not supported by Arker: runtime"
                 )
+            creation_config = registry_configuration(
+                values.get("docker_config"), values.get("image"), arker_config or {}
+            )
             policies = lifetime_policies(values.get("ttl"), arker_config)
             validate_name(values.get("name"))
             validate_network(values.get("network"))
@@ -235,7 +244,7 @@ class SyncSandboxInstance(UnsupportedMixin):
                 raise RoutingCancelled("Async routing was cancelled")
             memory = values.get("memory")
             return arker_create(
-                arker_config,
+                creation_config,
                 fork=lambda client, request: fork_named(
                     client,
                     request,
