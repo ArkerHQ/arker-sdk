@@ -71,9 +71,9 @@ def test_blaxel_import_shim_keeps_core_resource_exports():
         "SyncDriveInstance",
         "VolumeInstance",
         "SyncVolumeInstance",
-        "SecretInstance",
-        "ImageInstance",
     ):
+        assert issubclass(getattr(blaxel, name), getattr(native, name))
+    for name in ("SecretInstance", "ImageInstance"):
         assert getattr(blaxel, name) is getattr(native, name)
 
 

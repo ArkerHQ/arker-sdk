@@ -51,6 +51,10 @@ def _record_cleanup_failure(error, cleanup_error, sandbox_id):
 
 
 def __getattr__(name: str) -> Any:
+    if name in {"DriveInstance", "SyncDriveInstance", "VolumeInstance", "SyncVolumeInstance"}:
+        from . import _compat_blaxel_resources
+
+        return getattr(_compat_blaxel_resources, name)
     for module_name in ("blaxel.core.sandbox", "blaxel.core"):
         module = import_optional(module_name)
         if module is not None:

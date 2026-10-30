@@ -256,3 +256,5 @@ export class Blaxel {
   delete(id: string) { return SandboxInstance.delete(id, this.config); }
 }
 export * from "@blaxel/core";
+
+export { DriveInstance, VolumeInstance } from "./compat/blaxel-resources.js";
