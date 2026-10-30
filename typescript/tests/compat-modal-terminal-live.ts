@@ -19,7 +19,7 @@ interface CoreClient<A, I> {
   apps: { fromName(name: string, options: { createIfMissing: true }): Promise<A> };
   images: { fromRegistry(tag: string): I };
   sandboxes: {
-    create(app: A, image: I, options: { timeoutMs: number }): Promise<CoreSandbox>;
+    create(app: A, image: I, options: { timeoutMs?: number }): Promise<CoreSandbox>;
     fromId(id: string): Promise<CoreSandbox>;
   };
 }
@@ -30,7 +30,8 @@ async function workload<A, I>(client: CoreClient<A, I>) {
   const image = client.images.fromRegistry("python:3.12-slim-bookworm");
   const reason = process.env.MODAL_TERMINAL_REASON ?? "requested";
   if (!["requested", "deadline"].includes(reason)) throw new Error("Unknown terminal scenario");
-  const box = await client.sandboxes.create(app, image, { timeoutMs: 30_000 });
+  const options = reason === "deadline" ? { timeoutMs: 30_000 } : {};
+  const box = await client.sandboxes.create(app, image, options);
   console.log(JSON.stringify({ event: "allocated", id: box.sandboxId }));
   try {
     assert.equal(await box.poll(), null);

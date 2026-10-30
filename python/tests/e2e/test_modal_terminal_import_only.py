@@ -20,7 +20,8 @@ async def program(asynchronous, reason):
         return await asyncio.to_thread(method, *args, **options)
     app = await asyncio.to_thread(modal.App.lookup, "arker-compat-lifecycle", create_if_missing=True)
     image = modal.Image.from_registry("python:3.12-slim-bookworm")
-    box = await call(modal.Sandbox.create, app=app, image=image, timeout=30)
+    options = {"timeout": 30} if reason == "deadline" else {}
+    box = await call(modal.Sandbox.create, app=app, image=image, **options)
     print(json.dumps({"event": "allocated", "id": box.object_id}), flush=True)
     try:
         assert await call(box.poll) is None

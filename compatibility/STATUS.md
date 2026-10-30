@@ -65,7 +65,7 @@ must pass with fresh evidence before claiming parity.
   are implemented. Python file transfers honor native connect/pool and read/write
   phase timeouts, including zero for an unbounded transfer phase; cleanup uses
   independent request limits. Python metadata requests preserve native synchronous
-  connection/read budgets and asynchronous response deadlines. TypeScript process
+  connection/read budgets and one asynchronous deadline across submission and polling. TypeScript process
   and transfer requests enforce inactivity limits, including zero to disable the
   limit. These timeout paths have local HTTP comparisons; complete live equivalence
   remains unqualified. Custom users and image working-directory selection remain
@@ -74,9 +74,13 @@ must pass with fresh evidence before claiming parity.
   [filesystem contract](daytona-filesystem.md) for source prerequisites and
   [volume contract](daytona-volumes.md) for mount and deletion limits.
 - Modal retained-terminal lookup, polling, waiting and termination are implemented.
-  The latest terminal comparison passed 15 of 18 cases; three native-backed
-  requested-termination cases failed. All 12 Arker cases passed, but this does
-  not establish complete differential equivalence.
+  The earlier terminal comparison passed 15 of 18 cases; three native-backed
+  requested-termination cases raced the short sandbox lifetime and failed. Those
+  failures remain recorded. Using the default lifetime for requested termination
+  passes six fresh native and shim-native cases across Python sync/async and
+  TypeScript, with cleanup confirmed. The separate deadline scenario retains its
+  explicit lifetime. Fresh Arker qualification of the corrected scenario remains
+  required; these results do not establish complete differential equivalence.
 - Modal native Image/Secret/Volume handles are forwarded on native routes but
   have local registry/secret recipe support for Arker creation; opaque handles
   and Volume recipes remain incomplete. Exec PTY passed nine live cases across
