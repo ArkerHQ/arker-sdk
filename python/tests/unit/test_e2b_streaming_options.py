@@ -201,9 +201,11 @@ def test_async_upload_cancellation_closes_producer(http_server):
 
     async def run():
         finalized = asyncio.Event()
+        producing = asyncio.Event()
 
         async def source():
             try:
+                producing.set()
                 yield b"first"
                 await asyncio.Event().wait()
             finally:
@@ -213,6 +215,7 @@ def test_async_upload_cancellation_closes_producer(http_server):
         upload = asyncio.create_task(data.files.write("/tmp/file", source()))
         try:
             assert await asyncio.to_thread(arrived.wait, 5)
+            await asyncio.wait_for(producing.wait(), 5)
             upload.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await upload

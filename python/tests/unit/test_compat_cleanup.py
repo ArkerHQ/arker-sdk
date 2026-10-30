@@ -103,9 +103,12 @@ def test_failed_readback_preserves_error_and_invalidates_previous_observation(fa
     async def failed(identifier):
         raise failure
 
-    with pytest.raises(type(failure)) as caught:
-        asyncio.run(cleanup.observe("one", failed, poll))
-    assert caught.value is failure
+    async def verify_failure():
+        with pytest.raises(type(failure)) as caught:
+            await cleanup.observe("one", failed, poll)
+        assert caught.value is failure
+
+    asyncio.run(verify_failure())
     assert verified(events(cleanup.receipt())) == []
 
 
