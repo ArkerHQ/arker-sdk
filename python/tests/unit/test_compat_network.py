@@ -4,7 +4,7 @@ import asyncio
 import socket
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from types import SimpleNamespace
 
 import httpx
@@ -23,7 +23,7 @@ def native_components(monkeypatch):
 
 
 @pytest.fixture
-def service():
+def service(http_server):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -65,9 +65,7 @@ def service():
             self.wfile.write(b"3\r\neof\r\n3\r\n\x00\xff\x01\r\n0\r\n\r\n")
             self.wfile.flush()
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    server = http_server(Handler)
     opened = []
 
     class VM:
@@ -78,12 +76,7 @@ def service():
             opened.append(port)
             return socket.create_connection(server.server_address, timeout=5)
 
-    try:
-        yield SyncSandboxInstance(vm=VM()), opened
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join()
+    yield SyncSandboxInstance(vm=VM()), opened
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from e2b_facade_helpers import delegation_response
 
 from arker._compat_e2b_data_plane import EnvdDescriptor
 from arker._compat_e2b_urls import E2BFileURLs, prepare_file_urls
@@ -96,17 +97,6 @@ def test_public_sync_and_async_url_methods_share_retained_descriptor():
     assert calls == []
     assert [(body["operation"], body["path"]) for body in bodies] == [("read", "~/file"), ("write", "")]
     assert all(body["user"] == "image-user" and "envd_signature" in body for body in bodies)
-
-
-def delegation_response(**updates):
-    return {
-        "redemption_url": "https://regional.example.test/api/v1/vms/canonical/file-transfer",
-        "context": "b3BhcXVl",
-        "signing_key": base64.urlsafe_b64encode(bytes(range(32))).decode().rstrip("="),
-        "operations": ["read", "write"],
-        "expires_at": None,
-        **updates,
-    }
 
 
 def verify_url(url):

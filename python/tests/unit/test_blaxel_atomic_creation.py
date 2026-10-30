@@ -65,13 +65,8 @@ def test_native_atomic_creation_error_is_not_retried_as_plain_create(monkeypatch
     assert calls == [{"create_if_not_exist": True}]
 
 
-@pytest.fixture
-def named_client(monkeypatch):
-    from arker import _compat_blaxel_create as creation
-
-    monkeypatch.delenv("ARKER_BASE_URL", raising=False)
-    calls = []
-    wire = {
+def named_vm_response(**updates):
+    return {
         "vm_id": "winner",
         "name": "named",
         "description": None,
@@ -82,7 +77,17 @@ def named_client(monkeypatch):
         "sessions": [],
         "network": {},
         "resources": {},
+        **updates,
     }
+
+
+@pytest.fixture
+def named_client(monkeypatch):
+    from arker import _compat_blaxel_create as creation
+
+    monkeypatch.delenv("ARKER_BASE_URL", raising=False)
+    calls = []
+    wire = named_vm_response()
     client = SimpleNamespace(_control_base_url="https://control.example/api", region="region-one", provider="aws")
     client._request = lambda *args, **kwargs: calls.append((args, kwargs)) or wire
     client.fork = lambda **kwargs: pytest.fail("must use global coordinator")
@@ -219,18 +224,7 @@ def test_lost_committed_response_does_not_turn_strict_creation_into_duplicate(mo
 
     monkeypatch.delenv("ARKER_BASE_URL", raising=False)
     calls = []
-    winner = {
-        "vm_id": "committed",
-        "name": "named",
-        "description": None,
-        "owner_org_id": "org",
-        "created_at": "2026-01-01T00:00:00Z",
-        "public": False,
-        "state": "idle",
-        "sessions": [],
-        "network": {},
-        "resources": {},
-    }
+    winner = named_vm_response(vm_id="committed")
 
     def http(method, url, headers, body, **kwargs):
         calls.append((method, url, dict(headers), json.loads(body)))
@@ -282,21 +276,7 @@ def test_concurrent_callers_keep_independent_modes_and_return_authoritative_winn
         with lock:
             requests.append(headers["Arker-VM-Name-Mode"])
             if not stored:
-                stored.append(
-                    {
-                        "vm_id": "winner",
-                        "name": "named",
-                        "description": None,
-                        "owner_org_id": "org",
-                        "created_at": "2026-01-01T00:00:00Z",
-                        "public": False,
-                        "state": "idle",
-                        "sessions": [],
-                        "network": {},
-                        "resources": {},
-                        "metadata": request["metadata"],
-                    }
-                )
+                stored.append(named_vm_response(metadata=request["metadata"]))
             elif headers["Arker-VM-Name-Mode"] == "create":
                 return 409, json.dumps(
                     {"error": {"code": "conflict", "message": "exists", "details": {"resource": "vm"}}}
@@ -370,20 +350,7 @@ def test_named_fork_reuses_ordinary_policy_read_to_write_normalization(monkeypat
 
     def http(method, url, headers, body, **kwargs):
         calls.append((dict(headers), json.loads(body)))
-        return 200, json.dumps(
-            {
-                "vm_id": "winner",
-                "name": "named",
-                "description": None,
-                "owner_org_id": "org",
-                "created_at": "2026-01-01T00:00:00Z",
-                "public": False,
-                "state": "idle",
-                "sessions": [],
-                "network": {},
-                "resources": {},
-            }
-        ).encode()
+        return 200, json.dumps(named_vm_response()).encode()
 
     monkeypatch.setattr(transport, "_http", http)
     client = Arker(
