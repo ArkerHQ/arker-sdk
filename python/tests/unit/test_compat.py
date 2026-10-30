@@ -388,11 +388,11 @@ def test_python_shims_translate_or_reject_arker_create_options(arker_env, monkey
 
     with use_transport(t):
         Daytona().create(image="ubuntu:24.04", name="daytona", resources={"cpu": 4, "memory": 8})
-        BlaxelSandbox.create({"image": "ubuntu:24.04", "name": "blaxel", "memory": 4096})
+        BlaxelSandbox.create({"image": "ubuntu:24.04", "name": "blaxel", "memory": 4096, "ttl": "5m"})
         with pytest.raises(TypeError, match="envVars"):
             Daytona().create(envVars={"A": "b"})
         with pytest.raises(TypeError, match="ttl"):
-            BlaxelSandbox.create({"ttl": "5m"})
+            BlaxelSandbox.create({"ttl": "5.5m"})
 
     daytona = json.loads(t.calls[0]["body"])
     assert daytona == {
@@ -407,6 +407,9 @@ def test_python_shims_translate_or_reject_arker_create_options(arker_env, monkey
         "name": "blaxel",
         "metadata": {"arker_blaxel": {"version": 1, "labels": {}}},
         "resources": {"memory_mib": 4096},
+        "policies": {
+            "rules": {"computesdk-blaxel-lifetime": {"type": "schedule", "after_created": 300, "action": "delete"}}
+        },
     }
 
 

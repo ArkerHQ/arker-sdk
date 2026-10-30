@@ -169,7 +169,7 @@ class SyncSandboxInstance(UnsupportedMixin):
         )
 
         def create_arker() -> VM:
-            from ._compat_blaxel_create import fork_named, image_configuration, validate_name
+            from ._compat_blaxel_create import fork_named, image_configuration, lifetime_policies, validate_name
             from ._compat_blaxel_data_plane import validate_native
 
             options = dict(kwargs)
@@ -181,12 +181,11 @@ class SyncSandboxInstance(UnsupportedMixin):
                 raise UnsupportedCompatibilityOption(
                     f"SandboxInstance.create received unsupported option(s) for Arker: {', '.join(names)}"
                 )
-            unsupported = [key for key in ("ttl", "runtime") if values.get(key) is not None]
-            if unsupported:
-                names = ", ".join(unsupported)
+            if values.get("runtime") is not None:
                 raise UnsupportedCompatibilityOption(
-                    f"SandboxInstance.create option(s) are not supported by Arker: {names}"
+                    "SandboxInstance.create option(s) are not supported by Arker: runtime"
                 )
+            policies = lifetime_policies(values.get("ttl"), arker_config)
             validate_name(values.get("name"))
             validate_network(values.get("network"))
             from ._compat_blaxel_packages import validate_firewall_startup
@@ -206,6 +205,7 @@ class SyncSandboxInstance(UnsupportedMixin):
                     cancelled=cls._creation_cancelled,
                 ),
                 metadata=creation_metadata(values.get("labels")),
+                policies=policies,
                 name=values.get("name"),
                 image=values.get("image"),
                 image_config=image_configuration(values, arker_config or {}),

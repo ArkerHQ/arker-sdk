@@ -8,7 +8,7 @@ import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
 import { createBlaxelDataPlane, validateBlaxelNative, type BlaxelDataPlane } from "./compat/blaxel-data-plane.js";
 import { blaxelControlCall, blaxelNotFound } from "./compat/blaxel-errors.js";
-import { blaxelCreationMetadata, blaxelSandboxMetadata, blaxelImageConfiguration, namedBlaxelFork, validateBlaxelName } from "./compat/blaxel-create.js";
+import { blaxelLifetimePolicies, blaxelCreationMetadata, blaxelSandboxMetadata, blaxelImageConfiguration, namedBlaxelFork, validateBlaxelName } from "./compat/blaxel-create.js";
 import { bootstrapBlaxel } from "./compat/blaxel-bootstrap.js";
 import { privateFetch } from "./compat/private-fetch.js";
 import { createNativeBlaxelProvider } from "./compat/blaxel-provider.js";
@@ -25,7 +25,7 @@ export interface BlaxelCreateOptions {
   name?: string;
   image?: string;
   memory?: number;
-  ttl?: string | number;
+  ttl?: string | null;
   envs?: Record<string, string>;
   runtime?: string;
   region?: string;
@@ -42,21 +42,17 @@ export interface BlaxelCreateCallOptions extends BlaxelCompatConfig {
   timeout?: number;
 }
 
-function parseTtl(ttl: string | number | undefined): number | undefined {
-  if (ttl === undefined || typeof ttl === "number") return ttl;
-  const match = /^(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)$/i.exec(ttl.trim());
-  if (!match) throw new Error(`Invalid Blaxel ttl '${ttl}'; use milliseconds or a duration such as 30s, 5m, 2h, or 1d`);
-  const multiplier = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 }[match[2]!.toLowerCase()]!;
-  return Number(match[1]) * multiplier;
-}
-
-function makeSdk(config: BlaxelCompatConfig = {}, getOrCreate = false): CompatSdk {
+function makeSdk(config: BlaxelCompatConfig = {}, getOrCreate = false, ttl?: unknown): CompatSdk {
   return createCompatSdk({
     arker: config.arker,
-    arkerFork: (client, request) => blaxelControlCall("create", () => namedBlaxelFork(config.arker, getOrCreate)(client, request)),
+    arkerFork: (client, request) => {
+      const lifetime = blaxelLifetimePolicies(ttl, config.arker?.policies);
+      if (lifetime) request = {...request, policies: {...request.policies, rules: {...request.policies?.rules, ...lifetime.rules}}};
+      return blaxelControlCall("create", () => namedBlaxelFork(config.arker, getOrCreate)(client, request));
+    },
     mapArkerCreateOptions: options => {
       validateBlaxelName(options.name);
-      const { createIfNotExist: _, network, envs: _envs, labels, ...rest } = options;
+      const { createIfNotExist: _, ttl: _ttl, network, envs: _envs, labels, ...rest } = options;
       validateBlaxelNetwork(network);
       validateFirewallStartup(options.image, config.arker?.imageConfig);
       validateBlaxelNative();
@@ -155,11 +151,11 @@ export class SandboxInstance {
 
   static async create(options: BlaxelCreateOptions = {}, callOptions: BlaxelCreateCallOptions = {}): Promise<SandboxInstance> {
     const profile = fetchProfile(options.region);
-    const box = await makeSdk(callOptions, callOptions.createIfNotExist ?? false).sandbox.create({
+    const box = await makeSdk(callOptions, callOptions.createIfNotExist ?? false, options.ttl).sandbox.create({
       name: options.name,
       image: options.image,
       memory: options.memory,
-      timeout: parseTtl(options.ttl),
+      ...(Object.hasOwn(options, "ttl") ? {ttl: options.ttl} : {}),
       envs: options.envs,
       runtime: options.runtime,
       ...(options.region !== undefined ? { region: options.region } : {}),

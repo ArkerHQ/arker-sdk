@@ -135,7 +135,8 @@ def arker_create(
     if policies is not None:
         if "policies" in policies:
             fork_policies.pop("rules", None)
-        rules = {**fork_policies.get("rules", {}), **policies.get("rules", {})}
+        rules, updates = fork_policies.get("rules"), policies.get("rules")
+        rules = {**({} if rules is None else rules), **({} if updates is None else updates)}
         fork_policies.update(policies)
         if rules:
             fork_policies["rules"] = rules

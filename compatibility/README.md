@@ -225,6 +225,14 @@ status/list, wait, logs, stdin/EOF, stop, kill, and execution timeout.
 The current guest protocol requires Python 3. Image-independent operation remains
 a release requirement before claiming arbitrary-image compatibility.
 
+## Blaxel creation lifetime
+
+Python and TypeScript accept whole-number `s`, `m`, `h`, `d`, or `w` TTLs from
+five minutes through 30 days on Arker, using a named deletion policy measured
+from VM creation. Omitted, null and empty values add no lifetime policy. Native
+routes preserve the original value. Fractional, compound and longer durations
+remain unsupported on Arker; live expiry and TTL readback equivalence are unverified.
+
 ## Blaxel image creation environment
 
 Creation `envs` are applied before boot when creating from an explicit OCI image.

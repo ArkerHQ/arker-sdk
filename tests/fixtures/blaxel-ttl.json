@@ -1,0 +1,32 @@
+{
+  "durations": [
+    {"options": {}, "seconds": null},
+    {"options": {"ttl": null}, "seconds": null},
+    {"options": {"ttl": ""}, "seconds": null},
+    {"options": {"ttl": "300s"}, "seconds": 300},
+    {"options": {"ttl": "5m"}, "seconds": 300},
+    {"options": {"ttl": "2h"}, "seconds": 7200},
+    {"options": {"ttl": "7d"}, "seconds": 604800},
+    {"options": {"ttl": "4w"}, "seconds": 2419200},
+    {"options": {"ttl": "30d"}, "seconds": 2592000},
+    {"options": {"ttl": "0s"}, "reject": true},
+    {"options": {"ttl": "299s"}, "reject": true},
+    {"options": {"ttl": "2592001s"}, "reject": true},
+    {"options": {"ttl": "5w"}, "reject": true},
+    {"options": {"ttl": "5.5m"}, "reject": true},
+    {"options": {"ttl": "1h30m"}, "reject": true},
+    {"options": {"ttl": "300000ms"}, "reject": true},
+    {"options": {"ttl": "5M"}, "reject": true},
+    {"options": {"ttl": " 5m "}, "reject": true},
+    {"options": {"ttl": 300000}, "reject": true},
+    {"options": {"ttl": true}, "reject": true}
+  ],
+  "policies": [
+    {"config": {"rules": null}},
+    {"config": {"rules": false}, "reject": true},
+    {"config": {"rules": []}, "reject": true},
+    {"config": {"rules": {"customer-deny": {"type": "inbound", "action": "deny", "priority": 10}}}},
+    {"config": {"rules": {"computesdk-blaxel-lifetime": null}}, "reject": true},
+    {"config": {"policies": []}, "reject": true}
+  ]
+}

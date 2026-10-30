@@ -12,6 +12,31 @@ from ._compat_blaxel_errors import creation_error
 from .computer import REQUEST_TIMEOUT_S, VM, ArkerError, _drop_none, _policy_update, _vm_info
 
 
+def lifetime_policies(ttl, config):
+    if ttl is None or ttl == "":
+        return None
+    match = re.fullmatch(r"([0-9]+)(s|m|h|d|w)", ttl) if isinstance(ttl, str) else None
+    if match is None:
+        raise UnsupportedCompatibilityOption(
+            "Arker supports Blaxel ttl as whole-number s, m, h, d, or w; "
+            "fractional and compound durations are unsupported"
+        )
+    seconds = int(match[1]) * {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}[match[2]]
+    if seconds < 300:
+        raise UnsupportedCompatibilityOption("Blaxel ttl requires at least five minutes and whole seconds")
+    # The public Arker schedule contract supports at most 30 days; never clamp.
+    if seconds > 2592000:
+        raise UnsupportedCompatibilityOption("Arker lifetime schedules support Blaxel ttl up to 30 days")
+    configured = (config or {}).get("policies") or {}
+    rules = configured.get("rules")
+    if rules is not None and not isinstance(rules, dict):
+        raise UnsupportedCompatibilityOption("rules must be a rule map")
+    policy_id = "computesdk-blaxel-lifetime"
+    if "policies" in configured or policy_id in (configured.get("rules") or {}):
+        raise UnsupportedCompatibilityOption("Blaxel ttl requires named policies with its lifetime policy id reserved")
+    return {"rules": {policy_id: {"type": "schedule", "after_created": int(seconds), "action": "delete"}}}
+
+
 def validate_name(name):
     if name is None or name == "":
         return

@@ -1,6 +1,21 @@
 import { ArkerError, VM, withoutReadOnlyPolicyFields, type Arker, type ForkOptions, type Vm } from "../index.js";
 import type { ArkerComputeProviderConfig } from "./arker-provider.js";
 
+export function blaxelLifetimePolicies(ttl: unknown, configured: ArkerComputeProviderConfig["policies"] = {}) {
+  if (ttl == null || ttl === "") return undefined;
+  const match = typeof ttl === "string" ? /^([0-9]+)(s|m|h|d|w)$/.exec(ttl) : null;
+  if (!match) throw new Error("Arker supports Blaxel ttl as whole-number s, m, h, d, or w; fractional and compound durations are unsupported");
+  const seconds = Number(match[1]) * {s: 1, m: 60, h: 3600, d: 86400, w: 604800}[match[2] as "s" | "m" | "h" | "d" | "w"];
+  if (seconds < 300) throw new Error("Blaxel ttl requires at least five minutes");
+  if (seconds > 2592000) throw new Error("Arker lifetime schedules support Blaxel ttl up to 30 days");
+  const rules = configured?.rules;
+  if (rules != null && (typeof rules !== "object" || Array.isArray(rules))) throw new Error("rules must be a rule map");
+  const id = "computesdk-blaxel-lifetime";
+  if (configured && ("policies" in configured || Object.hasOwn(configured.rules ?? {}, id)))
+    throw new Error("Blaxel ttl requires named policies with its lifetime policy id reserved");
+  return {rules: {[id]: {type: "schedule" as const, after_created: seconds, action: "delete" as const}}};
+}
+
 export function validateBlaxelName(name: unknown): void {
   if (name == null || name === "") return;
   let message: string;
