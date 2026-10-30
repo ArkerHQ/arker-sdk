@@ -220,13 +220,13 @@ def test_wait_timeout_leaves_command_running_and_retrievable(session):
     assert owner.get_session_command_logs(identifier, command.id).stdout.endswith("kept\n")
 
 
-def test_request_timeout_refuses_before_guest_work():
+def test_invalid_request_timeout_refuses_before_guest_work():
     owner = SessionProcess()
     owner._vm = SimpleNamespace(sync=lambda *_: pytest.fail("must not stage"))
-    with pytest.raises(Exception, match="request_timeout"):
-        owner.create_session("test", request_timeout=1)
-    with pytest.raises(Exception, match="request_timeout"):
-        owner.get_session("test", request_timeout=1)
+    with pytest.raises(Exception, match="finite non-negative"):
+        owner.create_session("test", request_timeout=-1)
+    with pytest.raises(Exception, match="finite non-negative"):
+        owner.get_session("test", request_timeout=float("nan"))
 
 
 def test_async_cancelled_session_creation_reconciles_exact_admission():

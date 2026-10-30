@@ -42,7 +42,7 @@ from jsonschema.exceptions import ValidationError as SchemaValidationError
 from pydantic import TypeAdapter, ValidationError
 
 from ._port import PortStream
-from ._request_timeout import has_transport_timeout, transport_timeout
+from ._request_timeout import has_transport_timeout, request_executor, transport_timeout
 from .generated.api_models import (
     ApiKeyScope,
     BackgroundRunResponse,
@@ -1793,6 +1793,9 @@ def _http(
     method: str, url: str, headers: dict[str, str], data: bytes | None, *, timeout: float | _UnsetType | None = _UNSET
 ) -> tuple[int, bytes]:
     effective_timeout = transport_timeout(REQUEST_TIMEOUT_S) if timeout is _UNSET else timeout
+    executor = request_executor()
+    if executor is not None:
+        return executor(method, url, headers, data, effective_timeout)
     with _http_client.stream(method, url, headers=headers, content=data, timeout=effective_timeout) as response:
         try:
             content = response.read()

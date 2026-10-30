@@ -30,7 +30,25 @@ def request_timeout_scope(timeout):
 def without_request_timeout():
     """Reconcile or clean up independently of the initiating request's timeout."""
     token = _current.set(None)
+    executor_token = _executor.set(None)
     try:
         yield
     finally:
+        _executor.reset(executor_token)
         _current.reset(token)
+
+
+_executor: ContextVar[object] = ContextVar("arker_http_executor", default=None)
+
+
+def request_executor():
+    return _executor.get()
+
+
+@contextmanager
+def request_executor_scope(executor):
+    token = _executor.set(executor)
+    try:
+        yield
+    finally:
+        _executor.reset(token)

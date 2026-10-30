@@ -15,8 +15,11 @@ import uuid
 from importlib.resources import files
 from types import SimpleNamespace
 
-from ._compat import UnsupportedCompatibilityOption, import_optional, run_command
+from ._compat import import_optional, run_command
 from ._compat_process import GuestProcesses
+from ._daytona_request import is_response_timeout
+from ._daytona_request import request_timeout as response_timeout
+from ._request_timeout import without_request_timeout
 from .computer import CompletedRunResult
 
 _PREFIX = "daytona-session:"
@@ -45,10 +48,6 @@ class SessionProcess:
         return path
 
     def _session_call(self, action, request_timeout=None, **values):
-        if request_timeout is not None:
-            if request_timeout < 0:
-                raise ValueError("request_timeout must be nonnegative")
-            raise UnsupportedCompatibilityOption("Daytona session request_timeout is not supported by this transport")
         payload = base64.b64encode(json.dumps({"action": action, **values}).encode()).decode()
         lock = self.__dict__.setdefault("_session_control_lock", threading.Lock())
         with lock:
@@ -74,38 +73,46 @@ class SessionProcess:
             raise RuntimeError(parsed["error"])
         return parsed["result"]
 
+    @response_timeout
     def create_session(self, session_id, request_timeout=None):
         self._create_session_owned(session_id, request_timeout)
 
+    @response_timeout
     def _create_session_owned(self, session_id, request_timeout=None):
         if not isinstance(session_id, str) or not session_id:
             raise ValueError("Session ID must be a nonempty string")
-        if request_timeout is not None:
-            raise UnsupportedCompatibilityOption("Daytona session request_timeout is not supported by this transport")
         path = self._session_source()
         account_source = files("arker").joinpath("_guest_daytona_pty.py").read_text()
         home, _ = json.loads(run_command(self._vm, "python3 -I -c " + shlex.quote(account_source)).stdout)
         manager = GuestProcesses(self._vm)
         name = _PREFIX + uuid.uuid4().hex
-        started = manager.exec(
-            {
-                "name": name,
-                "exclusiveName": _PREFIX + session_id,
-                "command": json.dumps({"id": session_id}),
-                "argv": ["python3", "-I", path, "serve", session_id, name],
-                "user": "daytona",
-                "workingDir": home,
-                "preserveDescendants": True,
-                "env": {"HOME": home, "USER": "daytona", "LOGNAME": "daytona"},
-            }
-        )
         try:
-            deadline = time.monotonic() + (request_timeout or 30)
+            started = manager.exec(
+                {
+                    "name": name,
+                    "exclusiveName": _PREFIX + session_id,
+                    "command": json.dumps({"id": session_id}),
+                    "argv": ["python3", "-I", path, "serve", session_id, name],
+                    "user": "daytona",
+                    "workingDir": home,
+                    "preserveDescendants": True,
+                    "env": {"HOME": home, "USER": "daytona", "LOGNAME": "daytona"},
+                }
+            )
+        except Exception as error:
+            if is_response_timeout(error):
+                error.session_id = session_id
+                error.process_id = name
+            raise
+        try:
+            deadline = time.monotonic() + 30
             while True:
                 try:
                     self.get_session(session_id, request_timeout)
                     return started.name
-                except Exception:
+                except Exception as error:
+                    if is_response_timeout(error):
+                        raise
                     current = manager.get(started.name)
                     if current.status != "running" or time.monotonic() >= deadline:
                         raise
@@ -113,25 +120,32 @@ class SessionProcess:
         except BaseException as primary:
             primary.session_id = session_id
             primary.process_id = started.name
+            if is_response_timeout(primary):
+                raise
             try:
-                manager.kill(started.name)
+                with without_request_timeout():
+                    manager.kill(started.name)
             except BaseException as cleanup:
                 raise primary from cleanup
             raise
 
     def _discard_created_session(self, session_id, identifier):
         manager = GuestProcesses(self._vm)
-        try:
-            self._session_call("delete", session_id=session_id, instance=identifier)
-        finally:
-            manager.kill(identifier)
+        with without_request_timeout():
+            try:
+                self._session_call("delete", session_id=session_id, instance=identifier)
+            finally:
+                manager.kill(identifier)
 
+    @response_timeout
     def get_session(self, session_id, request_timeout=None):
         return model("Session", **self._session_call("get", request_timeout, session_id=session_id))
 
+    @response_timeout
     def list_sessions(self, request_timeout=None):
         return [model("Session", **value) for value in self._session_call("list", request_timeout)]
 
+    @response_timeout
     def get_session_command(self, session_id, command_id, request_timeout=None):
         return model(
             "Command", **self._session_call("command", request_timeout, session_id=session_id, command_id=command_id)
@@ -164,6 +178,7 @@ class SessionProcess:
             stderr=logs.stderr,
         )
 
+    @response_timeout
     def get_session_command_logs(self, session_id, command_id, request_timeout=None):
         streams = {}
         for stream in ("stdout", "stderr", "output"):
@@ -212,6 +227,7 @@ class SessionProcess:
             if len(finished) < 2:
                 await asyncio.sleep(0.02)
 
+    @response_timeout
     def send_session_command_input(self, session_id, command_id, data, request_timeout=None):
         encoded = data.encode()
         offset = 0
@@ -227,6 +243,7 @@ class SessionProcess:
             if response["written"] == 0:
                 time.sleep(0.02)
 
+    @response_timeout
     def delete_session(self, session_id, request_timeout=None):
         manager = GuestProcesses(self._vm)
         current = [

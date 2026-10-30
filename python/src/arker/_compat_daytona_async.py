@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 
 from ._compat import CompatibilityCreationNotStartedError, UnsupportedCompatibilityOption, import_optional
 from ._compat_async import NativeBridge, call, route
 from ._daytona_pty import AsyncPtyProcess
+from ._daytona_request import async_request_timeout
 
 
 class _AsyncProcess(AsyncPtyProcess):
@@ -12,11 +14,12 @@ class _AsyncProcess(AsyncPtyProcess):
         self._process = process
 
     async def create_session(self, session_id, request_timeout=None):
-        await route(
-            lambda: self._process._create_session_owned(session_id, request_timeout),
-            cleanup=lambda identifier: self._process._discard_created_session(session_id, identifier),
-            drain_on_cancel=True,
-        )
+        async with async_request_timeout(self._process._create_session_owned, (session_id, request_timeout), {}):
+            await route(
+                lambda: self._process._create_session_owned(session_id, request_timeout),
+                cleanup=lambda identifier: self._process._discard_created_session(session_id, identifier),
+                drain_on_cancel=True,
+            )
 
     async def get_session_command_logs_async(self, session_id, command_id, on_stdout, on_stderr):
         return await self._process.get_session_command_logs_async(session_id, command_id, on_stdout, on_stderr)
@@ -25,7 +28,10 @@ class _AsyncProcess(AsyncPtyProcess):
         function = getattr(self._process, name)
 
         async def invoke(*args, **kwargs):
-            return await call(function, *args, **kwargs)
+            if "request_timeout" not in inspect.signature(function).parameters:
+                return await call(function, *args, **kwargs)
+            async with async_request_timeout(function, args, kwargs) as requests:
+                return await route(lambda: function(*args, **kwargs), bridges=(requests,), drain_on_cancel=True)
 
         return invoke
 

@@ -14,9 +14,10 @@ import uuid
 from importlib.resources import files
 from types import SimpleNamespace
 
-from ._compat import UnsupportedCompatibilityOption, import_optional, run_command
+from ._compat import import_optional, run_command
 from ._compat_async import route
 from ._compat_process import GuestProcesses
+from ._daytona_request import request_timeout as response_timeout
 
 _PREFIX = "daytona-pty:"
 _TERMINAL = {"completed", "failed", "killed", "stopped"}
@@ -237,31 +238,27 @@ class PtyProcess:
             raise module.DaytonaNotFoundError("PTY session not found", status_code=404)
         raise ValueError("PTY session not found")
 
+    @response_timeout
     def get_pty_session_info(self, session_id, request_timeout=None):
-        if request_timeout is not None:
-            raise UnsupportedCompatibilityOption("Daytona PTY request_timeout is not supported by this transport")
         return self._pty_info(self._current(session_id))
 
+    @response_timeout
     def list_pty_sessions(self, request_timeout=None):
-        if request_timeout is not None:
-            raise UnsupportedCompatibilityOption("Daytona PTY request_timeout is not supported by this transport")
         return [
             self._pty_info(p)
             for p in self._pty_processes.list(include_output=False)
             if p.name.startswith(_PREFIX) and p.status not in _TERMINAL
         ]
 
+    @response_timeout
     def kill_pty_session(self, session_id, request_timeout=None):
-        if request_timeout is not None:
-            raise UnsupportedCompatibilityOption("Daytona PTY request_timeout is not supported by this transport")
         self._pty_processes.kill(self._current(session_id).name)
 
+    @response_timeout
     def resize_pty_session(self, session_id, pty_size, request_timeout=None):
-        if request_timeout is not None:
-            raise UnsupportedCompatibilityOption("Daytona PTY request_timeout is not supported by this transport")
         size = _size(pty_size)
         self._pty_processes.resize(self._current(session_id).name, **size)
-        info = self.get_pty_session_info(session_id)
+        info = self.get_pty_session_info(session_id, request_timeout)
         info.rows, info.cols = size["rows"], size["cols"]
         return info
 
