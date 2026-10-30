@@ -197,7 +197,6 @@ def test_exec_local_secrets_precedence_and_native_defaults(tmp_path, monkeypatch
 @pytest.mark.parametrize(
     "case, error, match",
     [
-        ("terminate-wait", UnsupportedCompatibilityOption, None),
         ("remote-secret", UnsupportedCompatibilityOption, "named or deployed"),
         ("pty", TypeError, "unsupported option"),
         ("pty_info", TypeError, "unsupported option"),
@@ -216,7 +215,4 @@ def test_unsupported_options_rejected_before_guest_mutation(guest, case, error, 
     else:
         options = {case: True if case == "pty" else object()}
     with pytest.raises(error, match=match):
-        if case == "terminate-wait":
-            sandbox.terminate(wait=True)
-        else:
-            sandbox.exec("true", **options)
+        sandbox.exec("true", **options)

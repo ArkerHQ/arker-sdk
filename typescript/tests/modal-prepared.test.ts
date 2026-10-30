@@ -100,21 +100,21 @@ test("public recipe creation builds privately with separate final lifetime and e
   assert.deepEqual(calls.slice(-2), [["delete", "capture"], ["delete", "builder"]]);
 });
 
-for (const failure of ["builder", "capture"]) {
-  test(`fork failure reclaims owned resources at ${failure}`, async () => {
+for (const failure of ["builder", "capture"]) for (const image_config of [undefined, { env: { TOKEN: "synthetic-secret" }, workdir: "/final" }]) {
+  test(`fork failure reclaims owned resources at ${failure} overrides=${!!image_config}`, async () => {
     const calls: any[] = [];
-    await assert.rejects(finishPrepared(fixture(calls, "builder", failure), empty(), {}), /fork failed/);
+    await assert.rejects(finishPrepared(fixture(calls, "builder", failure), empty(), { image_config }), /fork failed/);
     assert.deepEqual(calls.filter(call => call[0] === "delete").map(call => call[1]), failure === "builder" ? ["builder"] : ["capture", "builder"]);
   });
 }
 
-test("cancellation after final fork reclaims late child", async () => {
+for (const image_config of [undefined, { env: { TOKEN: "synthetic-secret" }, workdir: "/final" }]) test(`cancellation after final fork reclaims late child overrides=${!!image_config}`, async () => {
   const calls: any[] = [], controller = new AbortController();
   const builder = fixture(calls);
   const capture = fixture(calls, "capture");
   builder.fork = async () => capture;
   capture.fork = async () => { controller.abort(); return fixture(calls, "child"); };
-  await assert.rejects(finishPrepared(builder, empty(), {}, controller.signal), /abort/i);
+  await assert.rejects(finishPrepared(builder, empty(), { image_config }, controller.signal), /abort/i);
   assert.deepEqual(calls.filter(call => call[0] === "delete").map(call => call[1]), ["child", "capture", "builder"]);
 });
 
@@ -146,14 +146,27 @@ for (const explicit of [undefined, "/explicit"]) {
   });
 }
 
-test("prepared startup secrets reject before builder allocation", async t => {
+test("prepared startup secrets and overrides reach only the final child", async t => {
   preserveEnvironment(t, "COMPUTESDK_ROUTER_CONFIG");
   delete process.env.COMPUTESDK_ROUTER_CONFIG;
-  const fork = t.mock.method(Arker.prototype, "fork", async () => { assert.fail("must not allocate"); });
+  const calls: any[] = [];
+  const fork = t.mock.method(Arker.prototype, "fork", async (request: ForkOptions) => {
+    calls.push(["builder_request", request]);
+    return fixture(calls);
+  });
   const client = new ModalClient({ arker: { apiKey: "synthetic", baseUrl: "https://fixture.invalid" } });
   const app = await client.apps.fromName("prepared", { createIfMissing: true });
   const image = client.images.fromRegistry("example/image").dockerfileCommands(["CMD true", "ENTRYPOINT []"]);
-  const secret = await client.secrets.fromObject({ TOKEN: "synthetic-secret" });
-  await assert.rejects(client.sandboxes.create(app, image, { secrets: [secret] }), /per-child/);
-  assert.equal(fork.mock.callCount(), 0);
+  const secret = await client.secrets.fromObject({ TOKEN: "synthetic-secret", SHARED: "secret" });
+  const box = await client.sandboxes.create(app, image, { secrets: [secret], env: { SHARED: "explicit" }, workdir: "/final" });
+  assert.equal(box.sandboxId, "child");
+  assert.equal(fork.mock.callCount(), 1);
+  const child = calls.find(call => call[0] === "fork" && call[1] === "capture")[2];
+  assert.deepEqual(JSON.parse(JSON.stringify(child.image_config)), { env: { TOKEN: "synthetic-secret", SHARED: "explicit" }, workdir: "/final" });
+  assert.equal(child.metadata["computesdk-modal-image-workdir"], "/final");
+  assert.equal(child.metadata["computesdk-modal-defaults"], undefined);
+  assert.equal(JSON.stringify(child.metadata).includes("synthetic-secret"), false);
+  assert.equal(JSON.stringify(calls.filter(call => !(call[0] === "fork" && call[1] === "capture"))).includes("synthetic-secret"), false);
+  assert.deepEqual(calls[0][1].image_config, {cmd: [], entrypoint: []});
+  assert.deepEqual(calls.slice(-2), [["delete", "capture"], ["delete", "builder"]]);
 });

@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { InvalidError, ModalClient as NativeModalClient, type ModalClientParams, type Sandbox as NativeSandbox, type SandboxExecParams, type ContainerProcess, type SandboxTerminateParams } from "modal";
+import { NotFoundError, InvalidError, ModalClient as NativeModalClient, type ModalClientParams, type Sandbox as NativeSandbox, type SandboxExecParams, type ContainerProcess, type SandboxTerminateParams } from "modal";
 import type { RunCommandOptions } from "computesdk";
 
 import {
@@ -14,7 +14,8 @@ import { ModalAppRecipe, ModalVolumeRecipe, registryImage, registry, registrySte
 import { MODAL_DEFAULTS_MARKER, prepareExec, discardExec, writeDefaults } from "./compat/modal-defaults.js";
 import { createNativeModalProvider } from "./compat/modal-provider.js";
 import { IMAGE_WORKDIR, preparedFork, preparedMetadata } from "./compat/modal-prepared.js";
-import { rethrowModalExecError } from "./compat/modal-errors.js";
+import { lifecycle, returncode, lookup } from "./compat/modal-lifecycle.js";
+import { rethrowModalExecError, missingVm } from "./compat/modal-errors.js";
 import type { VM } from "./index.js";
 import { modalCommandHandle } from "./compat/modal-command.js";
 import { modalFilesystem } from "./compat/modal-filesystem.js";
@@ -161,13 +162,30 @@ export class Sandbox {
     }
   }
 
+  async poll(): Promise<number | null> {
+    if (this.#native) return this.#native.poll();
+    const vm = (this.#box as UniversalSandbox & { getInstance(): VM }).getInstance();
+    return returncode(await lifecycle(vm));
+  }
+
+  async wait(): Promise<number> {
+    if (this.#native) return this.#native.wait();
+    for (;;) {
+      const code = await this.poll();
+      if (code !== null) return code;
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+
   async terminate(): Promise<void>;
   async terminate(params: { wait: true }): Promise<number>;
   async terminate(params?: SandboxTerminateParams): Promise<void | number> {
     if (this.#native) return params?.wait ? this.#native.terminate({ wait: true }) : this.#native.terminate();
     assertSupportedObjectKeys(params, ["wait"], "modal", "Sandbox.terminate");
-    if (params?.wait) throw new Error("Waiting for a Modal entrypoint exit status is not supported on Arker");
-    await this.#box.destroy();
+    const vm = (this.#box as UniversalSandbox & { getInstance(): VM }).getInstance();
+    try { await vm.delete(); }
+    catch (error) { if (!missingVm(error) || await lifecycle(vm) === null) throw error; }
+    if (params?.wait) return this.wait();
   }
 }
 
@@ -212,6 +230,7 @@ export class ModalClient {
       arker,
       fallbackProvider: createNativeModalProvider(() => this.#nativeClient()),
       routerConfigPath,
+      arkerGet: lookup,
       arkerLifetimePolicyId: "computesdk-modal-lifetime",
       arkerFork: preparedFork,
       mapArkerCreateOptions: ({ modalCreateParams, modalApp, modalImage, ...rest }) => {
@@ -228,10 +247,13 @@ export class ModalClient {
         const defaults = creationDefaults({ env, workdir, secrets });
         const steps = registrySteps(modalImage);
         if (steps) {
-          if (Object.keys(defaults.env).length || workdir !== undefined) throw new Error("Prepared image startup cannot yet receive per-child environment, secrets or workdir");
-          rest = { ...rest, metadata: preparedMetadata((rest.metadata ?? {}) as object, steps) };
+          const imageConfig = {
+            ...(Object.keys(defaults.env).length ? { env: defaults.env } : {}),
+            ...(workdir !== undefined ? { workdir: defaults.workdir } : {}),
+          };
+          rest = { ...rest, metadata: preparedMetadata((rest.metadata ?? {}) as object, steps, Object.keys(imageConfig).length ? imageConfig : undefined) };
         }
-        if (Object.keys(defaults.env).length || workdir !== undefined) {
+        if (!steps && (Object.keys(defaults.env).length || workdir !== undefined)) {
           rest = { ...rest, metadata: { ...(rest.metadata as Record<string, unknown> ?? {}), [MODAL_DEFAULTS_MARKER]: true } };
         }
         if (timeoutMs != null && (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs))) {
@@ -280,7 +302,7 @@ export class ModalClient {
       });
       if (box.provider === "arker") {
         const defaults = creationDefaults(options ?? {});
-        if (Object.keys(defaults.env).length || options?.workdir !== undefined) {
+        if (!registrySteps(args[1]) && (Object.keys(defaults.env).length || options?.workdir !== undefined)) {
           try { await writeDefaults(box, defaults); }
           catch (error) {
             try { await box.destroy(); }
@@ -293,7 +315,7 @@ export class ModalClient {
     },
     fromId: async (sandboxId: string): Promise<Sandbox> => {
       const box = await this.#sdk.sandbox.getById(sandboxId);
-      if (!box) throw new Error(`Sandbox ${sandboxId} not found`);
+      if (!box) throw new NotFoundError(`Sandbox ${sandboxId} not found`);
       return guardUnsupported(new Sandbox(box), "modal", nativeInstance(box));
     },
   };

@@ -1740,11 +1740,13 @@ class ResumeVmResponse:
 @dataclass(frozen=True)
 class VmLifecycleResponse:
     vm_id: str
-    state: Literal['running', 'idle', 'paused']
+    state: Literal['running', 'idle', 'paused', 'terminated']
     mode: VmPauseMode | None
     customer_paused: bool
     started_at: str
     paused_at: str | None = None
+    terminated_at: str | None = None
+    termination_reason: Literal['deadline', 'requested', 'unknown'] | None = None
 
 
 @dataclass(frozen=True)
@@ -2122,6 +2124,7 @@ class ResumeVmParameters:
 @dataclass(frozen=True)
 class GetVmLifecycleParameters:
     id: str
+    include_terminated: bool | None = False
 
 
 @dataclass(frozen=True)
@@ -2316,6 +2319,8 @@ class ImageConfigOverrides:
     env: dict[str, str] | None = None
     entrypoint: ImageArgv | None = None
     cmd: ImageArgv | None = None
+    user: str | None = None
+    workdir: str | None = None
 
 
 @dataclass(frozen=True)

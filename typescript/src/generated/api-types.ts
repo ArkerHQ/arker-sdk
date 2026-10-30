@@ -3914,7 +3914,7 @@ export interface components {
              * @description Running means the guest is executing. Idle is automatic suspension, not an explicit customer pause.
              * @enum {string}
              */
-            state: "running" | "idle" | "paused";
+            state: "running" | "idle" | "paused" | "terminated";
             /** @description Saved explicit pause mode, or null when no explicit pause mode is saved. */
             mode: components["schemas"]["VmPauseMode"] | null;
             /** @description True only for a confirmed explicit customer pause. */
@@ -3929,6 +3929,16 @@ export interface components {
              * @description Time the current explicit customer pause was committed, or null when not customer-paused. Repeated pauses preserve this timestamp; explicit resume clears it.
              */
             paused_at?: string | null;
+            /**
+             * Format: date-time
+             * @description Recorded deletion time for a retained terminal VM; null otherwise.
+             */
+            terminated_at?: string | null;
+            /**
+             * @description Reason recorded atomically by the winning deletion. Unknown includes records predating reason persistence; never inferred from elapsed time or command exits.
+             * @enum {string|null}
+             */
+            termination_reason?: "deadline" | "requested" | "unknown" | null;
         };
         /** @description Remove only this delete schedule rule atomically with the explicit pause marker. Other policy rules are preserved. */
         PauseVmDeadline: {
@@ -3985,7 +3995,7 @@ export interface components {
              */
             code: number;
         };
-        /** @description Creation-time OCI configuration overrides, supported for image sources on Firecracker and Cloud Hypervisor. Applied to the private root disk before boot. Omitted fields inherit; env merges by key, and explicit entrypoint/cmd arrays replace argv (empty clears). USER and working directory remain inherited. Captured VM sources do not accept overrides. Combined UTF-8 keys, values and argv are limited to 64 KiB; each value or argument to 32768 bytes. */
+        /** @description Creation-time image configuration overrides applied only to the private child disk before boot. Supported for OCI image sources and explicit non-durable filesystem-only VM forks with start_image=true on Firecracker; OCI sources also support Cloud Hypervisor. Omitted fields inherit. Environment merges by key; entrypoint/cmd arrays replace argv (empty clears). User and workdir replace the corresponding image defaults. Combined UTF-8 keys, values and argv are limited to 64 KiB; each value or argument to 32768 bytes. */
         ImageConfigOverrides: {
             /** @description Environment entries merged over the image environment before boot. */
             env?: {
@@ -3995,6 +4005,10 @@ export interface components {
             entrypoint?: components["schemas"]["ImageArgv"];
             /** @description Replacement OCI command argv; an empty array clears it. */
             cmd?: components["schemas"]["ImageArgv"];
+            /** @description Guest user name or numeric UID, optionally followed by a group name or GID. Omission inherits. */
+            user?: string;
+            /** @description Absolute working directory for new image processes. Omission inherits. */
+            workdir?: string;
         };
         /** @description An explicit OCI argument vector. Empty clears the corresponding startup field; omission of that field inherits it. */
         ImageArgv: string[];
@@ -6447,7 +6461,10 @@ export interface operations {
     };
     getVmLifecycle: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description For a canonical VM ID owned by the caller, include a retained terminal record. Foreign, nonexistent and purged IDs remain not_found. Does not resume or recreate the VM. */
+                include_terminated?: boolean;
+            };
             header?: never;
             path: {
                 /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */

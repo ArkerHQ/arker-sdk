@@ -9,7 +9,8 @@ const BUILD_INGRESS = "computesdk-modal-build-ingress";
 export const CONFIG_PATH = "/etc/arker/image-config.json";
 const PROFILE_PATH = "/etc/profile.d/99-arker-image.sh";
 type Resolved = { env: [string, string][]; user: string | null; workdir: string | null; cmd: string | null; entrypoint: string | null };
-const plans = new WeakMap<object, Step[]>();
+type ChildConfig = { env?: Record<string, string>; workdir?: string };
+const plans = new WeakMap<object, { steps: Step[]; imageConfig?: ChildConfig }>();
 
 export function preparedSteps(commands: string[]): Step[] {
   if (!Array.isArray(commands) || commands.some(value => typeof value !== "string")) throw new TypeError("Image commands must be strings");
@@ -19,8 +20,8 @@ export function preparedSteps(commands: string[]): Step[] {
   return steps;
 }
 
-export function preparedMetadata(metadata: object, steps: Step[]): object {
-  plans.set(metadata, steps);
+export function preparedMetadata(metadata: object, steps: Step[], imageConfig?: ChildConfig): object {
+  plans.set(metadata, { steps, imageConfig });
   return metadata;
 }
 
@@ -46,7 +47,7 @@ async function dispose(vm: VM): Promise<void> {
   catch (error) { throw Object.assign(new Error(`Prepared image cleanup failed for VM ${vm.id}`, { cause: error }), { vmId: vm.id }); }
 }
 
-export async function finishPrepared(builder: VM, encoded: [string, string], final: Pick<ForkOptions, "policies" | "metadata" | "name">, signal?: AbortSignal): Promise<VM> {
+export async function finishPrepared(builder: VM, encoded: [string, string], final: Pick<ForkOptions, "policies" | "metadata" | "name"> & { image_config?: ChildConfig }, signal?: AbortSignal): Promise<VM> {
   const owned = [builder];
   const fork = async (source: VM, request: NonNullable<Parameters<VM["fork"]>[0]>) => {
     signal?.throwIfAborted();
@@ -69,6 +70,7 @@ export async function finishPrepared(builder: VM, encoded: [string, string], fin
       [BUILD_POLICY]: { type: "schedule", after_created: 300, action: "delete" },
     } } });
     const childRequest = { layers: ["disk"] as "disk"[], start_image: true, policies,
+      ...(final.image_config === undefined ? {} : { image_config: final.image_config }),
       ...(final.metadata === undefined ? {} : { metadata: final.metadata }), ...(final.name === undefined ? {} : { name: final.name }) };
     const child = await fork(capture, childRequest);
     for (const resource of owned.slice(0, -1).reverse()) { await dispose(resource); owned.splice(owned.indexOf(resource), 1); }
@@ -82,7 +84,7 @@ export async function finishPrepared(builder: VM, encoded: [string, string], fin
   }
 }
 
-export async function createPrepared(client: Arker, request: ForkOptions, steps: Step[], buildTimeout = 900): Promise<VM> {
+export async function createPrepared(client: Arker, request: ForkOptions, steps: Step[], buildTimeout = 900, imageConfig?: ChildConfig): Promise<VM> {
   const policies = structuredClone(request.policies ?? {});
   if ("policies" in policies || policies.secrets || BUILD_POLICY in (policies.rules ?? {})) throw new Error("Prepared builds require named policies without policy secrets or reserved build rules");
   const rules = policies.rules ?? {};
@@ -130,7 +132,7 @@ export async function createPrepared(client: Arker, request: ForkOptions, steps:
       "computesdk-modal-prepared-ingress": { type: "inbound", priority: 0, action: "allow", auth: "arker" },
     };
     transferred = true;
-    return await finishPrepared(builder, encoded, { ...request, policies, metadata: { ...request.metadata, [IMAGE_WORKDIR]: resolved.workdir ?? "/" } });
+    return await finishPrepared(builder, encoded, { ...request, image_config: imageConfig, policies, metadata: { ...request.metadata, [IMAGE_WORKDIR]: imageConfig?.workdir ?? resolved.workdir ?? "/" } });
   } catch (error) {
     if (!transferred) { try { await dispose(builder); } catch (cleanup) { throw new AggregateError([error, cleanup], "Prepared build and cleanup failed"); } }
     throw error;
@@ -138,6 +140,6 @@ export async function createPrepared(client: Arker, request: ForkOptions, steps:
 }
 
 export function preparedFork(client: Arker, request: ForkOptions): Promise<VM> {
-  const steps = request.metadata && typeof request.metadata === "object" ? plans.get(request.metadata) : undefined;
-  return steps ? createPrepared(client, request, steps) : client.fork(request);
+  const plan = request.metadata && typeof request.metadata === "object" ? plans.get(request.metadata) : undefined;
+  return plan ? createPrepared(client, request, plan.steps, 900, plan.imageConfig) : client.fork(request);
 }

@@ -239,6 +239,15 @@ A source whose entrypoint launches a public daemon must be prepared with explici
 replace a customer's startup command. Custom-image user identity, native default
 image resolution and unattended daemon lifecycle are not fully qualified.
 
+## Modal retained lifecycle
+
+On backends supporting retained lifecycle lookup, `from_id` / `fromId` can return
+an owned terminal sandbox while its record remains retained. `poll`, `wait`, and
+`terminate(wait=True)` / `terminate({ wait: true })` use the recorded deadline or
+explicit-termination outcome. Terminal handles cannot execute commands. Foreign,
+nonexistent, and purged IDs remain not found. Historical records without a known
+outcome and natural entrypoint completion do not have a synthesized exit code.
+
 ## Modal creation recipes
 
 Arker supports plain registry-image recipes, local secret values, creation
@@ -277,10 +286,12 @@ requires Arker authentication for ingress. This requires backend support for `st
 filesystem-only VM forks. Startup acknowledgement confirms command admission,
 not application readiness. Live timing and startup validation remain pending.
 
-Prepared recipes currently reject creation environment/secrets/workdir,
-build secrets, custom inbound policies, policy secrets, additional layers and
-other Dockerfile instructions. They do not bake sandbox secrets into shared
-sources or place them in startup command text. No prepared-image cache is used.
+Prepared recipes pass creation environment, local secrets and workdir only to
+the final child through `image_config`; this requires backend support for applying
+those overrides before startup. Explicit environment values override secrets.
+Build secrets, custom inbound policies, policy secrets, additional layers and
+other Dockerfile instructions remain unsupported. Sandbox secrets are not baked
+into shared sources or placed in startup command text. No prepared-image cache is used.
 Named Volume recipes, Python `debian_slim`, `add_python`, and unknown native
 image handles remain unsupported on Arker. Native routes
 continue to use native resources. The creation differential scenarios use the

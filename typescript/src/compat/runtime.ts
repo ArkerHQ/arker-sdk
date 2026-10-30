@@ -1,4 +1,4 @@
-import type { RequestTransportOptions } from "../index.js";
+import type { Arker, VM, RequestTransportOptions } from "../index.js";
 import { compute } from "computesdk";
 
 import { createArkerComputeProvider, type ArkerComputeProviderConfig, type ForkMetadataMapper, type ForkExecutor } from "./arker-provider.js";
@@ -21,6 +21,7 @@ export interface CreateCompatSdkOptions {
   mapArkerForkMetadata?: ForkMetadataMapper;
   arkerFork?: ForkExecutor;
   arkerLifetimePolicyId?: string;
+  arkerGet?: (client: Arker, id: string, transport?: RequestTransportOptions) => Promise<VM>;
   mapArkerCreateOptions?: (options: Record<string, unknown>) => Record<string, unknown>;
   prepareArkerCreateOptions?: (options: Record<string, unknown>) => Promise<{ options: Record<string, unknown>; context: unknown }>;
   finishArkerCreate?: (sandbox: any, context: unknown) => Promise<void>;
@@ -28,7 +29,7 @@ export interface CreateCompatSdkOptions {
 
 export function createCompatRouter(options: CreateCompatSdkOptions) {
   const hasArker = !!(options.arker?.apiKey || globalThis.process?.env?.ARKER_API_KEY?.trim());
-  const arker = hasArker ? createArkerComputeProvider(options.arker, options.mapArkerForkMetadata, options.arkerLookupTransport, options.arkerFork, options.arkerLifetimePolicyId) : undefined;
+  const arker = hasArker ? createArkerComputeProvider(options.arker, options.mapArkerForkMetadata, options.arkerLookupTransport, options.arkerFork, options.arkerLifetimePolicyId, options.arkerGet) : undefined;
   if (arker && (options.mapArkerCreateOptions || options.prepareArkerCreateOptions)) {
     const create = arker.sandbox.create.bind(arker.sandbox);
     arker.sandbox.create = async (values) => {

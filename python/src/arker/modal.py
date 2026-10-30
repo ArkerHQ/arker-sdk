@@ -15,7 +15,6 @@ from ._compat import (
     arker_create,
     arker_get,
     compat_network_policies,
-    format_not_found,
     get_or_none,
     import_optional,
     pop_arker_config,
@@ -90,6 +89,7 @@ class Sandbox(UnsupportedMixin):
         self._processes = None
         self._filesystem_container = None
         self._filesystem = None
+        self._terminal_reason = getattr(vm, "_modal_terminal_reason", None)
         self.sandbox_id = (
             vm.id
             if vm is not None
@@ -192,15 +192,11 @@ class Sandbox(UnsupportedMixin):
             ):
                 raise invalid(f"workdir must be an absolute path, got: {creation_workdir}")
             defaults = {"env": environment, "workdir": creation_workdir or "/"}
-            if environment or creation_workdir is not None:
+            steps = recipe._steps() if recipe is not None else None
+            if not steps and (environment or creation_workdir is not None):
                 from ._modal_defaults import MARKER
 
                 metadata[MARKER] = True
-            steps = recipe._steps() if recipe is not None else None
-            if steps and (environment or creation_workdir is not None):
-                raise UnsupportedCompatibilityOption(
-                    "Prepared image startup cannot yet receive per-child environment, secrets or workdir"
-                )
             registry = recipe._registry() if recipe is not None else None
             registry_auth = recipe._registry_auth() if recipe is not None else None
             image_config = arker_config
@@ -241,9 +237,15 @@ class Sandbox(UnsupportedMixin):
             if steps:
                 from ._modal_prepared import create_prepared
 
-                fork = lambda client, request: create_prepared(client, request, steps)
+                final_image_config = {
+                    **({"env": environment} if environment else {}),
+                    **({"workdir": creation_workdir} if creation_workdir is not None else {}),
+                }
+                fork = lambda client, request: create_prepared(
+                    client, request, steps, final_image_config=final_image_config
+                )
             vm = arker_create(image_config, image=registry, policies=policies, metadata=metadata or None, fork=fork)
-            if environment or creation_workdir is not None:
+            if not steps and (environment or creation_workdir is not None):
                 from ._modal_defaults import write
 
                 try:
@@ -285,16 +287,30 @@ class Sandbox(UnsupportedMixin):
                     )
             return None
 
+        def get_arker():
+            found = arker_get(sandbox_id, arker_config)
+            if found is not None:
+                return found
+            from ._router import is_arker_vm_identifier
+
+            if not is_arker_vm_identifier(sandbox_id):
+                return None
+            from ._modal_lifecycle import retained
+
+            return retained(sandbox_id, arker_config)
+
         found = routed_get(
             sandbox_id,
             "modal",
             arker_config,
-            {"arker": lambda: arker_get(sandbox_id, arker_config), "modal": get_native},
+            {"arker": get_arker, "modal": get_native},
         )
         if found is not None:
             provider, result = found
             return cls(vm=result if provider == "arker" else None, native=result if provider == "modal" else None)
-        raise format_not_found("Sandbox", sandbox_id)
+        from ._modal_lifecycle import missing
+
+        raise missing(sandbox_id)
 
     @classmethod
     def fromId(cls, sandbox_id: str, **kwargs: Any) -> Sandbox:
@@ -405,12 +421,54 @@ class Sandbox(UnsupportedMixin):
         discard_exec(self._vm, control_name)
         return result
 
+    @property
+    def returncode(self) -> int | None:
+        if self._native is not None:
+            return self._native.returncode
+        from ._modal_lifecycle import returncode
+
+        return returncode(self._terminal_reason)
+
+    @dualmethod
+    def poll(self) -> int | None:
+        if self._native is not None:
+            return self._native.poll()
+        from ._modal_lifecycle import state
+
+        self._terminal_reason = state(self._vm)
+        return self.returncode
+
+    @dualmethod
+    def wait(self, raise_on_termination: bool = True) -> None:
+        if self._native is not None:
+            return self._native.wait(raise_on_termination=raise_on_termination)
+        import time
+
+        from ._modal_lifecycle import completed
+
+        while self.poll() is None:
+            time.sleep(1)
+        completed(self._terminal_reason, raise_on_termination)
+        return None
+
     @dualmethod
     def terminate(self, *, wait: bool = False) -> int | None:
         if self._vm is not None:
+            try:
+                self._vm.delete()
+            except Exception as error:
+                from ._modal_errors import _missing_vm
+
+                if not _missing_vm(error):
+                    raise
+                from ._modal_lifecycle import state
+
+                self._terminal_reason = state(self._vm)
+                if self._terminal_reason is None:
+                    raise
             if wait:
-                raise UnsupportedCompatibilityOption("Sandbox.terminate(wait=True) is not supported by Arker")
-            self._vm.delete()
+                self.wait(raise_on_termination=False)
+                return self.returncode
             return None
         if hasattr(self._native, "terminate"):
             return self._native.terminate(wait=wait)

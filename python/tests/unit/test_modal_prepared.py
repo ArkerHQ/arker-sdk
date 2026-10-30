@@ -110,16 +110,24 @@ def test_prepared_capture_and_child_have_separate_deadlines_and_atomic_policies(
 
 
 @pytest.mark.parametrize("failure,deleted", [("builder", ["builder"]), ("capture", ["capture", "builder"])])
-def test_prepared_failures_reclaim_all_returned_resources(failure, deleted):
+@pytest.mark.parametrize("overrides", [None, {"env": {"TOKEN": "synthetic-secret"}, "workdir": "/final"}])
+def test_prepared_failures_reclaim_all_returned_resources(failure, deleted, overrides):
     from arker._modal_prepared import finish_prepared
 
     calls = []
     with pytest.raises(RuntimeError, match="fork failed"):
-        finish_prepared(Builder("builder", calls, failure), encoded_metadata=metadata(), final_policies={})
+        finish_prepared(
+            Builder("builder", calls, failure),
+            encoded_metadata=metadata(),
+            final_policies={},
+            final_image_config=overrides,
+        )
     assert [call[1] for call in calls if call[0] == "delete"] == deleted
+    assert "synthetic-secret" not in repr([call for call in calls if call[:2] != ("fork", "capture")])
 
 
-def test_prepared_cancellation_after_child_fork_reclaims_late_child():
+@pytest.mark.parametrize("overrides", [None, {"env": {"TOKEN": "synthetic-secret"}, "workdir": "/final"}])
+def test_prepared_cancellation_after_child_fork_reclaims_late_child(overrides):
     import asyncio
     import threading
 
@@ -137,7 +145,11 @@ def test_prepared_cancellation_after_child_fork_reclaims_late_child():
 
     with pytest.raises(asyncio.CancelledError):
         finish_prepared(
-            CancellingBuilder("builder", calls), encoded_metadata=metadata(), final_policies={}, cancelled=cancelled
+            CancellingBuilder("builder", calls),
+            encoded_metadata=metadata(),
+            final_policies={},
+            cancelled=cancelled,
+            final_image_config=overrides,
         )
     assert [call[1] for call in calls if call[0] == "delete"] == ["child", "capture", "builder"]
 
@@ -338,16 +350,29 @@ def test_public_create_prepares_recipe_and_applies_lifetime_only_to_child(monkey
 
 
 @pytest.mark.parametrize("options", [{"env": {"TOKEN": "synthetic"}}, {"workdir": "/other"}])
-def test_prepared_create_rejects_child_startup_overrides_before_fork(monkeypatch, options):
+def test_prepared_create_sends_startup_overrides_only_to_final_child(monkeypatch, options):
+    from types import SimpleNamespace
+
     import arker.modal as shim
-    from arker._compat import UnsupportedCompatibilityOption
+    from arker._modal_prepared import IMAGE_WORKDIR
     from arker._modal_recipes import Image
 
+    calls = []
     monkeypatch.setattr(shim, "routed_create", lambda name, config, creators: ("arker", creators["arker"]()))
-    monkeypatch.setattr("arker._compat.arker_client", lambda config: pytest.fail("must reject before allocation"))
+    monkeypatch.setattr(
+        "arker._compat.arker_client",
+        lambda config: SimpleNamespace(fork=lambda **request: RecipeBuilder("builder", calls)),
+    )
+    monkeypatch.setattr(
+        "arker._modal_defaults.write", lambda *_: pytest.fail("Canonical child config persists defaults")
+    )
     image = Image.from_registry("example/image", setup_dockerfile_commands=["ENTRYPOINT []", 'CMD ["true"]'])
-    with pytest.raises(UnsupportedCompatibilityOption, match="per-child"):
-        shim.Sandbox.create(image=image, **options)
+    assert shim.Sandbox.create(image=image, **options).object_id == "child"
+    child = next(call[2] for call in calls if call[:2] == ("fork", "capture"))
+    assert child["image_config"] == options
+    assert child["metadata"][IMAGE_WORKDIR] == options.get("workdir", "/work")
+    assert "computesdk-modal-defaults" not in child["metadata"]
+    assert "synthetic" not in repr([call for call in calls if call[:2] != ("fork", "capture")])
 
 
 def test_cancelled_public_prepared_create_disposes_late_child(monkeypatch):
@@ -425,13 +450,35 @@ def test_reconnected_prepared_exec_uses_image_workdir_unless_overridden(monkeypa
     assert received[0]["env"] == {}
 
 
-def test_prepared_startup_secret_is_rejected_before_builder_allocation(monkeypatch):
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_prepared_startup_secret_precedence_and_builder_isolation(monkeypatch, asynchronous):
+    import asyncio
+    from types import SimpleNamespace
+
     import arker.modal as shim
-    from arker._compat import UnsupportedCompatibilityOption
     from arker._modal_recipes import Image, Secret
 
+    calls = []
+
+    def fork(**request):
+        calls.append(("builder_request", request))
+        return RecipeBuilder("builder", calls)
+
     monkeypatch.setattr(shim, "routed_create", lambda name, config, creators: ("arker", creators["arker"]()))
-    monkeypatch.setattr("arker._compat.arker_client", lambda config: pytest.fail("must not allocate"))
+    monkeypatch.setattr("arker._compat.arker_client", lambda config: SimpleNamespace(fork=fork))
+    monkeypatch.setattr("arker._modal_defaults.write", lambda *_: pytest.fail("No post-start secret staging"))
     image = Image.from_registry("example/image", setup_dockerfile_commands=["CMD true", "ENTRYPOINT []"])
-    with pytest.raises(UnsupportedCompatibilityOption, match="per-child"):
-        shim.Sandbox.create(image=image, secrets=[Secret.from_dict({"TOKEN": "synthetic-secret"})])
+    options = {
+        "image": image,
+        "secrets": [Secret.from_dict({"TOKEN": "synthetic-secret", "SHARED": "secret"})],
+        "env": {"SHARED": "explicit"},
+        "workdir": "/final",
+    }
+    box = asyncio.run(shim.Sandbox.create.aio(**options)) if asynchronous else shim.Sandbox.create(**options)
+    assert box.object_id == "child"
+    child = next(call[2] for call in calls if call[:2] == ("fork", "capture"))
+    assert child["image_config"] == {"env": {"TOKEN": "synthetic-secret", "SHARED": "explicit"}, "workdir": "/final"}
+    assert "synthetic-secret" not in repr([call for call in calls if call[:2] != ("fork", "capture")])
+    assert "synthetic-secret" not in json.dumps(child["metadata"])
+    assert calls[0][1]["image_config"] == {"cmd": [], "entrypoint": []}
+    assert calls[-2:] == [("delete", "capture"), ("delete", "builder")]

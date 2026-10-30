@@ -331,7 +331,7 @@
               "type": "string",
               "format": "uuid"
             },
-            "description": "Filter the caller organization\u2019s VMs by pool membership."
+            "description": "Filter the caller organization’s VMs by pool membership."
           },
           {
             "name": "metadata_filter",
@@ -3795,7 +3795,19 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "include_terminated",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "For a canonical VM ID owned by the caller, include a retained terminal record. Foreign, nonexistent and purged IDs remain not_found. Does not resume or recreate the VM."
+          }
+        ]
       }
     },
     "/v1/vms/{id}/deadline": {
@@ -4953,7 +4965,7 @@
         }
       },
       "RateLimitedError": {
-        "description": "HTTP 429: A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service\u2019s quota or credentials.",
+        "description": "HTTP 429: A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service’s quota or credentials.",
         "x-http-status": 429,
         "headers": {
           "Retry-After": {
@@ -5926,7 +5938,7 @@
           "action"
         ],
         "additionalProperties": false,
-        "description": "One policy rule. `match` AND's its present fields (absent \u21d2 catch-all).",
+        "description": "One policy rule. `match` AND's its present fields (absent ⇒ catch-all).",
         "properties": {
           "type": {
             "type": "string",
@@ -6024,7 +6036,7 @@
                 "type": "string"
               }
             },
-            "description": "Header name \u2192 any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, `\"authorization\": [\"Bearer $arker_api_key\"]` or `\"x-api-key\": [\"$arker_api_key\"]` matches an API key of the VM's organization."
+            "description": "Header name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, `\"authorization\": [\"Bearer $arker_api_key\"]` or `\"x-api-key\": [\"$arker_api_key\"]` matches an API key of the VM's organization."
           },
           "query_params": {
             "type": "object",
@@ -6034,7 +6046,7 @@
                 "type": "string"
               }
             },
-            "description": "Query parameter name \u2192 any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, parameters named `arker_*` are removed from a `GET` request's URL by a redirect that keeps them in a cookie, so the rest of a browsing session carries them without the URL showing them."
+            "description": "Query parameter name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, parameters named `arker_*` are removed from a `GET` request's URL by a redirect that keeps them in a cookie, so the rest of a browsing session carries them without the URL showing them."
           },
           "body_contains": {
             "description": "Substrings that must appear in the request body.",
@@ -6143,7 +6155,7 @@
       "Rewrite": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${\u2026}`-braced), `${header:NAME}` (the request's header NAME, on inbound rules), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged.",
+        "description": "Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${…}`-braced), `${header:NAME}` (the request's header NAME, on inbound rules), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged.",
         "properties": {
           "host": {
             "description": "Replacement request host.",
@@ -11038,7 +11050,7 @@
         "unevaluatedProperties": false
       },
       "RateLimited": {
-        "description": "A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service\u2019s quota or credentials.",
+        "description": "A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service’s quota or credentials.",
         "x-http-status": 429,
         "allOf": [
           {
@@ -12305,7 +12317,7 @@
           "action"
         ],
         "additionalProperties": false,
-        "description": "One network policy rule, keyed by its id in a policy's `rules`. `match` ANDs its present fields (absent \u21d2 catch-all). Rules are evaluated highest `priority` first, and the first rule that matches decides.",
+        "description": "One network policy rule, keyed by its id in a policy's `rules`. `match` ANDs its present fields (absent ⇒ catch-all). Rules are evaluated highest `priority` first, and the first rule that matches decides.",
         "properties": {
           "type": {
             "type": "string",
@@ -14172,7 +14184,8 @@
             "enum": [
               "running",
               "idle",
-              "paused"
+              "paused",
+              "terminated"
             ],
             "description": "Running means the guest is executing. Idle is automatic suspension, not an explicit customer pause."
           },
@@ -14203,6 +14216,27 @@
             ],
             "format": "date-time",
             "description": "Time the current explicit customer pause was committed, or null when not customer-paused. Repeated pauses preserve this timestamp; explicit resume clears it."
+          },
+          "terminated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Recorded deletion time for a retained terminal VM; null otherwise."
+          },
+          "termination_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "deadline",
+              "requested",
+              "unknown",
+              null
+            ],
+            "description": "Reason recorded atomically by the winning deletion. Unknown includes records predating reason persistence; never inferred from elapsed time or command exits."
           }
         }
       },
@@ -14323,7 +14357,7 @@
       "ImageConfigOverrides": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Creation-time OCI configuration overrides, supported for image sources on Firecracker and Cloud Hypervisor. Applied to the private root disk before boot. Omitted fields inherit; env merges by key, and explicit entrypoint/cmd arrays replace argv (empty clears). USER and working directory remain inherited. Captured VM sources do not accept overrides. Combined UTF-8 keys, values and argv are limited to 64 KiB; each value or argument to 32768 bytes.",
+        "description": "Creation-time image configuration overrides applied only to the private child disk before boot. Supported for OCI image sources and explicit non-durable filesystem-only VM forks with start_image=true on Firecracker; OCI sources also support Cloud Hypervisor. Omitted fields inherit. Environment merges by key; entrypoint/cmd arrays replace argv (empty clears). User and workdir replace the corresponding image defaults. Combined UTF-8 keys, values and argv are limited to 64 KiB; each value or argument to 32768 bytes.",
         "properties": {
           "env": {
             "type": "object",
@@ -14345,6 +14379,18 @@
           "cmd": {
             "$ref": "#/components/schemas/ImageArgv",
             "description": "Replacement OCI command argv; an empty array clears it."
+          },
+          "user": {
+            "type": "string",
+            "maxLength": 32768,
+            "pattern": "^[A-Za-z0-9_.-]+(?::[A-Za-z0-9_.-]+)?$",
+            "description": "Guest user name or numeric UID, optionally followed by a group name or GID. Omission inherits."
+          },
+          "workdir": {
+            "type": "string",
+            "maxLength": 32768,
+            "pattern": "^/[^\\u0000]*$",
+            "description": "Absolute working directory for new image processes. Omission inherits."
           }
         }
       },

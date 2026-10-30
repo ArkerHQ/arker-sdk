@@ -66,6 +66,22 @@ async def invoke(target, name, *args, **kwargs):
         from ._modal_recipes import native_secrets
 
         return await getattr(target._native, name).aio(*args, **native_secrets(kwargs))
+    if name == "wait":
+        from ._modal_lifecycle import completed
+
+        if len(args) > 1 or (args and "raise_on_termination" in kwargs):
+            raise TypeError("Invalid Sandbox.wait options")
+        raise_on_termination = kwargs.pop("raise_on_termination", args[0] if args else True)
+        if kwargs:
+            raise TypeError("Invalid Sandbox.wait options")
+        while await invoke(target, "poll") is None:
+            await asyncio.sleep(1)
+        completed(target._terminal_reason, raise_on_termination)
+        return None
+    if name == "terminate" and kwargs.get("wait"):
+        await route(lambda: target.terminate(wait=False))
+        await invoke(target, "wait", raise_on_termination=False)
+        return target.returncode
     if name == "exec":
 
         def discard(process):
@@ -77,4 +93,4 @@ async def invoke(target, name, *args, **kwargs):
             target._processes.kill(native._process_id)
 
         return await route(lambda: target.exec(*args, **kwargs), cleanup=discard)
-    return await route(lambda: target.terminate(*args, **kwargs))
+    return await route(lambda: getattr(target, name)(*args, **kwargs))

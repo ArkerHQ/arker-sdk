@@ -3,7 +3,7 @@ import type { ArkerError } from "../index.js";
 
 import { validateHttpError } from "../generated/error-validators.js";
 
-function missingVm(error: unknown): error is ArkerError {
+export function missingVm(error: unknown): error is ArkerError {
   // Separate package entrypoints can contain different ArkerError constructors.
   if (!(error instanceof Error) || error.name !== "ArkerError") return false;
   const candidate = error as ArkerError;

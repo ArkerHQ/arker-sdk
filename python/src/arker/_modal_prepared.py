@@ -73,6 +73,7 @@ def finish_prepared(
     cancelled=None,
     final_metadata=None,
     final_name=None,
+    final_image_config=None,
 ):
     """Take ownership of a settled builder and return its started disk-only child.
 
@@ -135,6 +136,8 @@ def finish_prepared(
             },
         )
         child_options = {"layers": ["disk"], "start_image": True, "policies": policies}
+        if final_image_config:
+            child_options["image_config"] = final_image_config
         if final_metadata is not None:
             child_options["metadata"] = final_metadata
         if final_name is not None:
@@ -173,7 +176,7 @@ def recipe_steps(commands):
     return steps
 
 
-def create_prepared(client, request, steps, *, build_timeout=900):
+def create_prepared(client, request, steps, *, build_timeout=900, final_image_config=None):
     """Build on a private temporary VM; apply the sandbox lifetime only to its child."""
     import time
     from copy import deepcopy
@@ -268,8 +271,12 @@ def create_prepared(client, request, steps, *, build_timeout=900):
             builder,
             encoded_metadata=encoded,
             final_policies=policies,
-            final_metadata={**(request.get("metadata") or {}), IMAGE_WORKDIR: resolved["workdir"] or "/"},
+            final_metadata={
+                **(request.get("metadata") or {}),
+                IMAGE_WORKDIR: (final_image_config or {}).get("workdir", resolved["workdir"] or "/"),
+            },
             final_name=request.get("name"),
+            final_image_config=final_image_config,
         )
     except BaseException as primary:
         if not transferred:

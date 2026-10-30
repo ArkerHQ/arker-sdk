@@ -321,7 +321,7 @@ export type ForkMetadataMapper = (source: Readonly<ForkOptions>, metadata: unkno
 
 export type ForkExecutor = (client: Arker, request: ForkOptions) => Promise<VM>;
 
-export function createArkerComputeProvider(config: ArkerComputeProviderConfig = {}, mapMetadata?: ForkMetadataMapper, lookupTransport?: RequestTransportOptions, fork?: ForkExecutor, lifetimePolicyId = "computesdk-e2b-lifetime"): DirectProvider {
+export function createArkerComputeProvider(config: ArkerComputeProviderConfig = {}, mapMetadata?: ForkMetadataMapper, lookupTransport?: RequestTransportOptions, fork?: ForkExecutor, lifetimePolicyId = "computesdk-e2b-lifetime", lookup?: (client: Arker, id: string, transport?: RequestTransportOptions) => Promise<VM>): DirectProvider {
   async function destroy(sandboxId: string): Promise<void> {
     const client = makeClient(config);
     try {
@@ -423,7 +423,7 @@ export function createArkerComputeProvider(config: ArkerComputeProviderConfig = 
       getById: async (sandboxId: string): Promise<SandboxInterface | null> => {
         const client = makeClient(config);
         try {
-          return wrap(await client.getVm(sandboxId, undefined, lookupTransport));
+          return wrap(await (lookup ? lookup(client, sandboxId, lookupTransport) : client.getVm(sandboxId, undefined, lookupTransport)));
         } catch (error) {
           if (error instanceof ArkerError && error.status === 404) return null;
           throw error;
