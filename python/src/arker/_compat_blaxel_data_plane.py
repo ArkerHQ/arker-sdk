@@ -16,9 +16,9 @@ from ._compat_network import _AsyncTransport, _origin, _Transport
 # These native implementations reference module-level HTTP factories and headers.
 # Bind their unchanged code into subclasses; never mutate the vendor modules.
 _SOURCES = {
-    "sync.filesystem": "ae8ce140eb4ca3d3abe1176b7ac2554c4280180fe72a02172ffd8d3870901725",
+    "sync.filesystem": "4f38db9e57de154c0fb89dcea616cdf3d41aaa2f853ec62258ca4e4d8364edc2",
     "sync.process": "ea7dc5859a19b45fdd8a27459d6bc121b949e2878c2f395375eb5f9a6f07d545",
-    "default.filesystem": "d50c6de66143e58ef068cc673b01540ea2abcbbf9e61ab497b57e8d0afb15023",
+    "default.filesystem": "c05a4cd504cf9b5c946f5de0d403c7293711cb863ef624e244ffa4f674be009b",
     "default.process": "35c20b97eed7fa54360c99c2f158444de494620a4a06c5a2ea6c8c1f759f2a17",
 }
 
@@ -56,8 +56,8 @@ def _subclass(module, native, plane):
 
 
 def validate_native():
-    if version("blaxel") != "0.4.19":
-        raise RuntimeError("Native Blaxel data plane requires blaxel==0.4.19")
+    if version("blaxel") != "0.4.21":
+        raise RuntimeError("Native Blaxel data plane requires blaxel==0.4.21")
     modules = {name: importlib.import_module("blaxel.core.sandbox." + name) for name in _SOURCES}
     for name, module in modules.items():
         if hashlib.sha256(inspect.getsource(module).encode()).hexdigest() != _SOURCES[name]:

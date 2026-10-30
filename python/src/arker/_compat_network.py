@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+import socket
 import threading
 from contextlib import contextmanager, suppress
 
@@ -49,10 +50,20 @@ class _PortNetworkStream(httpcore.NetworkStream):
             raise httpcore.WriteError(str(error)) from error
 
     def close(self):
-        self.stream.close()
+        # HTTP connection teardown must interrupt an outstanding read.
+        self.abort()
 
     def abort(self):
         getattr(self.stream, "abort", self.stream.close)()
+
+    def get_extra_info(self, info):
+        # Native watch cancellation uses the httpcore socket shutdown hook.
+        return self if info == "socket" else None
+
+    def shutdown(self, how):
+        if how != socket.SHUT_RDWR:
+            raise ValueError("Private transport shutdown requires both directions")
+        self.abort()
 
     def start_tls(self, ssl_context, server_hostname=None, timeout=None):
         raise httpcore.UnsupportedProtocol("Private sandbox fetch expects an HTTP service")

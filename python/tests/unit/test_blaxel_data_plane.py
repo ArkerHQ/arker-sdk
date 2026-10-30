@@ -133,9 +133,10 @@ def test_sync_facade_preserves_native_dictionary_requests(monkeypatch):
         plane.close()
 
 
-def test_native_version_guard(monkeypatch):
-    monkeypatch.setattr(adapter, "version", lambda name: "0.0.0")
-    with pytest.raises(RuntimeError, match=r"0\.4\.19"):
+@pytest.mark.parametrize("unsupported", ["0.0.0", "0.4.19", "0.4.20", "0.4.22"])
+def test_native_version_guard(monkeypatch, unsupported):
+    monkeypatch.setattr(adapter, "version", lambda name: unsupported)
+    with pytest.raises(RuntimeError, match=r"0\.4\.21"):
         adapter.validate_native()
 
 
@@ -447,3 +448,114 @@ def test_direct_async_and_sync_clients_keep_native_defaults():
             await plane.aclose()
 
     asyncio.run(exercise())
+
+
+def test_sync_watch_close_interrupts_private_stream():
+    import threading
+
+    class Wire:
+        def __init__(self):
+            self.release = threading.Event()
+            self.reading = threading.Event()
+            self.interrupted = threading.Event()
+            self.parts = iter(
+                [
+                    b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n",
+                    b"c\r\n[keepalive]\n\r\n",
+                ]
+            )
+
+        def settimeout(self, timeout):
+            pass
+
+        def sendall(self, data):
+            pass
+
+        def recv(self, size):
+            part = next(self.parts, None)
+            if part is not None:
+                return part
+            self.reading.set()
+            assert self.release.wait(5)
+            return b"0\r\n\r\n"
+
+        def abort(self):
+            self.interrupted.set()
+            self.release.set()
+
+        def close(self):
+            self.release.set()
+
+    wire = Wire()
+    vm = VM()
+    vm.connect_port = lambda port, timeout: wire
+    plane = adapter.BlaxelDataPlane(vm)
+    errors = []
+    handle = plane.fs.watch("/tmp", lambda event: None, {"on_error": errors.append})
+    try:
+        assert wire.reading.wait(2)
+        handle.close()
+        assert wire.interrupted.wait(1), "watch close did not interrupt the private stream"
+    finally:
+        wire.release.set()
+        handle.close()
+        plane.close()
+    assert not errors
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("recursive", [False, True])
+def test_native_read_tree_uses_private_transport(monkeypatch, asynchronous, recursive):
+    from blaxel.core.sandbox.client.models import Directory
+
+    requests = []
+
+    def reply(request):
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "name": "tmp",
+                "path": "/tmp",
+                "files": [],
+                "subdirectories": [],
+                "recursive": recursive,
+            },
+        )
+
+    monkeypatch.setattr(
+        adapter, "_AsyncTransport" if asynchronous else "_Transport", lambda vm: httpx.MockTransport(reply)
+    )
+    plane = adapter.BlaxelDataPlane(VM(), asynchronous=asynchronous)
+
+    async def read_async():
+        try:
+            return await plane.fs.read_tree("/tmp", max_files=0, exclude_hidden=False)
+        finally:
+            await plane.aclose()
+
+    def read():
+        if asynchronous:
+            return asyncio.run(read_async())
+        try:
+            return plane.fs.read_tree("/tmp", max_files=0, exclude_hidden=False)
+        finally:
+            plane.close()
+
+    if recursive:
+        result = read()
+        assert isinstance(result, Directory)
+        assert result.recursive is True
+    else:
+        with pytest.raises(RuntimeError, match="recursive tree reads"):
+            read()
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.url.host == "custom.example"
+    assert request.url.path.startswith("/port/49983/filesystem/tree/")
+    assert dict(request.url.params) == {
+        "recursive": "true",
+        "content": "true",
+        "maxFiles": "0",
+        "excludeHidden": "false",
+    }

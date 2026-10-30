@@ -180,6 +180,7 @@ const provider = defineProvider<SandboxInstance, Config>({
             timeout,
             envs,
             creationTimeout,
+            mountDrives,
             createIfNotExist = false,
             safe,
             runtime,
@@ -204,6 +205,7 @@ const provider = defineProvider<SandboxInstance, Config>({
             },
             {
               createIfNotExist,
+              ...(mountDrives !== undefined ? {mountDrives: mountDrives as NonNullable<Parameters<typeof SandboxInstance.create>[1]>["mountDrives"]} : {}),
               ...(safe !== undefined ? { safe } : {}),
               ...(creationTimeout !== undefined
                 ? { timeout: creationTimeout }

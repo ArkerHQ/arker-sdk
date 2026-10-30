@@ -237,3 +237,54 @@ def test_async_cookie_state_is_persistent_but_default_cookie_paths_are_port_scop
         await box.network.aclose()
 
     asyncio.run(run())
+
+
+def test_http_connection_close_interrupts_blocked_websocket_read():
+    from websocket import WebSocket
+
+    from arker._compat_network import _PortNetworkStream
+    from arker._port import PortStream
+
+    reading = threading.Event()
+    closed = threading.Event()
+    local, peer = socket.socketpair()
+
+    class ObservedSocket:
+        def recv(self, *args):
+            reading.set()
+            return local.recv(*args)
+
+        def __getattr__(self, name):
+            return getattr(local, name)
+
+    websocket = WebSocket(enable_multithread=True)
+    websocket.sock = ObservedSocket()
+    websocket.connected = True
+    stream = _PortNetworkStream(PortStream(websocket))
+
+    def read():
+        try:
+            stream.read(1)
+        except Exception:
+            pass
+        finally:
+            closed.set()
+
+    reader = threading.Thread(target=read)
+    closer = threading.Thread(target=stream.close)
+    reader.start()
+    try:
+        assert reading.wait(2)
+        closer.start()
+        assert closed.wait(2), "Connection close must wake an idle reader"
+        closer.join(2)
+        assert not closer.is_alive()
+        stream.get_extra_info("socket").shutdown(socket.SHUT_RDWR)
+        stream.close()
+    finally:
+        peer.shutdown(socket.SHUT_RDWR)
+        peer.close()
+        reader.join(2)
+        if closer.ident is not None:
+            closer.join(2)
+        local.close()

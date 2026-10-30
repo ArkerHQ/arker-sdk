@@ -14,7 +14,7 @@ export interface BlaxelDataPlane {
 export function validateBlaxelNative(): Native {
   const entry = createRequire(typeof import.meta.url === 'string' ? import.meta.url : __filename).resolve('@blaxel/core');
   const version = JSON.parse(readFileSync(join(dirname(entry), '../../package.json'), 'utf8')).version;
-  if (version !== '0.3.31') throw new Error('Native Blaxel data plane requires @blaxel/core@0.3.31');
+  if (version !== '0.3.32') throw new Error('Native Blaxel data plane requires @blaxel/core@0.3.32');
   const native = new Native({ metadata: { name: 'private' }, spec: {}, forceUrl: 'http://localhost:49983', headers: {} });
   for (const component of [native.fs, native.process]) {
     if (typeof component.client?.setConfig !== 'function' || typeof Reflect.get(component, 'h2Fetch') !== 'function')

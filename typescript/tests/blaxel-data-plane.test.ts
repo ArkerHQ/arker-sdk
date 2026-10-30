@@ -56,3 +56,29 @@ test('closing the plane aborts an active native read', async t => {
   plane.close();
   await result;
 });
+
+test('native watch reports keepalive, trailing event, and remote close through the private transport', {timeout: 5000}, async t => {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, {'content-type': 'application/x-ndjson'});
+    res.end('[keepalive]\n' + JSON.stringify({op: 'WRITE', path: '/tmp', name: 'tail'}));
+  });
+  t.after(() => closeServer(server));
+  const address = await listen(server);
+  const plane = createBlaxelDataPlane({connectPort: async port => {
+    assert.equal(port, 49983);
+    return connect(address.port, '127.0.0.1');
+  }});
+  t.after(() => plane.close());
+  const events: string[] = [];
+  let keepalives = 0;
+  let closed!: () => void;
+  let failed!: (error: Error) => void;
+  const completion = new Promise<void>((resolve, reject) => { closed = resolve; failed = reject; });
+  const handle = plane.fs.watch('/tmp', event => { events.push(event.name); }, {
+    withContent: false, onKeepalive: () => { keepalives++; }, onClose: closed, onError: failed,
+  });
+  t.after(() => handle.close());
+  await completion;
+  assert.deepEqual(events, ['tail']);
+  assert.equal(keepalives, 1);
+});

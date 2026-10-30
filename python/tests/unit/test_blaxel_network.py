@@ -80,3 +80,23 @@ def test_native_model_serialization_and_route_passthrough(monkeypatch):
     )
     monkeypatch.setattr(blaxel, "routed_create", lambda _name, _config, handlers: ("blaxel", handlers["blaxel"]()))
     assert blaxel.SyncSandboxInstance.create(request)._native is result
+
+
+@pytest.mark.parametrize("value", ["FROM alpine", {"dockerfile": "FROM alpine"}])
+def test_docker_config_rejected_before_arker_mutation_and_preserved_for_native(monkeypatch, value):
+    request = {"docker_config": value}
+    monkeypatch.setattr(blaxel, "arker_create", lambda *a, **kw: pytest.fail("provider I/O"))
+    monkeypatch.setattr(blaxel, "routed_create", lambda _name, _config, handlers: handlers["arker"]())
+    with pytest.raises(UnsupportedCompatibilityOption, match="docker_config"):
+        blaxel.SyncSandboxInstance.create(request)
+    result = object()
+
+    def create(received, **kwargs):
+        assert received is request
+        return result
+
+    monkeypatch.setattr(
+        blaxel.SyncSandboxInstance, "_native_class", staticmethod(lambda: SimpleNamespace(create=create))
+    )
+    monkeypatch.setattr(blaxel, "routed_create", lambda _name, _config, handlers: ("blaxel", handlers["blaxel"]()))
+    assert blaxel.SyncSandboxInstance.create(request)._native is result

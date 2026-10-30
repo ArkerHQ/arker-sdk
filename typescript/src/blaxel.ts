@@ -37,6 +37,7 @@ export interface BlaxelCreateOptions {
 }
 
 export interface BlaxelCreateCallOptions extends BlaxelCompatConfig {
+  mountDrives?: NonNullable<Parameters<typeof NativeBlaxelSandbox.create>[1]>["mountDrives"];
   safe?: boolean;
   createIfNotExist?: boolean;
   timeout?: number;
@@ -51,6 +52,7 @@ function makeSdk(config: BlaxelCompatConfig = {}, getOrCreate = false, ttl?: unk
       return blaxelControlCall("create", () => namedBlaxelFork(config.arker, getOrCreate)(client, request));
     },
     mapArkerCreateOptions: options => {
+      if (options.mountDrives !== undefined) throw new Error("Arker does not support Blaxel mountDrives");
       validateBlaxelName(options.name);
       const { createIfNotExist: _, ttl: _ttl, network, envs: _envs, labels, ...rest } = options;
       validateBlaxelNetwork(network);
@@ -171,6 +173,7 @@ export class SandboxInstance {
   static async create(options: BlaxelCreateOptions = {}, callOptions: BlaxelCreateCallOptions = {}): Promise<SandboxInstance> {
     const profile = fetchProfile(options.region);
     const box = await makeSdk(callOptions, callOptions.createIfNotExist ?? false, options.ttl).sandbox.create({
+      ...(callOptions.mountDrives !== undefined ? {mountDrives: callOptions.mountDrives} : {}),
       name: options.name,
       image: options.image,
       memory: options.memory,
