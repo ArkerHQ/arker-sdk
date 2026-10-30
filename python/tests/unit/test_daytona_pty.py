@@ -63,7 +63,7 @@ def test_async_wait_cancellation_preserves_reader_and_awaits_callbacks(processes
             output.append(data)
 
         terminal = AsyncPtyHandle(handle, on_data)
-        with pytest.raises(TimeoutError):
+        with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(terminal.wait(), 0.01)
         assert terminal.is_connected()
         await terminal.send_input("async-data\n")

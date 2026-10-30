@@ -131,7 +131,7 @@ def test_stream_reader_cancellation_does_not_cancel_command(session):
             identifier,
             SimpleNamespace(command="read value; printf '%s' \"$value\"", run_async=True, suppress_input_echo=True),
         )
-        with pytest.raises(TimeoutError):
+        with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(
                 owner.get_session_command_logs_async(identifier, result.cmd_id, lambda _: None, lambda _: None), 0.05
             )
