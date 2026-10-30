@@ -48,6 +48,7 @@ ErrorCode: TypeAlias = Literal[
     'idempotency_conflict',
     'expired',
     'payload_too_large',
+    'request_timeout',
     'method_not_allowed',
     'unsupported_operation',
     'unrecoverable',
@@ -1030,6 +1031,11 @@ class PayloadTooLarge(ErrorMetadata):
 
 
 @dataclass(frozen=True)
+class RequestTimeout(ErrorMetadata):
+    code: Literal['request_timeout'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
 class MethodNotAllowed(ErrorMetadata):
     code: Literal['method_not_allowed'] = field(kw_only=True)
     details: MethodNotAllowedDetails = field(kw_only=True)
@@ -1120,6 +1126,12 @@ class SyncBadRequestError(ErrorExecutionContext):
 
 
 @dataclass(frozen=True)
+class SyncForbiddenError(ErrorExecutionContext):
+    code: Literal['forbidden'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+
+
+@dataclass(frozen=True)
 class Details:
     resource: Literal['file', 'upload', 'resource']
 
@@ -1143,6 +1155,13 @@ class SyncPayloadTooLargeError(ErrorExecutionContext):
     code: Literal['payload_too_large'] = field(kw_only=True)
     message: str = field(kw_only=True)
     details: PayloadTooLargeDetails | None = None
+
+
+@dataclass(frozen=True)
+class SyncInsufficientResourcesError(ErrorExecutionContext):
+    code: Literal['insufficient_resources'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: InsufficientResourcesDetails = field(kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -1255,6 +1274,11 @@ class PayloadTooLargeErrorResponse:
 
 
 @dataclass(frozen=True)
+class RequestTimeoutErrorResponse:
+    error: RequestTimeout
+
+
+@dataclass(frozen=True)
 class MethodNotAllowedErrorResponse:
     error: MethodNotAllowed
 
@@ -1310,8 +1334,8 @@ class BadRequestOrInsufficientResourcesErrorResponse:
 
 
 @dataclass(frozen=True)
-class AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse:
-    error: AlreadyExists | Conflict | InvalidState | ResourceBusy
+class AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse:
+    error: AlreadyExists | Conflict | IdempotencyConflict | InvalidState | ResourceBusy
 
 
 @dataclass(frozen=True)
@@ -1945,9 +1969,11 @@ SyncReadResponse: TypeAlias = SyncReadInlineResponse | SyncReadPresignedResponse
 
 SyncFileError: TypeAlias = (
     SyncBadRequestError
+    | SyncForbiddenError
     | SyncNotFoundError
     | SyncConflictError
     | SyncPayloadTooLargeError
+    | SyncInsufficientResourcesError
     | SyncUnsupportedOperationError
     | SyncUnavailableError
     | SyncInternalError
@@ -2142,6 +2168,7 @@ ErrorBody: TypeAlias = (
     | IdempotencyConflict
     | Expired
     | PayloadTooLarge
+    | RequestTimeout
     | MethodNotAllowed
     | UnsupportedOperation
     | Unrecoverable
