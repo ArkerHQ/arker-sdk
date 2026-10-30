@@ -18,7 +18,7 @@ def native_components(monkeypatch):
     # These tests exercise application HTTP transport independently of the daemon client.
     monkeypatch.setattr(
         "arker._compat_blaxel_data_plane.BlaxelDataPlane",
-        lambda *args, **kwargs: SimpleNamespace(fs=object(), process=object()),
+        lambda *args, **kwargs: SimpleNamespace(fs=object(), process=object(), drives=object()),
     )
 
 

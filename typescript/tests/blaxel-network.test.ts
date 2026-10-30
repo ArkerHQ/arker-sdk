@@ -77,13 +77,13 @@ test("native route retains proxy configuration without Arker validation", async 
     arker: {apiKey: "ark_test", baseUrl: "https://custom.example/api", source: "source"}}), error => error === stop);
 });
 
-test("mountDrives reaches native unchanged and is rejected before Arker mutation", async t => {
+test("readOnly mountDrives reaches native unchanged and is rejected before Arker mutation", async t => {
   const config = {...settings.config};
   t.after(() => initialize(config));
   const dir = await mkdtemp(join(tmpdir(), "blaxel-drive-options-"));
   t.after(() => rm(dir, {recursive: true, force: true}));
   const routerConfigPath = join(dir, "router.json");
-  const mountDrives = [{driveName: "test-drive", mountPath: "/data"}];
+  const mountDrives = [{driveName: "test-drive", mountPath: "/data", readOnly: true}];
   const stop = new Error("native reached");
   preserveProperties(t, Native, "create");
   preserveProperties(t, Arker.prototype, "_request");
@@ -97,7 +97,7 @@ test("mountDrives reaches native unchanged and is rejected before Arker mutation
     await writeFile(routerConfigPath, JSON.stringify({version: 1, create: {strategy: "priority", order: [provider]}, existing: {strategy: "priority", order: [provider]}}));
     await assert.rejects(SandboxInstance.create({}, {routerConfigPath, mountDrives, apiKey: "test", workspace: "test",
       arker: {apiKey: "ark_test", baseUrl: "https://custom.example/api", source: "source"}}), error =>
-      provider === "blaxel" ? error === stop : /mountDrives/.test(String(error)));
+      provider === "blaxel" ? error === stop : /readOnly/.test(String(error)));
   }
   assert.equal(mutations, 0);
 });

@@ -10,7 +10,7 @@ function fixture(ttl: unknown = '300s', seconds = 300, fetch?: typeof globalThis
     metadata:{arker_blaxel:{version:1,labels:{},ttl}},
     policies:{rules:{'computesdk-blaxel-lifetime':{type:'schedule',action:'delete',after_created:seconds}}}} as unknown as Vm);
   const box = {provider:'arker',sandboxId:vm.id,getInstance:()=>vm};
-  return Reflect.construct(SandboxInstance, [box, undefined, undefined, {process:{},fs:{}}]) as SandboxInstance;
+  return Reflect.construct(SandboxInstance, [box, undefined, undefined, {process:{},fs:{},drives:{}}]) as SandboxInstance;
 }
 
 test('TTL readback preserves duration spelling and omits unknown or drifted values', () => {

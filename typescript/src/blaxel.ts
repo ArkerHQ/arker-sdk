@@ -1,3 +1,4 @@
+import { blaxelDrives, prepareBlaxelDrives, scopedFilesystems } from "./compat/blaxel-drives.js";
 import { validateFirewallStartup } from "./compat/blaxel-packages.js";
 import { validateBlaxelNetwork } from "./compat/blaxel-network.js";
 import { SandboxInstance as NativeBlaxelSandbox, settings as blaxelSettings } from "@blaxel/core";
@@ -43,7 +44,7 @@ export interface BlaxelCreateCallOptions extends BlaxelCompatConfig {
   timeout?: number;
 }
 
-function makeSdk(config: BlaxelCompatConfig = {}, getOrCreate = false, ttl?: unknown): CompatSdk {
+function makeSdk(config: BlaxelCompatConfig = {}, getOrCreate = false, ttl?: unknown, onDriveSetup?: (setup: ReturnType<typeof prepareBlaxelDrives>) => void): CompatSdk {
   return createCompatSdk({
     arker: config.arker,
     arkerFork: (client, request) => {
@@ -52,9 +53,12 @@ function makeSdk(config: BlaxelCompatConfig = {}, getOrCreate = false, ttl?: unk
       return blaxelControlCall("create", () => namedBlaxelFork(config.arker, getOrCreate)(client, request));
     },
     mapArkerCreateOptions: options => {
-      if (options.mountDrives !== undefined) throw new Error("Arker does not support Blaxel mountDrives");
+      if (options.mountDrives !== undefined) {
+        const setup = prepareBlaxelDrives(options.mountDrives, {createIfNotExist: getOrCreate, region: options.region as string | undefined});
+        if ((options.mountDrives as unknown[]).length) onDriveSetup?.(setup);
+      }
       validateBlaxelName(options.name);
-      const { createIfNotExist: _, ttl: _ttl, network, envs: _envs, labels, ...rest } = options;
+      const { createIfNotExist: _, ttl: _ttl, network, envs: _envs, labels, mountDrives: _mountDrives, ...rest } = options;
       validateBlaxelNetwork(network);
       validateFirewallStartup(options.image, config.arker?.imageConfig);
       validateBlaxelNative();
@@ -94,7 +98,6 @@ export class SandboxInstance {
   declare readonly sessions: NativeBlaxelSandbox["sessions"];
   declare readonly codegen: NativeBlaxelSandbox["codegen"];
   declare readonly system: NativeBlaxelSandbox["system"];
-  declare readonly drives: NativeBlaxelSandbox["drives"];
   declare readonly snapshots: NativeBlaxelSandbox["snapshots"];
   declare readonly status: NativeBlaxelSandbox["status"];
   declare readonly events: NativeBlaxelSandbox["events"];
@@ -119,6 +122,7 @@ export class SandboxInstance {
 
   readonly process: NativeBlaxelSandbox["process"];
   readonly fs: NativeBlaxelSandbox["fs"];
+  readonly drives: NativeBlaxelSandbox["drives"];
 
   private constructor(box: UniversalSandbox, native?: NativeBlaxelSandbox, profile = fetchProfile(), dataPlane?: BlaxelDataPlane, config: ArkerComputeProviderConfig = {}) {
     this.#box = box;
@@ -135,6 +139,13 @@ export class SandboxInstance {
     if (!native && !dataPlane) throw new Error("Native Blaxel data plane was not initialized");
     this.process = (native ?? dataPlane!).process;
     this.fs = (native ?? dataPlane!).fs;
+    this.drives = (native ?? dataPlane!).drives;
+    if (vm) {
+      const bindings = () => blaxelDrives(vm, scopedFilesystems(vm));
+      this.drives.mount = request => bindings().mount(request);
+      this.drives.list = () => bindings().list();
+      this.drives.unmount = path => bindings().unmount(path);
+    }
     return guardUnsupported(this, "blaxel", native);
   }
 
@@ -172,7 +183,8 @@ export class SandboxInstance {
 
   static async create(options: BlaxelCreateOptions = {}, callOptions: BlaxelCreateCallOptions = {}): Promise<SandboxInstance> {
     const profile = fetchProfile(options.region);
-    const box = await makeSdk(callOptions, callOptions.createIfNotExist ?? false, options.ttl).sandbox.create({
+    let driveSetup: ReturnType<typeof prepareBlaxelDrives> | undefined;
+    const box = await makeSdk(callOptions, callOptions.createIfNotExist ?? false, options.ttl, setup => {driveSetup = setup;}).sandbox.create({
       ...(callOptions.mountDrives !== undefined ? {mountDrives: callOptions.mountDrives} : {}),
       name: options.name,
       image: options.image,
@@ -190,8 +202,9 @@ export class SandboxInstance {
         ? { creationTimeout: callOptions.timeout ?? options.timeout }
         : {}),
     });
+    let instance: SandboxInstance;
     try {
-      return await SandboxInstance.wrap(box, profile, callOptions.arker);
+      instance = await SandboxInstance.wrap(box, profile, callOptions.arker);
     } catch (error) {
       if (box.provider === "arker" && !callOptions.createIfNotExist) {
         try { await box.destroy(); } catch (cleanupError) {
@@ -201,6 +214,11 @@ export class SandboxInstance {
       }
       throw error;
     }
+    if (driveSetup) {
+      const vm = (box as UniversalSandbox & {getInstance(): VM}).getInstance();
+      await driveSetup.mount(instance as unknown as NativeBlaxelSandbox, vm, scopedFilesystems(vm));
+    }
+    return instance;
   }
 
   static async createIfNotExists(

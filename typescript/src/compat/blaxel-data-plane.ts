@@ -8,6 +8,7 @@ import { privateFetch } from './private-fetch.js';
 export interface BlaxelDataPlane {
   readonly fs: Native['fs'];
   readonly process: Native['process'];
+  readonly drives: Native['drives'];
   close(): void;
 }
 
@@ -16,7 +17,7 @@ export function validateBlaxelNative(): Native {
   const version = JSON.parse(readFileSync(join(dirname(entry), '../../package.json'), 'utf8')).version;
   if (version !== '0.3.32') throw new Error('Native Blaxel data plane requires @blaxel/core@0.3.32');
   const native = new Native({ metadata: { name: 'private' }, spec: {}, forceUrl: 'http://localhost:49983', headers: {} });
-  for (const component of [native.fs, native.process]) {
+  for (const component of [native.fs, native.process, native.drives]) {
     if (typeof component.client?.setConfig !== 'function' || typeof Reflect.get(component, 'h2Fetch') !== 'function')
       throw new Error('Native Blaxel transport structure changed');
   }
@@ -62,12 +63,12 @@ export function createBlaxelDataPlane(vm: Pick<VM, 'connectPort'>): BlaxelDataPl
     } catch (error) { finish(); throw error; }
   };
   // Both generated requests and native binary/streaming paths need the same factory.
-  for (const component of [native.fs, native.process]) {
+  for (const component of [native.fs, native.process, native.drives]) {
     const client = component.client;
     client.setConfig({ fetch });
     Object.defineProperty(component, 'client', { get: () => client });
     Reflect.set(component, 'h2Fetch', fetch);
   }
-  return { fs: native.fs, process: native.process,
+  return { fs: native.fs, process: native.process, drives: native.drives,
     close() { closed = true; for (const controller of active) controller.abort(); active.clear(); } };
 }

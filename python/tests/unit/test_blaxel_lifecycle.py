@@ -95,7 +95,9 @@ def test_get_rehydrates_ttl_and_async_fork_uses_shared_path(monkeypatch, asynchr
     monkeypatch.setattr(facade, "routed_get", lambda *a: ("arker", source))
     monkeypatch.setattr(facade.SyncSandboxInstance, "_plane", lambda self: None)
     monkeypatch.setattr(
-        _compat_blaxel_data_plane, "BlaxelDataPlane", lambda *a, **kw: SimpleNamespace(process=None, fs=None)
+        _compat_blaxel_data_plane,
+        "BlaxelDataPlane",
+        lambda *a, **kw: SimpleNamespace(process=None, fs=None, drives=None),
     )
     monkeypatch.setattr(creation, "fork_named", lambda *a, **kw: SimpleNamespace(name="child"))
 

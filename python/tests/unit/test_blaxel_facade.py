@@ -193,7 +193,7 @@ def test_async_native_create_uses_native_coroutine_and_preserves_result(monkeypa
     class Native:
         def __init__(self):
             self.metadata = SimpleNamespace(name="test")
-            self.process, self.fs, self.network = object(), object(), object()
+            self.process, self.fs, self.network, self.drives = object(), object(), object(), object()
 
         @classmethod
         async def create(cls, config, **kwargs):
@@ -295,7 +295,7 @@ def test_async_native_result_cleanup_does_not_reuse_expired_creation_bridge(monk
     class Native:
         def __init__(self):
             self.metadata = SimpleNamespace(name="test")
-            self.process, self.fs, self.network = object(), object(), object()
+            self.process, self.fs, self.network, self.drives = object(), object(), object(), object()
 
         @classmethod
         async def create(cls, config, **kwargs):

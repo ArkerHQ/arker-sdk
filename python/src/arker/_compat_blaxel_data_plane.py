@@ -115,6 +115,9 @@ class BlaxelDataPlane:
         process_module, fs_module = modules[prefix + ".process"], modules[prefix + ".filesystem"]
         self.process = _subclass(process_module, getattr(process_module, stem + "Process"), self)(config)
         self.fs = _subclass(fs_module, getattr(fs_module, stem + "FileSystem"), self)(config, self.process)
+        from ._compat_blaxel_drives import AsyncDrives, SyncDrives
+
+        self.drives = (AsyncDrives if asynchronous else SyncDrives)(vm, config)
 
     def _options(self, kwargs, transport):
         if self.closed:

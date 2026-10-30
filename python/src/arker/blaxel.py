@@ -25,7 +25,14 @@ from .computer import VM
 
 if TYPE_CHECKING:
     from blaxel.core.client.models import Env, SandboxForkResponse, SandboxLifecycle, SandboxSpec
-    from blaxel.core.sandbox import SandboxFileSystem, SandboxProcess, SyncSandboxFileSystem, SyncSandboxProcess
+    from blaxel.core.sandbox import (
+        SandboxDrive,
+        SandboxFileSystem,
+        SandboxProcess,
+        SyncSandboxDrive,
+        SyncSandboxFileSystem,
+        SyncSandboxProcess,
+    )
 
 
 def _dispose_created(sandbox):
@@ -176,6 +183,10 @@ class SyncSandboxInstance(UnsupportedMixin):
     @property
     def fs(self) -> SyncSandboxFileSystem:
         return self._native.fs if self._native is not None else self._plane().fs
+
+    @property
+    def drives(self) -> SyncSandboxDrive:
+        return self._native.drives if self._native is not None else self._plane().drives
 
     def fetch(self, port: int, path: str = "/", method: str = "GET", **kwargs):
         if self._native is not None:
@@ -362,6 +373,7 @@ class SandboxInstance:
 
     process: SandboxProcess
     fs: SandboxFileSystem
+    drives: SandboxDrive
 
     def __init__(self, sandbox: SyncSandboxInstance, native: Any = None) -> None:
         self._sandbox = sandbox
@@ -374,6 +386,7 @@ class SandboxInstance:
             self._data_plane = BlaxelDataPlane(sandbox._vm, asynchronous=True)
         self.process = native.process if native is not None else self._data_plane.process
         self.fs = native.fs if native is not None else self._data_plane.fs
+        self.drives = native.drives if native is not None else self._data_plane.drives
         self.network = native.network if native is not None else _AsyncNetwork(sandbox._vm)
 
     async def fetch(self, port: int, path: str = "/", method: str = "GET", **kwargs):
