@@ -15,6 +15,10 @@ from ._daytona_sync_request import sync_request_executor
 from ._request_timeout import request_executor_scope, request_timeout_scope
 
 
+class _ResponseDeadline(httpx.ReadTimeout):
+    """An elapsed total response budget, distinct from transport phase timeouts."""
+
+
 def normalized_timeout(value):
     if value is not None and (not math.isfinite(value) or value < 0):
         errors = import_optional("daytona.common.errors")
@@ -36,7 +40,12 @@ def request_timeout(function):
             errors = import_optional("daytona.common.errors")
             if errors is None:
                 raise
-            error = errors.DaytonaConnectionTimeoutError(str(cause))
+            error_type = errors.DaytonaConnectionTimeoutError
+            # Native maps built-in TimeoutError, whereas asyncio has a separate
+            # exception type on Python 3.10 and therefore returns DaytonaError.
+            if isinstance(cause, _ResponseDeadline) and asyncio.TimeoutError is not TimeoutError:
+                error_type = errors.DaytonaError
+            error = error_type(str(cause))
             for field in ("session_id", "process_id", "run_id"):
                 if hasattr(cause, field):
                     setattr(error, field, getattr(cause, field))
@@ -47,8 +56,10 @@ def request_timeout(function):
 
 def is_response_timeout(error):
     errors = import_optional("daytona.common.errors")
-    return isinstance(error, httpx.TimeoutException) or (
-        errors is not None and isinstance(error, errors.DaytonaConnectionTimeoutError)
+    return (
+        isinstance(error, httpx.TimeoutException)
+        or isinstance(error.__cause__, _ResponseDeadline)
+        or (errors is not None and isinstance(error, errors.DaytonaConnectionTimeoutError))
     )
 
 
@@ -76,7 +87,7 @@ async def async_request_timeout(function, args, kwargs):
             pending.add(task)
 
             async def receive():
-                async with client.stream(method, url, headers=headers, content=data, timeout=timeout) as response:
+                async with client.stream(method, url, headers=headers, content=data, timeout=None) as response:
                     try:
                         content = await response.aread()
                     except httpx.RequestError:
@@ -88,7 +99,7 @@ async def async_request_timeout(function, args, kwargs):
             try:
                 return await asyncio.wait_for(receive(), seconds)
             except asyncio.TimeoutError as cause:
-                raise httpx.ReadTimeout("HTTP response timeout") from cause
+                raise _ResponseDeadline("HTTP response timeout") from cause
             finally:
                 pending.discard(task)
 

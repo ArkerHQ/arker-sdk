@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("daytona")
 
-from daytona import DaytonaBadRequestError, DaytonaConnectionTimeoutError
+from daytona import DaytonaBadRequestError, DaytonaConnectionTimeoutError, DaytonaError
 
 from arker._daytona_filesystem import AsyncFileSystem, FileSystem
 from arker._request_timeout import request_executor, transport_timeout
@@ -145,10 +145,37 @@ def test_sync_progress_can_outlast_response_timeout(endpoint, native):
 
 
 @pytest.mark.parametrize("native", [True, False])
-def test_async_total_response_timeout_matches_native(endpoint, native):
-    url, calls, _, _ = endpoint
-    with pytest.raises(DaytonaConnectionTimeoutError):
-        asyncio.run(async_info(url, native, 1))
+@pytest.mark.parametrize("stall", [False, True], ids=["body-progress", "before-headers"])
+@pytest.mark.parametrize("operation", ["filesystem", "process"])
+def test_async_total_response_timeout_matches_native(endpoint, native, stall, operation):
+    url, calls, settings, _ = endpoint
+    settings["stall"] = stall
+    expected = DaytonaConnectionTimeoutError if asyncio.TimeoutError is TimeoutError else DaytonaError
+
+    async def run():
+        if operation == "filesystem":
+            return await async_info(url, native, 1)
+        if native:
+            from daytona._async.process import AsyncProcess
+            from daytona_toolbox_api_client_async import ApiClient, Configuration, ProcessApi
+
+            async with ApiClient(Configuration(host=url)) as client:
+                return await AsyncProcess("python", ProcessApi(client)).get_session("session", request_timeout=1)
+        from types import SimpleNamespace
+
+        from arker import computer
+        from arker._compat_daytona_async import _AsyncProcess
+        from arker._daytona_request import request_timeout
+
+        @request_timeout
+        def get_session(session_id, request_timeout=None):
+            return computer._http("POST", url, {}, b"{}")
+
+        return await _AsyncProcess(SimpleNamespace(get_session=get_session)).get_session("session", request_timeout=1)
+
+    with pytest.raises(expected) as caught:
+        asyncio.run(run())
+    assert type(caught.value) is expected
     assert len(calls) == 1
     assert request_executor() is None
 
@@ -214,12 +241,64 @@ def test_mutation_timeout_does_not_replay_or_kill_guest(endpoint, asynchronous):
     url, calls, settings, _ = endpoint
     settings["stall"] = True
     vm = Arker(api_key="synthetic", base_url=url).vm("vm-test")
-    with pytest.raises(DaytonaConnectionTimeoutError):
+    expected = (
+        DaytonaError if asynchronous and asyncio.TimeoutError is not TimeoutError else DaytonaConnectionTimeoutError
+    )
+    with pytest.raises(expected) as caught:
         if asynchronous:
             asyncio.run(AsyncFileSystem(vm).delete_file("file", request_timeout=0.1))
         else:
             FileSystem(vm).delete_file("file", request_timeout=0.1)
+    assert type(caught.value) is expected
     assert len(calls) == 1
     method, path, body = calls[0]
     assert method == "POST" and path.endswith("/runs")
     assert "timeout" not in body and "signal" not in body
+
+
+@pytest.mark.parametrize("lost_start_ack", [False, True])
+def test_async_accepted_creation_total_timeout_keeps_identity_without_killing(endpoint, monkeypatch, lost_start_ack):
+    from types import SimpleNamespace
+
+    from arker import _daytona_sessions as sessions
+    from arker import computer
+    from arker._compat_daytona_async import _AsyncProcess
+    from arker._daytona_request import is_response_timeout, request_timeout
+
+    url, calls, settings, _ = endpoint
+    settings["stall"] = True
+    killed = []
+    owner = sessions.SessionProcess()
+    owner._vm = object()
+    owner._session_source = lambda: "/helper.py"
+
+    @request_timeout
+    def get_session(identifier, request_timeout=None):
+        return computer._http("POST", url, {}, b"{}")
+
+    def start(options):
+        if lost_start_ack:
+            return computer._http("POST", url, {}, b"{}")
+        return SimpleNamespace(name=options["name"])
+
+    owner.get_session = get_session
+    monkeypatch.setattr(sessions, "run_command", lambda *args: SimpleNamespace(stdout='["/home/daytona",1000]'))
+    monkeypatch.setattr(
+        sessions,
+        "GuestProcesses",
+        lambda vm: SimpleNamespace(
+            exec=start,
+            kill=killed.append,
+            get=lambda *args: pytest.fail("deadline must not trigger reconciliation or replay"),
+        ),
+    )
+    expected = DaytonaConnectionTimeoutError if asyncio.TimeoutError is TimeoutError else DaytonaError
+    with pytest.raises(expected) as caught:
+        asyncio.run(_AsyncProcess(owner).create_session("owned", request_timeout=1))
+    assert type(caught.value) is expected
+    assert is_response_timeout(caught.value)
+    assert not is_response_timeout(DaytonaError("unrelated failure"))
+    assert caught.value.session_id == "owned"
+    assert caught.value.process_id.startswith("daytona-session:")
+    assert len(calls) == 1
+    assert killed == []

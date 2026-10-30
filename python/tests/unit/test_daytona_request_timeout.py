@@ -57,12 +57,14 @@ def test_sync_progressing_response_can_outlast_request_timeout(drip_server):
 
 
 def test_async_response_has_native_total_timeout(drip_server):
-    DaytonaConnectionTimeoutError = pytest.importorskip("daytona.common.errors").DaytonaConnectionTimeoutError
+    errors = pytest.importorskip("daytona.common.errors")
+    expected = errors.DaytonaConnectionTimeoutError if asyncio.TimeoutError is TimeoutError else errors.DaytonaError
 
     async def run():
         started = time.monotonic()
-        with pytest.raises(DaytonaConnectionTimeoutError):
+        with pytest.raises(expected) as caught:
             await _AsyncProcess(process(drip_server)).get_session("session", request_timeout=1)
+        assert type(caught.value) is expected
         assert time.monotonic() - started < 1.2
         assert request_executor() is None
 
