@@ -40,7 +40,7 @@ for (const operation of ["download-initial", "download-read", "download-destroy"
     function leaves(error: any): unknown[] { return error instanceof AggregateError ? error.errors.flatMap(leaves) : [error]; }
     assert.ok(leaves(failure).includes(primary));
     assert.ok(leaves(failure).includes(cleanup));
-    assert.match(JSON.stringify(failure.resources), /\.arker-daytona-fs-/);
+    assert.match(JSON.stringify((failure as AggregateError & { resources: string[] }).resources), /\.arker-daytona-fs-/);
     assert.ok(stage);
     assert.equal(removals, 1);
   });
@@ -70,7 +70,8 @@ test("uncertain mkdir preserves error identity and reports path without deletion
   const context = { command: () => "copy", vm: {} as any, run: async (command: string) => { calls.push(command); throw primary; } };
   await assert.rejects(downloadStream(context, "file", {}), (error: any) => {
     assert.equal(error, primary);
-    assert.match(error.stagingDirectory, /^\/tmp\/\.arker-daytona-fs-/);
+    assert.ok("stagingDirectory" in error);
+    assert.match(String(error.stagingDirectory), /^\/tmp\/\.arker-daytona-fs-/);
     return true;
   });
   assert.equal(calls.length, 1);
