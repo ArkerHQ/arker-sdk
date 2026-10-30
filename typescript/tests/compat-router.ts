@@ -38,12 +38,9 @@ function provider(name: string, handlers: {
 
 async function testRaceErrorsAndPriorityAreDeterministic(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "arker-router-errors-"));
-  const path = join(directory, "router.json");
-  await writeFile(path, JSON.stringify({
-    version: 1,
+  const path = await config(directory, {
     existing: { strategy: "race", order: ["blaxel", "arker"] },
-    create: { strategy: "priority", order: ["blaxel", "arker"] },
-  }));
+  });
   for (const status of [403, 429, 500]) {
     for (const errorFirst of [true, false]) {
       const error = Object.assign(new Error(`lookup HTTP ${status}`), { status });
@@ -114,8 +111,8 @@ async function testCachedProbeSharesLookupBudget(): Promise<void> {
   const cachePath = join(directory, "cache.json");
   await new JsonRouteCache(cachePath).set("shared", "blaxel");
   const path = await config(directory, {
-    version: 1, existing: { strategy: "priority", order: ["blaxel", "arker"], timeoutMs: 30 },
-    create: { strategy: "priority", order: ["blaxel", "arker"] }, cache: { path: cachePath },
+    existing: { strategy: "priority", order: ["blaxel", "arker"], timeoutMs: 30 },
+    cache: { path: cachePath },
   });
   const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
   const routed = createRoutedProvider([
@@ -131,8 +128,7 @@ await testCachedProbeSharesLookupBudget();
 async function testTimedOutProbeObservesLateRejection(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "arker-router-late-error-"));
   const path = await config(directory, {
-    version: 1, existing: { strategy: "race", order: ["blaxel", "arker"], timeoutMs: 10 },
-    create: { strategy: "priority", order: ["blaxel", "arker"] },
+    existing: { strategy: "race", order: ["blaxel", "arker"], timeoutMs: 10 },
   });
   let rejectNative!: (error: Error) => void;
   const pending = new Promise<null>((_resolve, reject) => { rejectNative = reject; });
@@ -154,7 +150,7 @@ await testTimedOutProbeObservesLateRejection();
 async function testLateErrorCannotBeatElapsedDeadline(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "arker-router-clock-"));
   const path = await config(directory, {
-    version: 1, existing: { strategy: "priority", order: ["blaxel"], timeoutMs: 30 },
+    existing: { strategy: "priority", order: ["blaxel"], timeoutMs: 30 },
     create: { strategy: "priority", order: ["blaxel"] },
   });
   const descriptor = Object.getOwnPropertyDescriptor(performance, "now");
@@ -173,18 +169,21 @@ async function testLateErrorCannotBeatElapsedDeadline(): Promise<void> {
 }
 await testLateErrorCannotBeatElapsedDeadline();
 
-async function config(directory: string, value: unknown): Promise<string> {
+async function config(directory: string, overrides: Record<string, unknown>): Promise<string> {
   const path = join(directory, "computesdk_router.json");
-  await writeFile(path, JSON.stringify(value));
+  await writeFile(path, JSON.stringify({
+    version: 1,
+    existing: { strategy: "priority", order: ["blaxel", "arker"] },
+    create: { strategy: "priority", order: ["blaxel", "arker"] },
+    ...overrides,
+  }));
   return path;
 }
 
 async function testPriorityAndRaceRouting(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "arker-router-"));
   const path = await config(directory, {
-    version: 1,
     existing: { strategy: "race", order: ["blaxel", "arker"] },
-    create: { strategy: "priority", order: ["blaxel", "arker"] },
   });
   let nativeCreates = 0;
   let arkerCreates = 0;
@@ -209,8 +208,6 @@ async function testWeightedFallbackAndNonRetryableErrors(): Promise<void> {
   Math.random = () => 0.95;
   try {
     const path = await config(directory, {
-      version: 1,
-      existing: { strategy: "priority", order: ["blaxel", "arker"] },
       create: { strategy: "weighted", weights: { blaxel: 90, arker: 10 }, fallback: ["arker", "blaxel"] },
     });
     let fallbackCreates = 0;
@@ -223,8 +220,6 @@ async function testWeightedFallbackAndNonRetryableErrors(): Promise<void> {
 
     Math.random = () => 0.25;
     const largeWeightsPath = await config(directory, {
-      version: 1,
-      existing: { strategy: "priority", order: ["blaxel", "arker"] },
       create: { strategy: "weighted", weights: { blaxel: 1e308, arker: 1e308 } },
     });
     const largeWeights = createRoutedProvider([provider("blaxel"), provider("arker")], largeWeightsPath).instances!;
@@ -289,9 +284,6 @@ async function testPersistentCacheAndDestroyOwnership(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "arker-router-"));
   const cachePath = join(directory, "routes.json");
   const path = await config(directory, {
-    version: 1,
-    existing: { strategy: "priority", order: ["blaxel", "arker"] },
-    create: { strategy: "priority", order: ["blaxel", "arker"] },
     cache: { path: cachePath, maxEntries: 10, maxBytes: 4096 },
   });
   let nativeLookups = 0;
@@ -362,7 +354,6 @@ async function testConfigAndCacheValidation(): Promise<void> {
 async function testMemoryCacheIsBoundedAndPromotesReads(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "arker-memory-cache-"));
   const path = await config(directory, {
-    version: 1,
     existing: { strategy: "priority", order: ["arker", "blaxel"] },
     create: { strategy: "priority", order: ["blaxel"] },
     cache: { maxEntries: 2, maxBytes: 4096 },
@@ -415,7 +406,6 @@ async function testCacheCannotOverrideConfiguredProviders(): Promise<void> {
   const cachePath = join(directory, "ownership.json");
   await new JsonRouteCache(cachePath).set("existing", "arker");
   const path = await config(directory, {
-    version: 1,
     existing: { strategy: "priority", order: ["blaxel"] },
     create: { strategy: "priority", order: ["blaxel"] },
     cache: { path: cachePath },
@@ -450,7 +440,7 @@ async function testNativeFirstArkerIdentifiers(): Promise<void> {
         const cachePath = join(directory, "cache.json");
         if (staleCache) await new JsonRouteCache(cachePath).set(id, native);
         const path = await config(directory, {
-          version: 1, existing: { strategy, order: [native, "arker"] },
+          existing: { strategy, order: [native, "arker"] },
           create: { strategy: "priority", order: ["arker"] },
           cache: { path: cachePath },
         });
@@ -468,7 +458,7 @@ await testNativeFirstArkerIdentifiers();
 async function testOwnershipProbesDoNotConnectLosingSandboxes(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "arker-probe-routing-"));
   const path = await config(directory, {
-    version: 1, existing: { strategy: "race", order: ["e2b", "arker"] },
+    existing: { strategy: "race", order: ["e2b", "arker"] },
     create: { strategy: "priority", order: ["arker"] },
   });
   let connects = 0;
@@ -537,7 +527,7 @@ async function testCachedMissInvalidatesButErrorPreservesHint(): Promise<void> {
     const cache = new JsonRouteCache(cachePath);
     await cache.set("shared", "blaxel");
     const path = await config(directory, {
-      version: 1, existing: { strategy, order: ["blaxel", "arker"] },
+      existing: { strategy, order: ["blaxel", "arker"] },
       create: { strategy: "priority", order: ["blaxel"] }, cache: { path: cachePath },
     });
     const error = new Error("lookup unavailable");
@@ -560,7 +550,6 @@ async function testKeyedCreationKeepsItsOwner(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "arker-router-keyed-"));
   for (const weights of [{ arker: 50, e2b: 50 }, { e2b: 50, arker: 50 }]) {
     const path = await config(directory, {
-      version: 1,
       existing: { strategy: "priority", order: ["e2b", "arker"] },
       create: { strategy: "weighted", weights, fallback: ["e2b", "arker"] },
     });
