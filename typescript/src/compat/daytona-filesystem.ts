@@ -1,8 +1,7 @@
-import { randomUUID } from "node:crypto";
 import { open } from "node:fs/promises";
 import { constants } from "node:fs";
 import { DaytonaError, DaytonaBadRequestError, DaytonaForbiddenError, DaytonaNotFoundError, type DownloadStreamOptions, type UploadStreamOptions, type UploadSource, type Match, type SearchFilesResponse, type FileInfo, type FilePermissionsParams, type FileUpload, type FileDownloadRequest, type FileDownloadResponse } from "@daytona/sdk";
-import { ArkerError, type VM } from "../index.js";
+import { type RequestTransportOptions, type VM } from "../index.js";
 import { assertSupportedObjectKeys, guardUnsupported, shellQuote, type UniversalSandbox } from "./common.js";
 import { downloadStream, uploadStream } from "./daytona-streams.js";
 import source from "./daytona-filesystem.generated.js";
@@ -10,10 +9,6 @@ import source from "./daytona-filesystem.generated.js";
 function filesystemError(message: string, status: number): DaytonaError {
   const ErrorType = status === 404 ? DaytonaNotFoundError : status === 403 ? DaytonaForbiddenError : DaytonaBadRequestError;
   return new ErrorType(message, status);
-}
-
-function checkTimeout(timeout = 1800): void {
-  if (timeout !== 1800) throw new ArkerError("unsupported_operation", "Custom Daytona filesystem timeouts are not supported on Arker", 422);
 }
 
 async function localFile(path: string, data?: Buffer): Promise<Buffer | undefined> {
@@ -38,8 +33,11 @@ export class DaytonaFileSystem {
     return guardUnsupported(this, "daytona filesystem");
   }
 
-  private async run(command: string): Promise<string> {
-    const result = await this.box.runCommand(command);
+  private async run(command: string, transport?: RequestTransportOptions): Promise<string> {
+    const result = transport
+      ? await (this.box as unknown as { getInstance(): VM }).getInstance()._runWithTransport(command, {}, transport)
+      : await this.box.runCommand(command);
+    if ("type" in result && result.type === "background") throw new DaytonaError("File operation unexpectedly backgrounded");
     if (result.exitCode !== 0) {
       let error: { message: string; status: number };
       try { error = JSON.parse(result.stderr); }
@@ -66,27 +64,11 @@ export class DaytonaFileSystem {
     return this.call("search", path, { pattern });
   }
 
-  private async transfer(operation: "upload" | "download", path: string, data?: Buffer): Promise<Buffer | undefined> {
-    const command = this.command(operation, path);
-    const vm = (this.box as unknown as { getInstance(): VM }).getInstance();
-    const directory = `/tmp/.arker-daytona-fs-${randomUUID()}`;
-    const staged = `${directory}/data`;
-    await this.run(`mkdir -m 700 -- ${shellQuote(directory)}`);
-    let failed = false;
-    try {
-      if (operation === "upload") {
-        await this.run(`umask 077; set -C; : > ${shellQuote(staged)}`);
-        await vm.sync(staged, data!);
-        await this.run(`${command} < ${shellQuote(staged)}`);
-        return;
-      }
-      await this.run(`umask 077; set -C; ${command} > ${shellQuote(staged)}`);
-      return Buffer.from(await vm.sync(staged));
-    } catch (error) { failed = true; throw error; }
-    finally {
-      try { await this.run(`rm -rf -- ${shellQuote(directory)}`); }
-      catch (error) { if (!failed) throw error; }
-    }
+  private async transfer(operation: "upload" | "download", path: string, data?: Buffer, timeout = 1800): Promise<Buffer | undefined> {
+    if (operation === "upload") { await this.uploadFileStream(data!, path, { timeout }); return; }
+    const chunks: Buffer[] = [];
+    for await (const chunk of await this.downloadFileStream(path, { timeout })) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks);
   }
 
   async createFolder(path: string, mode: string): Promise<void> { await this.call("mkdir", path, { mode }); }
@@ -104,28 +86,24 @@ export class DaytonaFileSystem {
   }
   private streamContext() {
     return { vm: (this.box as unknown as { getInstance(): VM }).getInstance(),
-      run: (command: string) => this.run(command), command: (operation: string, path: string) => this.command(operation, path) };
+      run: (command: string, transport?: RequestTransportOptions) => this.run(command, transport), command: (operation: string, path: string) => this.command(operation, path) };
   }
   async downloadFileStream(path: string, timeoutOrOptions: number | DownloadStreamOptions = {}) {
     const options = typeof timeoutOrOptions === "number" ? { timeout: timeoutOrOptions } : timeoutOrOptions;
     assertSupportedObjectKeys(options, ["timeout", "signal", "onProgress"], "daytona", "fs.downloadFileStream");
-    checkTimeout(options.timeout);
     return downloadStream(this.streamContext(), path, options);
   }
   async uploadFileStream(source: UploadSource, path: string, options: UploadStreamOptions = {}): Promise<void> {
     assertSupportedObjectKeys(options, ["timeout", "signal", "onProgress"], "daytona", "fs.uploadFileStream");
-    checkTimeout(options.timeout);
     await uploadStream(this.streamContext(), source, path, options);
   }
   async uploadFile(file: Buffer, remotePath: string, timeout?: number): Promise<void>;
   async uploadFile(localPath: string, remotePath: string, timeout?: number): Promise<void>;
   async uploadFile(src: Buffer | string, dst: string, timeout = 1800): Promise<void> {
-    checkTimeout(timeout);
     if (typeof src !== "string" && !Buffer.isBuffer(src)) throw new TypeError("source must be Buffer or a local path");
-    await this.transfer("upload", dst, typeof src === "string" ? (await localFile(src))! : src);
+    await this.transfer("upload", dst, typeof src === "string" ? (await localFile(src))! : src, timeout);
   }
   async uploadFiles(files: FileUpload[], timeout = 1800): Promise<void> {
-    checkTimeout(timeout);
     for (const file of files) {
       if (typeof file.source === "string") await this.uploadFile(file.source, file.destination, timeout);
       else await this.uploadFile(file.source, file.destination, timeout);
@@ -134,13 +112,11 @@ export class DaytonaFileSystem {
   async downloadFile(remotePath: string, timeout?: number): Promise<Buffer>;
   async downloadFile(remotePath: string, localPath: string, timeout?: number): Promise<void>;
   async downloadFile(src: string, dst?: string | number, timeout = 1800): Promise<Buffer | void> {
-    checkTimeout(typeof dst === "number" ? dst : timeout);
-    const data = (await this.transfer("download", src))!;
+    const data = (await this.transfer("download", src, undefined, typeof dst === "number" ? dst : timeout))!;
     if (typeof dst === "string") { await localFile(dst, data); return; }
     return data;
   }
   async downloadFiles(files: FileDownloadRequest[], timeout = 1800): Promise<FileDownloadResponse[]> {
-    checkTimeout(timeout);
     const results: FileDownloadResponse[] = [];
     for (const file of files) {
       try {

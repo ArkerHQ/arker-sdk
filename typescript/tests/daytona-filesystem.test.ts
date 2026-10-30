@@ -109,9 +109,9 @@ test("Daytona guest identity prevents symlink privilege escalation and rejects F
     chmodSync(fifo, 0o666);
     await assert.rejects(fs.downloadFile("fifo"), DaytonaBadRequestError);
     await assert.rejects(fs.uploadFile(Buffer.from("bad"), "fifo"), DaytonaBadRequestError);
-    await assert.rejects(fs.downloadFile("owned", 0), /timeouts are not supported/);
+    assert.deepEqual(await fs.downloadFile("owned", 0), readFileSync(join(g.home, "owned")));
     await assert.rejects(fs.listFiles(".", { depth: 0 }), /depth/);
-    await assert.rejects(fs.downloadFileStream("owned", 0), /timeouts are not supported/);
+    for await (const _ of await fs.downloadFileStream("owned", 0)) { /* drain */ }
   } finally { g.close(); }
 });
 
@@ -134,7 +134,8 @@ test("Daytona preserves native filesystem identity and refuses unowned staging c
   assert.equal(nativeSandbox.fs, native.fs);
   const commands: string[] = [];
   const sandbox = Reflect.construct(Sandbox, [{
-    provider: "arker", sandboxId: "local", getInstance: () => ({ sync: () => assert.fail("must not sync") }),
+    provider: "arker", sandboxId: "local", getInstance: () => ({ _syncWriteChunks: () => assert.fail("must not sync"),
+      _runWithTransport: async (command: string) => { commands.push(command); return { stdout: "", stderr: "File exists", exitCode: 1 }; } }),
     runCommand: async (command: string) => { commands.push(command); return { stdout: "", stderr: "File exists", exitCode: 1 }; },
   }]) as Sandbox;
   await assert.rejects(sandbox.fs.uploadFile(Buffer.from("x"), "file"), /File exists/);
@@ -142,15 +143,25 @@ test("Daytona preserves native filesystem identity and refuses unowned staging c
   assert.match(commands[0]!, /^mkdir -m 700 -- /);
 });
 
-test("Daytona interrupted upload preserves its primary error despite cleanup failure", async () => {
+test("Daytona interrupted upload preserves primary and cleanup failures", async () => {
+  const primary = new Error("upload interrupted");
+  const cleanup = new Error("cleanup failure");
+  let removed = 0;
+  const run = async (command: string) => {
+    if (command.startsWith("rm ")) { removed++; throw cleanup; }
+    return { stdout: "", stderr: "", exitCode: 0 };
+  };
   const sandbox = Reflect.construct(Sandbox, [{
-    provider: "arker", sandboxId: "local", getInstance: () => ({ sync: async () => { throw new Error("upload interrupted"); } }),
-    runCommand: async (command: string) => {
-      if (command.startsWith("rm ")) throw new Error("cleanup failure");
-      return { stdout: "", stderr: "", exitCode: 0 };
-    },
+    provider: "arker", sandboxId: "local", getInstance: () => ({
+      _syncWriteChunks: async () => { throw primary; }, _runWithTransport: run,
+    }), runCommand: run,
   }]) as Sandbox;
-  await assert.rejects(sandbox.fs.uploadFile(Buffer.from("x"), "file"), /upload interrupted/);
+  await assert.rejects(sandbox.fs.uploadFile(Buffer.from("x"), "file"), (error: unknown) => {
+    assert.ok(error instanceof AggregateError);
+    assert.deepEqual(error.errors, [primary, cleanup]);
+    assert.equal(removed, 1);
+    return true;
+  });
 });
 
 test("live scenario preserves primary failure while attempting deletion and disposal", async () => {

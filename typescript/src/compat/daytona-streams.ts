@@ -1,13 +1,24 @@
 import { randomUUID } from "node:crypto";
+import { withRequestTransport } from "../internal/request-context.js";
 import { mkdtemp, open, rm, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { DaytonaError, type DownloadStreamOptions, type UploadSource, type UploadStreamOptions } from "@daytona/sdk";
-import type { VM } from "../index.js";
+import { DaytonaConnectionTimeoutError, DaytonaError, type DownloadStreamOptions, type UploadSource, type UploadStreamOptions } from "@daytona/sdk";
+import { RequestIdleTimeoutError, type RequestTransportOptions, type VM } from "../index.js";
 import { shellQuote } from "./common.js";
 
-type Context = { vm: VM; run(command: string): Promise<string>; command(operation: string, path: string): string };
+type Context = { vm: VM; run(command: string, transport?: RequestTransportOptions): Promise<string>; command(operation: string, path: string): string };
+
+function transport(options: { timeout?: number; signal?: AbortSignal }): RequestTransportOptions {
+  const seconds = options.timeout ?? 1800;
+  if (!Number.isFinite(seconds) || seconds < 0) throw new RangeError("timeout must be finite and nonnegative");
+  return { signal: options.signal, idleTimeoutMs: seconds * 1000 };
+}
+
+function transferError(error: unknown): unknown {
+  return error instanceof RequestIdleTimeoutError ? new DaytonaConnectionTimeoutError(error.message) : error;
+}
 
 function cancelled(signal: AbortSignal | undefined, operation: string, path: string): void {
   if (signal?.aborted) throw new DaytonaError(`${operation} cancelled: ${path}`);
@@ -30,26 +41,28 @@ export async function cleanupTransfer(primary: unknown[], resources: Cleanup[]):
   });
 }
 
-async function staging(context: Context) {
+async function staging(context: Context, options: RequestTransportOptions) {
   const directory = `/tmp/.arker-daytona-fs-${randomUUID()}`;
-  try { await context.run(`mkdir -m 700 -- ${shellQuote(directory)}`); }
-  catch (error) {
+  try { await context.run(`mkdir -m 700 -- ${shellQuote(directory)}`, options); }
+  catch (failure) {
+    const error = transferError(failure);
     // A lost response does not prove ownership; report the path without removing it.
     if (error instanceof Error) { Object.assign(error, { stagingDirectory: directory }); throw error; }
     throw Object.assign(new Error(`Staging creation outcome uncertain: ${directory}`, { cause: error }), { stagingDirectory: directory });
   }
   let cleanup: Promise<unknown> | undefined;
-  return { path: `${directory}/data`, close: () => cleanup ??= context.run(`rm -rf -- ${shellQuote(directory)}`) };
+  return { path: `${directory}/data`, close: () => cleanup ??= withRequestTransport(undefined, () => context.run(`rm -rf -- ${shellQuote(directory)}`)) };
 }
 
 export async function downloadStream(context: Context, path: string, options: DownloadStreamOptions): Promise<Readable> {
+  const request = transport(options);
   const command = context.command("download", path);
   cancelled(options.signal, "Download", path);
-  const stage = await staging(context);
-  try { await context.run(`umask 077; set -C; ${command} > ${shellQuote(stage.path)}`); }
-  catch (error) { await cleanupTransfer([error], [stage]); throw error; }
+  const stage = await staging(context, request);
+  try { await context.run(`umask 077; set -C; ${command} > ${shellQuote(stage.path)}`, request); }
+  catch (error) { await cleanupTransfer([transferError(error)], [stage]); throw error; }
   const controller = new AbortController();
-  const chunks = context.vm._syncReadChunks(stage.path, controller.signal);
+  const chunks = context.vm._syncReadChunks(stage.path, controller.signal, request.idleTimeoutMs);
   let received = 0;
   async function* iterate() {
     const primary: unknown[] = [];
@@ -60,7 +73,7 @@ export async function downloadStream(context: Context, path: string, options: Do
         options.onProgress?.({ bytesReceived: received });
         yield Buffer.from(chunk);
       }
-    } catch (error) { primary.push(error); }
+    } catch (error) { primary.push(transferError(error)); }
     finally { await cleanupTransfer(primary, [stage]); }
   }
   const iterator = iterate();
@@ -91,6 +104,7 @@ export async function downloadStream(context: Context, path: string, options: Do
 }
 
 export async function uploadStream(context: Context, source: UploadSource, path: string, options: UploadStreamOptions): Promise<void> {
+  const request = transport(options);
   const command = context.command("upload", path);
   cancelled(options.signal, "Upload", path);
   let handle: FileHandle | undefined;
@@ -109,22 +123,32 @@ export async function uploadStream(context: Context, source: UploadSource, path:
       directory = await mkdtemp(join(tmpdir(), "daytona-upload-"));
       handle = await open(join(directory, "data"), "wx+", 0o600);
       const input = source instanceof Readable ? source : Readable.fromWeb(source as never);
+      let idle: ReturnType<typeof setTimeout> | undefined;
+      const reset = () => {
+        clearTimeout(idle);
+        if (request.idleTimeoutMs) {
+          idle = setTimeout(() => input.destroy(new RequestIdleTimeoutError(request.idleTimeoutMs!)), request.idleTimeoutMs);
+          idle.unref?.();
+        }
+      };
       const abort = () => input.destroy(new DaytonaError(`Upload cancelled: ${path}`));
       options.signal?.addEventListener("abort", abort, { once: true });
       size = 0;
       if (options.signal?.aborted) abort();
+      reset();
       try {
         for await (const chunk of input) {
+          reset();
           cancelled(options.signal, "Upload", path);
           const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
           await handle.writeFile(data);
           size += data.length;
         }
-      } finally { options.signal?.removeEventListener("abort", abort); }
+      } finally { clearTimeout(idle); options.signal?.removeEventListener("abort", abort); }
     }
-    stage = await staging(context);
+    stage = await staging(context, request);
     let sent = 0;
-    await context.run(`umask 077; set -C; : > ${shellQuote(stage.path)}`);
+    await context.run(`umask 077; set -C; : > ${shellQuote(stage.path)}`, request);
     await context.vm._syncWriteChunks(stage.path, size, async (offset, length) => {
       cancelled(options.signal, "Upload", path);
       let data: Uint8Array;
@@ -143,10 +167,10 @@ export async function uploadStream(context: Context, source: UploadSource, path:
       sent += data.length;
       if (data.length) options.onProgress?.({ bytesSent: sent });
       return data;
-    }, {}, { signal: options.signal });
+    }, {}, request);
     cancelled(options.signal, "Upload", path);
-    await context.run(`${command} < ${shellQuote(stage.path)}`);
-  } catch (error) { primary.push(error); }
+    await context.run(`${command} < ${shellQuote(stage.path)}`, request);
+  } catch (error) { primary.push(transferError(error)); }
   finally {
     const resources: Cleanup[] = [];
     if (stage) resources.push(stage);

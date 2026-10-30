@@ -76,3 +76,30 @@ test("uncertain mkdir preserves error identity and reports path without deletion
   });
   assert.equal(calls.length, 1);
 });
+
+for (const fails of [false, true]) test(`guest cleanup escapes the caller's transport scope, failure=${fails}`, async () => {
+  const {currentRequestTransport, withRequestTransport} = await import("../src/internal/request-context.js");
+  const controller = new AbortController();
+  controller.abort(new Error("unrelated caller cancellation"));
+  const outer = {signal: controller.signal, idleTimeoutMs: 1};
+  const primary = new Error("upload failed");
+  let cleanups = 0;
+  const context = {
+    command: () => "copy",
+    run: async (command: string) => {
+      if (command.startsWith("rm")) {
+        cleanups++;
+        assert.equal(currentRequestTransport(), undefined);
+      }
+      return "";
+    },
+    vm: {_syncWriteChunks: async () => {if (fails) throw primary;}} as any,
+  };
+  await withRequestTransport(outer, async () => {
+    if (fails) await assert.rejects(uploadStream(context, Buffer.from("x"), "file", {}), error => error === primary);
+    else await uploadStream(context, Buffer.from("x"), "file", {});
+    assert.equal(currentRequestTransport(), outer);
+  });
+  assert.equal(cleanups, 1);
+  assert.equal(currentRequestTransport(), undefined);
+});
