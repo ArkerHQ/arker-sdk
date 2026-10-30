@@ -118,6 +118,13 @@ and measurement code; changing the test also requires new evidence. A failed
 route invalidates that scenario. Different runs cannot be
 combined to manufacture a passing comparison.
 
+Signature credit is explicit: pass `signatures={"Sandbox.create": [signature]}`
+to Python `record_scenario`, or the equivalent final argument to TypeScript
+`recordEvidence`. Use the exact signature string from the pinned inventory only
+when the scenario exercises that overload. Attestations for APIs outside the
+scenario are rejected; unlisted signatures receive no credit. Do not populate
+this map from every inventory entry or infer it from method presence.
+
 TypeScript fingerprints also include the installed ComputeSDK/provider runtime
 artifacts. Native-route evidence refuses a different SDK version inside its
 native adapter than the direct native reference. E2B and Blaxel adapters now live

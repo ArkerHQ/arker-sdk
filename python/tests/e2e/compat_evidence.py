@@ -24,10 +24,19 @@ def vendor_version(provider):
 INITIAL_VERSIONS = {provider: vendor_version(provider) for provider in ("blaxel", "e2b", "modal", "daytona")}
 
 
-def record(provider, style, route, scenario, apis, outcome):
+def record(provider, style, route, scenario, apis, outcome, *, signatures=None):
     output = os.environ.get("COMPAT_COVERAGE_EVIDENCE")
     if not output:
         return
+    signatures = {} if signatures is None else signatures
+    if not isinstance(signatures, dict) or not all(
+        api in apis
+        and isinstance(values, list)
+        and values
+        and all(isinstance(value, str) and value.strip() for value in values)
+        for api, values in signatures.items()
+    ):
+        raise ValueError("Signature attestations must name exercised APIs and nonempty signatures")
     fingerprint = runpy.run_path(str(SCRIPT))["implementation_fingerprint"]()
     version = vendor_version(provider)
     changed = fingerprint != INITIAL_FINGERPRINT or version != INITIAL_VERSIONS[provider]
@@ -40,6 +49,7 @@ def record(provider, style, route, scenario, apis, outcome):
         "vendor_version": INITIAL_VERSIONS[provider],
         "implementation_fingerprint": INITIAL_FINGERPRINT,
         "apis": [f"python:{provider}:{style}:{api}" for api in apis],
+        "signatures": {f"python:{provider}:{style}:{api}": values for api, values in signatures.items()},
     }
     descriptor = os.open(output, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
     try:
@@ -51,7 +61,7 @@ def record(provider, style, route, scenario, apis, outcome):
 
 
 @contextmanager
-def record_scenario(vendor, style, provider, shim, scenario, apis):
+def record_scenario(vendor, style, provider, shim, scenario, apis, *, signatures=None):
     """A scenario passes only after its program and cleanup have completed."""
     outcome = "failed"
     try:
@@ -59,4 +69,4 @@ def record_scenario(vendor, style, provider, shim, scenario, apis):
         outcome = "passed"
     finally:
         route = "reference" if not shim else "arker" if provider == "arker" else "native"
-        record(vendor, style, route, scenario, sorted(apis), outcome)
+        record(vendor, style, route, scenario, sorted(apis), outcome, signatures=signatures)

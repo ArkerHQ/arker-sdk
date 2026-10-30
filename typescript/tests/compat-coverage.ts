@@ -1,9 +1,11 @@
 import { guestScript as envdSource } from "../src/compat/e2b-envd-guest.generated.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import guestSource from "../src/compat/guest-process.generated.js";
-import { captureEvidenceSnapshot, implementationFingerprint, runtimeInfo, verifiedScenarios } from "../scripts/compat-evidence.js";
+import { captureEvidenceSnapshot, implementationFingerprint, recordEvidence, runtimeInfo, verifiedScenarios } from "../scripts/compat-evidence.js";
 import { Template } from "../src/e2b.js";
 import { Template as NativeTemplate } from "e2b";
 import { Image as DaytonaImage } from "../src/daytona.js";
@@ -90,6 +92,39 @@ for (const name of ["compat-evidence.ts", "compat-coverage.ts", "compat-trace.ts
   });
   assert.notEqual(changed, fingerprint, `${name} must invalidate existing evidence`);
 }
-console.log("PASS compatibility coverage evidence validation");
 
 assert.equal(envdSource, await readFile(new URL("../../python/src/arker/_guest_e2b_envd.py", import.meta.url), "utf8"));
+
+// Explicit attestations must survive recording without crediting other overloads.
+const evidenceDirectory = await mkdtemp(join(tmpdir(), "compat-recorder-"));
+const previousEvidence = process.env.COMPAT_COVERAGE_EVIDENCE;
+const previousRun = process.env.COMPAT_COVERAGE_RUN;
+try {
+  const path = join(evidenceDirectory, "evidence.jsonl");
+  process.env.COMPAT_COVERAGE_EVIDENCE = path;
+  process.env.COMPAT_COVERAGE_RUN = "synthetic-recorder-test";
+  const api = "Sandbox.create", signature = "(template?: string): Promise<Sandbox>";
+  for (const route of ["reference", "native", "arker"]) {
+    await recordEvidence("e2b", route, "explicit", [api], "passed", {[api]: [signature]});
+  }
+  const events = (await readFile(path, "utf8")).trim().split("\n").map(line => JSON.parse(line));
+  const id = "typescript:e2b:async:" + api;
+  assert.ok(events.every(event => event.outcome === "passed"));
+  assert.ok(events.every(event => JSON.stringify(event.signatures) === JSON.stringify({[id]: [signature]})));
+  const attest = (value: string) => events.map(event => ({...event, apis: event.signatures[id]?.includes(value) ? event.apis : []}));
+  assert.deepEqual(verifiedScenarios(id, attest(signature).slice(0, 2), events[0].vendor_version, events[0].implementation_fingerprint), []);
+  assert.equal(verifiedScenarios(id, attest(signature), events[0].vendor_version, events[0].implementation_fingerprint).length, 1);
+  assert.deepEqual(verifiedScenarios(id, attest("other overload"), events[0].vendor_version, events[0].implementation_fingerprint), []);
+  for (const invalid of [{"Unexercised.api": [signature]}, {[api]: []}, {[api]: [""]}, {[api]: signature}]) {
+    await assert.rejects(recordEvidence("e2b", "arker", "invalid", [api], "passed", invalid as unknown as Record<string, string[]>), /Signature attestations/);
+  }
+  assert.equal((await readFile(path, "utf8")).trim().split("\n").length, 3);
+} finally {
+  if (previousEvidence === undefined) delete process.env.COMPAT_COVERAGE_EVIDENCE;
+  else process.env.COMPAT_COVERAGE_EVIDENCE = previousEvidence;
+  if (previousRun === undefined) delete process.env.COMPAT_COVERAGE_RUN;
+  else process.env.COMPAT_COVERAGE_RUN = previousRun;
+  await rm(evidenceDirectory, {recursive: true, force: true});
+}
+
+console.log("PASS compatibility coverage evidence validation");

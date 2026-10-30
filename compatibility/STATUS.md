@@ -12,8 +12,9 @@ runs do not certify the current source or dependencies.
 
 Live API credit requires one unchanged scenario to pass on the reference vendor,
 shim-native and shim-Arker routes with matching runtime/vendor fingerprints.
-Signature credit additionally requires explicit signature attestations; the live
-recorders currently emit API IDs only. Method presence and unit tests do not
+Signature credit additionally requires explicit signature attestations from the
+scenario. Both live recorders accept them; existing API-only events do not gain
+retroactive signature credit. Method presence and unit tests do not
 establish full compatibility. Both languages expose strict coverage gates, which
 must pass with fresh evidence before claiming parity.
 

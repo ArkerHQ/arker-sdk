@@ -406,3 +406,28 @@ def test_blaxel_delegated_services_are_discoverable(style):
         assert native is shim
         rows = list(coverage.surfaces("blaxel", style, prefix, native, shim))
         assert rows and all(row["declared_by_shim"] for row in rows)
+
+
+def test_recorder_attests_only_explicit_signatures_after_all_routes_pass(monkeypatch, tmp_path):
+    monkeypatch.setattr(coverage.importlib.metadata, "version", lambda _: "1")
+    helper = runpy.run_path(str(Path(__file__).resolve().parents[1] / "e2e" / "compat_evidence.py"))
+    output = tmp_path / "evidence.jsonl"
+    monkeypatch.setenv("COMPAT_COVERAGE_EVIDENCE", str(output))
+    monkeypatch.setenv("COMPAT_COVERAGE_RUN", "synthetic-recorder-test")
+    fingerprint = helper["INITIAL_FINGERPRINT"]
+    monkeypatch.setattr(runpy, "run_path", lambda _: {"implementation_fingerprint": lambda: fingerprint})
+    api, signature = "Sandbox.create", "(template=None)"
+    identifier = "python:e2b:sync:" + api
+    for route in ("reference", "native", "arker"):
+        helper["record"]("e2b", "sync", route, "explicit", [api], "passed", signatures={api: [signature]})
+    evidence = [json.loads(line) for line in output.read_text().splitlines()]
+    assert coverage.verified_scenarios(identifier, evidence[:2], "1", fingerprint, signature) == []
+    assert coverage.verified_scenarios(identifier, evidence, "1", fingerprint, signature)
+    assert coverage.verified_scenarios(identifier, evidence, "1", fingerprint, "(other overload)") == []
+    helper["record"]("e2b", "sync", "arker", "explicit", [api], "failed", signatures={api: [signature]})
+    evidence = [json.loads(line) for line in output.read_text().splitlines()]
+    assert coverage.verified_scenarios(identifier, evidence, "1", fingerprint, signature) == []
+    for invalid in ({"Unexercised.api": [signature]}, {api: []}, {api: [""]}, {api: signature}):
+        with pytest.raises(ValueError, match="Signature attestations"):
+            helper["record"]("e2b", "sync", "arker", "invalid", [api], "passed", signatures=invalid)
+    assert len(output.read_text().splitlines()) == 4

@@ -107,10 +107,15 @@ const initialVersions = Promise.all((Object.keys(packages) as Array<keyof typeof
   [provider, await vendorVersion(provider)] as const
 ))).then(Object.fromEntries);
 
-export async function recordEvidence(provider: "blaxel" | "e2b" | "modal" | "daytona", route: string, scenario: string, apis: string[], outcome: string): Promise<void> {
+export async function recordEvidence(provider: "blaxel" | "e2b" | "modal" | "daytona", route: string, scenario: string, apis: string[], outcome: string, signatures: Record<string, string[]> = {}): Promise<void> {
   const output = process.env.COMPAT_COVERAGE_EVIDENCE;
   if (!output) return;
   if (!process.env.COMPAT_COVERAGE_RUN) throw new Error("COMPAT_COVERAGE_RUN is required when recording evidence");
+  if (!signatures || Array.isArray(signatures) || typeof signatures !== "object" ||
+    !Object.entries(signatures).every(([api, values]) => apis.includes(api) && Array.isArray(values) && values.length > 0 &&
+      values.every(value => typeof value === "string" && value.trim()))) {
+    throw new Error("Signature attestations must name exercised APIs and nonempty signatures");
+  }
   const version = await vendorVersion(provider);
   if (route === "native") {
     const providerDirectory = fileURLToPath(new URL("../src/compat", import.meta.url));
@@ -129,6 +134,7 @@ export async function recordEvidence(provider: "blaxel" | "e2b" | "modal" | "day
     implementation_fingerprint: fingerprint,
     vendor_version: versions[provider],
     apis: apis.map((api) => `typescript:${provider}:async:${api}`),
+    signatures: Object.fromEntries(Object.entries(signatures).map(([api, values]) => [`typescript:${provider}:async:${api}`, values])),
   }) + "\n", { mode: 0o600 });
   if (changed) throw new Error("Implementation changed during the live compatibility scenario");
 }
