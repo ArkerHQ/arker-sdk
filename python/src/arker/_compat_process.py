@@ -26,6 +26,7 @@ class ProcessResult(CommandResult):
     completed_at: str
     logs: str
     stdin: bool
+    tty: dict[str, int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         values = dataclasses.asdict(self)
@@ -204,3 +205,6 @@ class GuestProcesses:
     def close_stdin(self, identifier: str) -> Any:
         with self._input_lock:
             return success(self._call("closeStdin", identifier=identifier))
+
+    def resize(self, identifier: str, rows: int, cols: int) -> Any:
+        return success(self._call("resize", identifier=identifier, tty={"rows": rows, "cols": cols}))

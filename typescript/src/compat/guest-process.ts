@@ -21,6 +21,7 @@ export interface GuestProcessResult {
   stderr: string;
   logs: string;
   stdin: boolean;
+  tty?: { rows: number; cols: number };
 }
 
 type Callbacks = {
@@ -170,6 +171,9 @@ export class GuestProcesses {
       }
       return result!;
     });
+  }
+  resize(identifier: string, rows: number, cols: number): Promise<{ message: string }> {
+    return this.call("resize", { identifier, tty: { rows, cols } });
   }
   closeStdin(identifier: string): Promise<{ message: string }> { return this.call("closeStdin", { identifier }); }
 }

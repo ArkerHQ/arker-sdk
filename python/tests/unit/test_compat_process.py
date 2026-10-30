@@ -588,3 +588,318 @@ def test_supervisor_reports_actual_worker_sigkill(tmp_path, preserve_descendants
         if supervisor.poll() is None:
             supervisor.kill()
         supervisor.communicate(timeout=5)
+
+
+def test_real_terminal_controlling_session_resize_and_eof(processes):
+    import json
+    import sys
+    import time
+
+    manager, directory = processes
+    program = """import os,sys,termios,json,signal
+print(json.dumps({"tty": [os.isatty(i) for i in range(3)],
+ "control": os.tcgetpgrp(0)==os.getpgrp(), "size": list(os.get_terminal_size())}),flush=True)
+signal.signal(signal.SIGWINCH, lambda *_: print("RESIZED:"+str(tuple(os.get_terminal_size())),flush=True))
+print("STDERR",file=sys.stderr,flush=True)
+data=sys.stdin.read()
+print("INPUT:"+repr(data),flush=True)
+sys.exit(7)
+"""
+    started = manager.exec(
+        {
+            "command": "terminal",
+            "argv": [sys.executable, "-c", program],
+            "workingDir": str(directory),
+            "stdin": True,
+            "tty": {"rows": 24, "cols": 80},
+        }
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while "STDERR" not in (current := manager.get(started.name)).stdout:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        first = json.loads(current.stdout.splitlines()[0])
+        assert first == {"tty": [True, True, True], "control": True, "size": [80, 24]}
+        assert current.stderr == ""
+        manager.resize(started.name, 37, 91)
+        assert manager.get(started.name).tty == {"rows": 37, "cols": 91}
+        while "RESIZED:(91, 37)" not in manager.get(started.name).stdout:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        manager.write_stdin(started.name, b"hello\n")
+        manager.write_stdin(started.name, b"\x04")
+        manager.close_stdin(started.name)
+        result = manager.wait(started.name, max_wait=5000, interval=10)
+        assert result.exitCode == 7
+        assert "INPUT:'hello\\n'" in result.stdout
+        assert result.stderr == ""
+    finally:
+        if manager.get(started.name).status == "running":
+            manager.kill(started.name)
+
+
+@pytest.mark.parametrize("size", [{"rows": True, "cols": 80}, {"rows": -1, "cols": 80}, {"rows": 24}, None])
+def test_terminal_rejects_invalid_size_before_launch(processes, size):
+    manager, directory = processes
+    with pytest.raises(Exception, match="Terminal"):
+        manager.exec({"command": "touch unexpected", "workingDir": str(directory), "tty": size})
+    assert not (directory / "unexpected").exists()
+
+
+def test_zero_size_terminal_writer_close_does_not_inject_eof(processes):
+    import sys
+
+    manager, directory = processes
+    program = """import os,signal,sys
+assert tuple(os.get_terminal_size()) == (0, 0)
+def deadline(*_):
+    print("reader-still-open",flush=True)
+    sys.exit(13)
+signal.signal(signal.SIGALRM, deadline)
+signal.alarm(2)
+sys.stdin.read()
+print("unexpected-eof",flush=True)
+"""
+    started = manager.exec(
+        {
+            "command": "terminal-input",
+            "argv": [sys.executable, "-c", program],
+            "workingDir": str(directory),
+            "stdin": True,
+            "tty": {"rows": 0, "cols": 0},
+        }
+    )
+    manager.close_stdin(started.name)
+    result = manager.wait(started.name, max_wait=5000, interval=10)
+    assert result.exitCode == 13
+    assert "reader-still-open" in result.stdout
+    assert "unexpected-eof" not in result.stdout
+
+
+@pytest.mark.parametrize("exit_before_resize", [False, True])
+def test_resize_waits_for_its_ioctl_ack_or_reports_exit(processes, exit_before_resize):
+    import json
+    import os
+    import signal
+    import time
+
+    manager, directory = processes
+    started = manager.exec(
+        {
+            "name": "resize-ack",
+            "command": "cat",
+            "stdin": True,
+            "workingDir": str(directory),
+            "tty": {"rows": 24, "cols": 80},
+        }
+    )
+    state_dir = directory / "processes" / hashlib.sha256(started.name.encode()).hexdigest()
+    state = json.loads((state_dir / "state").read_text())
+    worker_pid = state["_workerPid"]
+    os.kill(worker_pid, signal.SIGSTOP)
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        (state_dir / "resize-ack").write_text(json.dumps({"id": "stale-ack"}))
+        pending = pool.submit(manager.resize, started.name, 51, 103)
+        deadline = time.monotonic() + 5
+        while not (state_dir / "resize").exists():
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        with pytest.raises(concurrent.futures.TimeoutError):
+            pending.result(timeout=0.1)
+        assert json.loads((state_dir / "state").read_text())["tty"] == {"rows": 24, "cols": 80}
+        if exit_before_resize:
+            os.killpg(int(started.pid), signal.SIGKILL)
+            # Wait for the actual child termination while its supervisor is stopped.
+            while Path(f"/proc/{started.pid}/stat").read_text().rsplit(") ", 1)[1].split()[0] != "Z":
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+        os.kill(worker_pid, signal.SIGCONT)
+        if exit_before_resize:
+            with pytest.raises(Exception, match="terminal has exited"):
+                pending.result(timeout=5)
+        else:
+            pending.result(timeout=5)
+            assert manager.get(started.name).tty == {"rows": 51, "cols": 103}
+            request = json.loads((state_dir / "resize").read_text())
+            assert json.loads((state_dir / "resize-ack").read_text())["id"] == request["id"]
+    finally:
+        with __import__("contextlib").suppress(ProcessLookupError):
+            os.kill(worker_pid, signal.SIGCONT)
+        pool.shutdown(wait=True)
+
+
+@pytest.mark.parametrize("output_lifetime", ["leader", "writers"])
+def test_terminal_descendant_output_lifetime_matches_provider(processes, output_lifetime):
+    import json
+    import sys
+
+    manager, directory = processes
+    report = directory / "descendant-report"
+    program = """import os,sys,time,signal,json
+ready,notify=os.pipe()
+if os.fork():
+ os.close(notify);os.read(ready,1);print("leader",flush=True);os._exit(7)
+os.close(ready)
+os.setsid()
+written=0
+def done(error):
+ with open(sys.argv[1],"w") as f:json.dump({"written":written,"error":error},f)
+ os._exit(0)
+signal.signal(signal.SIGALRM,lambda *_:done("timeout"))
+os.write(notify,b"1");os.close(notify)
+signal.alarm(2)
+time.sleep(.1)
+try:
+ while written<2*1024*1024:written+=os.write(1,b"X"*min(65536,2*1024*1024-written))
+ done(None)
+except OSError as e:done(e.errno)
+"""
+    current = manager.exec(
+        {
+            "command": "detached terminal writer",
+            "argv": [sys.executable, "-c", program, str(report)],
+            "workingDir": str(directory),
+            "preserveDescendants": True,
+            "tty": {"rows": 24, "cols": 80},
+            "ttyOutput": output_lifetime,
+        }
+    )
+    result = manager.wait(current.name, max_wait=5000, interval=10)
+    assert result.exit_code == 7
+    supervisor = next(iter(manager._vm.runs.values()))[0]
+    supervisor.wait(timeout=5)
+    child = json.loads(report.read_text())
+    if output_lifetime == "writers":
+        assert result.stdout == "leader\r\n" + "X" * (2 * 1024 * 1024)
+        assert child == {"written": 2 * 1024 * 1024, "error": None}
+    else:
+        assert result.stdout == "leader\r\n"
+        assert 0 <= child["written"] < 2 * 1024 * 1024
+        assert child["error"] == "timeout"
+
+
+def test_kill_after_terminal_leader_exit_reaps_detached_descendant(processes):
+    import json
+    import os
+    import sys
+    import time
+
+    manager, directory = processes
+    marker = directory / "detached-pid"
+    program = """import os,sys,time
+ready,notify=os.pipe()
+if os.fork():
+ os.close(notify);os.read(ready,1);os._exit(0)
+os.close(ready)
+os.setsid()
+with open(sys.argv[1],"w") as f:f.write(str(os.getpid()))
+os.write(notify,b"1");os.close(notify)
+while True:time.sleep(1)
+"""
+    current = manager.exec(
+        {
+            "command": "detached terminal",
+            "argv": [sys.executable, "-c", program, str(marker)],
+            "workingDir": str(directory),
+            "preserveDescendants": True,
+            "tty": {"rows": 24, "cols": 80},
+        }
+    )
+    manager.wait(current.name, max_wait=5000, interval=10)
+    deadline = time.monotonic() + 5
+    while not marker.exists():
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    pid = int(marker.read_text())
+    state_dir = directory / "processes" / hashlib.sha256(current.name.encode()).hexdigest()
+    state = json.loads((state_dir / "state").read_text())
+    try:
+        os.kill(pid, 0)
+        manager.kill(current.name)
+        supervisor = next(iter(manager._vm.runs.values()))[0]
+        supervisor.wait(timeout=5)
+        assert not Path(f"/proc/{pid}").exists()
+        assert (state_dir / "worker-complete").exists()
+    finally:
+        # Keep a failing implementation from leaving this test's adopted child alive.
+        if Path(f"/proc/{pid}").exists():
+            fields = Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1].split()
+            if int(fields[1]) == state["_workerPid"]:
+                os.kill(pid, 9)
+
+
+def test_resize_after_leader_exit_updates_live_descendant_terminal(processes):
+    import json
+    import sys
+    import time
+
+    manager, directory = processes
+    release = directory / "inspect-terminal"
+    report = directory / "terminal-size"
+    program = """import os,sys,time,json
+ready,notify=os.pipe()
+if os.fork():
+ os.close(notify);os.read(ready,1);os._exit(0)
+os.close(ready);os.setsid();os.write(notify,b"1");os.close(notify)
+while not os.path.exists(sys.argv[1]):time.sleep(.01)
+with open(sys.argv[2],"w") as f:json.dump(list(os.get_terminal_size(1)),f)
+os._exit(0)
+"""
+    started = manager.exec(
+        {
+            "command": "resize detached terminal",
+            "argv": [sys.executable, "-c", program, str(release), str(report)],
+            "workingDir": str(directory),
+            "preserveDescendants": True,
+            "tty": {"rows": 24, "cols": 80},
+            "ttyOutput": "writers",
+        }
+    )
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        deadline = time.monotonic() + 5
+        while Path(f"/proc/{started.pid}").exists():
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        assert manager.get(started.name).status == "running"
+        pending = pool.submit(manager.resize, started.name, 41, 99)
+        pending.result(timeout=2)
+        release.touch()
+        manager.wait(started.name, max_wait=5000, interval=10)
+        assert json.loads(report.read_text()) == [99, 41]
+    finally:
+        release.touch()
+        pool.shutdown(wait=True)
+
+
+def test_resize_reports_worker_error_even_while_worker_identity_is_alive(processes):
+    import json
+    import os
+    import signal
+    import time
+
+    manager, directory = processes
+    started = manager.exec({"command": "cat", "stdin": True, "tty": {"rows": 24, "cols": 80}})
+    state_dir = directory / "processes" / hashlib.sha256(started.name.encode()).hexdigest()
+    state = json.loads((state_dir / "state").read_text())
+    worker_pid = state["_workerPid"]
+    os.kill(worker_pid, signal.SIGSTOP)
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        pending = pool.submit(manager.resize, started.name, 41, 99)
+        deadline = time.monotonic() + 5
+        while not (state_dir / "resize").exists():
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        temporary = state_dir / "injected-error"
+        temporary.write_text(json.dumps({"error": "terminal worker failed"}))
+        temporary.replace(state_dir / "error")
+        with pytest.raises(Exception, match="terminal worker failed"):
+            pending.result(timeout=2)
+        assert json.loads((state_dir / "state").read_text())["status"] == "running"
+        os.kill(worker_pid, 0)
+    finally:
+        os.kill(worker_pid, signal.SIGCONT)
+        pool.shutdown(wait=True)

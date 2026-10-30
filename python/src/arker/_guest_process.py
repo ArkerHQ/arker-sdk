@@ -10,14 +10,19 @@ import base64
 import codecs
 import contextlib
 import datetime
+import errno
 import fcntl
 import hashlib
 import json
 import os
+import pty
 import re
+import select
 import signal
+import struct
 import subprocess
 import sys
+import termios
 import time
 import uuid
 from pathlib import Path
@@ -80,6 +85,93 @@ def locate(identifier):
     raise ProcessNotFound(f"Process {identifier!r} not found")
 
 
+def terminal_size(value):
+    if not isinstance(value, dict) or set(value) != {"rows", "cols"}:
+        raise ValueError("Terminal size requires rows and cols")
+    if any(type(value[key]) is not int or not 0 <= value[key] <= 65535 for key in ("rows", "cols")):
+        raise ValueError("Terminal dimensions must be integers between 0 and 65535")
+    return struct.pack("HHHH", value["rows"], value["cols"], 0, 0)
+
+
+def claim_terminal():
+    # The supervisor is single-threaded; this runs in its forked child before exec.
+    os.setsid()
+    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+
+def drain_terminal(fd, output):
+    # Bound each pass so a continuous writer cannot starve input or resize.
+    for _ in range(16):
+        try:
+            data = os.read(fd, 65536)
+        except BlockingIOError:
+            return False
+        except OSError as error:
+            if error.errno == errno.EIO:
+                return True
+            raise
+        if not data:
+            return True
+        output.write(data)
+    return False
+
+
+def apply_terminal_resize(directory, master, state, resize_id):
+    path = directory / "resize"
+    if not path.exists():
+        return resize_id
+    update = json.loads(path.read_text())
+    if update["id"] == resize_id:
+        return resize_id
+    acknowledgement = {"id": update["id"]}
+    try:
+        fcntl.ioctl(master, termios.TIOCSWINSZ, terminal_size(update["tty"]))
+        state["tty"] = update["tty"]
+        write_json(directory / "state", state)
+    except OSError as error:
+        acknowledgement["error"] = str(error)
+    write_json(directory / "resize-ack", acknowledgement)
+    return update["id"]
+
+
+def terminate_descendants(directory):
+    termination = directory / "termination"
+    if not termination.exists():
+        return
+    action = json.loads(termination.read_text())["status"]
+    selected = signal.SIGKILL if action == "killed" else signal.SIGTERM
+    parent = os.getpid()
+    children = Path(f"/proc/{parent}/task/{parent}/children").read_text().split()
+    for child_pid in children:
+        handle = None
+        try:
+            handle = os.pidfd_open(int(child_pid))
+            fields = Path(f"/proc/{child_pid}/stat").read_text().rsplit(") ", 1)[1].split()
+            # A vanished child PID may already have been reused. Only signal an
+            # owned direct child through its pinned handle; orphans are adopted
+            # by this subreaper and processed on the next pass.
+            if int(fields[1]) == parent:
+                signal.pidfd_send_signal(handle, selected)
+        except (FileNotFoundError, ProcessLookupError):
+            pass
+        finally:
+            if handle is not None:
+                os.close(handle)
+
+
+def reap_descendants(directory):
+    while True:
+        terminate_descendants(directory)
+        try:
+            pid, _status = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            return
+        except InterruptedError:
+            continue
+        if pid == 0:
+            time.sleep(0.02)
+
+
 def worker(request, ready_fd):
     directory = Path(request["_directory"])
     command = request["command"]
@@ -99,6 +191,7 @@ def worker(request, ready_fd):
         "stdin": bool(request.get("stdin")),
         "_identity": None,
         "_request_id": request.get("_requestId"),
+        "_resizeAck": True,
         "_preserveDescendants": request.get("preserveDescendants") is True,
         "_workerPid": os.getpid(),
         "_workerIdentity": identity(os.getpid()),
@@ -108,6 +201,7 @@ def worker(request, ready_fd):
         (directory / "stderr").open("ab", buffering=0) as stderr,
     ):
         child = None
+        master = slave = None
         try:
             if request.get("preserveDescendants"):
                 import ctypes
@@ -115,17 +209,26 @@ def worker(request, ready_fd):
                 # Adopt orphaned descendants even when they double-fork or setsid.
                 if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
                     raise OSError(ctypes.get_errno(), "Cannot supervise detached process descendants")
+            if "tty" in request:
+                master, slave = pty.openpty()
+                fcntl.ioctl(slave, termios.TIOCSWINSZ, terminal_size(request["tty"]))
+                os.set_blocking(master, False)
+                state["tty"] = request["tty"]
             child = subprocess.Popen(
                 request.get("argv", command),
                 shell="argv" not in request,
                 executable=None if "argv" in request else "/bin/sh",
                 cwd=cwd,
                 env=environment,
-                stdout=stdout,
-                stderr=stderr,
-                stdin=subprocess.PIPE if request.get("stdin") else subprocess.DEVNULL,
-                start_new_session=True,
+                stdout=slave if slave is not None else stdout,
+                stderr=slave if slave is not None else stderr,
+                stdin=slave if slave is not None else (subprocess.PIPE if request.get("stdin") else subprocess.DEVNULL),
+                start_new_session=slave is None,
+                preexec_fn=claim_terminal if slave is not None else None,
             )
+            if slave is not None:
+                os.close(slave)
+                slave = None
             state.update(pid=str(child.pid), _identity=identity(child.pid))
             write_json(directory / "state", state)
             os.write(ready_fd, b"1")
@@ -133,6 +236,9 @@ def worker(request, ready_fd):
             ready_fd = -1
             started = time.monotonic()
             pending = b""
+            terminal_eof = False
+            terminal_closed = False
+            resize_id = None
             if child.stdin:
                 os.set_blocking(child.stdin.fileno(), False)
             with (directory / "input").open("rb") as incoming:
@@ -141,6 +247,18 @@ def worker(request, ready_fd):
                         write_json(directory / "termination", {"status": "killed"})
                         with contextlib.suppress(ProcessLookupError):
                             os.killpg(child.pid, signal.SIGKILL)
+                    if master is not None:
+                        terminal_closed = drain_terminal(master, stdout)
+                        resize_id = apply_terminal_resize(directory, master, state, resize_id)
+                        if request.get("stdin") and not terminal_eof:
+                            pending += incoming.read(65536 - min(len(pending), 65536))
+                            if not pending and (directory / "eof").exists():
+                                # A terminal has no input half-close. Closing the SDK
+                                # writer neither sends VEOF nor closes the output master.
+                                terminal_eof = True
+                        if pending:
+                            with contextlib.suppress(BlockingIOError):
+                                pending = pending[os.write(master, pending) :]
                     if child.stdin and not child.stdin.closed:
                         pending += incoming.read(65536 - min(len(pending), 65536))
                         if pending:
@@ -154,8 +272,19 @@ def worker(request, ready_fd):
                                 (directory / "eof").touch()
                         elif (directory / "eof").exists():
                             child.stdin.close()
-                    time.sleep(0.02)
+                    if master is not None and not terminal_closed:
+                        select.select([master], [], [], 0.02)
+                    else:
+                        time.sleep(0.02)
             code = child.wait()
+            if master is not None:
+                if request.get("ttyOutput") == "writers":
+                    while not drain_terminal(master, stdout):
+                        resize_id = apply_terminal_resize(directory, master, state, resize_id)
+                        terminate_descendants(directory)
+                        select.select([master], [], [], 0.02)
+                else:
+                    drain_terminal(master, stdout)
             state["exitCode"] = code if code >= 0 else request.get("signalExitCode", 128 - code)
             state["_returnCode"] = code
             termination = directory / "termination"
@@ -184,13 +313,7 @@ def worker(request, ready_fd):
                 if ready_fd >= 0:
                     os.close(ready_fd)
                 if request.get("preserveDescendants"):
-                    while True:
-                        try:
-                            os.waitpid(-1, 0)
-                        except ChildProcessError:
-                            break
-                        except InterruptedError:
-                            continue
+                    reap_descendants(directory)
                 control = request.get("_modalControl", "")
                 if isinstance(control, str) and re.fullmatch(r"exec-[0-9a-f]{32}\.json", control):
                     with contextlib.suppress(FileNotFoundError):
@@ -203,6 +326,9 @@ def worker(request, ready_fd):
                     diagnostic = json.loads(error_path.read_text())["error"] + "; " + diagnostic
                 write_json(error_path, {"error": diagnostic})
             finally:
+                for fd in (master, slave):
+                    if fd is not None:
+                        os.close(fd)
                 (directory / "worker-complete").touch()
 
 
@@ -210,6 +336,14 @@ def dispatch(request):
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     action = request["action"]
     if action == "exec":
+        if "tty" in request:
+            terminal_size(request["tty"])
+        if "ttyOutput" in request and (
+            request["ttyOutput"] not in {"leader", "writers"}
+            or "tty" not in request
+            or (request["ttyOutput"] == "writers" and request.get("preserveDescendants") is not True)
+        ):
+            raise ValueError("Invalid terminal output lifetime")
         if "signalExitCode" in request and (
             type(request["signalExitCode"]) is not int or request["signalExitCode"] != -1
         ):
@@ -306,14 +440,47 @@ def dispatch(request):
             "nextOffset": end,
             "eof": state["status"] in TERMINAL and end >= size,
         }
+    if action == "resize":
+        terminal_size(request.get("tty"))
+        with (directory / "resize-lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            state = json.loads((directory / "state").read_text())
+            if "tty" not in state:
+                raise ValueError("Process has no terminal")
+            if not state.get("_resizeAck"):
+                raise ValueError("Terminal resize acknowledgement is unavailable for this process")
+            if state["status"] in TERMINAL:
+                raise ValueError("Process terminal has exited")
+            request_id = uuid.uuid4().hex
+            write_json(directory / "resize", {"id": request_id, "tty": request["tty"]})
+            while True:
+                ack_path = directory / "resize-ack"
+                if ack_path.exists():
+                    acknowledgement = json.loads(ack_path.read_text())
+                    if acknowledgement["id"] == request_id:
+                        if "error" in acknowledgement:
+                            raise RuntimeError(acknowledgement["error"])
+                        return {"message": "Terminal resized"}
+                error_path = directory / "error"
+                if error_path.exists():
+                    raise RuntimeError(json.loads(error_path.read_text())["error"])
+                state = json.loads((directory / "state").read_text())
+                if state["status"] in TERMINAL:
+                    raise ValueError("Process terminal has exited")
+                if identity(state["_workerPid"]) != state["_workerIdentity"]:
+                    raise RuntimeError("Process supervisor exited before resizing the terminal")
+                time.sleep(0.01)
     if action == "get":
         return snapshot(directory, raw_exit_code=request.get("rawExitCode") is True)
     if action in {"kill", "stop"}:
         state = json.loads((directory / "state").read_text())
-        if state["status"] not in TERMINAL and identity(state["pid"]) == state["_identity"]:
+        if (state["status"] not in TERMINAL or state.get("_preserveDescendants")) and (
+            identity(state["_workerPid"]) == state["_workerIdentity"]
+        ):
             write_json(directory / "termination", {"status": "killed" if action == "kill" else "stopped"})
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(int(state["pid"]), signal.SIGKILL if action == "kill" else signal.SIGTERM)
+            if identity(state["pid"]) == state["_identity"]:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(int(state["pid"]), signal.SIGKILL if action == "kill" else signal.SIGTERM)
         return {"message": "Process " + action + " requested"}
     if action in {"writeStdin", "closeStdin"}:
         with (directory / "lock").open("r+") as lock:
