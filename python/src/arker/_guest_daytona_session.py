@@ -70,23 +70,31 @@ def serve(identifier, instance=None):
                 stream: os.open(folder / (stream + "-pipe"), os.O_RDWR | os.O_NONBLOCK)
                 for stream in ("stdout", "stderr")
             }
-            continuing = dict.fromkeys(outputs, False)
+            # Incomplete lines stay on disk until a newline or command completion.
 
-            def capture(final=False, outputs=outputs, continuing=continuing, folder=folder, lock=command["lock"]):
+            def capture(final=False, outputs=outputs, folder=folder, lock=command["lock"]):
                 readable, _, _ = select.select(list(outputs.values()), [], [], 0 if final else 0.01)
                 for stream, fd in outputs.items():
                     data = os.read(fd, 32768) if fd in readable else b""
-                    with lock, (folder / stream).open("ab") as log, (folder / "output").open("ab") as combined:
-                        for part in data.splitlines(keepends=True):
-                            if not continuing[stream]:
+                    parts = data.split(b"\n")
+                    with (
+                        (folder / (stream + "-pending")).open("a+b") as fragment,
+                        lock,
+                        (folder / stream).open("ab") as log,
+                        (folder / "output").open("ab") as combined,
+                    ):
+                        for index, part in enumerate(parts):
+                            fragment.write(part)
+                            complete = index < len(parts) - 1
+                            if complete or (final and not readable and fragment.tell()):
+                                fragment.write(b"\n")
+                                fragment.seek(0)
                                 combined.write(b"\1\1\1" if stream == "stdout" else b"\2\2\2")
-                            log.write(part)
-                            combined.write(part)
-                            continuing[stream] = not part.endswith(b"\n")
-                        if final and not readable and continuing[stream]:
-                            log.write(b"\n")
-                            combined.write(b"\n")
-                            continuing[stream] = False
+                                while chunk := fragment.read(32768):
+                                    log.write(chunk)
+                                    combined.write(chunk)
+                                fragment.seek(0)
+                                fragment.truncate()
                 return bool(readable)
 
             line = (

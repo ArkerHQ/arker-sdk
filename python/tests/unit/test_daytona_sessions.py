@@ -28,7 +28,11 @@ def session(tmp_path):
     # Emulate a login account even when the test runner is the non-login nobody user.
     login_shell = tmp_path / "login-shell"
     selected = tmp_path / "selected-shell"
-    login_shell.write_text("#!/bin/sh\nprintf selected > " + shlex.quote(str(selected)) + "\nexec /bin/sh\n")
+    login_shell.write_text(
+        "#!/bin/sh\nprintf selected > "
+        + shlex.quote(str(selected))
+        + "\nexec /bin/sh\n"
+    )
     login_shell.chmod(0o700)
     launcher = """import pwd, runpy, sys
 lookup = pwd.getpwuid
@@ -47,7 +51,9 @@ runpy.run_path(sys.argv[1])["serve"](sys.argv[2])
         start_new_session=True,
     )
     owner = SessionProcess()
-    owner._session_call = lambda action, request_timeout=None, **values: helper.call({"action": action, **values})
+    owner._session_call = lambda action, request_timeout=None, **values: helper.call(
+        {"action": action, **values}
+    )
     try:
         deadline = time.monotonic() + 5
         while not (helper.address(identifier) / "control").exists():
@@ -69,7 +75,9 @@ def test_persistent_shell_preserves_cwd_exports_and_functions(session, tmp_path)
     owner, identifier = session
     result = owner.execute_session_command(
         identifier,
-        SimpleNamespace(command="export KEPT=yes; cd /tmp; retained() { printf function; }; printf first"),
+        SimpleNamespace(
+            command="export KEPT=yes; cd /tmp; retained() { printf function; }; printf first"
+        ),
         timeout=5,
     )
     assert result.stdout == "first\n"
@@ -114,7 +122,10 @@ def test_streaming_input_and_awaited_callbacks(session):
             output.append(text)
 
         await asyncio.wait_for(
-            owner.get_session_command_logs_async(identifier, result.cmd_id, stdout, errors.append), 5
+            owner.get_session_command_logs_async(
+                identifier, result.cmd_id, stdout, errors.append
+            ),
+            5,
         )
         assert "".join(output) == "readyhello\n"
         assert "".join(errors) == "error\n"
@@ -129,31 +140,43 @@ def test_stream_reader_cancellation_does_not_cancel_command(session):
     async def exercise():
         result = owner.execute_session_command(
             identifier,
-            SimpleNamespace(command="read value; printf '%s' \"$value\"", run_async=True, suppress_input_echo=True),
+            SimpleNamespace(
+                command="read value; printf '%s' \"$value\"",
+                run_async=True,
+                suppress_input_echo=True,
+            ),
         )
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(
-                owner.get_session_command_logs_async(identifier, result.cmd_id, lambda _: None, lambda _: None), 0.05
+                owner.get_session_command_logs_async(
+                    identifier, result.cmd_id, lambda _: None, lambda _: None
+                ),
+                0.05,
             )
         assert owner.get_session_command(identifier, result.cmd_id).exit_code is None
         owner.send_session_command_input(identifier, result.cmd_id, "survived\n")
         chunks = []
         await asyncio.wait_for(
-            owner.get_session_command_logs_async(identifier, result.cmd_id, chunks.append, lambda _: None), 5
+            owner.get_session_command_logs_async(
+                identifier, result.cmd_id, chunks.append, lambda _: None
+            ),
+            5,
         )
         assert "".join(chunks) == "survived\n"
 
     asyncio.run(exercise())
 
 
-def test_large_unterminated_output_streams_before_command_completion(session):
+def test_large_completed_line_streams_before_command_completion(session):
     owner, identifier = session
 
     async def exercise():
         result = owner.execute_session_command(
             identifier,
             SimpleNamespace(
-                command="head -c 2097152 /dev/zero | tr '\\0' X; read done", run_async=True, suppress_input_echo=True
+                command="head -c 2097152 /dev/zero | tr '\\0' X; printf '\\n'; read done",
+                run_async=True,
+                suppress_input_echo=True,
             ),
         )
         received = 0
@@ -166,11 +189,15 @@ def test_large_unterminated_output_streams_before_command_completion(session):
                 ready.set()
 
         pending = asyncio.create_task(
-            owner.get_session_command_logs_async(identifier, result.cmd_id, output, lambda _: None)
+            owner.get_session_command_logs_async(
+                identifier, result.cmd_id, output, lambda _: None
+            )
         )
         try:
             await asyncio.wait_for(ready.wait(), 10)
-            assert owner.get_session_command(identifier, result.cmd_id).exit_code is None
+            assert (
+                owner.get_session_command(identifier, result.cmd_id).exit_code is None
+            )
             owner.send_session_command_input(identifier, result.cmd_id, "done\n")
             await asyncio.wait_for(pending, 5)
             assert received == 2097153
@@ -192,7 +219,10 @@ def test_default_input_echo_and_completed_input_refusal(session):
     while owner.get_session_command(identifier, result.cmd_id).exit_code is None:
         assert time.monotonic() < deadline
         time.sleep(0.01)
-    assert owner.get_session_command_logs(identifier, result.cmd_id).stdout == "hello\nanswer\n"
+    assert (
+        owner.get_session_command_logs(identifier, result.cmd_id).stdout
+        == "hello\nanswer\n"
+    )
     with pytest.raises(RuntimeError, match="completed"):
         owner.send_session_command_input(identifier, result.cmd_id, "extra")
 
@@ -200,7 +230,9 @@ def test_default_input_echo_and_completed_input_refusal(session):
 def test_wait_timeout_leaves_command_running_and_retrievable(session):
     owner, identifier = session
     with pytest.raises(TimeoutError, match="continues running"):
-        owner.execute_session_command(identifier, SimpleNamespace(command="read value; printf kept"), timeout=0.05)
+        owner.execute_session_command(
+            identifier, SimpleNamespace(command="read value; printf kept"), timeout=0.05
+        )
     command = owner.get_session(identifier).commands[0]
     assert command.exit_code is None
     owner.send_session_command_input(identifier, command.id, "go\n")
@@ -208,7 +240,9 @@ def test_wait_timeout_leaves_command_running_and_retrievable(session):
     while owner.get_session_command(identifier, command.id).exit_code is None:
         assert time.monotonic() < deadline
         time.sleep(0.01)
-    assert owner.get_session_command_logs(identifier, command.id).stdout.endswith("kept\n")
+    assert owner.get_session_command_logs(identifier, command.id).stdout.endswith(
+        "kept\n"
+    )
 
 
 def test_request_timeout_refuses_before_guest_work():
@@ -226,7 +260,11 @@ def test_async_cancelled_session_creation_reconciles_exact_admission():
     from arker._compat_daytona_async import _AsyncProcess
 
     async def exercise():
-        entered, release, cleaned = threading.Event(), threading.Event(), threading.Event()
+        entered, release, cleaned = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
         discarded = []
 
         def create(*_):
@@ -238,7 +276,11 @@ def test_async_cancelled_session_creation_reconciles_exact_admission():
             discarded.append((session_id, identifier))
             cleaned.set()
 
-        process = _AsyncProcess(SimpleNamespace(_create_session_owned=create, _discard_created_session=discard))
+        process = _AsyncProcess(
+            SimpleNamespace(
+                _create_session_owned=create, _discard_created_session=discard
+            )
+        )
         pending = asyncio.create_task(process.create_session("session"))
         try:
             assert await asyncio.to_thread(entered.wait, 5)
@@ -279,7 +321,9 @@ def test_creation_cleanup_failure_preserves_readiness_error_and_owned_id(monkeyp
     owner._session_source = lambda: "/source.py"
     owner.get_session = lambda *_: (_ for _ in ()).throw(primary)
     monkeypatch.setattr(module, "GuestProcesses", Manager)
-    monkeypatch.setattr(module, "run_command", lambda *_: SimpleNamespace(stdout='["/tmp", "/bin/sh"]'))
+    monkeypatch.setattr(
+        module, "run_command", lambda *_: SimpleNamespace(stdout='["/tmp", "/bin/sh"]')
+    )
     with pytest.raises(RuntimeError) as raised:
         owner.create_session("public-session")
     assert raised.value is primary
@@ -294,7 +338,9 @@ def test_creation_cleanup_failure_preserves_readiness_error_and_owned_id(monkeyp
 def test_session_uses_account_shell_and_preserves_runner_identity(session, tmp_path):
     owner, identifier = session
     result = owner.execute_session_command(
-        identifier, SimpleNamespace(command='printf \'%s:%s\' "$(id -u)" "$(id -g)"'), timeout=5
+        identifier,
+        SimpleNamespace(command='printf \'%s:%s\' "$(id -u)" "$(id -g)"'),
+        timeout=5,
     )
     assert result.stdout == f"{os.getuid()}:{os.getgid()}\n"
     assert (tmp_path / "selected-shell").read_text() == "selected"
@@ -305,10 +351,46 @@ def test_session_commands_keep_attributes_without_native_models(session, monkeyp
 
     monkeypatch.setattr(_daytona_sessions, "import_optional", lambda _: None)
     owner, identifier = session
-    result = owner.execute_session_command(identifier, SimpleNamespace(command="printf output"), timeout=5)
+    result = owner.execute_session_command(
+        identifier, SimpleNamespace(command="printf output"), timeout=5
+    )
     command = owner.get_session(identifier).commands[0]
     assert command.id == result.cmd_id
     assert command.exit_code == 0
-    listed = next(item for item in owner.list_sessions() if item.session_id == identifier)
+    listed = next(
+        item for item in owner.list_sessions() if item.session_id == identifier
+    )
     assert listed.commands[0].id == command.id
-    assert owner.get_session_command(identifier, command.id).exit_code == command.exit_code
+    assert (
+        owner.get_session_command(identifier, command.id).exit_code == command.exit_code
+    )
+
+
+def test_partial_lines_publish_only_when_complete_with_separate_stream_tags(
+    session, tmp_path
+):
+    owner, identifier = session
+    marker = tmp_path / "partial-ready"
+    command = owner.execute_session_command(
+        identifier,
+        SimpleNamespace(
+            command=f"printf first; printf err >&2; touch {marker}; read value; printf second; printf rest >&2",
+            run_async=True,
+            suppress_input_echo=True,
+        ),
+    )
+    deadline = time.monotonic() + 5
+    while not marker.exists():
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    before = owner.get_session_command_logs(identifier, command.cmd_id)
+    assert (before.stdout, before.stderr, before.output) == ("", "", "")
+    owner.send_session_command_input(identifier, command.cmd_id, "go\n")
+    while owner.get_session_command(identifier, command.cmd_id).exit_code is None:
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    after = owner.get_session_command_logs(identifier, command.cmd_id)
+    assert after.stdout == "firstsecond\n"
+    assert after.stderr == "errrest\n"
+    out, err = "\1\1\1firstsecond\n", "\2\2\2errrest\n"
+    assert after.output in (out + err, err + out)

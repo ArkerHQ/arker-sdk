@@ -54,14 +54,14 @@ test("session shell state, incremental UTF-8 logs and input use the shared guest
     assert.equal(output.join(""), "hëllo\n");
     assert.equal(errors.join(""), "error\n");
     assert.equal((await api.getSession(id)).commands.length, 3);
-    const retained = await api.executeSessionCommand(id, { command: "printf ready; read value; printf done", runAsync: true, suppressInputEcho: true });
+    const retained = await api.executeSessionCommand(id, { command: "printf 'ready\\n'; read value; printf done", runAsync: true, suppressInputEcho: true });
     const interruption = new Error("stop local reader");
     await assert.rejects(api.getSessionCommandLogs(id, retained.cmdId, () => { throw interruption; }, () => {}), error => error === interruption);
     assert.equal((await api.getSessionCommand(id, retained.cmdId)).exitCode, undefined);
     await api.sendSessionCommandInput(id, retained.cmdId, "continue\n");
     const continued: string[] = [];
     await api.getSessionCommandLogs(id, retained.cmdId, text => { continued.push(text); }, () => {});
-    assert.equal(continued.join(""), "readydone\n");
+    assert.equal(continued.join(""), "ready\ndone\n");
   } finally {
     await control({ action: "delete", session_id: id }).catch(() => undefined);
     await exited;
