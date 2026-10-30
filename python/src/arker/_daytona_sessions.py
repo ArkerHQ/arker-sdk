@@ -28,7 +28,11 @@ def model(name, **values):
         if name in {"SessionExecuteResponse", "SessionCommandLogsResponse"}
         else "daytona_toolbox_api_client"
     )
-    return getattr(module, name)(**values) if module else SimpleNamespace(**values)
+    if module is not None:
+        return getattr(module, name)(**values)
+    if name == "Session" and isinstance(values.get("commands"), list):
+        values["commands"] = [model("Command", **command) for command in values["commands"]]
+    return SimpleNamespace(**values)
 
 
 class SessionProcess:

@@ -298,3 +298,17 @@ def test_session_uses_account_shell_and_preserves_runner_identity(session, tmp_p
     )
     assert result.stdout == f"{os.getuid()}:{os.getgid()}\n"
     assert (tmp_path / "selected-shell").read_text() == "selected"
+
+
+def test_session_commands_keep_attributes_without_native_models(session, monkeypatch):
+    from arker import _daytona_sessions
+
+    monkeypatch.setattr(_daytona_sessions, "import_optional", lambda _: None)
+    owner, identifier = session
+    result = owner.execute_session_command(identifier, SimpleNamespace(command="printf output"), timeout=5)
+    command = owner.get_session(identifier).commands[0]
+    assert command.id == result.cmd_id
+    assert command.exit_code == 0
+    listed = next(item for item in owner.list_sessions() if item.session_id == identifier)
+    assert listed.commands[0].id == command.id
+    assert owner.get_session_command(identifier, command.id).exit_code == command.exit_code
