@@ -831,7 +831,7 @@ async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
       createIfNotExist: false,
     });
     await BlaxelSandbox.create({ ttl: "eventually" });
-    assert.equal(fake.createCalls[2].ttl, "eventually");
+    assert.equal((fake.createCalls[2] as { ttl: unknown }).ttl, "eventually");
     const arker = createArkerComputeProvider({ apiKey: "test", baseUrl: "https://example.invalid" });
     await assert.rejects(() => arker.sandbox.create({ network: { firewall: { rulesets: ["proxy"] } } } as any), /network/);
     await assert.rejects(() => arker.sandbox.create({ createIfNotExist: true } as any), /createIfNotExist/);
