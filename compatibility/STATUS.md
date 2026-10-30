@@ -64,8 +64,12 @@ must pass with fresh evidence before claiming parity.
   unknown-length uploads spool locally. Filename glob and literal content search
   are implemented. Python file transfers honor native connect/pool and read/write
   phase timeouts, including zero for an unbounded transfer phase; cleanup uses
-  independent request limits. Custom users, image working-directory selection,
-  metadata deadlines and TypeScript transfer timeout combinations remain incomplete.
+  independent request limits. Python metadata requests preserve native synchronous
+  connection/read budgets and asynchronous response deadlines. TypeScript process
+  and transfer requests enforce inactivity limits, including zero to disable the
+  limit. These timeout paths have local HTTP comparisons; complete live equivalence
+  remains unqualified. Custom users and image working-directory selection remain
+  incomplete.
   The pinned native filesystem exposes neither watch nor signed file URLs. See the
   [filesystem contract](daytona-filesystem.md) for source prerequisites and
   [volume contract](daytona-volumes.md) for mount and deletion limits.
@@ -84,8 +88,11 @@ must pass with fresh evidence before claiming parity.
   prepared derivative; public bootstrap and archive remain incomplete. Writable
   drive mount/list/unmount bindings are implemented in Python and TypeScript,
   including authoritative readback after a lost mount response. TypeScript also
-  supports writable mountDrives setup. Read-only mounts, UID/GID mapping and
-  full DriveInstance routing remain unsupported. Native drive comparisons are
+  supports writable mountDrives setup. Drive and volume resource lookup, listing
+  and conditional deletion use the shared router; name-only drive creation is
+  supported. Volume creation refuses capacity requests, including the native
+  default, because Arker filesystems cannot enforce that limit. Read-only mounts,
+  UID/GID mapping and resource updates remain unsupported. Native drive comparisons are
   authorization-blocked; live sharing/persistence is not yet qualified. Python
   cancellation stops subsequent drive operations but cannot interrupt an already
   in-flight synchronous HTTP request.
