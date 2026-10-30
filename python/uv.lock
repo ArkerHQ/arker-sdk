@@ -276,6 +276,7 @@ dependencies = [
     { name = "jsonschema", extra = ["format-nongpl"] },
     { name = "pydantic" },
     { name = "typing-extensions" },
+    { name = "urllib3" },
     { name = "websocket-client" },
 ]
 
@@ -331,6 +332,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.13,<3" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "typing-extensions", specifier = ">=4.12" },
+    { name = "urllib3", specifier = ">=2,<3" },
     { name = "websocket-client", specifier = ">=1.8,<2" },
     { name = "websocket-client", marker = "extra == 'pty'", specifier = ">=1.7" },
 ]

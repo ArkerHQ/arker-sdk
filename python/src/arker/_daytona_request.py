@@ -11,6 +11,7 @@ from functools import wraps
 import httpx2 as httpx
 
 from ._compat import import_optional
+from ._daytona_sync_request import sync_request_executor
 from ._request_timeout import request_executor_scope, request_timeout_scope
 
 
@@ -29,7 +30,7 @@ def request_timeout(function):
     def invoke(*args, **kwargs):
         seconds = normalized_timeout(signature.bind(*args, **kwargs).arguments.get("request_timeout"))
         try:
-            with request_timeout_scope(seconds):
+            with request_timeout_scope(seconds), sync_request_executor():
                 return function(*args, **kwargs)
         except httpx.TimeoutException as cause:
             errors = import_optional("daytona.common.errors")
