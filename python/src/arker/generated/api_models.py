@@ -2493,6 +2493,45 @@ class PolicyDoc:
 
 
 @dataclass(frozen=True)
+class RunRequest:
+    session_id: str | None = None
+    session_idx: int | None = None
+    command: str | None = None
+    timeout: int | None = None
+    time_to_background: int | None = None
+    background: bool | None = None
+    queueing_timeout: int | None = None
+    end_symbol: str | None = 'auto'
+    end_after_all_subprocesses: bool | None = None
+    signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
+    policies: PolicyUpdate | None = None
+
+
+SyncWriteResult: TypeAlias = (
+    SyncChunkWriteResult | SyncPresignedWriteRequestResult | SyncCommitWriteResult
+)
+
+
+@dataclass(frozen=True)
+class VmPolicies:
+    outbound_guards: dict[str, OutboundGuardRule] | None = None
+    rules: PolicyRules | None = None
+    secrets: dict[str, str] | None = None
+    mitm_domains: list[str] | None = None
+    warnings: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class PolicyPreconditions:
+    rules: (
+        dict[str, PolicyRule | ScheduleRule | LifecycleRule | OutboundGuardRule | None]
+        | None
+    ) = None
+    secrets: dict[str, str | None] | None = None
+    snapshot: VmPolicies | None = None
+
+
+@dataclass(frozen=True)
 class ForkRequest1:
     source_vm_id: str
     source_vm_name: None = None
@@ -2520,6 +2559,7 @@ class ForkRequest1:
     immutable: bool | None = None
     image_config: ImageConfigOverrides | None = None
     start_image: bool | None = None
+    source_policies: VmPolicies | None = None
 
 
 @dataclass(frozen=True)
@@ -2550,6 +2590,7 @@ class ForkRequest2:
     immutable: bool | None = None
     image_config: ImageConfigOverrides | None = None
     start_image: bool | None = None
+    source_policies: VmPolicies | None = None
 
 
 @dataclass(frozen=True)
@@ -2580,6 +2621,7 @@ class ForkRequest3:
     immutable: bool | None = None
     image_config: ImageConfigOverrides | None = None
     start_image: bool | None = None
+    source_policies: VmPolicies | None = None
 
 
 @dataclass(frozen=True)
@@ -2610,6 +2652,7 @@ class ForkRequest4:
     immutable: bool | None = None
     image_config: ImageConfigOverrides | None = None
     start_image: bool | None = None
+    source_policies: VmPolicies | None = None
 
 
 @dataclass(frozen=True)
@@ -2640,6 +2683,7 @@ class ForkRequest5:
     immutable: bool | None = None
     image_config: ImageConfigOverrides | None = None
     start_image: bool | None = None
+    source_policies: VmPolicies | None = None
 
 
 @dataclass(frozen=True)
@@ -2670,6 +2714,7 @@ class ForkRequest6:
     immutable: bool | None = None
     image_config: ImageConfigOverrides | None = None
     start_image: bool | None = None
+    source_policies: VmPolicies | None = None
 
 
 ForkRequest: TypeAlias = (
@@ -2680,44 +2725,6 @@ ForkRequest: TypeAlias = (
     | ForkRequest5
     | ForkRequest6
 )
-
-
-@dataclass(frozen=True)
-class RunRequest:
-    session_id: str | None = None
-    session_idx: int | None = None
-    command: str | None = None
-    timeout: int | None = None
-    time_to_background: int | None = None
-    background: bool | None = None
-    queueing_timeout: int | None = None
-    end_symbol: str | None = 'auto'
-    end_after_all_subprocesses: bool | None = None
-    signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
-    policies: PolicyUpdate | None = None
-
-
-SyncWriteResult: TypeAlias = (
-    SyncChunkWriteResult | SyncPresignedWriteRequestResult | SyncCommitWriteResult
-)
-
-
-@dataclass(frozen=True)
-class PatchVmRequest:
-    description: str | None = None
-    immutable: bool | None = None
-    resources: ResourcesInput | None = None
-    ssh_public_keys: SshKeysUpdate | list[str] | None = None
-    policies: PolicyUpdate | None = None
-
-
-@dataclass(frozen=True)
-class VmPolicies:
-    outbound_guards: dict[str, OutboundGuardRule] | None = None
-    rules: PolicyRules | None = None
-    secrets: dict[str, str] | None = None
-    mitm_domains: list[str] | None = None
-    warnings: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -2767,6 +2774,16 @@ class SyncWriteResponse:
     ok: bool
     op: Literal['write']
     results: list[SyncWriteResult]
+
+
+@dataclass(frozen=True)
+class PatchVmRequest:
+    description: str | None = None
+    immutable: bool | None = None
+    resources: ResourcesInput | None = None
+    ssh_public_keys: SshKeysUpdate | list[str] | None = None
+    policies: PolicyUpdate | None = None
+    policy_preconditions: PolicyPreconditions | None = None
 
 
 SyncResponse: TypeAlias = SyncReadResponse | SyncWriteResponse | SyncManifestResponse

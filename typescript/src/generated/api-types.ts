@@ -1292,6 +1292,8 @@ export interface components {
             image_config?: components["schemas"]["ImageConfigOverrides"];
             /** @description Start the prepared image ENTRYPOINT and CMD after creating a non-durable mutable filesystem-only VM fork and installing its policies. Requires a VM source, layers [disk], and a valid resolved image configuration on the source filesystem. Incompatible with command, immutable, and durable. Startup dispatch is idempotent per child; dispatch failure returns an error with the child VM ID for recovery. Command completion is asynchronous. Omitted or false does not start the image command. */
             start_image?: boolean;
+            /** @description Require the source policy readback to match this complete snapshot before copying it. Used with a VM source only; mismatch fails before child creation. Child updates are applied to this same source snapshot, retaining unspecified rules and encrypted secrets. Unknown fields are rejected by older fork servers. */
+            source_policies?: components["schemas"]["VmPolicies"];
         } & ({
             source_vm_id: string;
             source_vm_name?: null;
@@ -2069,7 +2071,9 @@ export interface components {
             ssh_public_keys?: components["schemas"]["SshKeysUpdate"] | string[];
             /** @description A change to the VM's network policy. Rules and secrets named are written or removed; the rest are kept, so concurrent changes to different rules do not overwrite each other. Omit it to leave the policy unchanged. If the policy cannot be stored and applied, the request fails. Changing only `policies` is allowed while the organization's billing is restricted. */
             policies?: components["schemas"]["PolicyUpdate"] | null;
-        };
+            /** @description Allowed only with policies and no other VM fields. Requires vm:write scope and an exact match before applying the policy update. Older servers reject this unknown field before mutation. */
+            policy_preconditions?: components["schemas"]["PolicyPreconditions"];
+        } & unknown;
         /** @description One platform this source can be forked onto, with the resource limits that apply there. This is the authoritative per-platform record: when an entry carries bounds they win over the flat `min_*`/`max_*` fields on the VM, which are a single-platform convenience projection of the same data. CPU, memory, and disk limits come from the source VM; GPU limits come from the platform catalog. */
         CompatiblePlatform: {
             /** @description Stable platform identifier used in fork requests. */
@@ -4103,6 +4107,19 @@ export interface components {
             state: "archived";
             /** @description True when the VM was already explicitly archived before this request. */
             already_archived: boolean;
+        };
+        /** @description Exact named policy rules and secrets required under the policy writer lock. Omitted names are unconstrained; null requires absence. Values are secret and never echoed on mismatch. */
+        PolicyPreconditions: {
+            /** @description Rules to write, keyed by rule id. A rule replaces any rule with the same id; `null` removes the rule with that id. Rules not named here are kept. The resulting policy must not give two rules of one `type` the same priority. */
+            rules?: {
+                [key: string]: components["schemas"]["PolicyRule"] | components["schemas"]["ScheduleRule"] | components["schemas"]["LifecycleRule"] | components["schemas"]["OutboundGuardRule"] | null;
+            };
+            /** @description Secrets to write, referenced by `${secret:NAME}` in rewrite actions, match values and `auth.token`. A value replaces the secret with that name; `null` removes it. Secrets not named here are kept. Values are encrypted at rest and masked as `***` in responses; `***` is not accepted as a value. */
+            secrets?: {
+                [key: string]: string | null;
+            };
+            /** @description Require the complete policy readback used for admission to match under the policy writer lock. Exact named secret conditions remain independently enforced. */
+            snapshot?: components["schemas"]["VmPolicies"];
         };
     };
     responses: {
