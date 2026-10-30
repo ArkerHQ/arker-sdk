@@ -238,3 +238,159 @@ def test_actual_terminal_program_waits_for_readback_before_recording(monkeypatch
     assert args[-1] == ("failed" if cleanup_running else "passed")
     assert calls[-3:] == [("terminate", {"wait": True}), ("lookup", "box"), ("poll", None if cleanup_running else 137)]
     assert coverage.cleanup_observed({"provider": "modal", "cleanup": kwargs["cleanup"]}) is not cleanup_running
+
+
+@pytest.mark.parametrize("provider", ["e2b", "daytona", "blaxel"])
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_native_absence_contracts(provider, asynchronous):
+    from compat_evidence import Cleanup
+
+    native = pytest.importorskip(provider)
+    if provider == "e2b":
+        cls = native.SandboxNotFoundException
+    elif provider == "daytona":
+        cls = native.DaytonaNotFoundError
+    else:
+        from blaxel.core.sandbox.default.sandbox import SandboxAPIError
+
+        cls = SandboxAPIError
+    cleanup = Cleanup(provider)
+    cleanup.allocated("owned")
+
+    def observe(error):
+        def lookup(identifier):
+            assert identifier == "owned"
+            if error is not None:
+                raise error
+            return {"state": "paused"}
+
+        async def async_lookup(identifier):
+            return lookup(identifier)
+
+        if asynchronous:
+            asyncio.run(cleanup.observe_absent_async("owned", async_lookup))
+        else:
+            cleanup.observe_absent("owned", lookup)
+
+    observe(cls("missing", status_code=404))
+    assert coverage.cleanup_observed({"provider": provider, "cleanup": cleanup.receipt()})
+    for error in [
+        cls("authorization", status_code=403),
+        cls("auth", status_code=401),
+        cls("server", status_code=500),
+        RuntimeError("404 not found"),
+        PermissionError("403"),
+    ]:
+        with pytest.raises(type(error)) as caught:
+            observe(error)
+        assert caught.value is error
+        assert not coverage.cleanup_observed({"provider": provider, "cleanup": cleanup.receipt()})
+    with pytest.raises(RuntimeError, match="absence has not"):
+        observe(None)
+    assert not coverage.cleanup_observed({"provider": provider, "cleanup": cleanup.receipt()})
+
+
+def test_e2b_filesystem_not_found_is_not_sandbox_absence():
+    pytest.importorskip("e2b")
+    from compat_evidence import Cleanup
+    from e2b import FileNotFoundException
+
+    cleanup = Cleanup("e2b")
+    cleanup.allocated("owned")
+    error = FileNotFoundException("missing file", status_code=404)
+
+    def lookup(identifier):
+        raise error
+
+    with pytest.raises(FileNotFoundException) as caught:
+        cleanup.observe_absent("owned", lookup)
+    assert caught.value is error
+    assert not coverage.cleanup_observed({"provider": "e2b", "cleanup": cleanup.receipt()})
+
+
+def test_blaxel_derived_async_program_preserves_cleanup_await():
+    import ast
+
+    import test_blaxel_import_only as scenario
+
+    source = scenario._async_program(scenario.PROGRAM)
+    tree = ast.parse(source)
+    matches = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Await)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Attribute)
+        and node.value.func.attr == "observe_absent_async"
+    ]
+    assert len(matches) == 1
+    compile(tree, "derived-blaxel", "exec")
+
+
+def test_blaxel_http_authorization_wins_over_misleading_body_code():
+    pytest.importorskip("blaxel")
+    import httpx
+    from blaxel.core.sandbox.default.sandbox import SandboxAPIError
+    from compat_evidence import Cleanup
+
+    cleanup = Cleanup("blaxel")
+    cleanup.allocated("owned")
+    error = SandboxAPIError(
+        "misleading body", status_code=404, response=httpx.Response(403, json={"code": 404, "error": "missing"})
+    )
+
+    def lookup(identifier):
+        raise error
+
+    with pytest.raises(SandboxAPIError) as caught:
+        cleanup.observe_absent("owned", lookup)
+    assert caught.value is error
+    assert not coverage.cleanup_observed({"provider": "blaxel", "cleanup": cleanup.receipt()})
+
+
+@pytest.mark.parametrize("status", [401, 403, 404, 500])
+def test_blaxel_native_http_parser_retains_status_for_cleanup(status):
+    pytest.importorskip("blaxel")
+    import httpx
+    from blaxel.core.client.api.compute.get_sandbox import _parse_response
+    from blaxel.core.sandbox.default.sandbox import SandboxAPIError
+    from compat_evidence import Cleanup
+
+    response = httpx.Response(status, json={"code": 404, "error": "misleading body"})
+    parsed = _parse_response(client=SimpleNamespace(raise_on_unexpected_status=True), response=response)
+    error = SandboxAPIError("missing", status_code=parsed.code, error=parsed)
+    assert error.response.status_code == status
+    cleanup = Cleanup("blaxel")
+    cleanup.allocated("owned")
+
+    def lookup(identifier):
+        assert identifier == "owned"
+        raise error
+
+    if status == 404:
+        cleanup.observe_absent("owned", lookup)
+    else:
+        with pytest.raises(SandboxAPIError) as caught:
+            cleanup.observe_absent("owned", lookup)
+        assert caught.value is error
+    assert coverage.cleanup_observed({"provider": "blaxel", "cleanup": cleanup.receipt()}) is (status == 404)
+
+
+@pytest.mark.parametrize("provider", ["e2b", "daytona", "blaxel"])
+def test_cancelled_absence_readback_never_qualifies(provider):
+    from compat_evidence import Cleanup
+
+    cleanup = Cleanup(provider)
+    cleanup.allocated("owned")
+    failure = asyncio.CancelledError()
+
+    async def lookup(identifier):
+        raise failure
+
+    async def attempt():
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await cleanup.observe_absent_async("owned", lookup)
+        assert caught.value is failure
+
+    asyncio.run(attempt())
+    assert not coverage.cleanup_observed({"provider": provider, "cleanup": cleanup.receipt()})

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { Sandbox as Native, CommandExitError, NotFoundError } from "e2b";
 import { Sandbox as Shim } from "../src/e2b.js";
-import { recordEvidence } from "../scripts/compat-evidence.js";
+import { Cleanup, recordEvidence } from "../scripts/compat-evidence.js";
 import { traceVendor } from "./compat-trace.js";
 import { withLiveRouter } from "./compat-live-router.js";
 
-async function program(Sandbox: { create(): Promise<Native | Shim>; connect(id: string): Promise<Native | Shim>; kill(id: string): Promise<boolean> }) {
+async function program(Sandbox: { create(): Promise<Native | Shim>; connect(id: string): Promise<Native | Shim>; kill(id: string): Promise<boolean>; getInfo(id: string): Promise<unknown> }, cleanup: Cleanup) {
   const sandbox = await Sandbox.create();
+  cleanup.allocated(sandbox.sandboxId);
   try {
     const connectedSandbox = await Sandbox.connect(sandbox.sandboxId);
     assert.equal(connectedSandbox.sandboxId, sandbox.sandboxId);
@@ -76,6 +77,7 @@ async function program(Sandbox: { create(): Promise<Native | Shim>; connect(id: 
   } finally {
     assert.equal(await Sandbox.kill(sandbox.sandboxId), true);
     assert.equal(await sandbox.kill(), false);
+    await cleanup.observeAbsent(sandbox.sandboxId, id => Sandbox.getInfo(id));
     assert.equal(await Sandbox.kill(sandbox.sandboxId), false);
   }
 }
@@ -91,9 +93,10 @@ await withLiveRouter(["E2B_API_KEY", "ARKER_API_KEY"], async ({ setProvider }) =
     if (provider === "arker") delete process.env.E2B_API_KEY;
     else process.env.E2B_API_KEY = nativeKey;
     const called = new Set<string>();
+    const cleanup = new Cleanup("e2b");
     let outcome = "failed";
     try {
-      await program(traceVendor(constructor, "Sandbox.static", called));
+      await program(traceVendor(constructor, "Sandbox.static", called), cleanup);
       outcome = "passed";
     } finally {
       await recordEvidence(
@@ -105,7 +108,7 @@ await withLiveRouter(["E2B_API_KEY", "ARKER_API_KEY"], async ({ setProvider }) =
             : "native",
         "import-only-command-environment-and-exit",
         [...called].sort(),
-        outcome,
+        outcome, {}, cleanup.receipt(),
       );
     }
     console.log(

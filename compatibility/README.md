@@ -129,10 +129,13 @@ combined to manufacture a passing comparison.
 
 Cleanup receipts contain enrolled resource IDs and provider readback results;
 a `passed` event, termination acknowledgement, or `cleanup_verified: true` alone
-does not qualify. The initial supported protocol is `modal-terminal-v1`: fresh
-sandbox lookup followed by an integer terminal `poll` result for every enrolled
-sandbox. Harnesses without a supported receipt remain unverified, including
-historical passes and other providers until their readback protocols are wired.
+does not qualify. `modal-terminal-v1` requires fresh sandbox lookup followed by an integer terminal
+`poll` result for every enrolled sandbox. E2B, Daytona, and Blaxel absence receipts
+require their sandbox lookup's typed not-found contract, never an authorization
+or transport failure. Native TypeScript Blaxel readback retains the HTTP response
+because thrown error bodies discard its status; the shim's decoded null-lookup
+receipt is accepted only on the Arker route. Harnesses without enrolled resources
+and a supported readback remain unverified, including historical passes.
 Receipts are trusted, auditable harness observations, not signed provider proof:
 they do not independently prove that the harness enrolled every allocation.
 Later private cleanup checks do not retroactively qualify earlier events.

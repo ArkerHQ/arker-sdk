@@ -88,14 +88,17 @@ def record_scenario(
         )
 
 
-class ModalCleanup:
-    """Enroll each allocation immediately; read retained terminal state after cleanup.
+class Cleanup:
+    """Enroll each allocation immediately; read provider state after cleanup.
 
     A termination acknowledgement alone is insufficient. The harness must enroll
     every owned allocation; this is an auditable observation, not cryptographic proof.
     """
 
-    def __init__(self):
+    def __init__(self, provider):
+        if provider not in {"modal", "e2b", "daytona", "blaxel"}:
+            raise ValueError("Unknown cleanup provider")
+        self.provider = provider
         self.resources = []
         self.observations = {}
 
@@ -105,9 +108,9 @@ class ModalCleanup:
         self.resources.append(identifier)
 
     async def observe(self, identifier, lookup, poll):
-        if identifier not in self.resources:
-            raise ValueError("Sandbox was not enrolled")
-        self.observations.pop(identifier, None)
+        self._begin(identifier)
+        if self.provider != "modal":
+            raise ValueError("Terminal poll is a Modal protocol")
         sandbox = await lookup(identifier)
         if sandbox.object_id != identifier:
             raise RuntimeError("Cleanup readback returned a different sandbox")
@@ -120,9 +123,63 @@ class ModalCleanup:
             "returncode": returncode,
         }
 
+    def _begin(self, identifier):
+        if identifier not in self.resources:
+            raise ValueError("Sandbox was not enrolled")
+        self.observations.pop(identifier, None)
+
+    def _absent(self, identifier, error):
+        if self.provider == "e2b":
+            from e2b import SandboxNotFoundException
+
+            absent = isinstance(error, SandboxNotFoundException) and error.status_code in (None, 404)
+            operation = "Sandbox.get_info"
+        elif self.provider == "daytona":
+            from daytona import DaytonaNotFoundError
+
+            absent = isinstance(error, DaytonaNotFoundError) and error.status_code == 404
+            operation = "Daytona.get"
+        elif self.provider == "blaxel":
+            from blaxel.core.sandbox.default.sandbox import SandboxAPIError
+
+            absent = (
+                isinstance(error, SandboxAPIError)
+                and error.status_code == 404
+                and (error.response is None or error.response.status_code == 404)
+            )
+            operation = "SandboxInstance.get"
+        else:
+            raise ValueError("Use Modal terminal readback")
+        if not absent:
+            raise error
+        self.observations[identifier] = {"id": identifier, "operation": operation, "status": 404}
+
+    def observe_absent(self, identifier, lookup):
+        self._begin(identifier)
+        try:
+            lookup(identifier)
+        except Exception as error:
+            self._absent(identifier, error)
+        else:
+            raise RuntimeError("Sandbox absence has not been observed")
+
+    async def observe_absent_async(self, identifier, lookup):
+        self._begin(identifier)
+        try:
+            await lookup(identifier)
+        except Exception as error:
+            self._absent(identifier, error)
+        else:
+            raise RuntimeError("Sandbox absence has not been observed")
+
     def receipt(self):
         return {
-            "protocol": "modal-terminal-v1",
+            "protocol": "modal-terminal-v1" if self.provider == "modal" else f"{self.provider}-absent-v1",
             "resources": list(self.resources),
             "observations": [self.observations[x] for x in self.resources if x in self.observations],
         }
+
+
+class ModalCleanup(Cleanup):
+    def __init__(self):
+        super().__init__("modal")

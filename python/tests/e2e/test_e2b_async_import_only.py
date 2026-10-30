@@ -4,13 +4,14 @@ import asyncio
 import os
 
 import pytest
-from compat_evidence import record_scenario
+from compat_evidence import Cleanup, record_scenario
 
 PROGRAM = r"""
 from e2b import AsyncSandbox, AsyncCommandHandle, CommandExitException, CommandResult, NotFoundException
 
-async def program():
+async def program(cleanup):
     sandbox = await AsyncSandbox.create()
+    cleanup.allocated(sandbox.sandbox_id)
     try:
         connected = await AsyncSandbox.connect(sandbox.sandbox_id)
         assert connected.sandbox_id == sandbox.sandbox_id
@@ -72,6 +73,7 @@ async def program():
             raise AssertionError("Async context swallowed application error")
         assert await sandbox.kill() is False
         assert await AsyncSandbox.kill(sandbox_id=sandbox.sandbox_id) is False
+        await cleanup.observe_absent_async(sandbox.sandbox_id, lambda identifier: AsyncSandbox.get_info(identifier))
 """
 
 
@@ -89,6 +91,7 @@ def test_async_import_only(provider, shim, live_router, monkeypatch):
     )
     namespace = {"asyncio": asyncio}
     exec(compile(source, "e2b_async_import_only.py", "exec"), namespace)
+    cleanup = Cleanup("e2b")
     with record_scenario(
         "e2b",
         "async",
@@ -116,5 +119,6 @@ def test_async_import_only(provider, shim, live_router, monkeypatch):
             "CommandHandle.disconnect",
             "CommandHandle.kill",
         ],
+        cleanup=cleanup,
     ):
-        asyncio.run(namespace["program"]())
+        asyncio.run(namespace["program"](cleanup))

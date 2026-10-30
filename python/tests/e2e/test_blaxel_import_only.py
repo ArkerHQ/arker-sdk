@@ -8,7 +8,7 @@ import os
 import uuid
 
 import pytest
-from compat_evidence import record_scenario
+from compat_evidence import Cleanup, record_scenario
 from compat_program import async_program
 
 PROGRAM = """
@@ -18,6 +18,7 @@ from blaxel.core.sandbox.types import SandboxCreateConfiguration, SandboxFilesys
 from blaxel.core.sandbox.client.models import ProcessRequestEnv
 
 sandbox = SyncSandboxInstance.create_if_not_exists(SandboxCreateConfiguration(name=sandbox_name))
+cleanup.allocated(sandbox_name)
 try:
     assert sandbox.fs.ls("/blaxel").path == "/blaxel"
     response = sandbox.process.exec(ProcessRequestWithLog(
@@ -154,12 +155,13 @@ try:
     assert reconnected.process.wait("kill-probe", max_wait=10000, interval=100).status == "killed"
 finally:
     SyncSandboxInstance.delete(sandbox_name)
+    cleanup.observe_absent(sandbox_name, SyncSandboxInstance.get)
 """
 
 
 def _async_program(source: str) -> str:
     return async_program(
-        source,
+        source.replace("cleanup.observe_absent(", "await cleanup.observe_absent_async("),
         rename={"SyncSandboxInstance": "SandboxInstance"},
         targets={"SandboxInstance", "sandbox", "reconnected"},
     )
@@ -207,7 +209,8 @@ def test_import_only(provider, shim, asynchronous, create_method, live_router, m
             "from blaxel.core.sandbox import SyncSandboxInstance",
             "from arker.blaxel import SyncSandboxInstance",
         )
-    namespace = {"sandbox_name": f"arker-import-{uuid.uuid4().hex[:12]}"}
+    cleanup = Cleanup("blaxel")
+    namespace = {"cleanup": cleanup, "sandbox_name": f"arker-import-{uuid.uuid4().hex[:12]}"}
     called = set()
 
     def trace(api, result):
@@ -225,6 +228,7 @@ def test_import_only(provider, shim, asynchronous, create_method, live_router, m
         shim,
         f"import-only-{create_method}-files-and-command-isolation",
         called,
+        cleanup=cleanup,
     ):
         exec(compile(source, "blaxel_import_only.py", "exec"), namespace)
         if asynchronous:

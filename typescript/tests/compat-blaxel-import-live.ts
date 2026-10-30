@@ -4,15 +4,16 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { withLiveRouter } from "./compat-live-router.js";
 
-import { SandboxInstance as Native } from "@blaxel/core";
+import { getSandbox, SandboxInstance as Native } from "@blaxel/core";
 import { SandboxInstance as Shim } from "../src/blaxel.js";
-import { recordEvidence } from "../scripts/compat-evidence.js";
+import { Cleanup, recordEvidence } from "../scripts/compat-evidence.js";
 import { traceVendor } from "./compat-trace.js";
 
 // This program uses only official Blaxel calls; the harness changes the import.
-async function program(SandboxInstance: typeof Native | typeof Shim, directory: string): Promise<void> {
+async function program(SandboxInstance: typeof Native | typeof Shim, directory: string, cleanup: Cleanup, nativeReadback: boolean): Promise<void> {
   const sandboxName = `arker-import-${randomUUID().slice(0, 12)}`;
   const sandbox = await SandboxInstance.create({ name: sandboxName });
+  cleanup.allocated(sandboxName);
   try {
     assert.equal(sandbox.metadata?.name, sandboxName);
     assert.ok(Array.isArray((await sandbox.fs.ls("/blaxel")).files));
@@ -131,6 +132,7 @@ async function program(SandboxInstance: typeof Native | typeof Shim, directory: 
     assert.equal((await reconnected.process.wait("kill-probe", { maxWait: 10_000, interval: 100 })).status, "killed");
   } finally {
     await sandbox.delete();
+    await cleanup.observeAbsent(sandboxName, name => nativeReadback ? getSandbox({ path: { sandboxName: name }, throwOnError: false }) : SandboxInstance.get(name));
   }
 }
 
@@ -138,13 +140,14 @@ await withLiveRouter(["ARKER_API_KEY", "BL_API_KEY"], async ({ directory, setPro
   for (const [provider, constructor] of [["blaxel", Native], ["blaxel", Shim], ["arker", Shim]] as const) {
     await setProvider(provider);
     const called = new Set<string>();
+    const cleanup = new Cleanup("blaxel", provider === "arker" ? "arker" : undefined);
     let outcome = "failed";
     try {
-      await program(traceVendor(constructor, "SandboxInstance.static", called), directory);
+      await program(traceVendor(constructor, "SandboxInstance.static", called), directory, cleanup, provider === "blaxel");
       outcome = "passed";
     } finally {
       await recordEvidence("blaxel", constructor === Native ? "reference" : provider === "arker" ? "arker" : "native",
-        "import-only-files-and-command-isolation", [...called].sort(), outcome);
+        "import-only-files-and-command-isolation", [...called].sort(), outcome, {}, cleanup.receipt());
     }
     console.log(`PASS Blaxel unchanged program: ${constructor === Native ? "native SDK" : "shim"} on ${provider}`);
   }

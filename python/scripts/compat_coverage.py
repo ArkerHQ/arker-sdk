@@ -236,9 +236,10 @@ def cleanup_observed(item):
     Missing receipts (including historical passes) cannot earn strict credit.
     """
     receipt = item.get("cleanup")
-    if not isinstance(receipt, dict) or receipt.get("protocol") != "modal-terminal-v1":
-        return False
-    if item.get("provider") != "modal":
+    provider = item.get("provider")
+    operations = {"e2b": "Sandbox.get_info", "daytona": "Daytona.get", "blaxel": "SandboxInstance.get"}
+    protocol = "modal-terminal-v1" if provider == "modal" else f"{provider}-absent-v1"
+    if provider not in {"modal", *operations} or not isinstance(receipt, dict) or receipt.get("protocol") != protocol:
         return False
     resources, observations = receipt.get("resources"), receipt.get("observations")
     if not isinstance(resources, list) or not resources or not all(isinstance(x, str) and x for x in resources):
@@ -250,8 +251,15 @@ def cleanup_observed(item):
     return all(
         isinstance(observation, dict)
         and observation.get("id") == resource
-        and observation.get("operation") == "Sandbox.from_id.poll"
-        and type(observation.get("returncode")) is int
+        and (
+            (observation.get("operation") == "Sandbox.from_id.poll" and type(observation.get("returncode")) is int)
+            if provider == "modal"
+            else (
+                observation.get("operation") == operations[provider]
+                and type(observation.get("status")) is int
+                and observation["status"] == 404
+            )
+        )
         for resource, observation in zip(resources, observations, strict=True)
     )
 

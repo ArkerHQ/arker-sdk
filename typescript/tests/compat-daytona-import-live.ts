@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { Daytona as Native } from "@daytona/sdk";
 import { Daytona as Shim } from "../src/daytona.js";
-import { recordEvidence } from "../scripts/compat-evidence.js";
+import { Cleanup, recordEvidence } from "../scripts/compat-evidence.js";
 import { withLiveRouter } from "./compat-live-router.js";
 
-async function program(Client: typeof Native | typeof Shim) {
+async function program(Client: typeof Native | typeof Shim, cleanup: Cleanup) {
   const client = new Client();
   try {
     const sandbox = await client.create();
+    cleanup.allocated(sandbox.id);
     try {
       const result = await sandbox.process.executeCommand("pwd");
       assert.equal(result.exitCode, 0);
@@ -37,6 +38,7 @@ async function program(Client: typeof Native | typeof Shim) {
       assert.deepEqual([failed.exitCode, failed.result], [17, "nonzero"]);
     } finally {
       await client.delete(sandbox as any);
+      await cleanup.observeAbsent(sandbox.id, id => client.get(id));
     }
   } finally {
     await client[Symbol.asyncDispose]();
@@ -53,9 +55,10 @@ await withLiveRouter(["DAYTONA_API_KEY", "ARKER_API_KEY"], async ({ setProvider 
     await setProvider(provider);
     if (provider === "arker") delete process.env.DAYTONA_API_KEY;
     else process.env.DAYTONA_API_KEY = key;
+    const cleanup = new Cleanup("daytona");
     let outcome = "failed";
     try {
-      await program(Client);
+      await program(Client, cleanup);
       outcome = "passed";
       console.log(`PASS Daytona unchanged program: ${route}`);
     } finally {
@@ -70,7 +73,7 @@ await withLiveRouter(["DAYTONA_API_KEY", "ARKER_API_KEY"], async ({ setProvider 
           "Sandbox.id",
           "Sandbox.process.executeCommand",
         ],
-        outcome,
+        outcome, {}, cleanup.receipt(),
       );
     }
   }

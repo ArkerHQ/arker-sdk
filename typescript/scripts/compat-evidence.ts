@@ -70,25 +70,34 @@ export async function implementationFingerprint(read: (path: string) => Promise<
   return hash.digest("hex");
 }
 
-export interface ModalCleanupReceipt {
-  protocol: "modal-terminal-v1";
+export interface CleanupReceipt {
+  protocol: string;
   resources: string[];
-  observations: Array<{ id: string; operation: "Sandbox.from_id.poll"; returncode: number }>;
+  observations: Array<{ id: string; operation: string; returncode?: number; status?: number }>;
 }
 
 // These are trusted harness observations, not signed provider proofs.
+const absenceOperations = { e2b: "Sandbox.get_info", daytona: "Daytona.get", blaxel: "SandboxInstance.get" } as const;
+type CleanupProvider = "modal" | keyof typeof absenceOperations;
+export type ModalCleanupReceipt = CleanupReceipt;
+
 export function cleanupObserved(item: any): boolean {
   const receipt = item.cleanup;
-  return item.provider === "modal" && receipt?.protocol === "modal-terminal-v1" &&
+  const provider = item.provider as CleanupProvider;
+  const protocol = provider === "modal" ? "modal-terminal-v1" : `${provider}-absent-v1`;
+  const arkerBlaxel = provider === "blaxel" && item.route === "arker" && receipt?.protocol === "blaxel-arker-lookup-v1";
+  return (provider === "modal" || Object.hasOwn(absenceOperations, provider)) && (receipt?.protocol === protocol || arkerBlaxel) &&
     Array.isArray(receipt.resources) && receipt.resources.length > 0 &&
     receipt.resources.every((id: unknown) => typeof id === "string" && id.length > 0) &&
     new Set(receipt.resources).size === receipt.resources.length &&
     Array.isArray(receipt.observations) && receipt.observations.length === receipt.resources.length &&
     receipt.observations.every((observation: any, index: number) => observation?.id === receipt.resources[index] &&
-      observation.operation === "Sandbox.from_id.poll" && Number.isSafeInteger(observation.returncode));
+      (provider === "modal" ? observation.operation === "Sandbox.from_id.poll" && Number.isSafeInteger(observation.returncode)
+        : observation.operation === absenceOperations[provider] && observation.status === 404));
 }
 
-export class ModalCleanup {
+export class Cleanup {
+  constructor(private provider: CleanupProvider, private route?: "arker") {}
   private resources: string[] = [];
   private observations = new Map<string, ModalCleanupReceipt["observations"][number]>();
 
@@ -98,8 +107,8 @@ export class ModalCleanup {
   }
 
   async observe(id: string, lookup: (id: string) => Promise<{ sandboxId: string; poll(): Promise<number | null> }>): Promise<void> {
-    if (!this.resources.includes(id)) throw new Error("Sandbox was not enrolled");
-    this.observations.delete(id);
+    this.begin(id);
+    if (this.provider !== "modal") throw new Error("Terminal poll is a Modal protocol");
     const sandbox = await lookup(id);
     if (sandbox.sandboxId !== id) throw new Error("Cleanup readback returned a different sandbox");
     const returncode = await sandbox.poll();
@@ -107,10 +116,61 @@ export class ModalCleanup {
     this.observations.set(id, { id, operation: "Sandbox.from_id.poll", returncode: returncode! });
   }
 
-  receipt(): ModalCleanupReceipt {
-    return { protocol: "modal-terminal-v1", resources: [...this.resources],
+  private begin(id: string): void {
+    if (!this.resources.includes(id)) throw new Error("Sandbox was not enrolled");
+    this.observations.delete(id);
+  }
+
+  async observeAbsent(id: string, lookup: (id: string) => Promise<unknown>): Promise<void> {
+    this.begin(id);
+    if (this.provider === "modal") throw new Error("Use Modal terminal readback");
+    try {
+      const result = await lookup(id);
+      if (this.provider === "blaxel") {
+        const response = (result as { response?: unknown } | null)?.response;
+        if (response instanceof Response && response.status === 404) {
+          this.observations.set(id, { id, operation: absenceOperations.blaxel, status: 404 });
+          return;
+        }
+      }
+    }
+    catch (error) {
+      let absent = false;
+      if (this.provider === "e2b") {
+        const { SandboxNotFoundError } = await import("e2b");
+        absent = error instanceof SandboxNotFoundError;
+      } else if (this.provider === "daytona") {
+        const { DaytonaNotFoundError } = await import("@daytona/sdk");
+        absent = error instanceof DaytonaNotFoundError && error.statusCode === 404;
+      } else {
+        // Native thrown bodies discard HTTP status. Require its response envelope
+        // on native routes, or the shim's retained typed control-plane cause.
+        const { ArkerError } = await import("../src/index.js");
+        const cause = (error as { cause?: unknown } | null)?.cause;
+        absent = cause instanceof ArkerError && cause.status === 404 && cause.code === "not_found";
+        if (!absent && this.route === "arker") {
+          // The isolated Arker-only router returns this decoded vendor shape when
+          // getById returns null. Native routes must retain the HTTP response.
+          const body = error as { code?: unknown; error?: unknown; cause?: unknown; status?: unknown; status_code?: unknown } | null;
+          absent = !!body && Object.getPrototypeOf(body) === Object.prototype && body.code === 404 &&
+            typeof body.error === "string" && body.cause === undefined && body.status === undefined && body.status_code === undefined;
+        }
+      }
+      if (!absent) throw error;
+      this.observations.set(id, { id, operation: absenceOperations[this.provider], status: 404 });
+      return;
+    }
+    throw new Error("Sandbox absence has not been observed");
+  }
+
+  receipt(): CleanupReceipt {
+    return { protocol: this.provider === "modal" ? "modal-terminal-v1" : this.provider === "blaxel" && this.route === "arker" ? "blaxel-arker-lookup-v1" : `${this.provider}-absent-v1`, resources: [...this.resources],
       observations: this.resources.flatMap(id => { const observation = this.observations.get(id); return observation ? [{ ...observation }] : []; }) };
   }
+}
+
+export class ModalCleanup extends Cleanup {
+  constructor() { super("modal"); }
 }
 
 export function verifiedScenarios(api: string, evidence: any[], version: string, fingerprint: string): string[] {

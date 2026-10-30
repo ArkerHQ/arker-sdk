@@ -4,15 +4,16 @@ import asyncio
 import os
 
 import pytest
-from compat_evidence import record_scenario
+from compat_evidence import Cleanup, record_scenario
 
 PROGRAM = r"""
 from daytona import AsyncDaytona
 from daytona.common.process import ExecuteResponse
 
-async def program():
+async def program(cleanup):
     async with AsyncDaytona() as client:
         sandbox = await client.create()
+        cleanup.allocated(sandbox.id)
         try:
             result = await sandbox.process.exec("pwd")
             assert result.exit_code == 0
@@ -31,6 +32,7 @@ async def program():
             assert (result.exit_code, result.result) == (17, "nonzero")
         finally:
             await client.delete(sandbox)
+            await cleanup.observe_absent_async(sandbox.id, client.get)
 """
 
 
@@ -48,6 +50,7 @@ def test_async_daytona_import_only(provider, shim, live_router, monkeypatch):
     )
     namespace = {}
     exec(compile(source, "daytona_async_import_only.py", "exec"), namespace)
+    cleanup = Cleanup("daytona")
     with record_scenario(
         "daytona",
         "async",
@@ -64,5 +67,6 @@ def test_async_daytona_import_only(provider, shim, live_router, monkeypatch):
             "Sandbox.id",
             "Sandbox.process.exec",
         ],
+        cleanup=cleanup,
     ):
-        asyncio.run(namespace["program"]())
+        asyncio.run(namespace["program"](cleanup))
