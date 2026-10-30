@@ -8,7 +8,7 @@ import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
 import { createBlaxelDataPlane, validateBlaxelNative, type BlaxelDataPlane } from "./compat/blaxel-data-plane.js";
 import { blaxelControlCall, blaxelNotFound } from "./compat/blaxel-errors.js";
-import { blaxelImageConfiguration, namedBlaxelFork, validateBlaxelName } from "./compat/blaxel-create.js";
+import { blaxelCreationMetadata, blaxelSandboxMetadata, blaxelImageConfiguration, namedBlaxelFork, validateBlaxelName } from "./compat/blaxel-create.js";
 import { bootstrapBlaxel } from "./compat/blaxel-bootstrap.js";
 import { privateFetch } from "./compat/private-fetch.js";
 import { createNativeBlaxelProvider } from "./compat/blaxel-provider.js";
@@ -56,12 +56,12 @@ function makeSdk(config: BlaxelCompatConfig = {}, getOrCreate = false): CompatSd
     arkerFork: (client, request) => blaxelControlCall("create", () => namedBlaxelFork(config.arker, getOrCreate)(client, request)),
     mapArkerCreateOptions: options => {
       validateBlaxelName(options.name);
-      const { createIfNotExist: _, network, envs: _envs, ...rest } = options;
+      const { createIfNotExist: _, network, envs: _envs, labels, ...rest } = options;
       validateBlaxelNetwork(network);
       validateFirewallStartup(options.image, config.arker?.imageConfig);
       validateBlaxelNative();
       const imageConfig = blaxelImageConfiguration(options, config.arker);
-      return { ...rest, ...(imageConfig !== undefined ? { imageConfig } : {}) };
+      return { ...rest, metadata: blaxelCreationMetadata(labels), ...(imageConfig !== undefined ? { imageConfig } : {}) };
     },
     fallbackProvider: createNativeBlaxelProvider({
       apiKey: config.apiKey,
@@ -131,7 +131,7 @@ export class SandboxInstance {
     this.id = box.sandboxId;
     this.provider = box.provider;
     const vm = box.provider === "arker" ? (box as UniversalSandbox & { getInstance(): VM }).getInstance() : undefined;
-    this.metadata = (native?.metadata ?? { name: vm?.name ?? box.sandboxId }) as NativeBlaxelSandbox["metadata"];
+    this.metadata = (native?.metadata ?? (vm ? blaxelSandboxMetadata(vm) : { name: box.sandboxId })) as NativeBlaxelSandbox["metadata"];
     if (!native && !dataPlane) throw new Error("Native Blaxel data plane was not initialized");
     this.process = (native ?? dataPlane!).process;
     this.fs = (native ?? dataPlane!).fs;

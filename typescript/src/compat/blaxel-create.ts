@@ -73,3 +73,22 @@ export function blaxelImageConfiguration(values: Record<string, unknown>, config
   }
   return { ...config.imageConfig, env: { ...config.imageConfig?.env, ...environment } };
 }
+
+function stringLabels(value: unknown): value is Record<string, string> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && Object.values(value).every(entry => typeof entry === "string");
+}
+
+export function blaxelCreationMetadata(labels: unknown): Record<string, unknown> {
+  labels ??= {};
+  if (!stringLabels(labels)) throw new TypeError("Blaxel labels must be a string mapping");
+  return { arker_blaxel: { version: 1, labels: { ...labels } } };
+}
+
+export function blaxelSandboxMetadata(vm: VM) {
+  const stored = vm.metadata?.arker_blaxel;
+  const labels = stored !== null && typeof stored === "object" && "version" in stored
+    && stored.version === 1 && "labels" in stored && stringLabels(stored.labels) ? stored.labels : undefined;
+  return { name: vm.name || vm.id, ...(vm.created_at ? { createdAt: vm.created_at } : {}),
+    ...(labels && Object.keys(labels).length ? { labels: { ...labels } } : {}) };
+}

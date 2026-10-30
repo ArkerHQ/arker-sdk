@@ -115,3 +115,30 @@ def image_configuration(values, config):
         environment[entry["name"]] = entry["value"]
     inherited = config.get("image_config") or {}
     return {**inherited, "env": {**(inherited.get("env") or {}), **environment}}
+
+
+def creation_metadata(labels=None):
+    if labels is None:
+        labels = {}
+    if not isinstance(labels, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in labels.items()):
+        raise ValueError("Blaxel labels must be a string mapping")
+    return {"arker_blaxel": {"version": 1, "labels": dict(labels)}}
+
+
+def sandbox_metadata(vm):
+    from ._compat import import_optional
+
+    native = import_optional("blaxel.core.client.models.metadata")
+    if native is None:
+        from .blaxel import SandboxMetadata
+
+        return SandboxMetadata(name=vm.name or vm.id)
+    values = {"name": vm.name or vm.id}
+    if getattr(vm, "created_at", None):
+        values["createdAt"] = vm.created_at
+    stored = (getattr(vm, "metadata", None) or {}).get("arker_blaxel")
+    if isinstance(stored, dict) and stored.get("version") == 1:
+        labels = stored.get("labels")
+        if isinstance(labels, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in labels.items()):
+            values["labels"] = labels
+    return native.Metadata.from_dict(values)

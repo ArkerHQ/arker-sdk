@@ -18,6 +18,7 @@ from ._compat import (
     routed_get,
 )
 from ._compat_async import NativeBridge, RoutingCancelled, call, route
+from ._compat_blaxel_create import creation_metadata, sandbox_metadata
 from ._compat_blaxel_errors import control_call, not_found
 from ._compat_blaxel_network import validate_network
 from .computer import VM
@@ -116,7 +117,7 @@ class SyncSandboxInstance(UnsupportedMixin):
             if vm is not None
             else getattr(native, "id", None) or getattr(native, "sandbox_id", None) or metadata_name
         )
-        self.metadata = SandboxMetadata(name=vm.name or vm.id) if vm is not None else metadata
+        self.metadata = sandbox_metadata(vm) if vm is not None else metadata
         self._data_plane = None
         self.network = getattr(native, "network", None) if native is not None else _Network(vm)
 
@@ -173,7 +174,7 @@ class SyncSandboxInstance(UnsupportedMixin):
 
             options = dict(kwargs)
             get_or_create = options.pop("create_if_not_exist", False)
-            supported = {"name", "image", "memory", "ttl", "envs", "runtime", "network"}
+            supported = {"name", "image", "memory", "ttl", "envs", "runtime", "network", "labels"}
             unknown = sorted(set(values) - supported)
             if options or unknown:
                 names = [*sorted(options), *unknown]
@@ -204,6 +205,7 @@ class SyncSandboxInstance(UnsupportedMixin):
                     get_or_create=get_or_create,
                     cancelled=cls._creation_cancelled,
                 ),
+                metadata=creation_metadata(values.get("labels")),
                 name=values.get("name"),
                 image=values.get("image"),
                 image_config=image_configuration(values, arker_config or {}),

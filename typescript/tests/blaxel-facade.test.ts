@@ -291,3 +291,70 @@ test("facade rejects falsy non-string names before generic option preparation", 
     });
   }
 });
+
+test("Arker metadata preserves authoritative birth and stored labels", () => {
+  const plane = createBlaxelDataPlane({connectPort: async () => {throw new Error("unexpected I/O");}});
+  const vm = {name: "named", created_at: "2026-01-01T00:00:00Z", metadata: {arker_blaxel: {version: 1, labels: {purpose: "test"}}}};
+  const box = {provider: "arker", sandboxId: "vm-test", getInstance: () => vm};
+  try {
+    const facade = Reflect.construct(SandboxInstance, [box, undefined, undefined, plane]);
+    assert.equal(facade.metadata.name, "named");
+    assert.equal(facade.metadata.createdAt, vm.created_at);
+    assert.deepEqual(Object.entries(facade.metadata.labels), [["purpose", "test"]]);
+  } finally { plane.close(); }
+});
+
+
+test("Blaxel labels have explicit creation metadata without inherited source labels", async () => {
+  const { blaxelCreationMetadata, blaxelSandboxMetadata } = await import("../src/compat/blaxel-create.js");
+  assert.deepEqual(blaxelCreationMetadata(undefined), {arker_blaxel: {version: 1, labels: {}}});
+  assert.deepEqual(blaxelCreationMetadata({purpose: "test"}), {arker_blaxel: {version: 1, labels: {purpose: "test"}}});
+  assert.throws(() => blaxelCreationMetadata({purpose: 3}), /string mapping/);
+  const { Arker } = await import("../src/index.js");
+  const vm = new Arker({apiKey: "test", baseUrl: "https://custom.example/api"}).vm("vm-test");
+  assert.deepEqual(blaxelSandboxMetadata(vm), {name: "vm-test"});
+});
+
+test("atomic winner, loser and refreshed VM retain authoritative labels", async t => {
+  const { createServer } = await import("node:http");
+  const { listen, closeServer, preserveEnvironment } = await import("./provider-fixtures.js");
+  const { Arker } = await import("../src/index.js");
+  const { namedBlaxelFork, blaxelCreationMetadata } = await import("../src/compat/blaxel-create.js");
+  preserveEnvironment(t, "ARKER_BASE_URL", "ARKER_CONTROL_BASE_URL");
+  delete process.env.ARKER_BASE_URL;
+  delete process.env.ARKER_CONTROL_BASE_URL;
+  let winner: unknown;
+  const requests: unknown[] = [];
+  const server = createServer(async (request, response) => {
+    if (request.method === "POST") {
+      let body = "";
+      for await (const chunk of request) body += chunk;
+      const metadata = JSON.parse(body).metadata;
+      requests.push(metadata);
+      winner ??= metadata;
+    }
+    response.writeHead(200, {"content-type": "application/json"});
+    response.end(JSON.stringify({vm_id: "winner", name: "named", description: null,
+      owner_org_id: "org", created_at: "2026-01-01T00:00:00Z", public: false,
+      state: "idle", sessions: [], network: {}, resources: {}, metadata: winner}));
+  });
+  t.after(() => closeServer(server));
+  const {port} = await listen(server);
+  const config = {apiKey: "test", baseUrl: `http://127.0.0.1:${port}/api`, controlBaseUrl: `http://127.0.0.1:${port}/api`};
+  const client = new Arker(config);
+  const first = await namedBlaxelFork(config, true)(client, {name: "named", source_vm_name: "source",
+    metadata: blaxelCreationMetadata({owner: "winner"})});
+  const second = await namedBlaxelFork(config, true)(client, {name: "named", source_vm_name: "source",
+    metadata: blaxelCreationMetadata({owner: "loser"})});
+  const reconnected = await client.vm(first.id).refresh();
+  assert.notDeepEqual(requests[0], requests[1]);
+  for (const vm of [first, second, reconnected]) {
+    const plane = createBlaxelDataPlane({connectPort: async () => {throw new Error("unexpected I/O");}});
+    try {
+      const facade = Reflect.construct(SandboxInstance,
+        [{provider: "arker", sandboxId: vm.id, getInstance: () => vm}, undefined, undefined, plane]);
+      assert.equal(facade.metadata.createdAt, "2026-01-01T00:00:00Z");
+      assert.deepEqual(Object.entries(facade.metadata.labels), [["owner", "winner"]]);
+    } finally { plane.close(); }
+  }
+});

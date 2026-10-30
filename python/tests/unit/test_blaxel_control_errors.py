@@ -123,6 +123,8 @@ def test_class_delete_only_looks_up_control_plane(monkeypatch, asynchronous, out
         id = "paused"
         name = "paused"
         customer_paused = True
+        created_at = None
+        metadata = None
 
         def delete(self):
             calls.append("delete")
