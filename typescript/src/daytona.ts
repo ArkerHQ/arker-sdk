@@ -5,6 +5,8 @@ import { dirname, join } from "node:path";
 import { createNativeDaytonaProvider } from "./compat/daytona-provider.js";
 import { DaytonaFileSystem, daytonaGuestCommand } from "./compat/daytona-filesystem.js";
 import { DaytonaVolumeService } from "./compat/daytona-volumes.js";
+import * as lifecycle from "./compat/daytona-lifecycle.js";
+import { ArkerComputeSandbox } from "./compat/arker-provider.js";
 import { ArkerError } from "./index.js";
 
 import { assertSupportedObjectKeys, guardUnsupported, nativeInstance, type UniversalSandbox } from "./compat/common.js";
@@ -97,7 +99,7 @@ export class Sandbox {
     ) => Promise<NativeExecuteResponse>;
   };
 
-  constructor(box: UniversalSandbox) {
+  constructor(box: UniversalSandbox, private readonly lifecycleConfig?: ArkerComputeProviderConfig) {
     this.#box = box;
     this.id = box.sandboxId;
     this.provider = box.provider;
@@ -145,6 +147,37 @@ export class Sandbox {
     return result.result;
   }
 
+  async pause(timeout = 60): Promise<void> {
+    const native = nativeInstance(this.#box) as NativeSandbox | undefined;
+    if (native) return native.pause(timeout);
+    return lifecycle.pause((this.#box as ArkerComputeSandbox).getInstance(), timeout);
+  }
+
+  async start(timeout = 60): Promise<void> {
+    const native = nativeInstance(this.#box) as NativeSandbox | undefined;
+    if (native) return native.start(timeout);
+    return lifecycle.start((this.#box as ArkerComputeSandbox).getInstance(), timeout);
+  }
+
+  async stop(timeout = 60, force = false): Promise<void> {
+    const native = nativeInstance(this.#box) as NativeSandbox | undefined;
+    if (native) return native.stop(timeout, force);
+    return lifecycle.unsupported("stop");
+  }
+
+  async archive(): Promise<void> {
+    const native = nativeInstance(this.#box) as NativeSandbox | undefined;
+    if (native) return native.archive();
+    return lifecycle.unsupported("archive");
+  }
+
+  async fork(params?: { name?: string }, timeout = 60): Promise<Sandbox | NativeSandbox> {
+    const native = nativeInstance(this.#box) as NativeSandbox | undefined;
+    if (native) return native.fork(params, timeout);
+    const child = await lifecycle.fork((this.#box as ArkerComputeSandbox).getInstance(), params, timeout, this.lifecycleConfig);
+    return new Sandbox(new ArkerComputeSandbox(child, async () => { await child.delete(); }), this.lifecycleConfig);
+  }
+
   async delete(): Promise<void> {
     await this.#box.destroy();
   }
@@ -152,6 +185,7 @@ export class Sandbox {
 
 export class Daytona {
   #sdk: CompatSdk;
+  #lifecycleConfig?: ArkerComputeProviderConfig;
   #closeNative: () => Promise<void>;
   #native?: NativeDaytona;
   readonly volume: DaytonaVolumeService;
@@ -159,6 +193,7 @@ export class Daytona {
   constructor(config?: DaytonaCompatConfig) {
     assertSupportedObjectKeys(config, DAYTONA_CONFIG_KEYS, "daytona", "new Daytona");
     const { arker, routerConfigPath, ...native } = config ?? {};
+    this.#lifecycleConfig = arker;
     const hasArker = !!(arker?.apiKey || globalThis.process?.env?.ARKER_API_KEY?.trim());
     const nativeEnabled = hasNativeDaytonaCredentials(native);
     if (!hasArker && !nativeEnabled) this.#native = new NativeDaytona(native);
@@ -201,13 +236,25 @@ export class Daytona {
     // Daytona provider forwards its own SDK's resources without that narrowing.
     const box = await this.#sdk.sandbox.create(request as Parameters<CompatSdk["sandbox"]["create"]>[0]);
     if (box.provider === "arker") await box.filesystem.mkdir("/home/daytona");
-    return guardUnsupported(new Sandbox(box), "daytona", nativeInstance(box));
+    return guardUnsupported(new Sandbox(box, this.#lifecycleConfig), "daytona", nativeInstance(box));
   }
 
   async get(sandboxId: string): Promise<Sandbox> {
     const box = await this.#sdk.sandbox.getById(sandboxId);
     if (!box) throw new Error(`Sandbox ${sandboxId} not found`);
-    return guardUnsupported(new Sandbox(box), "daytona", nativeInstance(box));
+    return guardUnsupported(new Sandbox(box, this.#lifecycleConfig), "daytona", nativeInstance(box));
+  }
+
+  async start(sandbox: Sandbox | NativeSandbox, timeout?: number): Promise<void> {
+    return sandbox.start(timeout);
+  }
+
+  async stop(sandbox: Sandbox | NativeSandbox): Promise<void> {
+    return sandbox.stop();
+  }
+
+  async fork(sandbox: Sandbox | NativeSandbox, params?: { name?: string }, timeout = 60): Promise<Sandbox | NativeSandbox> {
+    return sandbox.fork(params, timeout);
   }
 
   async delete(sandbox: string | Sandbox): Promise<void> {

@@ -39,7 +39,7 @@ function unsupported(message: string): never {
   throw new ArkerError("unsupported_operation", message, 422);
 }
 
-function translateArker(error: unknown, conflictIsBadRequest = false): never {
+export function translateArker(error: unknown, conflictIsBadRequest = false): never {
   if (!(error instanceof ArkerError)) throw error;
   const status = conflictIsBadRequest && error.status === 409 && error.code === "already_exists" ? 400 : error.status;
   if (status === 400) throw new DaytonaBadRequestError(error.message, status);

@@ -93,9 +93,10 @@ class Process:
 class Sandbox(UnsupportedMixin):
     _compat_name = "daytona"
 
-    def __init__(self, vm: VM | None = None, native: Any | None = None) -> None:
+    def __init__(self, vm: VM | None = None, native: Any | None = None, *, lifecycle_config=None) -> None:
         self._vm = vm
         self._native = native
+        self._lifecycle_config = lifecycle_config or {}
         self.id = vm.id if vm is not None else getattr(native, "id", getattr(native, "sandbox_id", None))
         if vm is not None:
             self.process = Process(vm)
@@ -117,6 +118,43 @@ class Sandbox(UnsupportedMixin):
         if result.exit_code:
             raise DaytonaError("Failed to get user home directory")
         return result.result
+
+    def pause(self, timeout: float = 60) -> None:
+        if self._native is not None:
+            return self._native.pause(timeout)
+        from ._daytona_lifecycle import pause
+
+        return pause(self._vm, timeout)
+
+    def start(self, timeout: float | None = 60):
+        if self._native is not None:
+            return self._native.start(timeout)
+        from ._daytona_lifecycle import start
+
+        return start(self._vm, timeout)
+
+    def stop(self, timeout: float | None = 60, force: bool = False):
+        if self._native is not None:
+            return self._native.stop(timeout, force=force)
+        from ._daytona_lifecycle import unsupported_stop
+
+        return unsupported_stop()
+
+    def archive(self, request_timeout: float | None = None) -> None:
+        if self._native is not None:
+            return self._native.archive(request_timeout=request_timeout)
+        from ._daytona_lifecycle import unsupported_archive
+
+        return unsupported_archive()
+
+    def fork(self, name: str | None = None, timeout: float | None = 60):
+        if self._native is not None:
+            return self._native.fork(name=name, timeout=timeout)
+        from ._daytona_lifecycle import fork
+
+        return type(self)(
+            vm=fork(self._vm, name, timeout, config=self._lifecycle_config), lifecycle_config=self._lifecycle_config
+        )
 
     def delete(self) -> None:
         if self._vm is not None:
@@ -287,7 +325,11 @@ class Daytona(UnsupportedMixin):
                 "daytona": create_native,
             },
         )
-        return Sandbox(vm=result if provider == "arker" else None, native=result if provider == "daytona" else None)
+        return Sandbox(
+            vm=result if provider == "arker" else None,
+            native=result if provider == "daytona" else None,
+            lifecycle_config=self._arker_config,
+        )
 
     def _lookup(self, sandbox_id: str):
         return routed_get(
@@ -305,11 +347,21 @@ class Daytona(UnsupportedMixin):
         if found is None:
             raise format_not_found("Sandbox", sandbox_id)
         provider, result = found
-        return Sandbox(vm=result if provider == "arker" else None, native=result if provider == "daytona" else None)
+        return Sandbox(
+            vm=result if provider == "arker" else None,
+            native=result if provider == "daytona" else None,
+            lifecycle_config=self._arker_config,
+        )
 
     def _native_get(self, sandbox_id: str) -> Any | None:
         native = self._native_client()
         return get_or_none(lambda: native.get(sandbox_id)) if native is not None and hasattr(native, "get") else None
+
+    def start(self, sandbox: Sandbox, timeout: float = 60) -> None:
+        return sandbox.start(timeout)
+
+    def stop(self, sandbox: Sandbox, timeout: float = 60) -> None:
+        return sandbox.stop(timeout)
 
     def delete(self, sandbox: str | Sandbox) -> None:
         if not isinstance(sandbox, str):

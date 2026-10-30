@@ -22,30 +22,29 @@ waits for its actual guest FUSE mount to be accessible to the existing non-root
 the backend's coherence model, not a promise of POSIX locking or instantaneous
 cross-VM cache invalidation.
 
-## Explicit gaps
+## Deletion, subpaths and pagination
 
-Arker-backed `volume.delete` is refused before issuing a destructive request.
-Native Daytona refuses deletion while a sandbox has the volume mounted;
-Arker's generic filesystem deletion removes attachments and contents. Safe
-native-compatible deletion needs a backend atomic unmounted condition.
-Applications using the explicit Arker filesystem API retain its own deletion
-contract.
+Arker-backed `volume.delete` uses the atomic `only_if_unmounted=true` condition
+with the volume's original provider-bound client. Active references, including
+paused sandboxes that retain attachments, prevent deletion; the adapter never
+falls back to unconditional deletion or a client-side mount check. Native volume
+handles keep native deletion behavior.
 
-Nonempty `subpath` is refused before sandbox creation. The backend must persist
-and restore the subtree and enforce its storage credential prefix; guest
-symlinks or bind mounts are not substitutes. Potentially truncated 500-entry
-filesystem listings are refused. The server needs complete pagination for larger
-inventories.
+Nonempty `subpath` is supported as a persisted relative subtree with scoped
+storage credentials. Arker paths must be canonical: traversal, empty segments,
+backslashes, control characters and policy wildcard syntax are rejected before
+creation. Native mount parameters retain native validation. Empty or omitted
+subpaths select the whole filesystem. Listings follow server cursors; repeated
+cursors and potentially truncated legacy responses fail explicitly.
 
 ## Differential checks
 
 `python/tests/e2e/test_daytona_volumes_import_only.py` runs the same workload
 across native, routed-native and Arker clients, in sync and async styles. It
 covers same-name get/create races, duplicate-create errors, mounted deletion,
-and cross-VM binary writes, rename and unlink. Mounted deletion remains an
-expected uncovered contract on Arker, not a passing parity claim. Arker fixture
-teardown uses explicit storage deletion only after removing the owned VMs and
-supplies no evidence for Daytona volume deletion.
+and cross-VM binary writes, rename and unlink. The adapter implements conditional
+deletion and subtree attachment, but current managed-volume native comparisons are quota-blocked and provide no equivalence
+credit. Cleanup removes owned sandboxes before conditionally deleting volumes.
 
 The Arker source must provide Python3, `setpriv` and a writable home for its
 non-root `daytona` account. The current Linux storage driver uses UID/GID1000;

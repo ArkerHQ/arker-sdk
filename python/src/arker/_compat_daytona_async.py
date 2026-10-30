@@ -39,6 +39,31 @@ class AsyncSandbox:
             return await self._sandbox._native.get_user_home_dir()
         return await call(self._sandbox.get_user_home_dir)
 
+    async def pause(self, timeout: float = 60) -> None:
+        if self._sandbox._native is not None:
+            return await self._sandbox._native.pause(timeout)
+        return await call(self._sandbox.pause, timeout)
+
+    async def start(self, timeout: float | None = 60):
+        if self._sandbox._native is not None:
+            return await self._sandbox._native.start(timeout)
+        return await call(self._sandbox.start, timeout)
+
+    async def stop(self, timeout: float | None = 60, force: bool = False):
+        if self._sandbox._native is not None:
+            return await self._sandbox._native.stop(timeout, force=force)
+        return await call(self._sandbox.stop, timeout, force=force)
+
+    async def archive(self, request_timeout: float | None = None) -> None:
+        if self._sandbox._native is not None:
+            return await self._sandbox._native.archive(request_timeout=request_timeout)
+        return await call(self._sandbox.archive, request_timeout=request_timeout)
+
+    async def fork(self, name: str | None = None, timeout: float | None = 60):
+        if self._sandbox._native is not None:
+            return await self._sandbox._native.fork(name=name, timeout=timeout)
+        return type(self)(await call(self._sandbox.fork, name=name, timeout=timeout))
+
     async def delete(self, timeout=60, *, wait=False):
         if self._sandbox._native is not None:
             return await self._sandbox._native.delete(timeout, wait=wait)
@@ -124,6 +149,14 @@ class AsyncDaytona:
             cleanup=(lambda sandbox: AsyncSandbox(sandbox).delete()) if method == "create" else None,
         )
         return AsyncSandbox(result)
+
+    async def start(self, sandbox: AsyncSandbox, timeout: float = 60) -> None:
+        self._bind_loop()
+        return await sandbox.start(timeout)
+
+    async def stop(self, sandbox: AsyncSandbox, timeout: float = 60) -> None:
+        self._bind_loop()
+        return await sandbox.stop(timeout)
 
     async def create(self, *args, **kwargs):
         return await self._route("create", *args, **kwargs)
