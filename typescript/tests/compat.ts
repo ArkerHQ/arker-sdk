@@ -818,19 +818,20 @@ async function testBlaxelCreateIfNotExistsAndTtl(): Promise<void> {
       network: { firewall: { rulesets: ["proxy"] }, allowedDomains: ["example.com"], proxy: { routing: [] } },
     });
     assert.deepEqual(fake.createCalls[0], {
-      name: "named-box", image: undefined, memory: undefined, timeout: undefined, envs: undefined, runtime: undefined,
+      name: "named-box", image: undefined, memory: undefined, envs: undefined, runtime: undefined,
       createIfNotExist: true,
       creationTimeout: 30,
     });
     assert.deepEqual(fake.createCalls[1], {
-      name: "new-box", image: undefined, memory: undefined, timeout: 300_000, envs: undefined, runtime: undefined,
+      name: "new-box", image: undefined, memory: undefined, ttl: "5m", envs: undefined, runtime: undefined,
       region: "us-pdx-1",
       ports: [{ target: 3000, protocol: "HTTP" }],
       labels: { env: "test" },
       network: { firewall: { rulesets: ["proxy"] }, allowedDomains: ["example.com"], proxy: { routing: [] } },
       createIfNotExist: false,
     });
-    await assert.rejects(() => BlaxelSandbox.create({ ttl: "eventually" }), /Invalid Blaxel ttl/);
+    await BlaxelSandbox.create({ ttl: "eventually" });
+    assert.equal(fake.createCalls[2].ttl, "eventually");
     const arker = createArkerComputeProvider({ apiKey: "test", baseUrl: "https://example.invalid" });
     await assert.rejects(() => arker.sandbox.create({ network: { firewall: { rulesets: ["proxy"] } } } as any), /network/);
     await assert.rejects(() => arker.sandbox.create({ createIfNotExist: true } as any), /createIfNotExist/);
