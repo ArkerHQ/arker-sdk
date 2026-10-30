@@ -1,6 +1,8 @@
+import { RequestIdleTimeoutError } from "../internal/idle-fetch.js";
+import { withRequestTransport } from "../internal/request-context.js";
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { DaytonaError, DaytonaInternalServerError, DaytonaNotFoundError, DaytonaSessionEndedError } from "@daytona/sdk";
+import { DaytonaConnectionTimeoutError, DaytonaError, DaytonaInternalServerError, DaytonaNotFoundError, DaytonaSessionEndedError } from "@daytona/sdk";
 import type { SandboxInterface } from "computesdk";
 import { shellQuote } from "./common.js";
 import { GuestProcesses } from "./guest-process.js";
@@ -90,14 +92,21 @@ export function createDaytonaSessions(box: SandboxInterface): SessionAPI {
       const account = await box.runCommand(`python3 -I -c ${shellQuote(accountSource)}`);
       if (account.exitCode !== 0) throw new DaytonaError("Unable to resolve session account");
       const [home] = JSON.parse(account.stdout) as [string];
-      const started = await processes.exec({ name: prefix + randomUUID(), exclusiveName: prefix + id,
+      const name = prefix + randomUUID();
+      let started;
+      try { started = await processes.exec({ name, exclusiveName: prefix + id,
         command: JSON.stringify({ id }), argv: ["python3", "-I", path, "serve", id], user: "daytona", workingDir: home,
-        preserveDescendants: true, env: { HOME: home, USER: "daytona", LOGNAME: "daytona" } });
+        preserveDescendants: true, env: { HOME: home, USER: "daytona", LOGNAME: "daytona" } }); }
+      catch (error) {
+        if (error instanceof RequestIdleTimeoutError) Object.defineProperties(error, {sessionId: {value: id}, processId: {value: name}});
+        throw error;
+      }
       try {
         const deadline = Date.now() + 30_000;
         for (;;) {
           try { await call("get", { session_id: id }); return; }
           catch (error) {
+            if (error instanceof RequestIdleTimeoutError) throw error;
             if ((await processes.get(started.name)).status !== "running" || Date.now() >= deadline) throw error;
             await delay(20);
           }
@@ -106,7 +115,8 @@ export function createDaytonaSessions(box: SandboxInterface): SessionAPI {
         if (error instanceof Error) {
           try { Object.defineProperties(error, { sessionId: { value: id }, processId: { value: started.name } }); } catch {}
         }
-        try { await processes.kill(started.name); }
+        if (error instanceof RequestIdleTimeoutError) throw error;
+        try { await withRequestTransport(undefined, () => processes.kill(started.name)); }
         catch (cleanup) {
           if (error instanceof Error) {
             try { Object.defineProperty(error, "cleanupError", { value: cleanup }); } catch {}
@@ -123,7 +133,7 @@ export function createDaytonaSessions(box: SandboxInterface): SessionAPI {
       if (request.runAsync) return { cmdId: current.id, output: "", stdout: "", stderr: "" };
       const deadline = timeout ? Date.now() + timeout * 1000 : Infinity;
       while (current.exit_code === null) {
-        if (Date.now() >= deadline) throw new DaytonaError("Timed out waiting for session command; command continues running");
+        if (Date.now() >= deadline) throw new DaytonaConnectionTimeoutError("Timed out waiting for session command; command continues running");
         await delay(20);
         current = await call<WireCommand>("command", { session_id: id, command_id: current.id });
       }

@@ -1,3 +1,4 @@
+import { daytonaRequest, executionRequestTimeout, validateDaytonaRequestTimeout } from "./compat/daytona-request.js";
 import { DaytonaError } from "@daytona/sdk";
 import { Daytona as NativeDaytona, type DaytonaConfig as NativeDaytonaConfig, type Sandbox as NativeSandbox } from "@daytona/sdk";
 import { createRequire } from "node:module";
@@ -101,7 +102,7 @@ export class Sandbox {
     ) => Promise<NativeExecuteResponse>;
   };
 
-  constructor(box: UniversalSandbox, private readonly lifecycleConfig?: ArkerComputeProviderConfig) {
+  constructor(box: UniversalSandbox, private readonly lifecycleConfig?: ArkerComputeProviderConfig, private readonly requestTimeoutMs?: number) {
     this.#box = box;
     this.id = box.sandboxId;
     this.provider = box.provider;
@@ -152,14 +153,25 @@ export class Sandbox {
     this.process = {
       ...terminals,
       ...sessions,
-      exec: run,
+      exec: (command, options) => daytonaRequest(executionRequestTimeout(this.requestTimeoutMs, options?.timeout), () => run(command, options)),
       executeCommand: typeof native?.process?.executeCommand === "function"
         ? native.process.executeCommand.bind(native.process)
         : async (command, cwd, env, timeout) => {
-          const result = await run(command, { cwd, env, timeout });
+          const result = await daytonaRequest(executionRequestTimeout(this.requestTimeoutMs, timeout), () => run(command, { cwd, env, timeout }));
           return { exitCode: result.exitCode, result: result.result, artifacts: { stdout: result.result } };
         },
     };
+    if (!nativeProcess) {
+      for (const key of ["createSession", "getSession", "listSessions", "deleteSession", "getSessionCommand", "sendSessionCommandInput", "createPty", "listPtySessions", "getPtySessionInfo", "resizePtySession", "killPtySession"] as const) {
+        const method = this.process[key].bind(this.process) as (...args: unknown[]) => Promise<unknown>;
+        Object.defineProperty(this.process, key, { value: (...args: unknown[]) => daytonaRequest(this.requestTimeoutMs, () => method(...args)), enumerable: true });
+      }
+      const logs = this.process.getSessionCommandLogs.bind(this.process);
+      this.process.getSessionCommandLogs = ((id: string, commandId: string, stdout?: (text: string) => void | Promise<void>, stderr?: (text: string) => void | Promise<void>) =>
+        stdout && stderr ? logs(id, commandId, stdout, stderr) : daytonaRequest(this.requestTimeoutMs, () => logs(id, commandId))) as SessionAPI["getSessionCommandLogs"];
+      const execute = this.process.executeSessionCommand.bind(this.process);
+      this.process.executeSessionCommand = (id, request, timeout) => daytonaRequest(timeout ? timeout * 1000 : this.requestTimeoutMs, () => execute(id, request, timeout || ((this.requestTimeoutMs ?? 86_400_000) / 1000 || undefined)));
+    }
   }
 
   async getUserHomeDir(): Promise<string | undefined> {
@@ -198,7 +210,7 @@ export class Sandbox {
     const native = nativeInstance(this.#box) as NativeSandbox | undefined;
     if (native) return native.fork(params, timeout);
     const child = await lifecycle.fork((this.#box as ArkerComputeSandbox).getInstance(), params, timeout, this.lifecycleConfig);
-    return new Sandbox(new ArkerComputeSandbox(child, async () => { await child.delete(); }), this.lifecycleConfig);
+    return new Sandbox(new ArkerComputeSandbox(child, async () => { await child.delete(); }), this.lifecycleConfig, this.requestTimeoutMs);
   }
 
   async delete(): Promise<void> {
@@ -209,12 +221,15 @@ export class Sandbox {
 export class Daytona {
   #sdk: CompatSdk;
   #lifecycleConfig?: ArkerComputeProviderConfig;
+  #requestTimeoutMs?: number;
   #closeNative: () => Promise<void>;
   #native?: NativeDaytona;
   readonly volume: DaytonaVolumeService;
 
   constructor(config?: DaytonaCompatConfig) {
     assertSupportedObjectKeys(config, DAYTONA_CONFIG_KEYS, "daytona", "new Daytona");
+    validateDaytonaRequestTimeout(config?.requestTimeoutMs);
+    this.#requestTimeoutMs = config?.requestTimeoutMs;
     const { arker, routerConfigPath, ...native } = config ?? {};
     this.#lifecycleConfig = arker;
     const hasArker = !!(arker?.apiKey || globalThis.process?.env?.ARKER_API_KEY?.trim());
@@ -259,13 +274,13 @@ export class Daytona {
     // Daytona provider forwards its own SDK's resources without that narrowing.
     const box = await this.#sdk.sandbox.create(request as Parameters<CompatSdk["sandbox"]["create"]>[0]);
     if (box.provider === "arker") await box.filesystem.mkdir("/home/daytona");
-    return guardUnsupported(new Sandbox(box, this.#lifecycleConfig), "daytona", nativeInstance(box));
+    return guardUnsupported(new Sandbox(box, this.#lifecycleConfig, this.#requestTimeoutMs), "daytona", nativeInstance(box));
   }
 
   async get(sandboxId: string): Promise<Sandbox> {
     const box = await this.#sdk.sandbox.getById(sandboxId);
     if (!box) throw new Error(`Sandbox ${sandboxId} not found`);
-    return guardUnsupported(new Sandbox(box, this.#lifecycleConfig), "daytona", nativeInstance(box));
+    return guardUnsupported(new Sandbox(box, this.#lifecycleConfig, this.#requestTimeoutMs), "daytona", nativeInstance(box));
   }
 
   async start(sandbox: Sandbox | NativeSandbox, timeout?: number): Promise<void> {

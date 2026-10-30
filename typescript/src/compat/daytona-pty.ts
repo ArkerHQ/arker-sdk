@@ -1,3 +1,4 @@
+import { withRequestTransport } from "../internal/request-context.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { DaytonaError, DaytonaNotFoundError } from "@daytona/sdk";
@@ -55,7 +56,7 @@ class Handle implements TerminalHandle {
   private readonly callbackContext = new AsyncLocalStorage<boolean>();
   constructor(readonly sessionId: string, private readonly processes: GuestProcesses,
     private readonly api: TerminalAPI, private readonly identifier: string, onData?: Output, private offset = 0) {
-    this.reader = this.read(onData);
+    this.reader = withRequestTransport(undefined, () => this.read(onData));
   }
   isConnected() { return this.connected; }
   async waitForConnection() { if (!this.connected) throw new DaytonaError("PTY is not connected"); }

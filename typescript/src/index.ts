@@ -1,3 +1,6 @@
+import { currentRequestTransport } from "./internal/request-context.js";
+import { idleFetch, RequestIdleTimeoutError } from "./internal/idle-fetch.js";
+export { RequestIdleTimeoutError } from "./internal/idle-fetch.js";
 import { validateHttpError, validateFileError } from "./generated/error-validators.js";
 export { RouterLookupTimeoutError } from "./compat/router-errors.js";
 /**
@@ -948,6 +951,7 @@ export class Arker {
     retryNetworkFailures?: boolean,
     transport?: RequestTransportOptions,
   ): Promise<T> {
+    transport ??= currentRequestTransport();
     const url = `${baseUrl}${path}`;
     const headers: Record<string, string> = {
       authorization: `Bearer ${this.apiKey}`,
@@ -973,7 +977,9 @@ export class Arker {
 
   /** @internal Unauthenticated presigned sync download. */
   async _download(url: string, transport?: RequestTransportOptions): Promise<Response> {
-    return this._fetch(url, transport ? { signal: transport.signal } : undefined);
+    return transport?.idleTimeoutMs === undefined
+      ? this._fetch(url, transport ? { signal: transport.signal } : undefined)
+      : idleFetch(this.fetchImpl as typeof fetch, url, { signal: transport.signal }, transport.idleTimeoutMs);
   }
 
   /** @internal */
@@ -1125,6 +1131,11 @@ export class VM {
   ): Promise<CompletedRunResult>;
   async run(command: string, options: RunOptions): Promise<RunResult>;
   async run(command: string, options: RunOptions = {}): Promise<RunResult> {
+    return this._runWithTransport(command, options);
+  }
+
+  /** @internal */
+  async _runWithTransport(command: string, options: RunOptions = {}, transport?: RequestTransportOptions): Promise<RunResult> {
     rejectUnsupportedRunNetworkInputs(options);
     const { idempotencyKey, onOutput, ...body } = options;
     const headers = idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined;
@@ -1138,6 +1149,8 @@ export class VM {
       this.baseUrl,
       headers,
       options.queueing_timeout,
+      undefined,
+      transport,
     );
     const result = parseRunResponse(response);
     // The server backgrounds a run that outlived its sync window. When the
@@ -1145,7 +1158,7 @@ export class VM {
     // and hand back the completed run so the synchronous call is transparent.
     // Explicit zero is a pure pass-through - return the ack immediately.
     if (result.type === "background" && options.time_to_background !== 0) {
-      return this._awaitRun(result.runId, options.timeout, onOutput);
+      return this._awaitRun(result.runId, options.timeout, onOutput, transport);
     }
     if (result.type === "completed" && (result.stdoutBytes.length || result.stderrBytes.length)) {
       onOutput?.({ stdout: result.stdoutBytes, stderr: result.stderrBytes });
@@ -1226,6 +1239,7 @@ export class VM {
     runId: string,
     timeoutSecs?: number | null,
     onOutput?: RunOptions["onOutput"],
+    transport?: RequestTransportOptions,
   ): Promise<CompletedRunResult> {
     const budgetMs = runPollBudgetMs(timeoutSecs);
     const stdoutCursor: RunOutputCursor = { emitted: new Uint8Array(0), replaced: false };
@@ -1235,11 +1249,13 @@ export class VM {
     // budgetMs without a non-null assertion.
     let consecutiveFailures = 0;
     for (let delay = 0; ; delay = delay ? Math.min(RUN_POLL_MAX_MS, Math.ceil(delay * RUN_POLL_BACKOFF)) : RUN_POLL_INITIAL_MS) {
-      await sleep(delay);
+      await abortableDelay(delay, transport?.signal);
       let run: RunRecord;
       try {
-        run = await this.getRun(runId);
+        run = await this.getRun(runId, transport);
       } catch (error) {
+        transport?.signal?.throwIfAborted();
+        if (error instanceof RequestIdleTimeoutError) throw error;
         consecutiveFailures += 1;
         if (consecutiveFailures >= RUN_POLL_MAX_CONSECUTIVE_FAILURES) {
           const code = error instanceof ArkerError ? error.code : "unavailable";
@@ -1622,17 +1638,17 @@ export class VM {
   }
 
   /** @internal */
-  async *_syncReadChunks(path: string, signal?: AbortSignal): AsyncGenerator<Uint8Array> {
+  async *_syncReadChunks(path: string, signal?: AbortSignal, idleTimeoutMs?: number): AsyncGenerator<Uint8Array> {
     const response = await this._client._request<SyncReadInlineResponse | SyncReadPresignedResponse>(
       "POST", `${vmPath(this.id)}/sync`, { op: "read", path }, this.baseUrl,
-      undefined, undefined, true, { signal },
+      undefined, undefined, true, { signal, idleTimeoutMs },
     );
     if ("content" in response) {
       const bytes = decodeBytes(response.content, response.encoding);
       for (let offset = 0; offset < bytes.length; offset += 65536) yield bytes.subarray(offset, offset + 65536);
       return;
     }
-    const signed = await this._client._download(response.presigned_url, { signal });
+    const signed = await this._client._download(response.presigned_url, { signal, idleTimeoutMs });
     if (!signed.ok) {
       await signed.body?.cancel();
       throw new ArkerError("internal", `signed GET failed: ${signed.status}`, signed.status);
@@ -1798,13 +1814,14 @@ export class VM {
    *
    * `stdout`/`stderr` come back decoded, the same as {@link run}, alongside
    * `stdoutBytes`/`stderrBytes` for output that is not text. */
-  async getRun(runId: string): Promise<RunRecord> {
+  async getRun(runId: string, transport?: RequestTransportOptions): Promise<RunRecord> {
     return decodeWireRun(
       await this._client._request<Run>(
         "GET",
         `${vmPath(this.id)}/runs/${pathSegment(runId)}`,
         undefined,
         this.baseUrl,
+        undefined, undefined, undefined, transport,
       ),
     );
   }
@@ -2315,6 +2332,8 @@ function runToCompletedResult(run: RunRecord): CompletedRunResult {
 /** Per-request cancellation; does not change shared client or connection settings. */
 export interface RequestTransportOptions {
   signal?: AbortSignal;
+  /** @internal Inactivity timeout for one HTTP request, in milliseconds. Zero disables it. */
+  idleTimeoutMs?: number;
 }
 
 async function requestJson<T>(
@@ -2360,8 +2379,8 @@ async function requestJson<T>(
       const { status, ok, text } = await sendRequest(
         url,
         { method, headers, body: requestBody, signal: transport?.signal },
-        fetchImpl,
-        http2,
+        transport?.idleTimeoutMs === undefined ? fetchImpl : ((input, init) => idleFetch(fetchImpl as typeof fetch, input, init ?? {}, transport.idleTimeoutMs!)),
+        transport?.idleTimeoutMs === undefined && http2,
         transport ? 0 : undefined,
       );
       const payload = parseJson(text);
@@ -2388,6 +2407,7 @@ async function requestJson<T>(
 
       return payload as T;
     } catch (error) {
+      if (error instanceof RequestIdleTimeoutError) throw error;
       transport?.signal?.throwIfAborted();
       if (error instanceof ArkerError) throw error;
       if (!shouldRetryNetworkFailures) {
@@ -2809,6 +2829,7 @@ async function sendRequest(
   try {
     text = await response.text();
   } catch (error) {
+    if (error instanceof RequestIdleTimeoutError) throw error;
     if (RETRYABLE_HTTP.has(response.status)) {
       return { status: response.status, ok: false, text: "" };
     }
