@@ -42,6 +42,7 @@ from jsonschema.exceptions import ValidationError as SchemaValidationError
 from pydantic import TypeAdapter, ValidationError
 
 from ._port import PortStream
+from ._request_timeout import has_transport_timeout, transport_timeout
 from .generated.api_models import (
     ApiKeyScope,
     BackgroundRunResponse,
@@ -722,8 +723,9 @@ class Arker:
             request_timeout=request_timeout,
         )
 
-    def _download(self, url: str, *, request_timeout: float | None = 300):
-        return _http_client.get(url, timeout=request_timeout)
+    def _download(self, url: str, *, request_timeout: float | _UnsetType | None = _UNSET):
+        timeout = transport_timeout(300) if request_timeout is _UNSET else request_timeout
+        return _http_client.get(url, timeout=timeout)
 
     def _retry_delay(self, attempt: int, error: ArkerError | None = None) -> float:
         return _retry_delay(self._retry, attempt, error)
@@ -1108,7 +1110,7 @@ class VM:
             for offset in range(0, len(data), chunk_size):
                 yield data[offset : offset + chunk_size]
         elif isinstance(response, SyncReadPresignedResponse):
-            with _http_client.stream("GET", response.presigned_url, timeout=300) as transfer:
+            with _http_client.stream("GET", response.presigned_url, timeout=transport_timeout(300)) as transfer:
                 transfer.raise_for_status()
                 yield from transfer.iter_bytes(chunk_size=chunk_size)
         else:
@@ -1788,9 +1790,10 @@ atexit.register(_http_client.close)
 
 
 def _http(
-    method: str, url: str, headers: dict[str, str], data: bytes | None, *, timeout: float | None = REQUEST_TIMEOUT_S
+    method: str, url: str, headers: dict[str, str], data: bytes | None, *, timeout: float | _UnsetType | None = _UNSET
 ) -> tuple[int, bytes]:
-    with _http_client.stream(method, url, headers=headers, content=data, timeout=timeout) as response:
+    effective_timeout = transport_timeout(REQUEST_TIMEOUT_S) if timeout is _UNSET else timeout
+    with _http_client.stream(method, url, headers=headers, content=data, timeout=effective_timeout) as response:
         try:
             content = response.read()
         except httpx.RequestError:
@@ -1853,7 +1856,7 @@ def _request_json(
                 )
                 status, raw = _http(method, url, headers, data, timeout=remaining_timeout)
         except httpx.RequestError as error:
-            if isinstance(error, httpx.TimeoutException) and request_timeout is not _UNSET:
+            if isinstance(error, httpx.TimeoutException) and (request_timeout is not _UNSET or has_transport_timeout()):
                 raise
             if not should_retry_network_failures:
                 raise _unknown_outcome_error(method, path, error) from error
