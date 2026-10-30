@@ -7,6 +7,8 @@ import tempfile
 import uuid
 from contextlib import contextmanager
 
+from ._request_timeout import request_timeout_scope, without_request_timeout
+
 CHUNK_SIZE = 64 * 1024
 
 
@@ -27,10 +29,10 @@ class TransferCleanupError(RuntimeError):
 
 
 @contextmanager
-def staging(fs):
+def staging(fs, run=None):
     directory = "/tmp/.arker-daytona-fs-" + uuid.uuid4().hex
     try:
-        fs._run("mkdir -m 700 -- " + shlex.quote(directory))
+        (run or fs._run)("mkdir -m 700 -- " + shlex.quote(directory))
     except BaseException as error:
         # Without a successful mkdir receipt, deletion could remove a foreign path.
         error.staging_directory = directory
@@ -40,13 +42,15 @@ def staging(fs):
         yield directory + "/data"
     except BaseException as primary:
         try:
-            fs._run("rm -rf -- " + shlex.quote(directory))
+            with without_request_timeout():
+                fs._run("rm -rf -- " + shlex.quote(directory))
         except Exception as cleanup:
             raise TransferCleanupError(directory, primary, cleanup) from cleanup
         raise
     else:
         try:
-            fs._run("rm -rf -- " + shlex.quote(directory))
+            with without_request_timeout():
+                fs._run("rm -rf -- " + shlex.quote(directory))
         except BaseException as error:
             error.staging_directory = directory
             error.__notes__ = [*getattr(error, "__notes__", ()), f"Staging cleanup failed: {directory}"]
@@ -79,14 +83,57 @@ def transfer_files():
             raise TransferCleanupError(identities, primary, errors) from errors[-1]
 
 
-def download(fs, path, progress, cancel):
+class Transfer:
+    def __init__(self, fs, timeout):
+        import httpx2
+        from daytona.internal.http_client import request_timeout
+
+        self.fs = fs
+        # Preserve the vendor's connect/pool caps and read/write idle timeout.
+        self.timeout = httpx2.Timeout(**request_timeout(timeout).as_dict())
+
+    def run(self, command):
+        with self.errors(), request_timeout_scope(self.timeout):
+            return self.fs._run(command)
+
+    @contextmanager
+    def errors(self):
+        import httpx2
+        from daytona.common.errors import DaytonaConnectionTimeoutError
+
+        try:
+            yield
+        except httpx2.TimeoutException as error:
+            raise DaytonaConnectionTimeoutError(str(error)) from error
+
+    def read(self, path):
+        chunks = self.fs._vm._sync_read_chunks(path)
+        end = object()
+        try:
+            while True:
+                with self.errors(), request_timeout_scope(self.timeout):
+                    chunk = next(chunks, end)
+                if chunk is end:
+                    return
+                yield chunk
+        finally:
+            with without_request_timeout():
+                chunks.close()
+
+    def write(self, path, size, read):
+        with self.errors(), request_timeout_scope(self.timeout):
+            self.fs._vm._sync_write_chunks(path, size, read)
+
+
+def download(fs, path, progress, cancel, timeout=1800):
     from daytona.common.filesystem import DownloadProgress
 
+    transfer = Transfer(fs, timeout)
     command = fs._command("download", path)
     cancelled(cancel, "Download", path)
-    with staging(fs) as staged:
-        fs._run("umask 077; set -C; " + command + " > " + shlex.quote(staged))
-        chunks = fs._vm._sync_read_chunks(staged)
+    with staging(fs, transfer.run) as staged:
+        transfer.run("umask 077; set -C; " + command + " > " + shlex.quote(staged))
+        chunks = transfer.read(staged)
         received = 0
         try:
             for chunk in chunks:
@@ -99,10 +146,11 @@ def download(fs, path, progress, cancel):
             chunks.close()
 
 
-def upload(fs, source, path, progress, cancel):
+def upload(fs, source, path, progress, cancel, timeout=1800):
     from daytona.common.errors import DaytonaError
     from daytona.common.filesystem import UploadProgress
 
+    transfer = Transfer(fs, timeout)
     command = fs._command("upload", path)
     cancelled(cancel, "Upload", path)
     with transfer_files() as own:
@@ -153,11 +201,11 @@ def upload(fs, source, path, progress, cancel):
                     progress(UploadProgress(bytes_sent=sent))
             return b"".join(chunks)
 
-        with staging(fs) as staged:
-            fs._run("umask 077; set -C; : > " + shlex.quote(staged))
-            fs._vm._sync_write_chunks(staged, size, read)
+        with staging(fs, transfer.run) as staged:
+            transfer.run("umask 077; set -C; : > " + shlex.quote(staged))
+            transfer.write(staged, size, read)
             cancelled(cancel, "Upload", path)
-            fs._run(command + " < " + shlex.quote(staged))
+            transfer.run(command + " < " + shlex.quote(staged))
 
 
 class AsyncCancellation:
@@ -205,9 +253,9 @@ def progress_on_loop(callback):
     return lambda value: asyncio.run_coroutine_threadsafe(invoke(value), loop).result()
 
 
-def async_download(fs, path, progress, cancel):
+def async_download(fs, path, progress, cancel, timeout=1800):
     cancellation = AsyncCancellation(cancel)
-    iterator = download(fs, path, progress_on_loop(progress), cancellation)
+    iterator = download(fs, path, progress_on_loop(progress), cancellation, timeout)
     end = object()
 
     async def iterate():
@@ -223,7 +271,7 @@ def async_download(fs, path, progress, cancel):
     return iterate()
 
 
-async def async_upload(fs, source, path, progress, cancel):
+async def async_upload(fs, source, path, progress, cancel, timeout=1800):
     cancellation = AsyncCancellation(cancel)
     callback = progress_on_loop(progress)
-    await offload(lambda: upload(fs, source, path, callback, cancellation), cancellation)
+    await offload(lambda: upload(fs, source, path, callback, cancellation, timeout), cancellation)

@@ -6,7 +6,6 @@ import json
 import os
 import shlex
 import stat
-import uuid
 from importlib.resources import files
 
 from ._compat import UnsupportedCompatibilityOption, UnsupportedMixin, run_command
@@ -81,29 +80,12 @@ class FileSystem(UnsupportedMixin):
         check_timeout(request_timeout)
         return json.loads(self._run(self._command(operation, path, **options)))
 
-    def _transfer(self, operation, path, data=None):
-        command = self._command(operation, path)
-        directory = "/tmp/.arker-daytona-fs-" + uuid.uuid4().hex
-        staged = directory + "/data"
-        self._run("mkdir -m 700 -- " + shlex.quote(directory))
-        primary = None
-        try:
-            if operation == "upload":
-                self._run("umask 077; set -C; : > " + shlex.quote(staged))
-                self._vm.sync(staged, data)
-                self._run(command + " < " + shlex.quote(staged))
-                return None
-            self._run("umask 077; set -C; " + command + " > " + shlex.quote(staged))
-            return self._vm.sync(staged)
-        except BaseException as error:
-            primary = error
-            raise
-        finally:
-            try:
-                self._run("rm -rf -- " + shlex.quote(directory))
-            except Exception:
-                if primary is None:
-                    raise
+    def _transfer(self, operation, path, data=None, *, timeout=1800):
+        from ._daytona_streams import download, upload
+
+        if operation == "upload":
+            return upload(self, data, path, None, None, timeout)
+        return b"".join(download(self, path, None, None, timeout))
 
     def create_folder(self, path: str, mode: str, request_timeout: float | None = None) -> None:
         self._call("mkdir", path, request_timeout, mode=mode)
@@ -158,24 +140,20 @@ class FileSystem(UnsupportedMixin):
     def download_file_stream(self, remote_path, timeout=1800, on_progress=None, cancel_event=None):
         from ._daytona_streams import download
 
-        check_timeout(timeout, 1800)
-        return download(self, remote_path, on_progress, cancel_event)
+        return download(self, remote_path, on_progress, cancel_event, timeout)
 
     def upload_file_stream(self, source, remote_path, timeout=1800, on_progress=None, cancel_event=None):
         from ._daytona_streams import upload
 
-        check_timeout(timeout, 1800)
-        return upload(self, source, remote_path, on_progress, cancel_event)
+        return upload(self, source, remote_path, on_progress, cancel_event, timeout)
 
     def upload_file(self, src: str | bytes, dst: str, timeout: int = 1800) -> None:
-        check_timeout(timeout, 1800)
         if not isinstance(src, (str, bytes, bytearray)):
             raise TypeError("source must be bytes or a local path")
         data = local_file(src) if isinstance(src, str) else bytes(src)
-        self._transfer("upload", dst, data)
+        self._transfer("upload", dst, data, timeout=timeout)
 
     def upload_files(self, files, timeout: int = 1800) -> None:
-        check_timeout(timeout, 1800)
         for item in files:
             self.upload_file(item.source, item.destination, timeout)
 
@@ -184,8 +162,7 @@ class FileSystem(UnsupportedMixin):
             raise TypeError("download_file expects a remote path, optional local path and timeout")
         local = args[1] if len(args) > 1 and isinstance(args[1], str) else None
         timeout = args[2] if len(args) == 3 else args[1] if len(args) == 2 and local is None else 1800
-        check_timeout(timeout, 1800)
-        data = self._transfer("download", args[0])
+        data = self._transfer("download", args[0], timeout=timeout)
         if local is None:
             return data
         local_file(local, data)
@@ -195,7 +172,6 @@ class FileSystem(UnsupportedMixin):
         from daytona.common.errors import DaytonaError
         from daytona.common.filesystem import FileDownloadErrorDetails, FileDownloadResponse
 
-        check_timeout(timeout, 1800)
         results = []
         for item in files:
             try:
@@ -275,14 +251,12 @@ class AsyncFileSystem:
     async def download_file_stream(self, remote_path, timeout=1800, on_progress=None, cancel_event=None):
         from ._daytona_streams import async_download
 
-        check_timeout(timeout, 1800)
-        return async_download(self._sync, remote_path, on_progress, cancel_event)
+        return async_download(self._sync, remote_path, on_progress, cancel_event, timeout)
 
     async def upload_file_stream(self, source, remote_path, timeout=1800, on_progress=None, cancel_event=None):
         from ._daytona_streams import async_upload
 
-        check_timeout(timeout, 1800)
-        await async_upload(self._sync, source, remote_path, on_progress, cancel_event)
+        await async_upload(self._sync, source, remote_path, on_progress, cancel_event, timeout)
 
     async def upload_file(self, src: str | bytes, dst: str, timeout: int = 1800) -> None:
         from ._compat_async import call

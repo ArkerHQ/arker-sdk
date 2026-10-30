@@ -1,5 +1,6 @@
 import asyncio
 import itertools
+import json
 import os
 import pwd
 import shutil
@@ -62,9 +63,19 @@ def guest(monkeypatch):
             return None
         return stage.read_bytes()
 
+    def read_chunks(path):
+        yield sync(path)
+
     monkeypatch.setattr(implementation, "run_command", run)
     monkeypatch.setattr("arker.daytona.run_command", run)
-    sandbox = Sandbox(vm=types.SimpleNamespace(id="local", sync=sync))
+    sandbox = Sandbox(
+        vm=types.SimpleNamespace(
+            id="local",
+            sync=sync,
+            _sync_read_chunks=read_chunks,
+            _sync_write_chunks=lambda path, size, read, **kwargs: sync(path, read(0, size)),
+        )
+    )
     yield sandbox, home, uid, stages
     assert all(not stage.parent.exists() for stage in stages)
     shutil.rmtree(home)
@@ -142,14 +153,12 @@ def test_async_filesystem_preserves_native_model_types(guest):
     asyncio.run(program())
 
 
-def test_untranslated_options_fail_closed(guest):
+def test_transfer_zero_disables_timeout_and_invalid_path_still_fails(guest):
     fs = guest[0].fs
-    with pytest.raises(UnsupportedCompatibilityOption):
-        fs.upload_file(b"x", "x", timeout=0)
+    fs.upload_file(b"x", "x", timeout=0)
+    assert fs.download_file("x", 0) == b"x"
     with pytest.raises(UnsupportedCompatibilityOption):
         fs.list_files(".", request_timeout=1)
-    with pytest.raises(UnsupportedCompatibilityOption):
-        fs.upload_file_stream(b"x", "x", timeout=0)
     with pytest.raises(DaytonaBadRequestError):
         fs.upload_file(b"x", "")
 
@@ -157,12 +166,12 @@ def test_untranslated_options_fail_closed(guest):
 def test_interrupted_upload_cleans_staging_and_keeps_primary_error(guest, monkeypatch):
     sandbox, _, _, stages = guest
 
-    def fail(path, data):
+    def fail(path, size, read, **transport):
         stages.append(Path(path))
         Path(path).write_bytes(b"partial")
         raise OSError("upload interrupted")
 
-    monkeypatch.setattr(sandbox._vm, "sync", fail)
+    monkeypatch.setattr(sandbox._vm, "_sync_write_chunks", fail)
     with pytest.raises(OSError, match="upload interrupted"):
         sandbox.fs.upload_file(b"data", "destination")
 
@@ -191,7 +200,7 @@ def test_bulk_download_reports_each_failure_without_discarding_success(guest, tm
 def test_staging_collision_never_syncs_or_removes_an_unowned_path(monkeypatch):
     commands = []
 
-    def fail(vm, command):
+    def fail(vm, command, **transport):
         commands.append(command)
         return CommandResult(stdout="", stderr="File exists", exit_code=1)
 
@@ -387,7 +396,7 @@ def test_download_creates_local_parents_and_preserves_binary_overwrite(monkeypat
     sandbox = Sandbox(vm=types.SimpleNamespace(id="local"))
     remote = {}
 
-    def transfer(self, operation, path, data=None):
+    def transfer(self, operation, path, data=None, **transport):
         if operation == "upload":
             remote[path] = data
             return None
@@ -418,7 +427,7 @@ def test_download_invalid_local_parent_returns_bulk_error_without_mutation(monke
     from daytona import FileDownloadRequest
 
     fs = implementation.FileSystem(None)
-    monkeypatch.setattr(fs, "_transfer", lambda *args: b"remote")
+    monkeypatch.setattr(fs, "_transfer", lambda *args, **kwargs: b"remote")
     parent = tmp_path / "not-a-directory"
     parent.write_bytes(b"keep")
     result = fs.download_files([FileDownloadRequest(source="remote", destination=str(parent / "child"))])[0]
@@ -431,13 +440,13 @@ def test_download_invalid_local_parent_returns_bulk_error_without_mutation(monke
 def streamed_guest(guest):
     sandbox, _home, _uid, stages = guest
 
-    def chunks(path):
+    def chunks(path, **kwargs):
         stages.append(Path(path))
         with open(path, "rb") as stream:
             while chunk := stream.read(65536):
                 yield chunk
 
-    def writes(path, size, read):
+    def writes(path, size, read, **kwargs):
         stages.append(Path(path))
         with open(path, "wb") as stream:
             for offset in range(0, max(size, 1), 65536):
@@ -605,7 +614,7 @@ def test_stream_double_failure_retains_primary_cleanup_and_owned_stage():
     cleanup = OSError("cleanup failed")
     commands = []
 
-    def run(command):
+    def run(command, **kwargs):
         commands.append(command)
         if command.startswith("rm "):
             raise cleanup
@@ -632,7 +641,7 @@ def test_async_stream_double_cancel_drains_reader_before_cleanup():
     closed = threading.Event()
     cleaned = threading.Event()
 
-    def chunks(path):
+    def chunks(path, **kwargs):
         try:
             reading.set()
             started.set()
@@ -643,7 +652,7 @@ def test_async_stream_double_cancel_drains_reader_before_cleanup():
             reading.clear()
             closed.set()
 
-    def run(command):
+    def run(command, **kwargs):
         if command.startswith("rm "):
             assert not reading.is_set(), "cleanup raced the blocked reader"
             cleaned.set()
@@ -796,3 +805,111 @@ def test_search_invalid_utf8_replaces_each_invalid_byte(tmp_path):
     file = tmp_path / "invalid"
     file.write_bytes(b"X\xe2\x82\n")
     assert search(str(file), str(file), "X", True)[0]["content"] == "X\ufffd\ufffd"
+
+
+@pytest.mark.parametrize("operation", ["download", "upload"])
+def test_transfer_timeout_is_client_only_and_reports_uncertain_stage(operation):
+    import http.server
+    import threading
+
+    from daytona import DaytonaConnectionTimeoutError
+
+    from arker.computer import Arker
+
+    received = []
+    release = threading.Event()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            received.append((self.path, json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
+            release.wait(5)
+            self.close_connection = True
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        client = Arker(api_key="test-only", base_url=f"http://127.0.0.1:{server.server_port}")
+        fs = implementation.FileSystem(client.vm("vm-test"))
+        with pytest.raises(DaytonaConnectionTimeoutError) as caught:
+            if operation == "download":
+                next(fs.download_file_stream("file", timeout=0.05))
+            else:
+                fs.upload_file_stream(b"data", "file", timeout=0.05)
+        assert caught.value.staging_directory.startswith("/tmp/.arker-daytona-fs-")
+        assert len(received) == 1
+        path, body = received[0]
+        assert path.endswith("/runs")
+        assert "timeout" not in body
+        assert "request_timeout" not in body
+        assert "mkdir -m 700" in body["command"]
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(5)
+
+
+@pytest.mark.parametrize("timeout,expected", [(0, None), (0.125, 0.125), (2.5, 2.5)])
+def test_stream_timeout_reaches_read_and_write_transport(timeout, expected):
+    from arker._daytona_streams import Transfer
+    from arker._request_timeout import transport_timeout
+
+    calls = []
+    fs = types.SimpleNamespace(
+        _run=lambda command, **kw: calls.append(("run", {"request_timeout": transport_timeout(300)})),
+        _vm=types.SimpleNamespace(
+            _sync_read_chunks=lambda path, **kw: iter([b"data"]),
+            _sync_write_chunks=lambda path, size, read, **kw: calls.append(
+                ("write", {"request_timeout": transport_timeout(300)})
+            ),
+        ),
+    )
+
+    def chunks(path):
+        calls.append(("read", {"request_timeout": transport_timeout(300)}))
+        yield b"data"
+
+    fs._vm._sync_read_chunks = chunks
+    transfer = Transfer(fs, timeout)
+    transfer.run("command")
+    chunks = transfer.read("file")
+    assert next(chunks) == b"data"
+    assert transport_timeout(300) == 300
+    chunks.close()
+    transfer.write("file", 4, lambda offset, size: b"data")
+    assert [operation for operation, _ in calls] == ["run", "read", "write"]
+    for _, options in calls:
+        assert options["request_timeout"].as_dict() == {
+            "connect": 30.0,
+            "pool": 60.0,
+            "read": expected,
+            "write": expected,
+        }
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_transfer_cleanup_ignores_timeout_scope_and_restores_caller(failed):
+    import httpx2
+
+    from arker._daytona_streams import staging
+    from arker._request_timeout import request_timeout_scope, transport_timeout
+
+    calls = []
+    primary = OSError("transfer failed")
+    fs = types.SimpleNamespace(_run=lambda command: calls.append((command, transport_timeout(300))))
+    with request_timeout_scope(httpx2.Timeout(0.01)):
+        try:
+            with staging(fs):
+                if failed:
+                    raise primary
+        except OSError as error:
+            assert error is primary
+        assert transport_timeout(300).read == 0.01
+    assert calls[0][1].read == 0.01
+    assert calls[-1][0].startswith("rm -rf -- ")
+    assert calls[-1][1] == 300
+    assert transport_timeout(300) == 300
