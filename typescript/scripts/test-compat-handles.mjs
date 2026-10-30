@@ -1,13 +1,14 @@
 import { build } from "tsup";
 import { spawnSync } from "node:child_process";
+import { readdirSync } from "node:fs";
 
-const suites = [
-  "e2b-inventory", "e2b-metadata", "e2b-network", "e2b-artifact", "e2b-bootstrap", "e2b-data-plane", "e2b-file-streams",
-  "e2b-transport", "e2b-lifecycle-extended", "e2b-paused-admission", "e2b-mounts", "e2b-urls", "e2b-urls-unsupported",
-  "e2b-lifecycle", "e2b-filesystem", "e2b-staging", "compat-live-router", "compat-trace",
-  "blaxel-provider", "blaxel-data-plane", "blaxel-facade", "blaxel-network", "blaxel-packages", "daemon-activity", "image-creation-config", "blaxel-literal-paths", "daytona-provider", "daytona-filesystem", "daytona-volumes", "modal-provider",
-  "modal-sandbox", "modal-recipes", "modal-prepared", "modal-terminal", "modal-lifetime", "modal-command", "modal-errors", "modal-filesystem", "filesystem-contract", "guest-process-input",
-];
+const families = ["e2b-", "blaxel-", "daytona-", "modal-", "guest-process-", "compat-"];
+const shared = new Set(["daemon-activity", "image-creation-config", "filesystem-contract"]);
+const suites = readdirSync(new URL("../tests/", import.meta.url))
+  .filter(name => name.endsWith(".test.ts"))
+  .map(name => name.slice(0, -".test.ts".length))
+  .filter(name => shared.has(name) || families.some(prefix => name.startsWith(prefix)))
+  .sort();
 const outDir = "node_modules/.cache/compat-tests";
 await build({
   entry: suites.filter(name => name.startsWith("e2b-")).map(name => `tests/${name}.test.ts`), outDir,
