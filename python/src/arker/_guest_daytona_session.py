@@ -22,6 +22,14 @@ class SessionNotFound(RuntimeError):
     pass
 
 
+class CommandInputClosed(RuntimeError):
+    pass
+
+
+class SessionEnded(RuntimeError):
+    pass
+
+
 LIMIT = 128 * 1024
 
 
@@ -115,7 +123,7 @@ def serve(identifier, instance=None):
                         pass
                 while not stopping.is_set() and capture(final=True):
                     pass
-                command["exit_code"] = code if code is not None else (shell.poll() if shell.poll() is not None else 137)
+                command["exit_code"] = code
             except (BrokenPipeError, OSError):
                 command["exit_code"] = shell.poll() if shell.poll() is not None else 1
             finally:
@@ -144,7 +152,7 @@ def serve(identifier, instance=None):
             return None
         if action == "execute":
             if shell.poll() is not None:
-                raise RuntimeError("Session shell has exited")
+                raise SessionEnded("session process has exited")
             command = {"id": uuid.uuid4().hex, "command": request["command"], "exit_code": None, "running": False}
             folder = directory / command["id"]
             folder.mkdir(mode=0o700)
@@ -167,6 +175,8 @@ def serve(identifier, instance=None):
             with command["lock"]:
                 if command["exit_code"] is not None:
                     raise RuntimeError("Command has completed")
+                if "input_fd" not in command:
+                    raise CommandInputClosed("Command input is closed")
                 data = base64.b64decode(request["data"], validate=True)
                 try:
                     written = os.write(command["input_fd"], data)
@@ -211,7 +221,13 @@ def serve(identifier, instance=None):
                 except Exception as error:
                     response = {
                         "error": str(error),
-                        "code": "not_found" if isinstance(error, (KeyError, FileNotFoundError)) else None,
+                        "code": "session_ended"
+                        if isinstance(error, SessionEnded)
+                        else "input_closed"
+                        if isinstance(error, CommandInputClosed)
+                        else "not_found"
+                        if isinstance(error, (KeyError, FileNotFoundError))
+                        else None,
                     }
                 connection.sendall((json.dumps(response) + "\n").encode())
     finally:
@@ -248,7 +264,9 @@ def call(request):
         connection.sendall((json.dumps(request) + "\n").encode())
         response = receive(connection)
     if "error" in response:
-        raise (SessionNotFound if response.get("code") == "not_found" else RuntimeError)(response["error"])
+        raise {"not_found": SessionNotFound, "session_ended": SessionEnded, "input_closed": CommandInputClosed}.get(
+            response.get("code"), RuntimeError
+        )(response["error"])
     return response["result"]
 
 
@@ -269,7 +287,11 @@ if __name__ == "__main__":
                 json.dumps(
                     {
                         "error": str(error),
-                        "code": "not_found"
+                        "code": "session_ended"
+                        if isinstance(error, SessionEnded)
+                        else "input_closed"
+                        if isinstance(error, CommandInputClosed)
+                        else "not_found"
                         if isinstance(error, (SessionNotFound, FileNotFoundError, ConnectionRefusedError))
                         else None,
                     }

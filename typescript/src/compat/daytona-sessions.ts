@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { DaytonaError, DaytonaNotFoundError } from "@daytona/sdk";
+import { DaytonaError, DaytonaInternalServerError, DaytonaNotFoundError, DaytonaSessionEndedError } from "@daytona/sdk";
 import type { SandboxInterface } from "computesdk";
 import { shellQuote } from "./common.js";
 import { GuestProcesses } from "./guest-process.js";
@@ -42,6 +42,8 @@ export function createDaytonaSessions(box: SandboxInterface): SessionAPI {
     const payload = Buffer.from(JSON.stringify({ action, ...values })).toString("base64");
     const result = await box.runCommand(`python3 -I ${shellQuote(path)} call ${shellQuote(payload)}`);
     const response = JSON.parse(result.stdout) as { result: T; error?: string; code?: string };
+    if (response.error && response.code === "input_closed") throw new DaytonaInternalServerError(response.error, 500);
+    if (response.error && response.code === "session_ended") throw new DaytonaSessionEndedError(response.error, 410);
     if (response.error) throw response.code === "not_found" ? new DaytonaNotFoundError(response.error) : new DaytonaError(response.error);
     if (result.exitCode !== 0) throw new DaytonaError("Session control failed");
     return response.result;

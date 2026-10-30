@@ -64,6 +64,10 @@ class SessionProcess:
         if "error" in parsed:
             native = import_optional("daytona.common.errors")
             if native is not None:
+                if parsed.get("code") == "input_closed":
+                    raise native.DaytonaInternalServerError(parsed["error"], status_code=500)
+                if parsed.get("code") == "session_ended":
+                    raise native.DaytonaSessionEndedError(parsed["error"], status_code=410)
                 if parsed.get("code") == "not_found":
                     raise native.DaytonaNotFoundError(parsed["error"], status_code=404)
                 raise native.DaytonaError(parsed["error"])

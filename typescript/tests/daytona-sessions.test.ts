@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { SandboxInterface } from "computesdk";
+import { DaytonaInternalServerError, DaytonaSessionEndedError } from "@daytona/sdk";
 import { createDaytonaSessions } from "../src/compat/daytona-sessions.js";
 import source from "../src/compat/daytona-session.generated.js";
 
@@ -62,6 +63,12 @@ test("session shell state, incremental UTF-8 logs and input use the shared guest
     const continued: string[] = [];
     await api.getSessionCommandLogs(id, retained.cmdId, text => { continued.push(text); }, () => {});
     assert.equal(continued.join(""), "ready\ndone\n");
+    const ended = await api.executeSessionCommand(id, {command: "printf before; exit 7", runAsync: true});
+    const final: string[] = [];
+    const stopEndedReader = new Error("stop ended-session log subscription");
+    await assert.rejects(api.getSessionCommandLogs(id, ended.cmdId, text => {final.push(text); throw stopEndedReader;}, () => {}), error => error === stopEndedReader);
+    assert.equal(final.join(""), "before\n");
+    assert.equal((await api.getSessionCommand(id, ended.cmdId)).exitCode, undefined);
   } finally {
     await control({ action: "delete", session_id: id }).catch(() => undefined);
     await exited;
@@ -94,4 +101,16 @@ test("startup retains primary and cleanup errors with the owned process identity
   } finally {
     Object.assign(GuestProcesses.prototype, original);
   }
+});
+
+
+test("ended session wire error retains native error identity and status", async () => {
+  const box = {filesystem: {writeFile: async () => {}}, runCommand: async () => ({stdout: JSON.stringify({error: "session process has exited", code: "session_ended"}), stderr: "", exitCode: 1})} as unknown as SandboxInterface;
+  await assert.rejects(createDaytonaSessions(box).executeSessionCommand("ended", {command: "printf after", runAsync: true}), error => error instanceof DaytonaSessionEndedError && error.statusCode === 410);
+});
+
+
+test("closed input keeps native internal error rather than missing resource", async () => {
+  const box = {filesystem: {writeFile: async () => {}}, runCommand: async () => ({stdout: JSON.stringify({error: "Command input is closed", code: "input_closed"}), stderr: "", exitCode: 1})} as unknown as SandboxInterface;
+  await assert.rejects(createDaytonaSessions(box).sendSessionCommandInput("ended", "command", "after"), error => error instanceof DaytonaInternalServerError && error.statusCode === 500);
 });
