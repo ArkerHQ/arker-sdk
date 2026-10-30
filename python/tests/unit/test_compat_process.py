@@ -881,7 +881,9 @@ def test_resize_reports_worker_error_even_while_worker_identity_is_alive(process
     import time
 
     manager, directory = processes
-    started = manager.exec({"command": "cat", "stdin": True, "tty": {"rows": 24, "cols": 80}})
+    started = manager.exec(
+        {"command": "cat", "stdin": True, "workingDir": str(directory), "tty": {"rows": 24, "cols": 80}}
+    )
     state_dir = directory / "processes" / hashlib.sha256(started.name.encode()).hexdigest()
     state = json.loads((state_dir / "state").read_text())
     worker_pid = state["_workerPid"]
