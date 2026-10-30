@@ -46,23 +46,35 @@ must pass with fresh evidence before claiming parity.
   VM-bound run. Explicit pause and lifetime deletion remain the stopping
   mechanisms. Nine live scenarios across Python sync/async and TypeScript passed
   on reference, shim-native and shim-Arker routes for unattended work, reconnect,
-  full-memory/filesystem pause, fork and expiry. Unexpected monitor death and
-  host-loss recovery remain unqualified; local pidfd tests do not prove them.
+  full-memory/filesystem pause, fork and expiry. The daemon joins the tracked run
+  through its authenticated filesystem connection. Separate comparisons against
+  E2B 2.58 and 2.62 passed all nine scenarios each, including additional monitor
+  termination checks. Host-loss recovery remains unqualified.
 - E2B sandbox expiry, request timeouts, cancellation, streamed reads, process
   enumeration and native error identities have unverified or unsupported cases.
-- Daytona custom users, image working-directory/shell selection, streaming,
-  search/watch and timeout/error combinations remain incomplete. See the
+- Daytona PTY/session comparisons against 0.227 pass nine Python sync/async and
+  TypeScript cases across all three routes, covering persistent shell state,
+  streams, resizing, tagged log lines and termination signals. Bounded file
+  streams are implemented; downloads stage the guest file before iteration and
+  unknown-length uploads spool locally. Custom users, image working-directory
+  selection, search and custom timeout/error combinations remain incomplete.
+  The pinned native filesystem exposes neither watch nor signed file URLs. See the
   [filesystem contract](daytona-filesystem.md) for source prerequisites and
   [volume contract](daytona-volumes.md) for mount and deletion limits.
 - Modal retained-terminal lookup, polling, waiting and termination are implemented.
-  The latest terminal comparison passed 14 of 18 cases; four native or shim-native
-  requested-termination cases failed. All six Arker cases passed, but this does
+  The latest terminal comparison passed 15 of 18 cases; three native-backed
+  requested-termination cases failed. All 12 Arker cases passed, but this does
   not establish complete differential equivalence.
 - Modal native Image/Secret/Volume handles are forwarded on native routes but
   have local registry/secret recipe support for Arker creation; opaque handles
   and Volume recipes remain incomplete. Exec PTY passed nine live cases across
   Python sync/async and TypeScript on all three routes. Creation-time PTY,
   remote secrets and broader async/lifecycle behavior remain incomplete.
+- Blaxel Python 0.4.21 and TypeScript 0.3.32 watch/stream comparisons pass 18
+  cases on the corrected cancellation implementation. Recursive directory reads
+  and named creation also have bounded comparisons. Qualification uses a private
+  prepared derivative; public bootstrap, archive, drive mounts and Docker build
+  configuration remain incomplete.
 - Guest process helpers require Python; arbitrary Python-free images are not
   drop-in compatible. Preparing a source is an explicit prerequisite, not proof
   of default-image equivalence.

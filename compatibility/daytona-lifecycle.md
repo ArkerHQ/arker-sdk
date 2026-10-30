@@ -21,5 +21,5 @@ a stopped sandbox before filesystem offload. Filesystem pause does not supply
 those guarantees. Native routing retains both operations. The adapter does not
 synthesize native lifecycle state fields from ambiguous idle VM state.
 
-Lifecycle transport and forwarding regressions use the pinned Daytona 0.226.0
+Lifecycle transport and forwarding regressions use the pinned Daytona 0.227.0
 SDKs. Live Arker lifecycle equivalence has not yet been qualified.

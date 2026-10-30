@@ -1,7 +1,8 @@
 # Daytona filesystem contract
 
 The Python sync/async and TypeScript adapters provide directory creation/listing,
-file metadata, buffered upload/download, rename, deletion and permission changes.
+file metadata, buffered and streaming upload/download, rename, deletion and
+permission changes.
 Commands and filesystem access run as the source's existing non-root `daytona`
 account. Relative paths use its home. The adapters do not create accounts or
 silently fall back to root.
@@ -16,6 +17,14 @@ Transfers reserve private staging paths, open guest files after dropping
 privileges, reject special files and preserve the primary error during cleanup.
 Batch writes are sequential and may partially succeed. Buffered transfers are
 not streaming APIs and do not promise bounded client memory or atomic writes.
+
+Streaming APIs transfer bounded chunks and expose progress and cancellation.
+Downloads first stage the complete guest file; unknown-length uploads spool to a
+local temporary file. This preserves bounded client memory but does not promise
+native HTTP time-to-first-byte behavior. A cleanup failure reports the owned
+staging path alongside the primary failure. Custom transfer deadlines remain
+unsupported; cancellation does not prove an already accepted guest operation
+was undone.
 
 ## Verification
 
@@ -34,9 +43,10 @@ COMPAT_COVERAGE_RUN=daytona-filesystem COMPAT_COVERAGE_EVIDENCE=/tmp/daytona-typ
 ## Remaining gaps
 
 Custom users, Python-free images, image `WORKDIR`, native shell selection,
-streaming/cancellation, custom request timeouts, search/find/replace/watch,
+custom request/transfer timeouts, search/find,
 special permission bits and complete symlink/error/timestamp equivalence are
-not established. Home-directory accessors have unit coverage; that does not
+not established. The pinned native filesystem has no watch or signed-file-URL
+methods. Home-directory accessors have unit coverage; that does not
 supply live evidence for those methods.
 
 References: [filesystem guide](https://www.daytona.io/docs/file-system-operations/),
