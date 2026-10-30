@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { Arker } from "../src/index.js";
+import { SandboxInstance as BlaxelSandbox } from "../src/blaxel.js";
 import { Daytona } from "../src/daytona.js";
 import { Sandbox as E2BSandbox } from "../src/e2b.js";
 import { ModalClient } from "../src/modal.js";
@@ -58,8 +59,22 @@ async function testModalLive(): Promise<void> {
   }
 }
 
+async function testBlaxelLive(): Promise<void> {
+  const sandbox = await BlaxelSandbox.create({}, { arker: { apiKey } });
+  try {
+    await expectArkerVm(sandbox.id);
+    const result = await sandbox.process.exec({ command: "printf blaxel-live", waitForCompletion: true });
+    assert.equal(result.stdout, "blaxel-live");
+    await sandbox.fs.write("/tmp/arker-blaxel-live.txt", "ok");
+    assert.equal(await sandbox.fs.read("/tmp/arker-blaxel-live.txt"), "ok");
+  } finally {
+    await sandbox.delete();
+  }
+}
+
 await testDaytonaLive();
 await testE2BLive();
 await testModalLive();
+await testBlaxelLive();
 
 console.log("PASS compat live");

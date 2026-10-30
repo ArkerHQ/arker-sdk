@@ -1,0 +1,35 @@
+{
+  "base": {
+    "version": 1,
+    "existing": {"strategy": "race", "order": ["blaxel", "arker"]},
+    "create": {"strategy": "priority", "order": ["blaxel", "arker"]}
+  },
+  "cases": [
+    {"name": "default cache", "patch": {}},
+    {"name": "bounded cache", "patch": {"cache": {"path": "routes.json", "maxBytes": 4096, "maxEntries": 10}}},
+    {"name": "weighted creation", "patch": {"create": {"strategy": "weighted", "weights": {"blaxel": 90, "arker": 10}}}},
+    {"name": "boolean version", "patch": {"version": true}, "error": "unsupported router config version"},
+    {"name": "unknown version", "patch": {"version": 2}, "error": "unsupported router config version"},
+    {"name": "credential field", "patch": {"apiKey": "not-a-credential"}, "error": "unknown field apiKey"},
+    {"name": "unknown nested field", "patch": {"create": {"strategy": "priority", "order": ["arker"], "token": "not-a-credential"}}, "error": "unknown field token"},
+    {"name": "null existing", "patch": {"existing": null}, "error": "existing must be an object"},
+    {"name": "duplicate providers", "patch": {"existing": {"strategy": "race", "order": ["arker", "arker"]}}, "error": "contains duplicate providers"},
+    {"name": "empty order", "patch": {"existing": {"strategy": "race", "order": []}}, "error": "non-empty"},
+    {"name": "invalid strategy", "patch": {"existing": {"strategy": "random", "order": ["arker"]}}, "error": "strategy must be race or priority"},
+    {"name": "boolean timeout", "patch": {"existing": {"strategy": "race", "order": ["arker"], "timeoutMs": true}}, "error": "positive safe integer"},
+    {"name": "zero timeout", "patch": {"existing": {"strategy": "race", "order": ["arker"], "timeoutMs": 0}}, "error": "positive safe integer"},
+    {"name": "negative timeout", "patch": {"existing": {"strategy": "race", "order": ["arker"], "timeoutMs": -1}}, "error": "positive safe integer"},
+    {"name": "fractional timeout", "patch": {"existing": {"strategy": "race", "order": ["arker"], "timeoutMs": 0.5}}, "error": "positive safe integer"},
+    {"name": "unsafe timeout", "patch": {"existing": {"strategy": "race", "order": ["arker"], "timeoutMs": 9007199254740992}}, "error": "positive safe integer"},
+    {"name": "empty weights", "patch": {"create": {"strategy": "weighted", "weights": {}}}, "error": "weights must not be empty"},
+    {"name": "boolean weight", "patch": {"create": {"strategy": "weighted", "weights": {"arker": true}}}, "error": "positive finite number"},
+    {"name": "zero weight", "patch": {"create": {"strategy": "weighted", "weights": {"arker": 0}}}, "error": "positive finite number"},
+    {"name": "duplicate fallback", "patch": {"create": {"strategy": "weighted", "weights": {"arker": 1}, "fallback": ["arker", "arker"]}}, "error": "contains duplicate providers"},
+    {"name": "null cache", "patch": {"cache": null}, "error": "cache must be an object"},
+    {"name": "null cache path", "patch": {"cache": {"path": null}}, "error": "cache.path must be a non-empty string"},
+    {"name": "empty cache path", "patch": {"cache": {"path": ""}}, "error": "cache.path must be a non-empty string"},
+    {"name": "zero byte bound", "patch": {"cache": {"maxBytes": 0}}, "error": "positive integer"},
+    {"name": "boolean entry bound", "patch": {"cache": {"maxEntries": true}}, "error": "positive integer"},
+    {"name": "fractional entry bound", "patch": {"cache": {"maxEntries": 0.5}}, "error": "positive integer"}
+  ]
+}

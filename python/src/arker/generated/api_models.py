@@ -48,6 +48,7 @@ ErrorCode: TypeAlias = Literal[
     'idempotency_conflict',
     'expired',
     'payload_too_large',
+    'request_timeout',
     'method_not_allowed',
     'unsupported_operation',
     'unrecoverable',
@@ -266,6 +267,7 @@ class Mount:
     vm_id: str
     filesystem_id: str
     path: str
+    subpath: str | None = None
     region: str | None = None
     state: Literal['attaching', 'mounted', 'failed'] | None = None
     state_detail: str | None = None
@@ -286,6 +288,7 @@ class DeleteMountResponse:
 class MountCreateRequest:
     filesystem_id: str
     path: str | None = None
+    subpath: str | None = None
 
 
 @dataclass(frozen=True)
@@ -495,7 +498,15 @@ OpenApiOperationId: TypeAlias = Literal[
     'patchSession',
     'deleteSession',
     'attachSessionPty',
+    'openVmPort',
+    'openVmSocket',
     'mintSessionPtyTicket',
+    'createFileTransferDelegation',
+    'downloadFileTransfer',
+    'uploadFileTransfer',
+    'pauseVm',
+    'resumeVm',
+    'getVmLifecycle',
     'createMount',
     'listMounts',
     'deleteMount',
@@ -518,6 +529,11 @@ OpenApiOperationId: TypeAlias = Literal[
     'listApiKeys',
     'createApiKey',
     'revokeApiKey',
+    'setVmDeadline',
+    'forkNamed',
+    'registerDaemonActivity',
+    'stopVm',
+    'archiveVm',
 ]
 
 
@@ -571,7 +587,7 @@ RateLimiter: TypeAlias = Literal['arker', 'upstream']
 
 
 StateRequirement: TypeAlias = Literal[
-    'running', 'mutable', 'unclaimed', 'uncommitted', 'not_deleting'
+    'running', 'mutable', 'unclaimed', 'uncommitted', 'not_deleting', 'explicit_resume'
 ]
 
 
@@ -1030,6 +1046,11 @@ class PayloadTooLarge(ErrorMetadata):
 
 
 @dataclass(frozen=True)
+class RequestTimeout(ErrorMetadata):
+    code: Literal['request_timeout'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
 class MethodNotAllowed(ErrorMetadata):
     code: Literal['method_not_allowed'] = field(kw_only=True)
     details: MethodNotAllowedDetails = field(kw_only=True)
@@ -1092,6 +1113,7 @@ class ActionRequired(ErrorMetadata):
 
 @dataclass(frozen=True)
 class OperationFailed(ErrorMetadata):
+    recovery: RecoveryContext
     code: Literal['operation_failed'] = field(kw_only=True)
     details: OperationFailedDetails = field(kw_only=True)
 
@@ -1120,6 +1142,12 @@ class SyncBadRequestError(ErrorExecutionContext):
 
 
 @dataclass(frozen=True)
+class SyncForbiddenError(ErrorExecutionContext):
+    code: Literal['forbidden'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+
+
+@dataclass(frozen=True)
 class Details:
     resource: Literal['file', 'upload', 'resource']
 
@@ -1143,6 +1171,13 @@ class SyncPayloadTooLargeError(ErrorExecutionContext):
     code: Literal['payload_too_large'] = field(kw_only=True)
     message: str = field(kw_only=True)
     details: PayloadTooLargeDetails | None = None
+
+
+@dataclass(frozen=True)
+class SyncInsufficientResourcesError(ErrorExecutionContext):
+    code: Literal['insufficient_resources'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: InsufficientResourcesDetails = field(kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -1255,6 +1290,11 @@ class PayloadTooLargeErrorResponse:
 
 
 @dataclass(frozen=True)
+class RequestTimeoutErrorResponse:
+    error: RequestTimeout
+
+
+@dataclass(frozen=True)
 class MethodNotAllowedErrorResponse:
     error: MethodNotAllowed
 
@@ -1310,8 +1350,8 @@ class BadRequestOrInsufficientResourcesErrorResponse:
 
 
 @dataclass(frozen=True)
-class AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse:
-    error: AlreadyExists | Conflict | InvalidState | ResourceBusy
+class AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse:
+    error: AlreadyExists | Conflict | IdempotencyConflict | InvalidState | ResourceBusy
 
 
 @dataclass(frozen=True)
@@ -1371,6 +1411,19 @@ OutputEncoding: TypeAlias = Literal['utf-8', 'base64']
 @dataclass(frozen=True)
 class Auth:
     token: str
+
+
+@dataclass(frozen=True)
+class OutboundGuardScope:
+    hosts: list[str] | None = None
+    ips: list[str] | None = None
+    ports: list[int | list[Port]] | None = None
+
+
+@dataclass(frozen=True)
+class OutboundGuardRule:
+    type: Literal['outbound_guard']
+    allow: list[OutboundGuardScope]
 
 
 @dataclass(frozen=True)
@@ -1644,6 +1697,129 @@ class ApiKeyPoolScope:
     pool_id: str
 
 
+FileTransferOperation: TypeAlias = Literal['read', 'write']
+
+
+@dataclass(frozen=True)
+class CreateFileTransferDelegationRequest:
+    expires_at: int | None = None
+
+
+@dataclass(frozen=True)
+class FileTransferDelegation:
+    redemption_url: str
+    context: str
+    signing_key: str
+    operations: list[FileTransferOperation]
+    expires_at: int | None
+
+
+@dataclass(frozen=True)
+class FileTransferUploadEntry:
+    path: str
+    name: str
+    type: Literal['file']
+
+
+VmPauseMode: TypeAlias = Literal['full', 'filesystem']
+
+
+@dataclass(frozen=True)
+class PauseVmResponse:
+    vm_id: str
+    mode: VmPauseMode
+    state: Literal['paused']
+    already_paused: bool
+
+
+@dataclass(frozen=True)
+class ResumeVmResponse:
+    vm_id: str
+    mode: VmPauseMode
+    state: Literal['running']
+
+
+@dataclass(frozen=True)
+class VmLifecycleResponse:
+    vm_id: str
+    state: Literal['running', 'idle', 'paused', 'terminated', 'stopped', 'archived']
+    mode: VmPauseMode | None
+    customer_paused: bool
+    started_at: str
+    paused_at: str | None = None
+    terminated_at: str | None = None
+    termination_reason: Literal['deadline', 'requested', 'unknown'] | None = None
+
+
+@dataclass(frozen=True)
+class PauseVmDeadline:
+    policy_id: str
+
+
+@dataclass(frozen=True)
+class ResumeVmDeadline:
+    policy_id: str
+    timeout_seconds: int
+
+
+@dataclass(frozen=True)
+class SetVmDeadlineRequest:
+    policy_id: str
+    timeout_seconds: int
+    max_session_duration_seconds: int | None = None
+
+
+@dataclass(frozen=True)
+class SetVmDeadlineResponse:
+    vm_id: str
+    deadline_at: str
+
+
+@dataclass(frozen=True)
+class NativeSandboxUnavailableResponse:
+    sandboxId: str
+    message: str
+    code: int
+
+
+ImageArgvItem: TypeAlias = str
+
+
+ImageArgv: TypeAlias = list[ImageArgvItem]
+
+
+@dataclass(frozen=True)
+class RegisterDaemonActivityRequest:
+    pid: int
+    start_ticks: int
+    boot_id: str
+    intent_version: Literal[1] | None = None
+
+
+@dataclass(frozen=True)
+class StopVmRequest:
+    pass
+
+
+@dataclass(frozen=True)
+class StopVmResponse:
+    vm_id: str
+    state: Literal['stopped']
+    already_stopped: bool
+
+
+@dataclass(frozen=True)
+class ArchiveVmRequest:
+    pass
+
+
+@dataclass(frozen=True)
+class ArchiveVmResponse:
+    vm_id: str
+    state: Literal['archived']
+    already_archived: bool
+
+
 @dataclass(frozen=True)
 class ListVmsParameters:
     cursor: str | None = None
@@ -1657,6 +1833,10 @@ class ListVmsParameters:
     created_after: str | None = None
     created_before: str | None = None
     pool_id: str | None = None
+    metadata_filter: str | None = None
+    started_after: str | None = None
+    started_before: str | None = None
+    started_at_order: Literal['asc', 'desc'] | None = None
 
 
 @dataclass(frozen=True)
@@ -1767,6 +1947,18 @@ class DeleteSessionParameters:
 
 
 @dataclass(frozen=True)
+class OpenVmPortParameters:
+    id: str
+    port: int
+
+
+@dataclass(frozen=True)
+class OpenVmSocketParameters:
+    id: str
+    path: str
+
+
+@dataclass(frozen=True)
 class AttachSessionPtyParameters:
     id: str
     sid: str
@@ -1823,6 +2015,7 @@ class GetFilesystemParameters:
 @dataclass(frozen=True)
 class DeleteFilesystemParameters:
     filesystem_id: str
+    only_if_unmounted: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -1891,6 +2084,97 @@ class RevokeApiKeyParameters:
 
 
 @dataclass(frozen=True)
+class CreateFileTransferDelegationParameters:
+    id: str
+
+
+@dataclass(frozen=True)
+class DownloadFileTransferParameters:
+    id: str
+    ticket: str
+
+
+DownloadFileTransferResponse: TypeAlias = BadRequestErrorResponse | Any
+
+
+DownloadFileTransferResponse1: TypeAlias = UnauthorizedErrorResponse | Any
+
+
+DownloadFileTransferResponse2: TypeAlias = NotFoundErrorResponse | Any
+
+
+DownloadFileTransferResponse3: TypeAlias = InternalErrorResponse | Any
+
+
+DownloadFileTransferResponse4: TypeAlias = NativeSandboxUnavailableResponse | Any
+
+
+@dataclass(frozen=True)
+class UploadFileTransferParameters:
+    id: str
+    ticket: str
+
+
+@dataclass(frozen=True)
+class UploadFileTransferRequest:
+    file: list[bytes] | None = None
+
+
+UploadFileTransferResponse: TypeAlias = BadRequestErrorResponse | Any
+
+
+UploadFileTransferResponse1: TypeAlias = UnauthorizedErrorResponse | Any
+
+
+UploadFileTransferResponse2: TypeAlias = NotFoundErrorResponse | Any
+
+
+UploadFileTransferResponse3: TypeAlias = InternalErrorResponse | Any
+
+
+UploadFileTransferResponse4: TypeAlias = list[FileTransferUploadEntry]
+
+
+UploadFileTransferResponse5: TypeAlias = NativeSandboxUnavailableResponse | Any
+
+
+@dataclass(frozen=True)
+class PauseVmParameters:
+    id: str
+
+
+@dataclass(frozen=True)
+class ResumeVmParameters:
+    id: str
+
+
+@dataclass(frozen=True)
+class GetVmLifecycleParameters:
+    id: str
+    include_terminated: bool | None = False
+
+
+@dataclass(frozen=True)
+class SetVmDeadlineParameters:
+    id: str
+
+
+@dataclass(frozen=True)
+class RegisterDaemonActivityParameters:
+    id: str
+
+
+@dataclass(frozen=True)
+class StopVmParameters:
+    id: str
+
+
+@dataclass(frozen=True)
+class ArchiveVmParameters:
+    id: str
+
+
+@dataclass(frozen=True)
 class PolicyAction1:
     rewrite: Rewrite | None = None
     gate: Gate | None = None
@@ -1945,9 +2229,11 @@ SyncReadResponse: TypeAlias = SyncReadInlineResponse | SyncReadPresignedResponse
 
 SyncFileError: TypeAlias = (
     SyncBadRequestError
+    | SyncForbiddenError
     | SyncNotFoundError
     | SyncConflictError
     | SyncPayloadTooLargeError
+    | SyncInsufficientResourcesError
     | SyncUnsupportedOperationError
     | SyncUnavailableError
     | SyncInternalError
@@ -2054,6 +2340,27 @@ class ListApiKeysResponse:
 
 
 @dataclass(frozen=True)
+class PauseVmRequest:
+    mode: VmPauseMode | None = None
+    deadline: PauseVmDeadline | None = None
+
+
+@dataclass(frozen=True)
+class ResumeVmRequest:
+    mode: VmPauseMode | None = None
+    deadline: ResumeVmDeadline | None = None
+
+
+@dataclass(frozen=True)
+class ImageConfigOverrides:
+    env: dict[str, str] | None = None
+    entrypoint: ImageArgv | None = None
+    cmd: ImageArgv | None = None
+    user: str | None = None
+    workdir: str | None = None
+
+
+@dataclass(frozen=True)
 class PolicyEntry:
     type: Literal['outbound', 'inbound']
     action: PolicyAction
@@ -2121,7 +2428,10 @@ class PaymentRequiredErrorResponse:
 
 @dataclass(frozen=True)
 class PolicyUpdate:
-    rules: dict[str, PolicyRule | ScheduleRule | LifecycleRule | None] | None = None
+    rules: (
+        dict[str, PolicyRule | ScheduleRule | LifecycleRule | OutboundGuardRule | None]
+        | None
+    ) = None
     secrets: dict[str, str | None] | None = None
     policies: list[PolicyEntry] | None = None
 
@@ -2142,6 +2452,7 @@ ErrorBody: TypeAlias = (
     | IdempotencyConflict
     | Expired
     | PayloadTooLarge
+    | RequestTimeout
     | MethodNotAllowed
     | UnsupportedOperation
     | Unrecoverable
@@ -2173,11 +2484,51 @@ class PolicyWriteRequest:
 
 @dataclass(frozen=True)
 class PolicyDoc:
+    outbound_guards: dict[str, OutboundGuardRule] | None = None
     policies: list[PolicyEntry] | None = None
     secrets: dict[str, str] | None = None
     hostname: str | None = None
     mitm_domains: list[str] | None = None
     warnings: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class RunRequest:
+    session_id: str | None = None
+    session_idx: int | None = None
+    command: str | None = None
+    timeout: int | None = None
+    time_to_background: int | None = None
+    background: bool | None = None
+    queueing_timeout: int | None = None
+    end_symbol: str | None = 'auto'
+    end_after_all_subprocesses: bool | None = None
+    signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
+    policies: PolicyUpdate | None = None
+
+
+SyncWriteResult: TypeAlias = (
+    SyncChunkWriteResult | SyncPresignedWriteRequestResult | SyncCommitWriteResult
+)
+
+
+@dataclass(frozen=True)
+class VmPolicies:
+    outbound_guards: dict[str, OutboundGuardRule] | None = None
+    rules: PolicyRules | None = None
+    secrets: dict[str, str] | None = None
+    mitm_domains: list[str] | None = None
+    warnings: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class PolicyPreconditions:
+    rules: (
+        dict[str, PolicyRule | ScheduleRule | LifecycleRule | OutboundGuardRule | None]
+        | None
+    ) = None
+    secrets: dict[str, str | None] | None = None
+    snapshot: VmPolicies | None = None
 
 
 @dataclass(frozen=True)
@@ -2204,6 +2555,11 @@ class ForkRequest1:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    metadata: dict[str, Any] | None = None
+    immutable: bool | None = None
+    image_config: ImageConfigOverrides | None = None
+    start_image: bool | None = None
+    source_policies: VmPolicies | None = None
 
 
 @dataclass(frozen=True)
@@ -2230,6 +2586,11 @@ class ForkRequest2:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    metadata: dict[str, Any] | None = None
+    immutable: bool | None = None
+    image_config: ImageConfigOverrides | None = None
+    start_image: bool | None = None
+    source_policies: VmPolicies | None = None
 
 
 @dataclass(frozen=True)
@@ -2256,6 +2617,11 @@ class ForkRequest3:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    metadata: dict[str, Any] | None = None
+    immutable: bool | None = None
+    image_config: ImageConfigOverrides | None = None
+    start_image: bool | None = None
+    source_policies: VmPolicies | None = None
 
 
 @dataclass(frozen=True)
@@ -2282,6 +2648,11 @@ class ForkRequest4:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    metadata: dict[str, Any] | None = None
+    immutable: bool | None = None
+    image_config: ImageConfigOverrides | None = None
+    start_image: bool | None = None
+    source_policies: VmPolicies | None = None
 
 
 @dataclass(frozen=True)
@@ -2308,6 +2679,11 @@ class ForkRequest5:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    metadata: dict[str, Any] | None = None
+    immutable: bool | None = None
+    image_config: ImageConfigOverrides | None = None
+    start_image: bool | None = None
+    source_policies: VmPolicies | None = None
 
 
 @dataclass(frozen=True)
@@ -2334,6 +2710,11 @@ class ForkRequest6:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    metadata: dict[str, Any] | None = None
+    immutable: bool | None = None
+    image_config: ImageConfigOverrides | None = None
+    start_image: bool | None = None
+    source_policies: VmPolicies | None = None
 
 
 ForkRequest: TypeAlias = (
@@ -2344,43 +2725,6 @@ ForkRequest: TypeAlias = (
     | ForkRequest5
     | ForkRequest6
 )
-
-
-@dataclass(frozen=True)
-class RunRequest:
-    session_id: str | None = None
-    session_idx: int | None = None
-    command: str | None = None
-    timeout: int | None = None
-    time_to_background: int | None = None
-    background: bool | None = None
-    queueing_timeout: int | None = None
-    end_symbol: str | None = 'auto'
-    end_after_all_subprocesses: bool | None = None
-    signal: Literal['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP'] | None = None
-    policies: PolicyUpdate | None = None
-
-
-SyncWriteResult: TypeAlias = (
-    SyncChunkWriteResult | SyncPresignedWriteRequestResult | SyncCommitWriteResult
-)
-
-
-@dataclass(frozen=True)
-class PatchVmRequest:
-    description: str | None = None
-    immutable: bool | None = None
-    resources: ResourcesInput | None = None
-    ssh_public_keys: SshKeysUpdate | list[str] | None = None
-    policies: PolicyUpdate | None = None
-
-
-@dataclass(frozen=True)
-class VmPolicies:
-    rules: PolicyRules | None = None
-    secrets: dict[str, str] | None = None
-    mitm_domains: list[str] | None = None
-    warnings: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -2413,6 +2757,10 @@ class Vm:
     platform: str | None = None
     compatible_platforms: list[CompatiblePlatform] | None = None
     pool_id: str | None = None
+    metadata: dict[str, Any] | None = None
+    started_at: str | None = None
+    paused_at: str | None = None
+    customer_paused: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -2426,6 +2774,16 @@ class SyncWriteResponse:
     ok: bool
     op: Literal['write']
     results: list[SyncWriteResult]
+
+
+@dataclass(frozen=True)
+class PatchVmRequest:
+    description: str | None = None
+    immutable: bool | None = None
+    resources: ResourcesInput | None = None
+    ssh_public_keys: SshKeysUpdate | list[str] | None = None
+    policies: PolicyUpdate | None = None
+    policy_preconditions: PolicyPreconditions | None = None
 
 
 SyncResponse: TypeAlias = SyncReadResponse | SyncWriteResponse | SyncManifestResponse

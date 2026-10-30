@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { daytona as createDaytonaProvider } from "@computesdk/daytona";
 import { e2b as createE2BProvider } from "@computesdk/e2b";
 import { modal as createModalProvider } from "@computesdk/modal";
+import { blaxel as createBlaxelProvider } from "@computesdk/blaxel";
 import { compute } from "computesdk";
 
 import { Daytona } from "../src/daytona.js";
+import { Blaxel } from "../src/blaxel.js";
 import { Sandbox as E2BSandbox } from "../src/e2b.js";
 import { ModalClient } from "../src/modal.js";
 
@@ -74,8 +76,31 @@ async function testModalFallback(): Promise<void> {
   }
 }
 
+async function testBlaxelFallback(): Promise<void> {
+  const apiKey = process.env.BL_API_KEY;
+  const workspace = process.env.BL_WORKSPACE;
+  if (!apiKey || !workspace) {
+    console.log("SKIP blaxel fallback: set BL_API_KEY and BL_WORKSPACE");
+    return;
+  }
+
+  const native = compute({ provider: createBlaxelProvider({ apiKey, workspace }) });
+  const nativeSandbox = await native.sandbox.create({ timeout: 300_000 });
+  try {
+    const shim = new Blaxel({ apiKey, workspace, arker: { apiKey: arkerApiKey } });
+    const fetched = await shim.get(nativeSandbox.sandboxId);
+    assert.equal(fetched.id, nativeSandbox.sandboxId);
+    const result = await fetched.process.exec({ command: "printf blaxel-fallback", waitForCompletion: true });
+    assert.equal(result.stdout, "blaxel-fallback");
+  } finally {
+    await nativeSandbox.destroy();
+  }
+}
+
 await testDaytonaFallback();
 await testE2BFallback();
 await testModalFallback();
+await testBlaxelFallback();
 
 console.log("PASS compat fallback live");
+process.exit(0);

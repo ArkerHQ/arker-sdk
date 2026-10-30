@@ -1,0 +1,16 @@
+{
+  "version": "0.10.2",
+  "port": 49983,
+  "license": "Apache-2.0",
+  "source": "https://github.com/e2b-dev/runtime",
+  "artifacts": {
+    "amd64": {
+      "url": "https://storage.googleapis.com/e2b-artifact-binaries/envd/v0.10.2/envd",
+      "sha256": "2bf41e6c44df89f5bea59c6d7eaf47aacc0e59b9e6957f95d3a8c6b8c9f1e7a2"
+    },
+    "arm64": {
+      "url": "https://storage.googleapis.com/e2b-artifact-binaries/envd/v0.10.2/arm64/envd",
+      "sha256": "c4bc9e463b7a89d28ae79e1740f7af8d2802ae06c164b25d3ad49e68e9c2a8d6"
+    }
+  }
+}

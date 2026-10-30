@@ -41,6 +41,8 @@ from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from pydantic import TypeAdapter, ValidationError
 
+from ._port import PortStream
+from ._request_timeout import has_transport_timeout, request_executor, request_wait, transport_timeout
 from .generated.api_models import (
     ApiKeyScope,
     BackgroundRunResponse,
@@ -49,6 +51,7 @@ from .generated.api_models import (
     CreatedApiKey,
     CreatePoolRequest,
     CreateSessionRequest,
+    DeleteFilesystemParameters,
     DeleteFilesystemResponse,
     DeleteMountResponse,
     DeleteSessionResponse,
@@ -102,6 +105,7 @@ from .generated.api_models import (
     UpdatePoolRequest,
     Vm,
     VmNetwork,
+    VmPolicies,
     VmResources,
     WhoamiResponse,
 )
@@ -332,6 +336,7 @@ class Arker:
 
         # base_url fully determines routing, so provider/region are ignored when it is set.
         base_url = base_url or _env("ARKER_BASE_URL")
+        self._explicit_base_url = bool(base_url)
         if base_url:
             provider = region = None
         else:
@@ -404,6 +409,9 @@ class Arker:
         return self._fork(options, base_url=self.base_url)
 
     def _fork(self, options: dict[str, Any], *, base_url: str) -> VM:
+        if options.get("policies") is not None:
+            options["policies"] = _drop_none(_policy_update(options["policies"]))
+        request_timeout = options.pop("request_timeout", _UNSET)
         queueing_timeout = options.get("queueing_timeout")
         # Headers, not contract fields: pop both before the body is built, or
         # the server's validator rejects the unknown keys and every fork 400s.
@@ -416,6 +424,7 @@ class Arker:
                 base_url=base_url,
                 extra_headers=({"Idempotency-Key": idempotency_key} if idempotency_key else None),
                 max_queueing_s=(queueing_timeout if type(queueing_timeout) is int else None),
+                request_timeout=request_timeout,
                 preserve_nulls=True,
             )
         )
@@ -476,6 +485,11 @@ class Arker:
         org_id: str | None = None,
         public: bool | None = None,
         state: str | None = None,
+        metadata_filter: dict[str, Any] | None = None,
+        started_after: str | None = None,
+        started_before: str | None = None,
+        started_at_order: Literal["asc", "desc"] | None = None,
+        request_timeout: float | _UnsetType | None = _UNSET,
     ) -> VmList:
         """Admin call - goes through the control plane so it can
         aggregate across providers and regions.
@@ -488,14 +502,27 @@ class Arker:
             org_id=org_id,
             public=public,
             state=state,
+            metadata_filter=json.dumps(metadata_filter) if metadata_filter is not None else None,
         )
-        path = _build_query("/v1/vms", parameters)
-        payload = self._request("GET", path, base_url=self._control_base_url)
+        path = _build_query(
+            "/v1/vms",
+            {
+                **_drop_none(parameters),
+                "started_after": started_after,
+                "started_before": started_before,
+                "started_at_order": started_at_order,
+            },
+        )
+        payload = self._request("GET", path, base_url=self._control_base_url, request_timeout=request_timeout)
         vms = []
         for item in payload.get("vms", []):
             info = _vm_info(item)
             placed = info.provider and info.region
-            base_url = _compute_base_url(info.provider, info.region) if placed else self.base_url
+            base_url = (
+                _compute_base_url(info.provider, info.region)
+                if placed and not self._explicit_base_url
+                else self.base_url
+            )
             vms.append(VM(self, info.vm_id, base_url, info))
         return VmList(vms=vms, next_cursor=_optional_str(payload.get("next_cursor")))
 
@@ -552,9 +579,9 @@ class Arker:
         payload = self._request("GET", "/v1/whoami", base_url=self._control_base_url)
         return _decode_model(WhoamiResponse, payload)
 
-    def get_vm(self, vm_id: str) -> VM:
+    def get_vm(self, vm_id: str, *, request_timeout: float | _UnsetType | None = _UNSET) -> VM:
         base_url = self.base_url
-        info = _vm_info(self._request("GET", _vm_path(vm_id), base_url=base_url))
+        info = _vm_info(self._request("GET", _vm_path(vm_id), base_url=base_url, request_timeout=request_timeout))
         return VM(self, vm_id, base_url, info)
 
     # ── Filesystems (org-scoped, control-plane) ─────────────────────────
@@ -584,10 +611,16 @@ class Arker:
             )
         )
 
-    def delete_filesystem(self, filesystem_id: str) -> DeleteFilesystemResponse:
+    def delete_filesystem(
+        self, filesystem_id: str, *, only_if_unmounted: bool | None = None
+    ) -> DeleteFilesystemResponse:
         payload = self._request(
             "DELETE",
-            f"/v1/filesystems/{_segment(filesystem_id)}",
+            _build_query(
+                f"/v1/filesystems/{_segment(filesystem_id)}",
+                DeleteFilesystemParameters(filesystem_id=filesystem_id, only_if_unmounted=only_if_unmounted),
+                path_fields={"filesystem_id"},
+            ),
             base_url=self.base_url,
         )
         return _decode_model(DeleteFilesystemResponse, payload)
@@ -674,6 +707,7 @@ class Arker:
         max_queueing_s: int | None = None,
         preserve_nulls: bool = False,
         retry_network_failures: bool | None = None,
+        request_timeout: float | _UnsetType | None = _UNSET,
     ) -> dict[str, Any]:
         return _request_json(
             method,
@@ -686,7 +720,12 @@ class Arker:
             max_queueing_s=max_queueing_s,
             preserve_nulls=preserve_nulls,
             retry_network_failures=retry_network_failures,
+            request_timeout=request_timeout,
         )
+
+    def _download(self, url: str, *, request_timeout: float | _UnsetType | None = _UNSET):
+        timeout = transport_timeout(300) if request_timeout is _UNSET else request_timeout
+        return _http_client.get(url, timeout=timeout)
 
     def _retry_delay(self, attempt: int, error: ArkerError | None = None) -> float:
         return _retry_delay(self._retry, attempt, error)
@@ -700,6 +739,7 @@ class VM:
     pool_id: str | None
     name: str | None
     description: str | None
+    metadata: dict[str, Any] | None
     state: str | None
     owner_org_id: str | None
     created_at: str | None
@@ -708,11 +748,16 @@ class VM:
     provider: str | None
     network: VmNetwork | None
     resources: VmResources | None
+    vcpu_count: int | None
+    memory_mib: int | None
+    disk_mib: int | None
     max_vcpus: int | None
     max_memory_mib: int | None
     min_memory_mib: int | None
     last_active_at: str | None
     sessions: list[Session] | None
+    hostname: str | None
+    policies: VmPolicies | None
 
     def __init__(
         self,
@@ -726,13 +771,19 @@ class VM:
         self.base_url = base_url or client.base_url
         for f in dataclasses.fields(Vm):
             setattr(self, f.name, getattr(data, f.name) if data is not None else None)
+        # Preserve public handle attributes while the wire contract nests resources.
+        self.vcpu_count = self.resources.vcpu if self.resources is not None else None
+        self.memory_mib = self.resources.memory_mib if self.resources is not None else None
+        self.disk_mib = self.resources.disk_mib if self.resources is not None else None
 
     def __repr__(self) -> str:
         return f"VM(id={self.id!r}, name={self.name!r}, state={self.state!r})"
 
-    def refresh(self) -> VM:
+    def refresh(self, *, request_timeout: float | _UnsetType | None = _UNSET) -> VM:
         """Re-fetch this VM and return a fresh, fully-populated handle."""
-        info = _vm_info(self._client._request("GET", _vm_path(self.id), base_url=self.base_url))
+        info = _vm_info(
+            self._client._request("GET", _vm_path(self.id), base_url=self.base_url, request_timeout=request_timeout)
+        )
         return VM(self._client, self.id, self.base_url, info)
 
     def fork(self, **options: Any) -> VM:
@@ -844,7 +895,7 @@ class VM:
             end_symbol=end_symbol,
             end_after_all_subprocesses=end_after_all_subprocesses,
             signal=signal,
-            policies=policies,
+            policies=_policy_update(policies),
         )
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
         result = _run_response(
@@ -881,7 +932,7 @@ class VM:
         delay = RUN_POLL_INITIAL_S
         consecutive_failures = 0
         while True:
-            time.sleep(delay)
+            request_wait(delay)
             try:
                 run = self.get_run(run_id)
             except ArkerError as e:
@@ -913,6 +964,7 @@ class VM:
         self,
         *,
         vcpu: int | None = None,
+        vcpu_count: int | None = None,
         memory_mib: int | None = None,
         disk_mib: int | None = None,
         vgpu: float | None = None,
@@ -949,6 +1001,9 @@ class VM:
         idle.
 
         Returns the updated :class:`Vm`."""
+        if vcpu is not None and vcpu_count is not None:
+            raise TypeError("Pass vcpu, not both vcpu and vcpu_count")
+        vcpu = vcpu if vcpu is not None else vcpu_count
         resources: ResourcesInput | None = None
         if vcpu is not None or memory_mib is not None or disk_mib is not None or vgpu is not None:
             resources = ResourcesInput(
@@ -976,8 +1031,10 @@ class VM:
         payload = self._client._request("PATCH", _vm_path(self.id), body, base_url=self.base_url)
         return _vm_info(payload)
 
-    def delete(self) -> DeleteVmResponse:
-        payload = self._client._request("DELETE", _vm_path(self.id), base_url=self.base_url)
+    def delete(self, *, request_timeout: float | _UnsetType | None = _UNSET) -> DeleteVmResponse:
+        payload = self._client._request(
+            "DELETE", _vm_path(self.id), base_url=self.base_url, request_timeout=request_timeout
+        )
         return _decode_model(DeleteVmResponse, payload)
 
     def get_policies(self) -> PolicyDoc:
@@ -1002,7 +1059,9 @@ class VM:
                 ],
             })
         """
-        payload = self._client._request("PUT", f"{_vm_path(self.id)}/policies", doc, base_url=self.base_url)
+        payload = self._client._request(
+            "PUT", f"{_vm_path(self.id)}/policies", _policy_update(doc), base_url=self.base_url
+        )
         return _decode_model(PolicyDoc, payload)
 
     def sync(self, path: str, data: bytes | str | None = None) -> bytes | None:
@@ -1032,9 +1091,30 @@ class VM:
             return _decode_bytes(response.content, response.encoding)
         if not isinstance(response, SyncReadPresignedResponse):
             raise ArkerError("internal", "unrecognized sync read response", 200)
-        signed = _http_client.get(response.presigned_url, timeout=300)
+        signed = self._client._download(response.presigned_url)
         signed.raise_for_status()
         return signed.content
+
+    def _sync_read_chunks(self, path: str, chunk_size: int = 64 * 1024):
+        request = SyncReadOperationRequest(op="read", path=path)
+        payload = self._client._request(
+            "POST",
+            f"{_vm_path(self.id)}/sync",
+            request,
+            base_url=self.base_url,
+            retry_network_failures=True,
+        )
+        response = _decode_value(SyncReadResponse, payload)
+        if isinstance(response, SyncReadInlineResponse):
+            data = _decode_bytes(response.content, response.encoding)
+            for offset in range(0, len(data), chunk_size):
+                yield data[offset : offset + chunk_size]
+        elif isinstance(response, SyncReadPresignedResponse):
+            with _http_client.stream("GET", response.presigned_url, timeout=transport_timeout(300)) as transfer:
+                transfer.raise_for_status()
+                yield from transfer.iter_bytes(chunk_size=chunk_size)
+        else:
+            raise ArkerError("internal", "unrecognized sync read response", 200)
 
     def _sync_write_inline(self, path: str, data: bytes) -> None:
         self._sync_write_chunks(path, len(data), lambda start, length: data[start : start + length])
@@ -1277,9 +1357,9 @@ class VM:
         payload = self._client._request("GET", path, base_url=self.base_url)
         return _decode_model(ListMountsResponse, payload)
 
-    def create_mount(self, *, filesystem_id: str, path: str | None = None) -> Mount:
+    def create_mount(self, *, filesystem_id: str, path: str | None = None, subpath: str | None = None) -> Mount:
         """Bind a filesystem into this VM at ``path``."""
-        request = MountCreateRequest(filesystem_id=filesystem_id, path=path)
+        request = MountCreateRequest(filesystem_id=filesystem_id, path=path, subpath=subpath)
         payload = self._client._request("POST", f"{_vm_path(self.id)}/mounts", request, base_url=self.base_url)
         return _mount(payload)
 
@@ -1395,6 +1475,56 @@ class VM:
             base_url=self.base_url,
         )
         return _decode_model(PatchSessionResponse, payload)
+
+    def connect_port(self, port: int, *, timeout: float = 300) -> PortStream:
+        """Connect to a VM-local TCP port without exposing public ingress."""
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            raise ValueError("port must be an integer from 1 through 65535")
+        return self._connect_private_stream(f"/ports/{port}", timeout=timeout)
+
+    def connect_unix(self, path: str, *, timeout: float = 300) -> PortStream:
+        """Open an owner-authenticated guest Unix socket without public ingress."""
+        if not isinstance(path, str) or not path.startswith("/") or "\0" in path or len(path.encode("utf-8")) > 107:
+            raise ValueError("socket path must be absolute, NUL-free, and at most 107 UTF-8 bytes")
+        return self._connect_private_stream("/sockets?" + urllib.parse.urlencode({"path": path}), timeout=timeout)
+
+    def _connect_private_stream(self, endpoint: str, *, timeout: float) -> PortStream:
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
+            raise ValueError("timeout must be finite and positive")
+        import websocket
+
+        parsed = urllib.parse.urlsplit(self.base_url + _vm_path(self.id) + endpoint)
+        if parsed.scheme not in {"https", "http"}:
+            raise ValueError("private port requires an HTTP or HTTPS API URL")
+        url = urllib.parse.urlunsplit(parsed._replace(scheme="wss" if parsed.scheme == "https" else "ws"))
+        try:
+            connection = websocket.create_connection(
+                url,
+                header=[f"Authorization: Bearer {self._client._api_key}"],
+                subprotocols=["vm-port.v1"],
+                timeout=timeout,
+                redirect_limit=0,
+                enable_multithread=True,
+            )
+        except websocket.WebSocketBadStatusException as error:
+            try:
+                payload = json.loads(error.resp_body)
+            except (TypeError, ValueError):
+                raise ArkerError(
+                    "internal", "Private port upgrade returned a malformed error", error.status_code
+                ) from error
+            parsed_error = _extract_error(payload, error.status_code)
+            if parsed_error is None:
+                raise ArkerError(
+                    "internal", "Private port upgrade returned a malformed error", error.status_code
+                ) from error
+            raise parsed_error from error
+        return PortStream(connection)
 
     # ── Interactive PTY ────────────────────────────────────────────────
     def connect_pty(
@@ -1659,8 +1789,14 @@ _http_client = httpx.Client(
 atexit.register(_http_client.close)
 
 
-def _http(method: str, url: str, headers: dict[str, str], data: bytes | None) -> tuple[int, bytes]:
-    with _http_client.stream(method, url, headers=headers, content=data, timeout=REQUEST_TIMEOUT_S) as response:
+def _http(
+    method: str, url: str, headers: dict[str, str], data: bytes | None, *, timeout: float | _UnsetType | None = _UNSET
+) -> tuple[int, bytes]:
+    effective_timeout = transport_timeout(REQUEST_TIMEOUT_S) if timeout is _UNSET else timeout
+    executor = request_executor()
+    if executor is not None:
+        return executor(method, url, headers, data, effective_timeout)
+    with _http_client.stream(method, url, headers=headers, content=data, timeout=effective_timeout) as response:
         try:
             content = response.read()
         except httpx.RequestError:
@@ -1682,6 +1818,7 @@ def _request_json(
     max_queueing_s: int | None = None,
     preserve_nulls: bool = False,
     retry_network_failures: bool | None = None,
+    request_timeout: float | _UnsetType | None = _UNSET,
 ) -> dict[str, Any]:
     url = base_url + path
     headers = {"authorization": f"Bearer {api_key}"} if api_key else {}
@@ -1700,24 +1837,37 @@ def _request_json(
     # queueing_timeout swaps the retry budget from attempt count to wall-clock
     # window; retry=False (attempts = 1) still means exactly one request.
     deadline = time.monotonic() + max_queueing_s if max_queueing_s and retry.attempts > 1 else None
+    request_deadline = time.monotonic() + request_timeout if isinstance(request_timeout, (int, float)) else None
+    if request_deadline is not None:
+        deadline = min(deadline, request_deadline) if deadline is not None else request_deadline
     should_retry_network_failures = (
         method.upper() == "GET" if retry_network_failures is None else retry_network_failures
     )
 
     attempt = 0
     while True:
-        if deadline is not None and attempt > 0 and isinstance(payload_dict, dict):
+        if max_queueing_s and deadline is not None and attempt > 0 and isinstance(payload_dict, dict):
             # Retries re-send the remaining window.
             remaining = max(1, math.ceil(deadline - time.monotonic()))
             data = json.dumps({**payload_dict, "queueing_timeout": remaining}).encode("utf-8")
         try:
-            status, raw = _http(method, url, headers, data)
+            if request_timeout is _UNSET:
+                status, raw = _http(method, url, headers, data)
+            else:
+                remaining_timeout = (
+                    max(0, request_deadline - time.monotonic()) if request_deadline is not None else None
+                )
+                status, raw = _http(method, url, headers, data, timeout=remaining_timeout)
         except httpx.RequestError as error:
+            if isinstance(error, httpx.TimeoutException) and (request_timeout is not _UNSET or has_transport_timeout()):
+                raise
             if not should_retry_network_failures:
                 raise _unknown_outcome_error(method, path, error) from error
             delay = _retry_delay(retry, attempt)
-            if _can_retry_again(retry, attempt, deadline, delay):
-                time.sleep(delay)
+            if _can_retry_again(retry, attempt, deadline, delay) and (
+                (max_queueing_s and retry.attempts > 1) or attempt < retry.attempts - 1
+            ):
+                request_wait(delay)
                 attempt += 1
                 continue
             raise ArkerError("unavailable", str(error), 0) from error
@@ -1729,8 +1879,10 @@ def _request_json(
             status, parsed_error, replay_safe=should_retry_network_failures or bool(headers.get("Idempotency-Key"))
         ):
             delay = _retry_delay(retry, attempt, parsed_error)
-            if _can_retry_again(retry, attempt, deadline, delay):
-                time.sleep(delay)
+            if _can_retry_again(retry, attempt, deadline, delay) and (
+                (max_queueing_s and retry.attempts > 1) or attempt < retry.attempts - 1
+            ):
+                request_wait(delay)
                 attempt += 1
                 continue
 
@@ -1790,7 +1942,11 @@ def _build_query(
     values = _drop_none(parameters)
     if not isinstance(values, dict):
         raise TypeError("operation parameters must serialize to an object")
-    pairs = [(key, str(value)) for key, value in values.items() if key not in path_fields]
+    pairs = [
+        (key, str(value).lower() if isinstance(value, bool) else str(value))
+        for key, value in values.items()
+        if key not in path_fields
+    ]
     qs = urllib.parse.urlencode(pairs)
     return f"{path}?{qs}" if qs else path
 
@@ -1864,7 +2020,7 @@ def _clamp_pty_dimension(value: int) -> int:
         n = int(value)
     except (TypeError, ValueError):
         return 1
-    return max(1, min(1000, n))
+    return max(1, min(65535, n))
 
 
 #: Environment that makes a PTY emit PLAIN TEXT instead of colour, cursor
@@ -1921,6 +2077,17 @@ def _policy_update(policies: Any) -> Any:
         policies = {field.name: getattr(policies, field.name) for field in dataclasses.fields(policies)}
     if not isinstance(policies, dict):
         return policies
+    policies = dict(policies)
+    guards = policies.pop("outbound_guards", None)
+    if guards:
+        if not isinstance(guards, dict):
+            raise TypeError("outbound_guards must be a rule map")
+        rules = policies.get("rules") or {}
+        if not isinstance(rules, dict):
+            raise TypeError("rules must be a rule map")
+        # Explicit changes, including null removals, take precedence over the
+        # floor read back from the VM. Never discard unedited floors.
+        policies["rules"] = {**guards, **rules}
     return {
         key: {name: _EXPLICIT_NULL if item is None else item for name, item in value.items()}
         if key in ("rules", "secrets") and isinstance(value, dict)

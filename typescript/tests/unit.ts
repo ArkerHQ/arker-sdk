@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { FakeFetch } from "./helpers/scripted-fetch.js";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
@@ -16,54 +17,6 @@ import { runPollBudgetMs } from "../src/internal/run-poll.js";
 import { parseDockerfile, DockerfileError } from "../src/buildSpec.js";
 import { applySteps, BuildError, type BuildTarget } from "../src/build.js";
 import { isExpectedSurfaceStub } from "./helpers/surface-errors.js";
-
-type FetchCall = {
-  url: string;
-  method: string;
-  body?: string;
-  headers: Record<string, string>;
-};
-
-type FetchScript = {
-  predicate: (method: string, url: string) => boolean;
-  response: Response | Error;
-};
-
-class FakeFetch {
-  readonly calls: FetchCall[] = [];
-  private readonly script: FetchScript[] = [];
-
-  addJson(predicate: FetchScript["predicate"], status: number, body: unknown): void {
-    this.script.push({
-      predicate,
-      response: new Response(JSON.stringify(body), {
-        status,
-        headers: { "content-type": "application/json" },
-      }),
-    });
-  }
-
-  addNetworkError(predicate: FetchScript["predicate"], message = "response lost"): void {
-    this.script.push({ predicate, response: new TypeError(message) });
-  }
-
-  fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    const method = init?.method ?? "GET";
-    const body = typeof init?.body === "string" ? init.body : undefined;
-    const headers: Record<string, string> = {};
-    for (const [key, value] of Object.entries((init?.headers ?? {}) as Record<string, string>)) {
-      headers[key.toLowerCase()] = value;
-    }
-    this.calls.push({ url, method, body, headers });
-
-    const index = this.script.findIndex((entry) => entry.predicate(method, url));
-    assert.notEqual(index, -1, `no scripted response for ${method} ${url}`);
-    const response = this.script.splice(index, 1)[0]!.response;
-    if (response instanceof Error) throw response;
-    return response;
-  };
-}
 
 class FakeWebSocket {
   binaryType = "";
@@ -605,6 +558,7 @@ async function testConfiguredPlacementRoutesNamedSourcesToMainEndpoint(): Promis
 
   assert.equal(arker.baseUrl, "https://provider-one-region-one.arker.ai/api");
   assert.equal(vm.baseUrl, "https://provider-one-region-one.arker.ai/api");
+  assert.equal(new Arker({ apiKey: "k", baseUrl: `https://test.invalid/api${"/".repeat(10_000)}` }).baseUrl, "https://test.invalid/api");
 }
 
 function testArbitraryProviderBuildsEndpoint(): void {
@@ -789,7 +743,8 @@ async function testListedVmUsesItsPlacementEndpoint(): Promise<void> {
 
   const arker = new Arker({
     apiKey: "ark_live_test",
-    baseUrl: "https://fallback.invalid/api",
+    provider: "provider-one",
+    region: "region-one",
     fetch: fetch.fetch,
     retry: false,
   });
@@ -801,11 +756,50 @@ async function testListedVmUsesItsPlacementEndpoint(): Promise<void> {
 function testExplicitVmHandleUsesPlacementEndpoint(): void {
   const arker = new Arker({
     apiKey: "ark_live_test",
-    baseUrl: "https://fallback.invalid/api",
+    provider: "provider-one",
+    region: "region-one",
     retry: false,
   });
   const vm = arker.vm("vm_placed", { provider: "provider-two", region: "region-two" });
   assert.equal(vm.baseUrl, "https://provider-two-region-two.arker.ai/api");
+}
+
+async function testCustomApiOriginSurvivesVmHydration(): Promise<void> {
+  const previous = process.env.ARKER_BASE_URL;
+  try {
+    for (const fromEnvironment of [false, true]) {
+      const baseUrl = "https://custom.example/api";
+      if (fromEnvironment) process.env.ARKER_BASE_URL = baseUrl;
+      else delete process.env.ARKER_BASE_URL;
+      const fetch = new FakeFetch();
+      const row = {
+        vm_id: "vm_placed", owner_org_id: "org_1", created_at: "now",
+        provider: "provider-two", region: "region-two",
+      };
+      fetch.addJson((method, url) => method === "GET" && url === "https://control.example/api/v1/vms",
+        200, { vms: [row] });
+      for (let i = 0; i < 3; i++) {
+        fetch.addJson((method, url) => method === "GET" && url === `${baseUrl}/v1/vms/vm_placed`,
+          200, row);
+      }
+      const arker = new Arker({
+        apiKey: "ark_live_test", fetch: fetch.fetch, retry: false,
+        ...(fromEnvironment ? {} : { baseUrl: `${baseUrl}/` }),
+        controlBaseUrl: "https://control.example/api",
+        provider: "provider-one", region: "region-one",
+      });
+      const { vms } = await arker.listVms();
+      assert.equal(vms[0]!.baseUrl, baseUrl);
+      await vms[0]!.refresh();
+      await arker.vm(row.vm_id, row).refresh();
+      await arker.getVm(row.vm_id, row);
+      assert.equal(fetch.calls.length, 4);
+      assert.ok(fetch.calls.slice(1).every(call => call.url.startsWith(`${baseUrl}/`)));
+    }
+  } finally {
+    if (previous === undefined) delete process.env.ARKER_BASE_URL;
+    else process.env.ARKER_BASE_URL = previous;
+  }
 }
 
 async function testListRunsUsesControlPlaneAndFilters(): Promise<void> {
@@ -1106,6 +1100,47 @@ async function testSyncWriteDoesNotRetryAmbiguousNetworkFailure(): Promise<void>
   assert.equal(fetch.calls.length, 1);
 }
 
+async function testSecretSyncMarksEveryChunkIncludingEmptyFiles(): Promise<void> {
+  for (const data of [new Uint8Array(0), new Uint8Array(4 * 1024 * 1024 + 1), "private-fixture"]) {
+    const fetch = new FakeFetch();
+    const match = (method: string, url: string) => method === "POST" && url.endsWith("/sync");
+    const chunks = typeof data === "string" || data.length === 0 ? 1 : 2;
+    for (let index = 0; index < chunks; index++) {
+      fetch.addJson(match, 200, { results: [{ complete: index === chunks - 1, written: index === chunks - 1 }] });
+    }
+    await client(fetch).vm("vm_1").sync("/run/credential", data, { isSecret: true });
+    assert.equal(fetch.calls.length, chunks);
+    for (const call of fetch.calls) {
+      const write = JSON.parse(call.body!).writes[0];
+      assert.equal(write.is_secret, true);
+      assert.equal(write.path, "/run/credential");
+    }
+  }
+}
+
+await testSecretSyncMarksEveryChunkIncludingEmptyFiles();
+
+async function testSyncSnapshotsSecretClassificationAcrossChunks(): Promise<void> {
+  for (const initial of [true, false]) {
+    const options = { isSecret: initial };
+    const fetch = new FakeFetch();
+    const match = (method: string, url: string) => method === "POST" && url.endsWith("/sync");
+    fetch.addJson(match, 200, { results: [{ complete: false, written: false }] });
+    fetch.addJson(match, 200, { results: [{ complete: true, written: true }] });
+    const originalFetch = fetch.fetch;
+    fetch.fetch = async (...args) => {
+      const result = await originalFetch(...args);
+      options.isSecret = !initial;
+      return result;
+    };
+    await client(fetch).vm("vm_1").sync("/run/credential", new Uint8Array(4 * 1024 * 1024 + 1), options);
+    assert.equal(fetch.calls.length, 2);
+    for (const call of fetch.calls) assert.equal(JSON.parse(call.body!).writes[0].is_secret, initial);
+  }
+}
+
+await testSyncSnapshotsSecretClassificationAcrossChunks();
+
 async function testGetAndSetPolicies(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(
@@ -1135,7 +1170,7 @@ async function testGetAndSetPolicies(): Promise<void> {
   assert.deepEqual(putResult.mitm_domains, ["example.com"]);
   const putCall = fetch.calls.find((c) => c.method === "PUT");
   assert.ok(putCall, "setPolicies should PUT");
-  assert.ok(putCall!.body?.includes("example.com"), "PUT body should include the policy match");
+  assert.deepEqual(JSON.parse(putCall!.body!).policies[0].match.hosts, ["example.com"]);
 }
 
 async function testCreateFilesystem(): Promise<void> {
@@ -1266,6 +1301,10 @@ async function testConnectPtyCreatesSessionAndUsesBearerHeader(): Promise<void> 
   assert.equal(socket.sent[0], JSON.stringify({ type: "resize", cols: 120, rows: 33 }));
   assert.equal(socket.sent[1], JSON.stringify({ type: "kill" }));
   assert.deepEqual(socket.sent[2], new TextEncoder().encode("x"));
+  pty.resize(65535, 1001);
+  assert.equal(socket.sent[3], JSON.stringify({ type: "resize", cols: 65535, rows: 1001 }));
+  pty.resize(65536, 0);
+  assert.equal(socket.sent[4], JSON.stringify({ type: "resize", cols: 65535, rows: 1 }));
 }
 
 async function testConnectPtyUsesTicketForBrowserWebSocket(): Promise<void> {
@@ -1326,6 +1365,7 @@ await testPoolsV2();
 await testPoolRefusals();
 await testPoolQuotaIsNotRetried();
 await testDiscoverRegionsRequiresNoConfiguredClient();
+await testCustomApiOriginSurvivesVmHydration();
 await testListedVmUsesItsPlacementEndpoint();
 testExplicitVmHandleUsesPlacementEndpoint();
 await testListRunsUsesControlPlaneAndFilters();
@@ -1892,6 +1932,33 @@ async function testAssumeEmptySkipsTheManifestRoundTrip(): Promise<void> {
 
 await testAssumeEmptySkipsTheManifestRoundTrip();
 
+async function testSyncDirBoundsSlashNormalization(): Promise<void> {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const nodePath = await import("node:path");
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "syncdir-slashes-"));
+  try {
+    for (const [input, expected] of [
+      ["/".repeat(100_000) + "p" + "/".repeat(100_000), "/p"],
+      ["/".repeat(100_000), "/"],
+    ]) {
+      const fetch = new FakeFetch();
+      fetch.addJson(
+        (method, url) => method === "POST" && url.endsWith("/sync"),
+        200,
+        { ok: true, op: "manifest", entries: [], truncated: false },
+      );
+      await client(fetch).vm("vm_1").syncDir(dir, input);
+      assert.equal(fetch.calls.length, 1);
+      assert.equal(JSON.parse(fetch.calls[0]!.body!).path, expected);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+await testSyncDirBoundsSlashNormalization();
+
 // ── fork Idempotency-Key ────────────────────────────────────────────────
 //
 // A retryable gateway response may arrive after a fork succeeds. The
@@ -2113,13 +2180,15 @@ async function testStatCacheCatchesForgedMtimeEdit(): Promise<void> {
     const cacheFile = nodePath.join(sub, fs.readdirSync(sub)[0]!);
     const parsed = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
     const entry = parsed.entries["a.txt"];
-    // Match size and mtime while leaving ctime stale.
+    // Forge matching fields and a stale ctime explicitly: some filesystems give
+    // both writes the same timestamp, so elapsed wall time cannot set up this case.
     entry.size = Number(now.size);
     entry.mtimeNs = String(now.mtimeNs);
     entry.ino = String(now.ino);
     entry.dev = String(now.dev);
     entry.mode = Number(now.mode);
     entry.ctimeNs = String(BigInt(now.ctimeNs) - 1n);
+    assert.notEqual(entry.ctimeNs, String(now.ctimeNs), "ctime must differ after a write");
     // Keep it outside the racily-clean window so ctime forces the rehash.
     parsed.writtenNs = String(BigInt(entry.mtimeNs) + 10_000_000_000n);
     fs.writeFileSync(cacheFile, JSON.stringify(parsed));

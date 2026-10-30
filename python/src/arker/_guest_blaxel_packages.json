@@ -1,0 +1,54 @@
+{
+  "image": "ghcr.io/blaxel-ai/sandbox-base-image@sha256:0df395d2387536baca3b80485b38a125b4541b29c927c4e6408f8e3c2af1bcb7",
+  "architecture": "x86_64",
+  "alpine_release": "3.23.7",
+  "key": {
+    "name": "alpine-devel@lists.alpinelinux.org-6165ee59.rsa.pub",
+    "sha256": "207e4696d3c05f7cb05966aee557307151f1f00217af4143c1bcaf33b8df733f"
+  },
+  "packages": [
+    {
+      "name": "iptables",
+      "version": "1.8.11-r1",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/iptables-1.8.11-r1.apk",
+      "sha256": "f836e153ac87b34066d7c633ddda885820720baa6ffa3a05858a790a184d87ec",
+      "bytes": 319202,
+      "payload_sha256": "ac787ae74b185d82e9a86cc5ede8e0b866b38ca4b9fe634a83f0614222dfbbe3"
+    },
+    {
+      "name": "libxtables",
+      "version": "1.8.11-r1",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/libxtables-1.8.11-r1.apk",
+      "sha256": "9ccb8fbffbcef5e853fa4c2a57fb0ae61c2a1765a408151f4fc96956e3529732",
+      "bytes": 24651,
+      "payload_sha256": "58f8fba5616286276de7515c84af0ec5702f6eed8703e9fe415f23bef644fbce"
+    },
+    {
+      "name": "libmnl",
+      "version": "1.0.5-r2",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/libmnl-1.0.5-r2.apk",
+      "sha256": "48474dde0d30a3c2e6de3f1e17b4b2eeb3f165f4655c2a4db394cdc500e90d44",
+      "bytes": 9027,
+      "payload_sha256": "fdf150d49790d31f8c858c3d4d0ee21199d78663fdb685175d0f52dde9dcb630"
+    },
+    {
+      "name": "libnftnl",
+      "version": "1.3.0-r0",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/libnftnl-1.3.0-r0.apk",
+      "sha256": "42ae75adfaa6eb770375af159a06aad9e3ff656c48429eab360cda9988027f78",
+      "bytes": 65456,
+      "payload_sha256": "729a53d272bec8fe911d774e6da4645185da5baf896e17f864b8577e8327c18b"
+    }
+  ],
+  "profile": "alpine-3.23.7-x86_64",
+  "dependencies": {
+    "musl": "1.2.5-r24",
+    "busybox": "1.37.0-r30",
+    "busybox-binsh": "1.37.0-r30"
+  },
+  "conflicts": [
+    "ip6tables",
+    "ebtables",
+    "libnftnl-libs"
+  ]
+}

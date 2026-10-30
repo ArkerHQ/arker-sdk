@@ -1,0 +1,225 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { Sandbox as NativeSandbox } from "e2b";
+import { Arker, type VM } from "../src/index.js";
+import { sandboxInfo } from "../src/compat/e2b-inventory.js";
+import { listSandboxes } from "../src/compat/e2b-list.js";
+import { preserveEnvironment, preserveProperties } from "./provider-fixtures.js";
+
+function fixture(id = "sandbox") {
+  const lifecycle = { vm_id: id, state: "running", mode: null as string | null, customer_paused: false,
+    started_at: "2026-01-02T03:04:05Z", paused_at: null as string | null };
+  const calls: string[] = [];
+  const vm = { id, baseUrl: "https://example.invalid", created_at: "2026-01-01T00:00:00Z",
+    metadata: { arker_e2b: { version: 1, network: { allow_public_traffic: true }, metadata: { purpose: "test" }, source: { kind: "vm_name", value: "actual-source" }, envd_version: "0.10.2" } },
+    policies: { rules: { "computesdk-e2b-lifetime": { type: "schedule", action: "delete", at: "2026-01-02T03:09:05Z" } } },
+    resources: { vcpu: 2, memory_mib: 512 },
+    refresh: async () => { calls.push("refresh"); return vm; },
+    _client: { _request: async (method: string, path: string) => { assert.equal(method, "GET"); assert.ok(path.endsWith("/lifecycle")); calls.push("lifecycle"); return lifecycle; } },
+  };
+  return { vm: vm as unknown as VM, raw: vm, lifecycle, calls };
+}
+
+test("info maps observed resources, source, metadata and resumed timestamps without guest I/O", () => {
+  const f = fixture();
+  const result = sandboxInfo(f.vm, f.lifecycle);
+  assert.equal(result.templateId, "actual-source"); assert.equal(result.name, "actual-source");
+  assert.equal(result.startedAt.toISOString(), "2026-01-02T03:04:05.000Z");
+  assert.equal(result.endAt.toISOString(), "2026-01-02T03:09:05.000Z");
+  assert.equal(result.cpuCount, 2); assert.equal(result.memoryMB, 512);
+  assert.deepEqual(result.metadata, { purpose: "test" });
+  f.lifecycle.state = "paused"; f.lifecycle.customer_paused = true; f.lifecycle.mode = "full";
+  f.lifecycle.paused_at = "2026-01-02T03:06:00Z";
+  assert.equal(sandboxInfo(f.vm, f.lifecycle).state, "paused");
+  assert.equal(sandboxInfo(f.vm, f.lifecycle).endAt.toISOString(), "2026-01-02T03:06:00.000Z");
+  assert.deepEqual(f.calls, []);
+});
+
+test("missing resource, provenance or timestamps never acquire invented defaults", () => {
+  for (const field of ["started_at"] as const) {
+    const f = fixture();
+    assert.throws(() => sandboxInfo(f.vm, { ...f.lifecycle, [field]: null }), /does not expose/);
+  }
+  for (const resource of ["vcpu", "memory_mib"] as const) {
+    const f = fixture();
+    (f.raw.resources as Record<string, unknown>)[resource] = null;
+    assert.throws(() => sandboxInfo(f.vm, f.lifecycle), /concrete CPU and memory/);
+  }
+  const f = fixture(); f.raw.metadata.arker_e2b.version = 2;
+  assert.throws(() => sandboxInfo(f.vm, f.lifecycle), /descriptor/);
+});
+
+test("Arker paginator forwards metadata filters and opaque cursors without changing state", async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "E2B_API_KEY", "COMPUTESDK_ROUTER_CONFIG");
+  preserveProperties(t, Arker.prototype, "listVms");
+  process.env.ARKER_API_KEY = "test"; delete process.env.E2B_API_KEY; delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  const f = fixture(); const requests: unknown[] = [];
+  Object.assign(f.raw.policies.rules, {
+    "computesdk-e2b-apps": { type: "inbound", priority: 0, action: "allow", match: { ports: [[1, 49982], [49984, 65535]] } },
+    "computesdk-e2b-envd": { type: "inbound", priority: 1000000, action: "allow", auth: "arker", match: { ports: [49983] } },
+  });
+  assert.deepEqual(sandboxInfo(f.vm, f.lifecycle).network, { allowPublicTraffic: true });
+  Arker.prototype.listVms = async options => { requests.push(options); return { vms: [f.vm], nextCursor: requests.length === 1 ? "opaque-next" : null }; };
+  const pages = listSandboxes({ query: { metadata: { purpose: "test" }, state: ["running"] }, limit: 2 });
+  assert.equal(pages.hasNext, true);
+  const first = (await pages.nextItems())[0];
+  assert.equal(first.sandboxId, "sandbox");
+  assert.equal(first.network, undefined);
+  assert.equal(pages.nextToken, "opaque-next");
+  await pages.nextItems(); assert.equal(pages.hasNext, false); assert.equal(pages.nextToken, undefined);
+  assert.deepEqual(requests, [undefined, "opaque-next"].map(cursor => ({ cursor, limit: 2, started_at_order: "desc",
+    metadata_filter: JSON.stringify({ arker_e2b: { version: 1, metadata: { purpose: "test" } } }),
+  })));
+  await assert.rejects(pages.nextItems(), /No more/);
+  assert.ok(f.calls.every(call => call === "refresh" || call === "lifecycle"));
+});
+
+test("native paginator keeps object identity and receives original options", t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "COMPUTESDK_ROUTER_CONFIG");
+  preserveProperties(t, NativeSandbox, "list");
+  delete process.env.ARKER_API_KEY; delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  const options = { order: "asc" as const, query: { startedAfter: new Date(0) }, requestTimeoutMs: 23 };
+  const pages = NativeSandbox.list();
+  NativeSandbox.list = actual => { assert.deepEqual(actual, options); return pages; };
+  assert.equal(listSandboxes(options), pages);
+});
+
+
+for (const open of [true, false]) test(`inventory exposes native public traffic flag ${open} from actual ingress`, () => {
+  const f = fixture();
+  f.raw.metadata.arker_e2b.network.allow_public_traffic = open;
+  Object.assign(f.raw.policies.rules, {
+    apps: { type: "inbound", priority: 0, action: "allow", auth: open ? "open" : "arker", match: { ports: [[1, 49982], [49984, 65535]] } },
+    control: { type: "inbound", priority: 1, action: "allow", auth: "arker", match: { ports: [49983] } },
+  });
+  assert.deepEqual(sandboxInfo(f.vm, f.lifecycle).network, { allowPublicTraffic: open });
+  Object.assign(f.raw.policies.rules, { custom: { type: "inbound", action: "deny", match: { ports: [8080] } } });
+  assert.equal(sandboxInfo(f.vm, f.lifecycle).network, undefined);
+});
+
+
+test("paused expiration requires the persisted pause clock, never the removed timer", () => {
+  const f = fixture();
+  f.lifecycle.state = "paused"; f.lifecycle.customer_paused = true; f.lifecycle.mode = "full";
+  assert.throws(() => sandboxInfo(f.vm, f.lifecycle), /pause timestamp/);
+  f.lifecycle.paused_at = "2026-01-02T03:06:00Z";
+  delete (f.raw.policies.rules as Record<string, unknown>)["computesdk-e2b-lifetime"];
+  assert.equal(sandboxInfo(f.vm, f.lifecycle).endAt.toISOString(), "2026-01-02T03:06:00.000Z");
+  f.lifecycle.state = "running"; f.lifecycle.customer_paused = false;
+  assert.throws(() => sandboxInfo(f.vm, f.lifecycle), /lifetime delete schedule/);
+});
+
+test("pagination merges per-page timeouts and propagates cancellation without advancing the cursor", async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "E2B_API_KEY", "COMPUTESDK_ROUTER_CONFIG");
+  preserveProperties(t, Arker.prototype, "listVms");
+  process.env.ARKER_API_KEY = "test"; delete process.env.E2B_API_KEY; delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  const controller = new AbortController();
+  const failure = new Error("cancelled page");
+  const signals: Array<AbortSignal | undefined> = [];
+  Arker.prototype.listVms = async (_options, transport) => {
+    signals.push(transport?.signal);
+    transport?.signal?.throwIfAborted();
+    return { vms: [], nextCursor: null };
+  };
+  const pages = listSandboxes({ requestTimeoutMs: 1, nextToken: "original" });
+  controller.abort(failure);
+  await assert.rejects(pages.nextItems({ requestTimeoutMs: 0, signal: controller.signal }), error => error === failure);
+  assert.equal(pages.nextToken, "original"); assert.equal(pages.hasNext, true);
+  assert.equal(signals[0], controller.signal);
+  await pages.nextItems({ requestTimeoutMs: 0 });
+  assert.equal(signals[1], undefined);
+  assert.equal(pages.hasNext, false);
+});
+
+for (const order of ["asc", "desc"] as const) test(`inventory ${order} order and inclusive start filter are server queries before pagination`, async t => {
+  preserveEnvironment(t, "ARKER_API_KEY", "E2B_API_KEY", "COMPUTESDK_ROUTER_CONFIG");
+  preserveProperties(t, Arker.prototype, "listVms");
+  process.env.ARKER_API_KEY = "test"; delete process.env.E2B_API_KEY; delete process.env.COMPUTESDK_ROUTER_CONFIG;
+  const records = [fixture("older-birth"), fixture("newer-birth")];
+  records[0].lifecycle.started_at = "2026-01-03T03:04:05Z";
+  records[1].lifecycle.started_at = "2026-01-02T03:04:05Z";
+  const startedAfter = new Date("2026-01-02T04:04:05+01:00");
+  let calls = 0;
+  Arker.prototype.listVms = async parameters => {
+    assert.deepEqual(parameters, { cursor: calls ? "opaque-next" : undefined, limit: 1,
+      started_at_order: order, started_after: "2026-01-02T03:04:05.000Z",
+      metadata_filter: JSON.stringify({ arker_e2b: { version: 1 } }),
+    });
+    const index = order === "desc" ? calls : 1 - calls;
+    calls++;
+    return { vms: [records[index].vm], nextCursor: calls === 1 ? "opaque-next" : null };
+  };
+  const pages = listSandboxes({ order, query: { startedAfter }, limit: 1 });
+  const results = [...await pages.nextItems(), ...await pages.nextItems()];
+  assert.deepEqual(results.map(item => item.sandboxId), order === "desc" ? ["older-birth", "newer-birth"] : ["newer-birth", "older-birth"]);
+  assert.equal(pages.hasNext, false);
+});
+
+for (const expiry of ["2000-01-01T00:00:00Z", "2999-01-01T00:00:00Z"]) {
+  for (const expiring of ["apps", "control"]) test(`inventory omits public traffic for ${expiring} expiring at ${expiry}`, () => {
+    for (const auth of ["open", "arker"]) {
+      const f = fixture();
+      const rules = {
+        apps: { type: "inbound", priority: 0, action: "allow", auth, match: { ports: [[1, 49982], [49984, 65535]] } },
+        control: { type: "inbound", priority: 1, action: "allow", auth: "arker", match: { ports: [49983] } },
+      };
+      Object.assign(rules[expiring as keyof typeof rules], { expires_at: expiry });
+      Object.assign(f.raw.policies.rules, rules);
+      assert.equal(sandboxInfo(f.vm, f.lifecycle).network, undefined);
+    }
+  });
+}
+
+
+test("inventory identifies managed secret-header app ingress as private without leaking credentials", () => {
+  const f = fixture();
+  f.raw.metadata.arker_e2b.network.allow_public_traffic = false;
+  Object.assign(f.raw.policies.rules, {
+    "computesdk-e2b-apps": { type: "inbound", priority: 0, action: "allow", auth: "open", match: { ports: [[1, 49982], [49984, 65535]], headers: { "e2b-traffic-access-token": ["***"] } } },
+    "computesdk-e2b-envd": { type: "inbound", priority: 1000000, action: "allow", auth: "arker", match: { ports: [49983] } },
+  });
+  const info = sandboxInfo(f.vm, f.lifecycle);
+  assert.deepEqual(info.network, { allowPublicTraffic: false });
+  assert.ok(!JSON.stringify(info).includes("***"));
+});
+
+for (const privateTraffic of [false, true]) test(`inventory recognizes normalized managed ingress, private=${privateTraffic}`, () => {
+  const f = fixture();
+  f.raw.metadata.arker_e2b.network.allow_public_traffic = !privateTraffic;
+  const apps = { type: "inbound", priority: 0, action: "allow",
+    match: { ports: [[1, 49982], [49984, 65535]], ...(privateTraffic ? { headers: { "e2b-traffic-access-token": ["***"] } } : {}) } };
+  Object.assign(f.raw.policies.rules, {
+    "computesdk-e2b-apps": apps,
+    "computesdk-e2b-envd": { type: "inbound", priority: 1000000, action: "allow", auth: "arker", match: { ports: [49983] } },
+  });
+  assert.deepEqual(sandboxInfo(f.vm, f.lifecycle).network, { allowPublicTraffic: !privateTraffic });
+  const rules = f.raw.policies.rules as Record<string, unknown>;
+  delete rules["computesdk-e2b-apps"];
+  rules["customer-app"] = apps;
+  assert.equal(sandboxInfo(f.vm, f.lifecycle).network, undefined, "Do not infer open auth for arbitrary customer rules");
+});
+
+test("default or historical creation omits network details despite canonical public ingress", () => {
+  const f = fixture();
+  Object.assign(f.raw.policies.rules, {
+    "computesdk-e2b-apps": { type: "inbound", priority: 0, action: "allow", match: { ports: [[1, 49982], [49984, 65535]] } },
+    "computesdk-e2b-envd": { type: "inbound", priority: 1000000, action: "allow", auth: "arker", match: { ports: [49983] } },
+  });
+  assert.deepEqual(sandboxInfo(f.vm, f.lifecycle).network, { allowPublicTraffic: true });
+  f.raw.metadata.arker_e2b.network.allow_public_traffic = false;
+  assert.equal(sandboxInfo(f.vm, f.lifecycle).network, undefined, "Policy drift must not override recorded provenance");
+  delete (f.raw.metadata.arker_e2b as { network?: unknown }).network;
+  assert.equal(sandboxInfo(f.vm, f.lifecycle).network, undefined);
+});
+
+test("unknown explicit auth never acquires a public or private network flag", () => {
+  for (const headers of [undefined, { "e2b-traffic-access-token": ["***"] }]) {
+    const f = fixture();
+    Object.assign(f.raw.policies.rules, {
+      "computesdk-e2b-apps": { type: "inbound", priority: 0, action: "allow", auth: "unsupported-auth",
+        match: { ports: [[1, 49982], [49984, 65535]], ...(headers ? { headers } : {}) } },
+      "computesdk-e2b-envd": { type: "inbound", priority: 1000000, action: "allow", auth: "arker", match: { ports: [49983] } },
+    });
+    assert.equal(sandboxInfo(f.vm, f.lifecycle).network, undefined);
+  }
+});

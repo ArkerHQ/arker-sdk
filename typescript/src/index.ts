@@ -1,4 +1,8 @@
+import { currentRequestTransport } from "./internal/request-context.js";
+import { idleFetch, RequestIdleTimeoutError } from "./internal/idle-fetch.js";
+export { RequestIdleTimeoutError } from "./internal/idle-fetch.js";
 import { validateHttpError, validateFileError } from "./generated/error-validators.js";
+export { RouterLookupTimeoutError } from "./compat/router-errors.js";
 /**
  * Arker TypeScript SDK.
  *
@@ -437,6 +441,7 @@ export type PtyTicketResponse = ApiSchema<"PtyTicketResponse">;
 export type ListVmsParameters = ApiQuery<"listVms">;
 export type ListOrgRunsParameters = ApiQuery<"listOrgRuns">;
 export type ListFilesystemsParameters = ApiQuery<"listFilesystems">;
+export type DeleteFilesystemParameters = ApiQuery<"deleteFilesystem">;
 export type ListPoolsParameters = ApiQuery<"listPools">;
 export type ListMountsParameters = ApiQuery<"listMounts">;
 export type ListRunsParameters = ApiQuery<"listRuns">;
@@ -506,6 +511,10 @@ export type ListVmsOptions = ListVmsParameters;
 export type ListFilesystemsOptions = Omit<ListFilesystemsParameters, "name_prefix"> & {
   namePrefix?: ListFilesystemsParameters["name_prefix"];
 };
+
+export interface DeleteFilesystemOptions {
+  onlyIfUnmounted?: DeleteFilesystemParameters["only_if_unmounted"];
+}
 
 export type ListMountsOptions = Omit<ListMountsParameters, "filesystem_id"> & {
   filesystemId?: ListMountsParameters["filesystem_id"];
@@ -636,6 +645,7 @@ async function deleteAfterFailedBuild(vm: VM, attempts = 3, baseDelayMs = 1000):
 export class Arker {
   /** Regional API base URL for per-VM operations. */
   private readonly computeBaseUrl?: string;
+  private readonly explicitComputeBaseUrl: boolean;
   /** Control API base URL for cross-region administrative calls. */
   readonly controlBaseUrl: string;
   readonly region?: string;
@@ -662,6 +672,7 @@ export class Arker {
     if (!apiKey) throw new Error("apiKey is required; pass apiKey or set ARKER_API_KEY");
     this.apiKey = apiKey;
     this.computeBaseUrl = baseUrl ? normalizeBaseUrl(baseUrl) : undefined;
+    this.explicitComputeBaseUrl = explicitBaseUrl !== undefined;
     this.controlBaseUrl = normalizeBaseUrl(controlBaseUrl);
     this.region = region;
     this.provider = provider;
@@ -715,7 +726,7 @@ export class Arker {
   }
 
   /** @internal */
-  async _fork(options: ForkRequest & ForkIdempotency, baseUrl: string): Promise<VM> {
+  async _fork(options: ForkRequest & ForkIdempotency, baseUrl: string, transport?: RequestTransportOptions): Promise<VM> {
     // A header, not a contract field: strip it before the body is built, or
     // the server's validator rejects the unknown key and every fork 400s.
     //
@@ -726,6 +737,7 @@ export class Arker {
     // on, unnamed and billable. The header object is bound once, before the
     // retry loop, so every attempt of one call presents the same key.
     const { idempotencyKey, idempotency, ...request } = options;
+    if (request.policies) request.policies = withoutReadOnlyPolicyFields(request.policies);
     const key = forkIdempotencyKey(idempotencyKey, idempotency);
     const wire = await this._request<Vm>(
       "POST",
@@ -734,6 +746,8 @@ export class Arker {
       baseUrl,
       key ? { "Idempotency-Key": key } : undefined,
       request.queueing_timeout,
+      undefined,
+      transport,
     );
     return new VM(this, wire.vm_id, baseUrl, wire);
   }
@@ -791,9 +805,9 @@ export class Arker {
     return vm;
   }
 
-  async listVms(opts: ListVmsOptions = {}): Promise<{ vms: VM[]; nextCursor: string | null }> {
+  async listVms(opts: ListVmsOptions = {}, transport?: RequestTransportOptions): Promise<{ vms: VM[]; nextCursor: string | null }> {
     const query: ListVmsParameters = opts;
-    const resp = await this._request<ListVmsResponse>("GET", buildQuery("/v1/vms", query), undefined, this.controlBaseUrl);
+    const resp = await this._request<ListVmsResponse>("GET", buildQuery("/v1/vms", query), undefined, this.controlBaseUrl, undefined, undefined, undefined, transport);
     const vms = (resp.vms ?? []).map((v) => {
       const id = v.vm_id;
       return new VM(this, id, this._baseUrlFor(id, v), v);
@@ -838,9 +852,9 @@ export class Arker {
   }
 
   /** Fetch a VM from its regional endpoint. */
-  async getVm(vmId: string, placement?: VmPlacement): Promise<VM> {
+  async getVm(vmId: string, placement?: VmPlacement, transport?: RequestTransportOptions): Promise<VM> {
     const baseUrl = this._baseUrlFor(vmId, placement);
-    const data = await this._request<Vm>("GET", vmPath(vmId), undefined, baseUrl);
+    const data = await this._request<Vm>("GET", vmPath(vmId), undefined, baseUrl, undefined, undefined, undefined, transport);
     return new VM(this, vmId, baseUrl, data);
   }
 
@@ -861,8 +875,11 @@ export class Arker {
     return this._request("GET", `/v1/filesystems/${pathSegment(filesystemId)}`, undefined, this.baseUrl);
   }
 
-  async deleteFilesystem(filesystemId: string): Promise<DeleteFilesystemResponse> {
-    return this._request("DELETE", `/v1/filesystems/${pathSegment(filesystemId)}`, undefined, this.baseUrl);
+  async deleteFilesystem(filesystemId: string, opts: DeleteFilesystemOptions = {}): Promise<DeleteFilesystemResponse> {
+    const path = buildQuery(`/v1/filesystems/${pathSegment(filesystemId)}`, {
+      only_if_unmounted: opts.onlyIfUnmounted,
+    });
+    return this._request("DELETE", path, undefined, this.baseUrl);
   }
 
   /** List pools across regions through the control plane. */
@@ -932,7 +949,9 @@ export class Arker {
     extraHeaders?: Record<string, string | undefined>,
     maxQueueingSecs?: number | null,
     retryNetworkFailures?: boolean,
+    transport?: RequestTransportOptions,
   ): Promise<T> {
+    transport ??= currentRequestTransport();
     const url = `${baseUrl}${path}`;
     const headers: Record<string, string> = {
       authorization: `Bearer ${this.apiKey}`,
@@ -952,7 +971,15 @@ export class Arker {
       this.retry,
       maxQueueingSecs ?? undefined,
       retryNetworkFailures,
+      transport,
     );
+  }
+
+  /** @internal Unauthenticated presigned sync download. */
+  async _download(url: string, transport?: RequestTransportOptions): Promise<Response> {
+    return transport?.idleTimeoutMs === undefined
+      ? this._fetch(url, transport ? { signal: transport.signal } : undefined)
+      : idleFetch(this.fetchImpl as typeof fetch, url, { signal: transport.signal }, transport.idleTimeoutMs);
   }
 
   /** @internal */
@@ -991,6 +1018,7 @@ export class Arker {
     ref: string,
     placement?: { provider?: unknown; region?: string | null },
   ): string {
+    if (this.explicitComputeBaseUrl) return this.baseUrl;
     const provider = optionalComputeProvider(placement?.provider);
     const region = placement?.region?.trim();
     if (provider && region) return computeBaseUrl(provider, region);
@@ -1027,6 +1055,7 @@ export class VM {
   readonly vm_id?: Vm["vm_id"];
   readonly pool_id?: Vm["pool_id"];
   readonly name?: Vm["name"];
+  readonly hostname?: Vm["hostname"];
   readonly state?: Vm["state"];
   readonly owner_org_id?: Vm["owner_org_id"];
   readonly created_at?: Vm["created_at"];
@@ -1044,6 +1073,10 @@ export class VM {
   readonly worker_id?: string | null;
   readonly sessions?: Vm["sessions"];
   readonly policies?: Vm["policies"];
+  readonly metadata?: Vm["metadata"];
+  readonly started_at?: Vm["started_at"];
+  readonly paused_at?: Vm["paused_at"];
+  readonly customer_paused?: Vm["customer_paused"];
 
   constructor(client: Arker, vmId: string, baseUrl = client._baseUrlFor(vmId), data?: Vm) {
     this._client = client;
@@ -1056,16 +1089,17 @@ export class VM {
   }
 
   /** Re-fetch this VM and return a fresh, fully-populated handle. */
-  async refresh(): Promise<VM> {
-    const data = await this._client._request<Vm>("GET", vmPath(this.id), undefined, this.baseUrl);
+  async refresh(transport?: RequestTransportOptions): Promise<VM> {
+    const data = await this._client._request<Vm>("GET", vmPath(this.id), undefined, this.baseUrl, undefined, undefined, undefined, transport);
     return new VM(this._client, this.id, this.baseUrl, data);
   }
 
   /** Fork this VM and return its child. */
-  async fork(options: Partial<ForkRequest> & ForkIdempotency = {}): Promise<VM> {
+  async fork(options: Partial<ForkRequest> & ForkIdempotency = {}, transport?: RequestTransportOptions): Promise<VM> {
     return this._client._fork(
       { ...options, source_vm_id: this.id } as ForkRequest,
       this.baseUrl,
+      transport,
     );
   }
 
@@ -1097,10 +1131,17 @@ export class VM {
   ): Promise<CompletedRunResult>;
   async run(command: string, options: RunOptions): Promise<RunResult>;
   async run(command: string, options: RunOptions = {}): Promise<RunResult> {
+    return this._runWithTransport(command, options);
+  }
+
+  /** @internal */
+  async _runWithTransport(command: string, options: RunOptions = {}, transport?: RequestTransportOptions): Promise<RunResult> {
     rejectUnsupportedRunNetworkInputs(options);
     const { idempotencyKey, onOutput, ...body } = options;
     const headers = idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined;
-    const request: RunRequest = { ...body, command };
+    const request: RunRequest = { ...body, command,
+      ...(body.policies ? {policies: withoutReadOnlyPolicyFields(body.policies)} : {}),
+    };
     const response = await this._client._request<unknown>(
       "POST",
       `${vmPath(this.id)}/runs`,
@@ -1108,6 +1149,8 @@ export class VM {
       this.baseUrl,
       headers,
       options.queueing_timeout,
+      undefined,
+      transport,
     );
     const result = parseRunResponse(response);
     // The server backgrounds a run that outlived its sync window. When the
@@ -1115,7 +1158,7 @@ export class VM {
     // and hand back the completed run so the synchronous call is transparent.
     // Explicit zero is a pure pass-through - return the ack immediately.
     if (result.type === "background" && options.time_to_background !== 0) {
-      return this._awaitRun(result.runId, options.timeout, onOutput);
+      return this._awaitRun(result.runId, options.timeout, onOutput, transport);
     }
     if (result.type === "completed" && (result.stdoutBytes.length || result.stderrBytes.length)) {
       onOutput?.({ stdout: result.stdoutBytes, stderr: result.stderrBytes });
@@ -1196,6 +1239,7 @@ export class VM {
     runId: string,
     timeoutSecs?: number | null,
     onOutput?: RunOptions["onOutput"],
+    transport?: RequestTransportOptions,
   ): Promise<CompletedRunResult> {
     const budgetMs = runPollBudgetMs(timeoutSecs);
     const stdoutCursor: RunOutputCursor = { emitted: new Uint8Array(0), replaced: false };
@@ -1205,11 +1249,13 @@ export class VM {
     // budgetMs without a non-null assertion.
     let consecutiveFailures = 0;
     for (let delay = 0; ; delay = delay ? Math.min(RUN_POLL_MAX_MS, Math.ceil(delay * RUN_POLL_BACKOFF)) : RUN_POLL_INITIAL_MS) {
-      await sleep(delay);
+      await abortableDelay(delay, transport?.signal);
       let run: RunRecord;
       try {
-        run = await this.getRun(runId);
+        run = await this.getRun(runId, transport);
       } catch (error) {
+        transport?.signal?.throwIfAborted();
+        if (error instanceof RequestIdleTimeoutError) throw error;
         consecutiveFailures += 1;
         if (consecutiveFailures >= RUN_POLL_MAX_CONSECUTIVE_FAILURES) {
           const code = error instanceof ArkerError ? error.code : "unavailable";
@@ -1260,11 +1306,11 @@ export class VM {
    * To mount a standalone filesystem into the VM, use `vm.createMount`.
    */
   async sync(path: string): Promise<Uint8Array>;
-  async sync(path: string, data: Uint8Array | string): Promise<void>;
-  async sync(path: string, data?: Uint8Array | string): Promise<Uint8Array | void> {
+  async sync(path: string, data: Uint8Array | string, options?: SyncOptions): Promise<void>;
+  async sync(path: string, data?: Uint8Array | string, options: SyncOptions = {}): Promise<Uint8Array | void> {
     if (data === undefined) return this.syncRead(path);
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
-    await this.syncWriteInline(path, bytes);
+    await this.syncWriteInline(path, bytes, options);
   }
 
   /**
@@ -1293,7 +1339,11 @@ export class VM {
     const fsp = fs.promises;
 
     const localRoot = nodePath.resolve(localDir);
-    const remoteRoot = "/" + remoteDir.replace(/^\/+/, "").replace(/\/+$/, "");
+    let remoteStart = 0;
+    let remoteEnd = remoteDir.length;
+    while (remoteStart < remoteEnd && remoteDir[remoteStart] === "/") remoteStart++;
+    while (remoteEnd > remoteStart && remoteDir[remoteEnd - 1] === "/") remoteEnd--;
+    const remoteRoot = "/" + remoteDir.slice(remoteStart, remoteEnd);
 
     // 1. Authoritative remote manifest: relative path -> content hash and mode. A directory that
     //    doesn't exist yet (or an empty VM) yields {} -> everything is sent.
@@ -1536,7 +1586,7 @@ export class VM {
       const handle = await fsp.open(localTar, "r");
       try {
         const { size } = await handle.stat();
-        await this.syncWriteChunks(remoteTar, size, async (start, length) => {
+        await this._syncWriteChunks(remoteTar, size, async (start, length) => {
           const buffer = Buffer.alloc(length);
           let offset = 0;
           while (offset < length) {
@@ -1582,18 +1632,47 @@ export class VM {
       true,
     );
     if ("content" in response) return decodeBytes(response.content, response.encoding);
-    const signed = await this._client._fetch(response.presigned_url);
+    const signed = await this._client._download(response.presigned_url);
     if (!signed.ok) throw new ArkerError("internal", `signed GET failed: ${signed.status}`, signed.status);
     return new Uint8Array(await signed.arrayBuffer());
   }
 
-  private async syncWriteInline(path: string, data: Uint8Array): Promise<void> {
-    await this.syncWriteChunks(path, data.length, async (start, length) => data.subarray(start, start + length));
+  /** @internal */
+  async *_syncReadChunks(path: string, signal?: AbortSignal, idleTimeoutMs?: number): AsyncGenerator<Uint8Array> {
+    const response = await this._client._request<SyncReadInlineResponse | SyncReadPresignedResponse>(
+      "POST", `${vmPath(this.id)}/sync`, { op: "read", path }, this.baseUrl,
+      undefined, undefined, true, { signal, idleTimeoutMs },
+    );
+    if ("content" in response) {
+      const bytes = decodeBytes(response.content, response.encoding);
+      for (let offset = 0; offset < bytes.length; offset += 65536) yield bytes.subarray(offset, offset + 65536);
+      return;
+    }
+    const signed = await this._client._download(response.presigned_url, { signal, idleTimeoutMs });
+    if (!signed.ok) {
+      await signed.body?.cancel();
+      throw new ArkerError("internal", `signed GET failed: ${signed.status}`, signed.status);
+    }
+    const reader = signed.body?.getReader();
+    if (!reader) return;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        for (let offset = 0; offset < value.length; offset += 65536) yield value.subarray(offset, offset + 65536);
+      }
+    } finally { await reader.cancel(); reader.releaseLock(); }
   }
 
-  private async syncWriteChunks(
-    path: string, size: number, read: (start: number, length: number) => Promise<Uint8Array>,
+  private async syncWriteInline(path: string, data: Uint8Array, options: SyncOptions): Promise<void> {
+    await this._syncWriteChunks(path, data.length, async (start, length) => data.subarray(start, start + length), options);
+  }
+
+  /** @internal */
+  async _syncWriteChunks(
+    path: string, size: number, read: (start: number, length: number) => Promise<Uint8Array>, options: SyncOptions = {}, transport?: RequestTransportOptions,
   ): Promise<void> {
+    const isSecret = options.isSecret ?? false;
     const uploadId = ulid();
     let result: SyncWriteResult | undefined;
     for (let start = 0; start < Math.max(size, 1); start += CHUNK_SIZE) {
@@ -1601,13 +1680,13 @@ export class VM {
       const data = await read(start, end - start);
       result = await this.sendOneWrite({
         path, size, upload_id: uploadId, content: bytesToBase64(data),
-        start, end, is_secret: false,
-      });
+        start, end, is_secret: isSecret,
+      }, transport);
     }
     assertWriteComplete(result!, "inline write");
   }
 
-  private async sendOneWrite(entry: SyncWriteEntry): Promise<SyncWriteResult> {
+  private async sendOneWrite(entry: SyncWriteEntry, transport?: RequestTransportOptions): Promise<SyncWriteResult> {
     let lastError: ArkerError | undefined;
     const attempts = this._client._retryAttempts();
     for (let attempt = 0; attempt < attempts; attempt++) {
@@ -1615,14 +1694,14 @@ export class VM {
         op: "write",
         writes: [entry],
       };
-      const response = await this._client._request<SyncWriteResponse>("POST", `${vmPath(this.id)}/sync`, request, this.baseUrl);
+      const response = await this._client._request<SyncWriteResponse>("POST", `${vmPath(this.id)}/sync`, request, this.baseUrl, undefined, undefined, undefined, transport);
       const result = response.results[0];
       if (!result) throw new ArkerError("internal", "write response missing results[0]", 200);
       const error = result.error ?? undefined;
       if (!error) return result;
       lastError = serverError(error, 200, true);
       if (!isRetryable(200, lastError, true) || attempt === attempts - 1) break;
-      await sleep(this._client._retryDelay(attempt));
+      await abortableDelay(this._client._retryDelay(attempt), transport?.signal);
     }
     throw lastError ?? new ArkerError("internal", "write failed", 200);
   }
@@ -1669,8 +1748,8 @@ export class VM {
     return this._client._request("PATCH", vmPath(this.id), body, this.baseUrl);
   }
 
-  async delete(): Promise<DeleteVmResponse> {
-    return this._client._request("DELETE", vmPath(this.id), undefined, this.baseUrl);
+  async delete(transport?: RequestTransportOptions): Promise<DeleteVmResponse> {
+    return this._client._request("DELETE", vmPath(this.id), undefined, this.baseUrl, undefined, undefined, undefined, transport);
   }
 
   /**
@@ -1694,7 +1773,7 @@ export class VM {
    *     });
    */
   async setPolicies(doc: PolicyDoc): Promise<PolicyDoc> {
-    return this._client._request<PolicyDoc>("PUT", `${vmPath(this.id)}/policies`, doc, this.baseUrl);
+    return this._client._request<PolicyDoc>("PUT", `${vmPath(this.id)}/policies`, withoutReadOnlyPolicyFields(doc), this.baseUrl);
   }
 
   // ── Mounts: bindings of a filesystem into this VM at a path ────────
@@ -1708,10 +1787,12 @@ export class VM {
   async createMount(request: {
     filesystemId: MountCreateRequest["filesystem_id"];
     path?: MountCreateRequest["path"];
+    subpath?: MountCreateRequest["subpath"];
   }): Promise<Mount> {
     const body: MountCreateRequest = {
       filesystem_id: request.filesystemId,
       path: request.path,
+      ...(request.subpath ? { subpath: request.subpath } : {}),
     };
     return this._client._request<Mount>("POST", `${vmPath(this.id)}/mounts`, body, this.baseUrl);
   }
@@ -1733,13 +1814,14 @@ export class VM {
    *
    * `stdout`/`stderr` come back decoded, the same as {@link run}, alongside
    * `stdoutBytes`/`stderrBytes` for output that is not text. */
-  async getRun(runId: string): Promise<RunRecord> {
+  async getRun(runId: string, transport?: RequestTransportOptions): Promise<RunRecord> {
     return decodeWireRun(
       await this._client._request<Run>(
         "GET",
         `${vmPath(this.id)}/runs/${pathSegment(runId)}`,
         undefined,
         this.baseUrl,
+        undefined, undefined, undefined, transport,
       ),
     );
   }
@@ -1792,6 +1874,35 @@ export class VM {
       `${vmPath(this.id)}/sessions/${pathSegment(sessionId)}`,
       request,
       this.baseUrl,
+    );
+  }
+
+  /** Open an owner-authenticated VM-local TCP stream without public ingress. Node only. */
+  async connectPort(port: number, options: { timeoutMs?: number } = {}): Promise<import("node:stream").Duplex> {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new RangeError("port must be an integer from 1 through 65535");
+    }
+    return this._connectPrivateStream(`/ports/${port}`, options);
+  }
+
+  /** Open an owner-authenticated guest Unix socket without public ingress. Node only. */
+  async connectUnix(path: string, options: { timeoutMs?: number } = {}): Promise<import("node:stream").Duplex> {
+    if (typeof path !== "string" || !path.startsWith("/") || path.includes("\0") || new TextEncoder().encode(path).length > 107) {
+      throw new RangeError("socket path must be absolute, NUL-free, and at most 107 UTF-8 bytes");
+    }
+    return this._connectPrivateStream(`/sockets?${new URLSearchParams({ path })}`, options);
+  }
+
+  private async _connectPrivateStream(endpoint: string, options: { timeoutMs?: number }): Promise<import("node:stream").Duplex> {
+    const timeout = options.timeoutMs ?? 300000;
+    if (!Number.isFinite(timeout) || timeout <= 0) throw new RangeError("timeoutMs must be finite and positive");
+    const url = new URL(`${normalizeBaseUrl(this.baseUrl)}${vmPath(this.id)}${endpoint}`);
+    if (url.protocol === "https:") url.protocol = "wss:";
+    else if (url.protocol === "http:") url.protocol = "ws:";
+    else throw new Error("private port requires an HTTP or HTTPS API URL");
+    const { connectPortStream } = await import("./internal/port.js");
+    return connectPortStream(url.toString(), this._client._authHeaders(), timeout, (body, status) =>
+      extractError(parseJson(body), status) ?? new ArkerError("internal", "Malformed private port upgrade error", status),
     );
   }
 
@@ -2032,11 +2143,14 @@ function ptyInputBytes(data: PtyInput): Uint8Array | ArrayBuffer {
 
 function clampPtyDimension(value: number): number {
   if (!Number.isFinite(value)) return 1;
-  return Math.max(1, Math.min(1000, Math.trunc(value)));
+  return Math.max(1, Math.min(65535, Math.trunc(value)));
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  const whitespaceTrimmed = baseUrl.trim();
+  let end = whitespaceTrimmed.length;
+  while (end > 0 && whitespaceTrimmed.charCodeAt(end - 1) === 47) end -= 1;
+  const trimmed = whitespaceTrimmed.slice(0, end);
   if (!trimmed) throw new Error("baseUrl must not be empty");
   return trimmed;
 }
@@ -2215,6 +2329,13 @@ function runToCompletedResult(run: RunRecord): CompletedRunResult {
   };
 }
 
+/** Per-request cancellation; does not change shared client or connection settings. */
+export interface RequestTransportOptions {
+  signal?: AbortSignal;
+  /** @internal Inactivity timeout for one HTTP request, in milliseconds. Zero disables it. */
+  idleTimeoutMs?: number;
+}
+
 async function requestJson<T>(
   method: HttpMethod,
   url: string,
@@ -2225,6 +2346,7 @@ async function requestJson<T>(
   retry: RetryConfig,
   maxQueueingSecs?: number,
   retryNetworkFailures?: boolean,
+  transport?: RequestTransportOptions,
 ): Promise<T> {
   const headers = { ...requestHeaders };
   let requestBody: string | undefined;
@@ -2242,6 +2364,7 @@ async function requestJson<T>(
   const shouldRetryNetworkFailures = retryNetworkFailures ?? (method === "GET");
 
   for (let attempt = 0; ; attempt++) {
+    transport?.signal?.throwIfAborted();
     if (queueingDeadline !== undefined && attempt > 0 && isObject(body)) {
       // Retries re-send the remaining window.
       const remainingSecs = Math.max(
@@ -2255,9 +2378,10 @@ async function requestJson<T>(
     try {
       const { status, ok, text } = await sendRequest(
         url,
-        { method, headers, body: requestBody },
-        fetchImpl,
-        http2,
+        { method, headers, body: requestBody, signal: transport?.signal },
+        transport?.idleTimeoutMs === undefined ? fetchImpl : ((input, init) => idleFetch(fetchImpl as typeof fetch, input, init ?? {}, transport.idleTimeoutMs!)),
+        transport?.idleTimeoutMs === undefined && http2,
+        transport ? 0 : undefined,
       );
       const payload = parseJson(text);
       const parsedError = extractError(payload, status);
@@ -2265,7 +2389,7 @@ async function requestJson<T>(
       if (isRetryable(status, parsedError, shouldRetryNetworkFailures || Boolean(headers["Idempotency-Key"]))) {
         const delay = retryDelay(retry, attempt, parsedError);
         if (canRetryAgain(retry, attempt, queueingDeadline, delay)) {
-          await sleep(delay);
+          await abortableDelay(delay, transport?.signal);
           continue;
         }
       }
@@ -2283,13 +2407,15 @@ async function requestJson<T>(
 
       return payload as T;
     } catch (error) {
+      if (error instanceof RequestIdleTimeoutError) throw error;
+      transport?.signal?.throwIfAborted();
       if (error instanceof ArkerError) throw error;
       if (!shouldRetryNetworkFailures) {
         throw unknownOutcomeError(method, new URL(url).pathname, error);
       }
       const delay = retryDelay(retry, attempt);
       if (canRetryAgain(retry, attempt, queueingDeadline, delay)) {
-        await sleep(delay);
+        await abortableDelay(delay, transport?.signal);
         continue;
       }
       const message = error instanceof Error ? error.message : String(error);
@@ -2310,9 +2436,12 @@ function canRetryAgain(
   return attempt < retry.attempts - 1;
 }
 
-/** A policy read back (`vm.policies`) also reports fields an update refuses. */
-function withoutReadOnlyPolicyFields(policies: PolicyUpdate): PolicyUpdate {
-  const { hostname: _h, mitm_domains: _m, warnings: _w, ...update } = policies as PolicyUpdate & Partial<PolicyDoc>;
+/** @internal A policy read back (`vm.policies`) also reports fields an update refuses. */
+export function withoutReadOnlyPolicyFields(policies: PolicyUpdate): PolicyUpdate {
+  const { hostname: _h, mitm_domains: _m, warnings: _w, outbound_guards, ...update } = policies as PolicyUpdate & Partial<PolicyDoc>;
+  if (outbound_guards && Object.keys(outbound_guards).length) {
+    update.rules = {...outbound_guards, ...update.rules};
+  }
   return update;
 }
 
@@ -2376,6 +2505,22 @@ function unknownOutcomeError(method: HttpMethod, path: string, error: unknown): 
 }
 
 function jitter(maxMs: number): number { return Math.floor(Math.random() * (maxMs + 1)); }
+
+function abortable<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return operation;
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => { signal.removeEventListener("abort", abort); reject(signal.reason); };
+    signal.addEventListener("abort", abort, { once: true });
+    operation.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    if (signal.aborted) abort();
+  });
+}
+
+async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try { await abortable(new Promise<void>(resolve => { timer = setTimeout(resolve, ms); }), signal); }
+  finally { clearTimeout(timer); }
+}
 
 async function sleep(ms: number): Promise<void> { await new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -2463,6 +2608,11 @@ export interface SyncDirResult {
 }
 
 /** Options for {@link VM.syncDir}. */
+export interface SyncOptions {
+  /** Register uploaded bytes for secret redaction. Applies to every chunk. */
+  isSecret?: boolean;
+}
+
 export interface SyncDirOptions {
   /** Caller-owned accelerator cache: absolute local path -> {size, mtimeMs, hash}.
    * Reused across calls it skips re-hashing files whose (size, mtime) are
@@ -2572,7 +2722,7 @@ class Http2Connection {
     return this.session.closed || this.session.destroyed;
   }
 
-  request(method: string, path: string, headers: Record<string, string>, body?: string): Promise<TransportResponse> {
+  request(method: string, path: string, headers: Record<string, string>, body?: string, signal?: AbortSignal, timeoutMs = HTTP2_REQUEST_TIMEOUT_MS): Promise<TransportResponse> {
     // Ref the socket only while requests are in flight, so a pending request keeps
     // the process alive but an idle connection still lets it exit.
     if (this.streams === 0) this.session.ref();
@@ -2584,19 +2734,23 @@ class Http2Connection {
         ":method": method,
         ":path": path,
       });
+      const abort = () => stream.destroy(signal?.reason instanceof Error ? signal.reason : new Error("Request aborted"));
+      signal?.addEventListener("abort", abort, { once: true });
+      stream.once("close", () => signal?.removeEventListener("abort", abort));
+      if (signal?.aborted) abort();
       let status = 0;
       let text = "";
       stream.setEncoding("utf8");
       let timeout: ReturnType<typeof setTimeout> | undefined;
-      if (BUN_RUNTIME) {
+      if (timeoutMs && BUN_RUNTIME) {
         // Bun attaches stream timeouts to the shared session socket.
         timeout = setTimeout(
           () => stream.destroy(new Error("HTTP/2 request timed out")),
-          HTTP2_REQUEST_TIMEOUT_MS,
+          timeoutMs,
         );
         timeout.unref();
-      } else {
-        stream.setTimeout(HTTP2_REQUEST_TIMEOUT_MS, () => stream.destroy(new Error("HTTP/2 request timed out")));
+      } else if (timeoutMs) {
+        stream.setTimeout(timeoutMs, () => stream.destroy(new Error("HTTP/2 request timed out")));
       }
       stream.on("response", (responseHeaders) => {
         timeout?.refresh();
@@ -2633,9 +2787,10 @@ const http2Connections = new Map<string, Http2Connection | null>();
 
 async function sendRequest(
   url: string,
-  init: { method: string; headers: Record<string, string>; body?: string },
+  init: { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal },
   fetchImpl: FetchLike,
   http2Enabled: boolean,
+  timeoutMs?: number,
 ): Promise<TransportResponse> {
   let failedNegotiation: Http2Connection | undefined;
   let origin: string | undefined;
@@ -2653,14 +2808,15 @@ async function sendRequest(
           http2Connections.set(origin, connection);
         }
         try {
-          await connection.ready;
+          await abortable(connection.ready, init.signal);
         } catch {
+          init.signal?.throwIfAborted();
           // No request stream exists yet, so switching transport cannot replay
           // an operation. Do not cache HTTP/1 until it returns a response.
           failedNegotiation = connection;
         }
         if (!failedNegotiation) {
-          return connection.request(init.method, `${pathname}${search}`, init.headers, init.body);
+          return connection.request(init.method, `${pathname}${search}`, init.headers, init.body, init.signal, timeoutMs);
         }
       }
     }
@@ -2673,6 +2829,7 @@ async function sendRequest(
   try {
     text = await response.text();
   } catch (error) {
+    if (error instanceof RequestIdleTimeoutError) throw error;
     if (RETRYABLE_HTTP.has(response.status)) {
       return { status: response.status, ok: false, text: "" };
     }

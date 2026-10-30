@@ -48,4 +48,8 @@ Fix description wording upstream, or the next sync reverts it. Do not edit
 
 ## Validation
 
-Run `scripts/check-local` before opening a pull request.
+Run `scripts/check-local` before opening a pull request. JavaScript workspaces
+use the root `bun.lock`; do not maintain a separate npm lockfile. TypeScript
+builds and tests generate the shared guest helpers from their Python sources.
+Run `bun run generate:validators` in `typescript/` before invoking individual
+TypeScript test files from a fresh checkout.

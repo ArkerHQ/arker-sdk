@@ -1,18 +1,50 @@
 from __future__ import annotations
 
+import math
+import re
+import shlex
+import time
+from functools import partial
 from typing import Any
 
 from ._compat import (
     CommandResult,
+    CompatibilityCreationNotStartedError,
+    UnsupportedCompatibilityOption,
     UnsupportedMixin,
     arker_create,
     arker_get,
-    format_not_found,
+    compat_network_policies,
+    get_or_none,
     import_optional,
+    pop_arker_config,
+    routed_create,
+    routed_get,
+    router_config,
     run_command,
     shell_command,
 )
+from ._modal_async import dualmethod
+from ._modal_errors import exec_errors
+from ._modal_recipes import App as AppRecipe
+from ._modal_recipes import Image as ImageRecipe
+from ._modal_recipes import RecipeFactory, image_recipe, secret_recipe
+from ._modal_recipes import Secret as SecretRecipe
 from .computer import VM
+
+_factories = {name: RecipeFactory(name) for name in ("App", "Image", "Secret")}
+
+
+def __getattr__(name: str) -> Any:
+    module = import_optional("modal")
+    if name in _factories:
+        route = router_config(None, "modal").create
+        providers = (*route.order, *route.weights, *route.fallback)
+        if module is None or "arker" in providers:
+            return _factories[name]
+    if module is not None:
+        return getattr(module, name)
+    raise AttributeError(name)
 
 
 class _Stream:
@@ -54,62 +86,409 @@ class Sandbox(UnsupportedMixin):
     def __init__(self, vm: VM | None = None, native: Any | None = None) -> None:
         self._vm = vm
         self._native = native
-        self.sandbox_id = vm.id if vm is not None else getattr(native, "sandbox_id", getattr(native, "id", None))
+        self._processes = None
+        self._filesystem_container = None
+        self._filesystem = None
+        self._terminal_reason = getattr(vm, "_modal_terminal_reason", None)
+        self.sandbox_id = (
+            vm.id
+            if vm is not None
+            else getattr(native, "object_id", getattr(native, "sandbox_id", getattr(native, "id", None)))
+        )
         self.sandboxId = self.sandbox_id
+
+    @property
+    def filesystem(self):
+        if self._native is not None:
+            return self._native.filesystem
+        if self._filesystem is None:
+            from ._modal_filesystem import FilesystemContainer, filesystem
+
+            self._filesystem_container = FilesystemContainer(self)
+            self._filesystem = filesystem(self._filesystem_container)
+        return self._filesystem
+
+    @property
+    def object_id(self) -> str:
+        return self.sandbox_id
 
     @staticmethod
     def _native_sandbox() -> Any | None:
         module = import_optional("modal")
         return getattr(module, "Sandbox", None) if module is not None else None
 
+    @dualmethod
     @classmethod
     def create(cls, *args: Any, **kwargs: Any) -> Sandbox:
-        arker_config = kwargs.pop("arker", None)
-        if args or kwargs:
-            raise TypeError("Sandbox.create only supports create() in the Arker compatibility layer for modal.")
-        try:
-            return cls(vm=arker_create(arker_config))
-        except Exception:
-            native = cls._native_sandbox()
-            if native is None or not hasattr(native, "create"):
-                raise
-            return cls(native=native.create())
+        arker_config = pop_arker_config(kwargs)
+        native_kwargs = dict(kwargs)
+        secrets = kwargs.pop("secrets", None)
+        creation_env = kwargs.pop("env", None)
+        creation_workdir = kwargs.pop("workdir", None)
+        app = kwargs.pop("app", None)
+        image = kwargs.pop("image", None)
+        timeout = kwargs.pop("timeout", 300)
+        block_network = kwargs.pop("block_network", kwargs.pop("blockNetwork", False))
+        outbound_cidrs = kwargs.pop("outbound_cidr_allowlist", kwargs.pop("outboundCidrAllowlist", None))
+        outbound_domains = kwargs.pop("outbound_domain_allowlist", kwargs.pop("outboundDomainAllowlist", None))
+        for camel, snake, value in (
+            ("blockNetwork", "block_network", block_network),
+            ("outboundCidrAllowlist", "outbound_cidr_allowlist", outbound_cidrs),
+            ("outboundDomainAllowlist", "outbound_domain_allowlist", outbound_domains),
+        ):
+            if camel in native_kwargs:
+                native_kwargs.pop(camel)
+                native_kwargs[snake] = value
+        native = cls._native_sandbox()
 
+        def create_native() -> Any:
+            if native is None or not hasattr(native, "create"):
+                raise CompatibilityCreationNotStartedError("Native Modal SDK is not installed")
+            options = dict(native_kwargs)
+            if isinstance(options.get("app"), AppRecipe):
+                options["app"] = options["app"]._native()
+            from ._modal_recipes import native_secrets
+
+            options = native_secrets(options)
+            if isinstance(options.get("image"), ImageRecipe):
+                options["image"] = options["image"]._native()
+            return native.create(*args, **options)
+
+        def create_arker() -> VM:
+            if args or kwargs:
+                names = [*(f"positional[{index}]" for index in range(len(args))), *sorted(kwargs)]
+                raise UnsupportedCompatibilityOption(
+                    f"Sandbox.create option(s) are not supported by Arker: {', '.join(names)}"
+                )
+            recipe = image_recipe(image)
+            if image is not None and recipe is None:
+                raise UnsupportedCompatibilityOption(
+                    "Arker requires a local Image recipe; opaque native image handles are unsupported"
+                )
+            if app is not None and type(app) is not AppRecipe:
+                raise UnsupportedCompatibilityOption("Arker requires a local App recipe, not an opaque native app")
+            metadata = {"computesdk-modal-app": app._group()} if app is not None else {}
+            exceptions = import_optional("modal.exception")
+            invalid = exceptions.InvalidError if exceptions is not None else ValueError
+            environment = {}
+            for secret in secrets or []:
+                secret = secret_recipe(secret)
+                if secret is None:
+                    raise UnsupportedCompatibilityOption("Arker creation requires local Secret.from_dict recipes")
+                environment.update(secret._values)
+            if creation_env is not None:
+                if not isinstance(creation_env, dict):
+                    raise invalid("the env argument to Sandbox must be a dict[str, str | None]")
+                environment.update({key: value for key, value in creation_env.items() if value is not None})
+            if any(
+                not isinstance(key, str)
+                or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) is None
+                or not isinstance(value, str)
+                for key, value in environment.items()
+            ):
+                raise invalid("Sandbox.create environment requires valid names and string values")
+            if creation_workdir is not None and (
+                not isinstance(creation_workdir, str) or not creation_workdir.startswith("/")
+            ):
+                raise invalid(f"workdir must be an absolute path, got: {creation_workdir}")
+            defaults = {"env": environment, "workdir": creation_workdir or "/"}
+            steps = recipe._steps() if recipe is not None else None
+            if not steps and (environment or creation_workdir is not None):
+                from ._modal_defaults import MARKER
+
+                metadata[MARKER] = True
+            registry = recipe._registry() if recipe is not None else None
+            registry_auth = recipe._registry_auth() if recipe is not None else None
+            image_config = arker_config
+            if registry_auth is not None:
+                image_config = {**(arker_config or {}), "registry_auth": registry_auth}
+            api_pb2 = import_optional("modal_proto.api_pb2")
+            if api_pb2 is not None:
+                lifetime = api_pb2.Sandbox(timeout_secs=timeout).timeout_secs or 300
+            else:
+                if timeout is not None and not isinstance(timeout, int):
+                    raise TypeError("timeout must be an integer number of seconds")
+                lifetime = timeout or 300
+            if not 10 <= lifetime <= 86_400:
+                exceptions = import_optional("modal.exception")
+                error = exceptions.InvalidError if exceptions is not None else ValueError
+                raise error("Timeout must be between 10s and 86400s (inclusive).")
+            configured = (arker_config or {}).get("policies") or {}
+            if "policies" in configured:
+                raise UnsupportedCompatibilityOption("Modal lifetime requires named policies, not ordered policies")
+            if "computesdk-modal-lifetime" in configured.get("rules", {}):
+                raise UnsupportedCompatibilityOption("Policy id 'computesdk-modal-lifetime' is reserved")
+            policies = (
+                compat_network_policies(
+                    block_all=bool(block_network),
+                    domains=outbound_domains,
+                    cidrs=outbound_cidrs,
+                    domain_ports=[443],
+                    empty_allowlist_blocks=True,
+                )
+                or {}
+            )
+            policies.setdefault("rules", {})["computesdk-modal-lifetime"] = {
+                "type": "schedule",
+                "after_created": lifetime,
+                "action": "delete",
+            }
+            fork = None
+            if steps:
+                from ._modal_prepared import create_prepared
+
+                final_image_config = {
+                    **({"env": environment} if environment else {}),
+                    **({"workdir": creation_workdir} if creation_workdir is not None else {}),
+                }
+                fork = lambda client, request: create_prepared(
+                    client, request, steps, final_image_config=final_image_config
+                )
+            vm = arker_create(image_config, image=registry, policies=policies, metadata=metadata or None, fork=fork)
+            if not steps and (environment or creation_workdir is not None):
+                from ._modal_defaults import write
+
+                try:
+                    write(vm, defaults)
+                except BaseException as error:
+                    try:
+                        vm.delete()
+                    except Exception as cleanup_error:
+                        error.vm_id = vm.id
+                        raise error from cleanup_error
+                    raise
+            return vm
+
+        provider, result = routed_create(
+            "modal",
+            arker_config,
+            {
+                "arker": create_arker,
+                "modal": create_native,
+            },
+        )
+        return cls(vm=result if provider == "arker" else None, native=result if provider == "modal" else None)
+
+    @dualmethod
     @classmethod
-    def from_id(cls, sandbox_id: str, **kwargs: Any) -> Sandbox:
-        arker_config = kwargs.pop("arker", None)
+    def from_id(cls, sandbox_id: str, client: Any | None = None, **kwargs: Any) -> Sandbox:
+        arker_config = pop_arker_config(kwargs)
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise TypeError(f"Sandbox.from_id received unsupported option(s): {unsupported}")
-        vm = arker_get(sandbox_id, arker_config)
-        if vm is not None:
-            return cls(vm=vm)
         native = cls._native_sandbox()
-        for method_name in ("from_id", "fromId", "connect"):
-            if native is not None and hasattr(native, method_name):
-                return cls(native=getattr(native, method_name)(sandbox_id))
-        raise format_not_found("Sandbox", sandbox_id)
+
+        def get_native() -> Any | None:
+            for method_name in ("from_id", "fromId", "connect"):
+                if native is not None and hasattr(native, method_name):
+                    method = getattr(native, method_name)
+                    return get_or_none(
+                        partial(method, sandbox_id, **({"client": client} if client is not None else {}))
+                    )
+            return None
+
+        def get_arker():
+            found = arker_get(sandbox_id, arker_config)
+            if found is not None:
+                return found
+            from ._router import is_arker_vm_identifier
+
+            if not is_arker_vm_identifier(sandbox_id):
+                return None
+            from ._modal_lifecycle import retained
+
+            return retained(sandbox_id, arker_config)
+
+        found = routed_get(
+            sandbox_id,
+            "modal",
+            arker_config,
+            {"arker": get_arker, "modal": get_native},
+        )
+        if found is not None:
+            provider, result = found
+            return cls(vm=result if provider == "arker" else None, native=result if provider == "modal" else None)
+        from ._modal_lifecycle import missing
+
+        raise missing(sandbox_id)
 
     @classmethod
     def fromId(cls, sandbox_id: str, **kwargs: Any) -> Sandbox:
         return cls.from_id(sandbox_id, **kwargs)
 
-    def exec(self, *command: Any, **kwargs: Any) -> Process:
+    @dualmethod
+    @exec_errors
+    def exec(self, *command: Any, **kwargs: Any) -> Any:
+        if self._vm is None:
+            from ._modal_recipes import native_secrets
+
+            return self._native.exec(*command, **native_secrets(kwargs))
+        workdir = kwargs.pop("workdir", kwargs.pop("cwd", None))
+        if workdir is None:
+            from ._modal_prepared import IMAGE_WORKDIR
+
+            workdir = (self._vm.metadata or {}).get(IMAGE_WORKDIR) if getattr(self._vm, "metadata", None) else None
+        environment = kwargs.pop("env", None)
+        timeout = kwargs.pop("timeout", None)
+        timeout_ms = kwargs.pop("timeout_ms", kwargs.pop("timeoutMs", None))
+        native_streams = import_optional("modal.container_process") is not None
+        stream_options = {}
+        tty = None
+        if native_streams:
+            from modal._utils.async_utils import synchronizer
+            from modal.exception import InvalidError
+            from modal.sandbox._common import _validate_exec_args
+            from modal.secret import _local_secret_env, _resolvable_secrets
+            from modal.stream_type import StreamType
+
+            _validate_exec_args(command)
+            if workdir is not None and not workdir.startswith("/"):
+                raise InvalidError(f"workdir must be an absolute path, got: {workdir}")
+            stream_options = {key: kwargs.pop(key) for key in ("stdout", "stderr", "text", "bufsize") if key in kwargs}
+            for key in ("stdout", "stderr"):
+                if key in stream_options and stream_options[key] not in tuple(StreamType):
+                    raise ValueError(f"Unsupported StreamType for {key}")
+            if stream_options.get("bufsize") == 1 and stream_options.get("text", True) is False:
+                raise ValueError("line-buffering is only supported when text=True")
+            secrets = [
+                synchronizer._translate_in(secret._native() if type(secret) is SecretRecipe else secret)
+                for secret in (kwargs.pop("secrets", None) or [])
+            ]
+            if _resolvable_secrets(secrets):
+                raise UnsupportedCompatibilityOption(
+                    "Sandbox.exec named or deployed secrets are not supported by Arker"
+                )
+            environment = {
+                **_local_secret_env(secrets),
+                **{k: v for k, v in (environment or {}).items() if v is not None},
+            }
+            if kwargs.pop("pty", False):
+                from modal._output.pty import get_pty_info
+
+                info = get_pty_info(shell=True, no_terminate_on_idle_stdin=True)
+                tty = {"rows": info.winsz_rows, "cols": info.winsz_cols}
+                environment = {
+                    "TERM": info.env_term,
+                    "COLORTERM": info.env_colorterm,
+                    "TERM_PROGRAM": info.env_term_program,
+                    **environment,
+                }
+                # Native pty=True overrides both deprecated terminal descriptors.
+                kwargs.pop("pty_info", None)
+                kwargs.pop("_pty_info", None)
+            for key, default in (("pty_info", None), ("_pty_info", None)):
+                if key in kwargs and kwargs[key] == default:
+                    kwargs.pop(key)
+        if not native_streams:
+            environment = {
+                **{key: value for key, value in (environment or {}).items() if value is not None},
+            }
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise TypeError(f"Sandbox.exec received unsupported option(s): {unsupported}")
-        if self._vm is not None:
-            return Process(run_command(self._vm, shell_command(command)))
-        return Process(self._native.exec(*command))
+        for key in environment or {}:
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)) is None:
+                raise ValueError(f"Invalid environment variable name: {key}")
+        from ._modal_defaults import discard_exec, prepare_exec
 
-    def terminate(self) -> None:
+        launch, control_name = prepare_exec(self._vm, command, environment, workdir)
+        arker_timeout = timeout if timeout is not None else math.ceil(timeout_ms / 1_000) if timeout_ms else None
+        if native_streams:
+            from ._compat_process import GuestProcesses
+            from ._modal_process import modal_process
+
+            if self._processes is None:
+                self._processes = GuestProcesses(self._vm)
+            milliseconds = timeout * 1000 if timeout is not None else timeout_ms
+            deadline = time.monotonic() + milliseconds / 1000 if milliseconds else None
+            try:
+                current = self._processes.exec(
+                    {
+                        "command": " ".join(shlex.quote(part) for part in command),
+                        "argv": launch,
+                        **({"_modalControl": control_name} if control_name else {}),
+                        "env": {},
+                        "spawnFailureExitCode": 128,
+                        "preserveDescendants": True,
+                        "workingDir": "/" if control_name else workdir or "/",
+                        "stdin": True,
+                        **({"tty": tty} if tty is not None else {}),
+                        **({"timeout": milliseconds} if milliseconds is not None else {}),
+                    }
+                )
+            except BaseException as error:
+                discard_exec(self._vm, control_name, error)
+                raise
+            return modal_process(
+                self._processes,
+                current.pid,
+                text=stream_options.get("text", True),
+                by_line=stream_options.get("bufsize") == 1,
+                stdout=stream_options.get("stdout"),
+                stderr=stream_options.get("stderr"),
+                deadline=deadline,
+            )
+        prefix = "" if control_name else f"cd {shlex.quote(str(workdir or '/'))} && "
+        try:
+            result = Process(run_command(self._vm, prefix + shell_command(launch), timeout=arker_timeout))
+        except BaseException as error:
+            discard_exec(self._vm, control_name, error)
+            raise
+        discard_exec(self._vm, control_name)
+        return result
+
+    @property
+    def returncode(self) -> int | None:
+        if self._native is not None:
+            return self._native.returncode
+        from ._modal_lifecycle import returncode
+
+        return returncode(self._terminal_reason)
+
+    @dualmethod
+    def poll(self) -> int | None:
+        if self._native is not None:
+            return self._native.poll()
+        from ._modal_lifecycle import state
+
+        self._terminal_reason = state(self._vm)
+        return self.returncode
+
+    @dualmethod
+    def wait(self, raise_on_termination: bool = True) -> None:
+        if self._native is not None:
+            return self._native.wait(raise_on_termination=raise_on_termination)
+        import time
+
+        from ._modal_lifecycle import completed
+
+        while self.poll() is None:
+            time.sleep(1)
+        completed(self._terminal_reason, raise_on_termination)
+        return None
+
+    @dualmethod
+    def terminate(self, *, wait: bool = False) -> int | None:
         if self._vm is not None:
-            self._vm.delete()
-            return
+            try:
+                self._vm.delete()
+            except Exception as error:
+                from ._modal_errors import _missing_vm
+
+                if not _missing_vm(error):
+                    raise
+                from ._modal_lifecycle import state
+
+                self._terminal_reason = state(self._vm)
+                if self._terminal_reason is None:
+                    raise
+            if wait:
+                self.wait(raise_on_termination=False)
+                return self.returncode
+            return None
         if hasattr(self._native, "terminate"):
-            self._native.terminate()
-            return
+            return self._native.terminate(wait=wait)
         if hasattr(self._native, "close"):
             self._native.close()
-            return
+            return None
         raise AttributeError("Native Modal sandbox does not expose terminate().")

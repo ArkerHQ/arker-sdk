@@ -1,0 +1,53 @@
+# Daytona volumes
+
+Python sync/async and TypeScript clients route `volume.create`, `volume.get` and
+`volume.list` through the configured providers. Arker-backed values use the
+native Daytona `Volume` model and retain their Arker client privately. Names
+must resolve to one provider: when multiple configured providers have the same
+name, lookup and attachment refuse the ambiguity. Authentication and tenant
+errors do not become misses or trigger creation elsewhere. Without native
+credentials, default volume routing uses Arker alone. Explicit router files
+that request an unavailable provider fail before lookup.
+
+`ready` describes the committed logical filesystem namespace. Arker creation
+writes its marker and catalog record synchronously; there is no asynchronous
+namespace provisioning or metadata update operation. `updated_at` therefore
+matches `created_at`, `error_reason` is null, and unknown `last_used_at` stays
+null. These fields do not describe mount convergence or the last file write.
+
+Whole-filesystem attachments accept native `VolumeMount` parameters. Creation
+preflights identities and canonical mount paths, attaches each filesystem, and
+waits for its actual guest FUSE mount to be accessible to the existing non-root
+`daytona` account. Failure deletes the newly owned sandbox. Mounted storage uses
+the backend's coherence model, not a promise of POSIX locking or instantaneous
+cross-VM cache invalidation.
+
+## Deletion, subpaths and pagination
+
+Arker-backed `volume.delete` uses the atomic `only_if_unmounted=true` condition
+with the volume's original provider-bound client. Active references, including
+paused sandboxes that retain attachments, prevent deletion; the adapter never
+falls back to unconditional deletion or a client-side mount check. Native volume
+handles keep native deletion behavior.
+
+Nonempty `subpath` is supported as a persisted relative subtree with scoped
+storage credentials. Arker paths must be canonical: traversal, empty segments,
+backslashes, control characters and policy wildcard syntax are rejected before
+creation. Native mount parameters retain native validation. Empty or omitted
+subpaths select the whole filesystem. Listings follow server cursors; repeated
+cursors and potentially truncated legacy responses fail explicitly.
+
+## Differential checks
+
+`python/tests/e2e/test_daytona_volumes_import_only.py` runs the same workload
+across native, routed-native and Arker clients, in sync and async styles. It
+covers same-name get/create races, duplicate-create errors, mounted deletion,
+and cross-VM binary writes, rename and unlink. The adapter implements conditional
+deletion and subtree attachment, but current managed-volume native comparisons are quota-blocked and provide no equivalence
+credit. Cleanup removes owned sandboxes before conditionally deleting volumes.
+
+The Arker source must provide Python3, `setpriv` and a writable home for its
+non-root `daytona` account. The current Linux storage driver uses UID/GID1000;
+`python/tests/e2e/daytona_baseline.py` prepares that identity only in its own
+pinned disposable image, with an explicit platform. It never changes a
+customer-selected source.

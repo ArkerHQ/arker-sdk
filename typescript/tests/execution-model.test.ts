@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   Arker, ArkerError,
-  type PolicyAction, type PolicyRule, type PolicyUpdate, type ScheduleRule, type SessionState, type VmState,
+  type PolicyAction, type PolicyRule, type PolicyUpdate, type ScheduleRule, type SessionState, type VmState, type VM,
 } from '../src/index';
 
 const sshKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl dev@laptop';
@@ -100,6 +100,42 @@ test('a policy read back updates without its read-only fields', async () => {
   await handle.update({policies: handle.policies!});
   assert.deepEqual(calls[1]!.body, {policies: {rules, secrets: {KEY: '***'}}});
 });
+
+for (const operation of ['update', 'fork', 'run', 'setPolicies'] as const) {
+test(`a policy read back preserves independent floors for ${operation}`, async () => {
+  const calls: Call[] = [];
+  const floor = {type: 'outbound_guard' as const, allow: [{ips: ['1.1.1.1'], ports: [443]}]};
+  const read = {...vm('idle'), policies: {rules, outbound_guards: {floor}}};
+  const status = operation === 'run' ? 202 : 200;
+  const response = operation === 'run' ? {run_id: 'run_1', session_id: 's1', state: 'running'} : read;
+  const sdk = client(status, response, calls);
+  const policies: NonNullable<VM['policies']> = read.policies;
+  const handle = sdk.vm('vm_1');
+  if (operation === 'update') await handle.update({policies});
+  else if (operation === 'fork') await handle.fork({policies});
+  else if (operation === 'run') await handle.run('sleep 1', {policies, time_to_background: 0});
+  else await handle.setPolicies(policies);
+  const body = calls[0]!.body as {policies: unknown};
+  assert.deepEqual(operation === 'setPolicies' ? body : body.policies, {rules: {...rules, floor}});
+  assert.deepEqual(read.policies.outbound_guards, {floor});
+});
+
+test(`an explicit floor removal overrides readback for ${operation}`, async () => {
+  const calls: Call[] = [];
+  const floor = {type: 'outbound_guard' as const, allow: []};
+  const policies = {outbound_guards: {floor}, rules: {floor: null}};
+  const status = operation === 'run' ? 202 : 200;
+  const response = operation === 'run' ? {run_id: 'run_1', session_id: 's1', state: 'running'} : vm('idle');
+  const handle = client(status, response, calls).vm('vm_1');
+  if (operation === 'update') await handle.update({policies});
+  else if (operation === 'fork') await handle.fork({policies});
+  else if (operation === 'run') await handle.run('sleep 1', {policies, time_to_background: 0});
+  else await handle.setPolicies(policies);
+  const body = calls[0]!.body as {policies: unknown};
+  assert.deepEqual(operation === 'setPolicies' ? body : body.policies, {rules: {floor: null}});
+  assert.deepEqual(policies, {outbound_guards: {floor}, rules: {floor: null}});
+});
+}
 
 const notRunningCases: Array<[string, string, (a: Arker) => Promise<unknown>]> = [
   ['signal', 'createRun', (a) => a.vm('vm_1').signal('SIGINT')],

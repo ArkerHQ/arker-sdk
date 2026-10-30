@@ -1,13 +1,19 @@
 import copy
 import json
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 from test_computer import FakeTransport, client, use_transport
 
 import arker.computer as sdk
+from arker.generated.api_models import OperationFailed, RecoveryContext
 
 SPEC = json.loads((Path(__file__).resolve().parents[3] / "openapi.json").read_text())
+
+
+def test_operation_failure_recovery_is_required_in_the_generated_public_type():
+    assert get_type_hints(OperationFailed)["recovery"] is RecoveryContext
 
 
 def example(code):

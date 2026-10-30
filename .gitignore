@@ -34,3 +34,11 @@ checkpoint-*.png
 typescript/src/generated/error-validators.js
 typescript/src/generated/error-validators.d.ts
 python/src/arker/_openapi.json
+
+# Bun is the workspace lockfile; guest helpers are generated before build/test.
+/typescript/package-lock.json
+/typescript/src/compat/*.generated.ts
+
+# Compatibility evidence belongs to individual runs.
+/compatibility/evidence/
+/python/tests/e2e/evidence/

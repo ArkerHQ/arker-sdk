@@ -4,12 +4,11 @@ import base64
 import contextlib
 import json
 import time
-from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 
-import httpx2 as httpx
 import pytest
+from scripted_transport import FakeTransport, use_transport
 
 import arker.computer as sdk
 from arker.generated.api_models import PolicyDoc, PolicyEntry, PolicyMatch
@@ -22,57 +21,6 @@ UNKNOWN_OUTCOME_ERROR_BODY = {
         "retryable": False,
     }
 }
-
-
-class FakeTransport:
-    """Scripts httpx responses by (method, url); drive it with ``use_transport``."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-        self.script: list[tuple[Any, int | None, bytes | httpx.RequestError]] = []
-
-    def add_json(self, predicate, status: int, body: dict[str, Any]) -> None:
-        self.script.append((predicate, status, json.dumps(body).encode()))
-
-    def add_raw(self, predicate, status: int, body: bytes) -> None:
-        self.script.append((predicate, status, body))
-
-    def add_network_error(self, predicate, message: str = "response lost") -> None:
-        self.script.append((predicate, None, httpx.ReadError(message)))
-
-    def handler(self, request: httpx.Request) -> httpx.Response:
-        method = request.method
-        url = str(request.url)
-        self.calls.append(
-            {
-                "method": method,
-                "url": url,
-                "body": request.content or None,
-                "headers": request.headers,
-            }
-        )
-
-        for index, (predicate, status, payload) in enumerate(self.script):
-            if predicate(method, url):
-                self.script.pop(index)
-                if isinstance(payload, httpx.RequestError):
-                    raise payload
-                assert status is not None
-                return httpx.Response(status, content=payload)
-
-        raise AssertionError(f"no scripted response for {method} {url}")
-
-
-@contextmanager
-def use_transport(t: FakeTransport):
-    """Route the SDK's shared client through ``t`` for the duration."""
-    previous = sdk._http_client
-    sdk._http_client = httpx.Client(transport=httpx.MockTransport(t.handler))
-    try:
-        yield
-    finally:
-        sdk._http_client.close()
-        sdk._http_client = previous
 
 
 def client() -> sdk.Arker:
@@ -117,6 +65,20 @@ def region_client() -> sdk.Arker:
 
 def session(session_id: str = "s0") -> dict[str, str]:
     return {"session_id": session_id, "state": "ready", "cwd": "/home/user"}
+
+
+def vm_response(vm_id, *, sessions=None, description=None, resources=None):
+    return {
+        "vm_id": vm_id,
+        "owner_org_id": "owner",
+        "created_at": "now",
+        "description": description,
+        "public": False,
+        "state": "idle",
+        "sessions": [] if sessions is None else sessions,
+        "network": {},
+        "resources": {} if resources is None else resources,
+    }
 
 
 def test_api_key_from_argument_beats_env(monkeypatch) -> None:
@@ -354,17 +316,7 @@ def test_fork_posts_directly_to_source_vm() -> None:
     t.add_json(
         lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/fork",
         200,
-        {
-            "vm_id": "vm_child",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [session()],
-            "network": {},
-            "resources": {},
-        },
+        vm_response("vm_child", sessions=[session()]),
     )
 
     with use_transport(t):
@@ -394,7 +346,7 @@ def test_fork_preserves_the_canonical_wire_shape(pool_id: str | None) -> None:
     t.add_json(
         lambda method, url: method == "POST" and url.endswith("/v1/fork"),
         200,
-        {**_fork_response("vm_child"), "pool_id": pool_id},
+        {**vm_response("vm_child", sessions=[session()]), "pool_id": pool_id},
     )
 
     with use_transport(t):
@@ -425,7 +377,7 @@ def test_vm_fork_uses_its_id_and_attached_endpoint() -> None:
     t.add_json(
         lambda method, url: method == "POST" and url == "https://attached.invalid/api/v1/fork",
         200,
-        _fork_response("vm_child"),
+        vm_response("vm_child", sessions=[session()]),
     )
     vm = sdk.VM(client(), "vm_source", "https://attached.invalid/api")
 
@@ -444,17 +396,9 @@ def test_fork_omits_source_org_when_not_explicit() -> None:
     t.add_json(
         lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/fork",
         200,
-        {
-            "vm_id": "vm_named_source",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [session()],
-            "network": {},
-            "resources": {"vcpu": 4, "memory_mib": 8192, "disk_mib": 10240},
-        },
+        vm_response(
+            "vm_named_source", sessions=[session()], resources={"vcpu": 4, "memory_mib": 8192, "disk_mib": 10240}
+        ),
     )
 
     with use_transport(t):
@@ -477,17 +421,7 @@ def test_fork_from_image_sends_only_the_image() -> None:
     t.add_json(
         lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/fork",
         200,
-        {
-            "vm_id": "vm_from_image",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [session()],
-            "network": {},
-            "resources": {},
-        },
+        vm_response("vm_from_image", sessions=[session()]),
     )
 
     with use_transport(t):
@@ -503,20 +437,6 @@ def test_fork_rejects_positional_sources() -> None:
         client().fork("base", image="ubuntu:24.04")
 
 
-def _fork_response(vm_id: str) -> dict:
-    return {
-        "vm_id": vm_id,
-        "owner_org_id": "owner",
-        "created_at": "now",
-        "description": None,
-        "public": False,
-        "state": "idle",
-        "sessions": [session()],
-        "network": {},
-        "resources": {},
-    }
-
-
 def test_fork_from_a_private_image_sends_registry_auth() -> None:
     """Credentials ride with the pull they authorize, and nothing else.
 
@@ -529,7 +449,7 @@ def test_fork_from_a_private_image_sends_registry_auth() -> None:
     t.add_json(
         lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/fork",
         200,
-        _fork_response("vm_private"),
+        vm_response("vm_private", sessions=[session()]),
     )
 
     with use_transport(t):
@@ -551,7 +471,7 @@ def test_fork_from_a_dockerfile_forks_the_base_image_then_drives_the_rest() -> N
     t.add_json(
         lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/fork",
         200,
-        _fork_response("vm_dockerfile"),
+        vm_response("vm_dockerfile", sessions=[session()]),
     )
     t.add_json(
         lambda method, url: method == "POST" and url.endswith("/runs"),
@@ -623,17 +543,7 @@ def test_configured_placement_routes_named_sources_to_main_endpoint() -> None:
     t.add_json(
         lambda method, url: method == "POST" and url == "https://provider-one-region-one.arker.ai/api/v1/fork",
         200,
-        {
-            "vm_id": "vmh-child",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [],
-            "network": {},
-            "resources": {},
-        },
+        vm_response("vmh-child"),
     )
 
     with use_transport(t):
@@ -651,7 +561,7 @@ def test_list_uses_configured_base_url() -> None:
     t.add_json(
         lambda method, url: (
             method == "GET"
-            and url == "https://arker.ai/api/v1/vms?region=us-west-2&provider=aws&org_id=ArkerHQ&public=True&state=idle"
+            and url == "https://arker.ai/api/v1/vms?region=us-west-2&provider=aws&org_id=ArkerHQ&public=true&state=idle"
         ),
         200,
         {
@@ -695,9 +605,22 @@ def test_list_uses_configured_base_url() -> None:
     assert result.vms[0].network is not None
     assert result.vms[0].network.ssh_public_keys is None
     assert result.vms[0].resources == sdk.VmResources(vcpu=2, memory_mib=1024, disk_mib=4096)
+    assert result.vms[0].vcpu_count == 2
+    assert result.vms[0].memory_mib == 1024
+    assert result.vms[0].disk_mib == 4096
 
 
-def test_listed_vm_uses_its_placement_endpoint() -> None:
+@pytest.mark.parametrize("explicit", [None, "argument", "environment"])
+def test_listed_vm_uses_its_placement_endpoint(monkeypatch, explicit) -> None:
+    monkeypatch.delenv("ARKER_BASE_URL", raising=False)
+    expected_base = "https://provider-two-region-two.arker.ai/api"
+    options = {"provider": "aws", "region": "us-east-1"}
+    if explicit:
+        expected_base = "https://feature.invalid/api"
+        if explicit == "argument":
+            options["base_url"] = expected_base
+        else:
+            monkeypatch.setenv("ARKER_BASE_URL", expected_base)
     t = FakeTransport()
     t.add_json(
         lambda method, url: method == "GET" and url == "https://arker.ai/api/v1/vms",
@@ -721,9 +644,7 @@ def test_listed_vm_uses_its_placement_endpoint() -> None:
         },
     )
     t.add_json(
-        lambda method, url: (
-            method == "POST" and url == "https://provider-two-region-two.arker.ai/api/v1/vms/vm_placed/runs"
-        ),
+        lambda method, url: method == "POST" and url == expected_base + "/v1/vms/vm_placed/runs",
         200,
         {
             "run_id": "run_placed",
@@ -738,12 +659,12 @@ def test_listed_vm_uses_its_placement_endpoint() -> None:
 
     arker = sdk.Arker(
         api_key="ark_live_test",
-        base_url="https://fallback.invalid/api",
+        **options,
         retry=False,
     )
     with use_transport(t):
         result = arker.list_vms()
-        assert result.vms[0].base_url == "https://provider-two-region-two.arker.ai/api"
+        assert result.vms[0].base_url == expected_base
         result.vms[0].run("printf ok")
 
 
@@ -753,7 +674,7 @@ def test_list_runs_uses_control_plane_and_filters() -> None:
         lambda method, url: (
             method == "GET"
             and url
-            == "https://control.invalid/api/v1/runs?since=10&until=20&vm=vm_1&vms=vm_2%2Cvm_3&search=pytest&limit=25&offset=5&lite=True&runtime=fc&endpoint=run&actions=run%2Cfork&status=success%2Cinternal&status_min=200&status_max=599&sort=when&dir=asc"
+            == "https://control.invalid/api/v1/runs?since=10&until=20&vm=vm_1&vms=vm_2%2Cvm_3&search=pytest&limit=25&offset=5&lite=true&runtime=fc&endpoint=run&actions=run%2Cfork&status=success%2Cinternal&status_min=200&status_max=599&sort=when&dir=asc"
         ),
         200,
         {
@@ -1010,30 +931,35 @@ def test_run_sends_end_after_all_subprocesses_only_when_set(kwargs, expected) ->
     }
 
 
-def test_resize_patches_vm_resources() -> None:
+@pytest.mark.parametrize(
+    "options, expected",
+    [
+        ({"memory_mib": 1024}, {"memory_mib": 1024}),
+        ({"vcpu": 2}, {"vcpu": 2}),
+        ({"vcpu_count": 2}, {"vcpu": 2}),
+    ],
+)
+def test_resize_patches_vm_resources(options, expected) -> None:
     t = FakeTransport()
     t.add_json(
         lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"),
         200,
-        {
-            "vm_id": "vm_1",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [],
-            "resources": {"vcpu": 2, "memory_mib": 1024, "disk_mib": 4096},
-            "network": {},
-        },
+        vm_response("vm_1", resources={"vcpu": 2, "memory_mib": 1024, "disk_mib": 4096}),
     )
 
     with use_transport(t):
-        result = client().vm("vm_1").update(memory_mib=1024)
+        result = client().vm("vm_1").update(**options)
 
     # Resize uses PATCH with a resources object. None fields are pruned.
-    assert json.loads(t.calls[0]["body"]) == {"resources": {"memory_mib": 1024}}
+    assert json.loads(t.calls[0]["body"]) == {"resources": expected}
     assert result is not None
+
+
+def test_resize_rejects_conflicting_cpu_aliases_before_sending_a_request() -> None:
+    t = FakeTransport()
+    with use_transport(t), pytest.raises(TypeError, match="vcpu"):
+        client().vm("vm_1").update(vcpu=2, vcpu_count=3)
+    assert t.calls == []
 
 
 def test_resize_patches_vgpu_on_its_own() -> None:
@@ -1047,17 +973,7 @@ def test_resize_patches_vgpu_on_its_own() -> None:
     t.add_json(
         lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"),
         200,
-        {
-            "vm_id": "vm_1",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [],
-            "resources": {"gpu_sms": 66, "gpu_vram_mib": 40779},
-            "network": {},
-        },
+        vm_response("vm_1", resources={"gpu_sms": 66, "gpu_vram_mib": 40779}),
     )
 
     with use_transport(t):
@@ -1071,17 +987,7 @@ def test_update_patches_vm_description() -> None:
     t.add_json(
         lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"),
         200,
-        {
-            "vm_id": "vm_1",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": "CI runner",
-            "public": False,
-            "state": "idle",
-            "sessions": [],
-            "resources": {"vcpu": 2, "memory_mib": 1024, "disk_mib": 4096},
-            "network": {},
-        },
+        vm_response("vm_1", description="CI runner", resources={"vcpu": 2, "memory_mib": 1024, "disk_mib": 4096}),
     )
 
     with use_transport(t):
@@ -1122,17 +1028,7 @@ def test_update_leaves_immutable_off_the_wire_by_default() -> None:
     t.add_json(
         lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"),
         200,
-        {
-            "vm_id": "vm_1",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": "CI runner",
-            "public": False,
-            "state": "idle",
-            "sessions": [],
-            "resources": {},
-            "network": {},
-        },
+        vm_response("vm_1", description="CI runner"),
     )
 
     with use_transport(t):
@@ -1146,17 +1042,7 @@ def test_update_can_clear_vm_description_with_null() -> None:
     t.add_json(
         lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"),
         200,
-        {
-            "vm_id": "vm_1",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [],
-            "resources": {},
-            "network": {},
-        },
+        vm_response("vm_1"),
     )
 
     with use_transport(t):
@@ -1170,17 +1056,7 @@ def test_update_can_clear_vm_description_with_blank_string() -> None:
     t.add_json(
         lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"),
         200,
-        {
-            "vm_id": "vm_1",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [],
-            "resources": {},
-            "network": {},
-        },
+        vm_response("vm_1"),
     )
 
     with use_transport(t):
@@ -1198,17 +1074,7 @@ def test_update_replaces_ssh_public_keys_at_the_top_level(keys: list[str]) -> No
     t.add_json(
         lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"),
         200,
-        {
-            "vm_id": "vm_1",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [],
-            "resources": {},
-            "network": {},
-        },
+        vm_response("vm_1"),
     )
 
     with use_transport(t):
@@ -1218,17 +1084,7 @@ def test_update_replaces_ssh_public_keys_at_the_top_level(keys: list[str]) -> No
 
 
 def _patched_vm() -> dict[str, Any]:
-    return {
-        "vm_id": "vm_1",
-        "owner_org_id": "owner",
-        "created_at": "now",
-        "description": None,
-        "public": False,
-        "state": "idle",
-        "sessions": [],
-        "resources": {},
-        "network": {},
-    }
+    return vm_response("vm_1")
 
 
 def _is_patch_vm(method: str, url: str) -> bool:
@@ -1421,7 +1277,7 @@ def test_get_retries_a_network_failure(monkeypatch) -> None:
     t = FakeTransport()
     predicate = lambda method, url: method == "GET" and url.endswith("/v1/vms/vm_1")
     t.add_network_error(predicate)
-    t.add_json(predicate, 200, _fork_response("vm_1"))
+    t.add_json(predicate, 200, vm_response("vm_1", sessions=[session()]))
 
     with use_transport(t):
         vm = sdk.Arker(
@@ -1611,17 +1467,7 @@ def test_fork_sends_durable_flag() -> None:
     t.add_json(
         lambda method, url: method == "POST" and url.endswith("/v1/fork"),
         200,
-        {
-            "vm_id": "vm_child",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [],
-            "network": {},
-            "resources": {},
-        },
+        vm_response("vm_child"),
     )
 
     with use_transport(t):
@@ -1648,17 +1494,7 @@ def test_fork_sends_disk_only_layers() -> None:
     t.add_json(
         lambda method, url: method == "POST" and url.endswith("/v1/fork"),
         200,
-        {
-            "vm_id": "vm_child",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [],
-            "network": {},
-            "resources": {},
-        },
+        vm_response("vm_child"),
     )
 
     with use_transport(t):
@@ -1678,17 +1514,7 @@ def test_fork_omits_layers_by_default() -> None:
     t.add_json(
         lambda method, url: method == "POST" and url.endswith("/v1/fork"),
         200,
-        {
-            "vm_id": "vm_child",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [],
-            "network": {},
-            "resources": {},
-        },
+        vm_response("vm_child"),
     )
 
     with use_transport(t):
@@ -1857,7 +1683,7 @@ def test_get_and_set_policies() -> None:
     assert updated.policies[0].type == "outbound"
     assert updated.mitm_domains == ["example.com"]
     put_call = next(c for c in t.calls if c["method"] == "PUT")
-    assert b"example.com" in put_call["body"]
+    assert json.loads(put_call["body"])["policies"][0]["match"]["hosts"] == ["example.com"]
 
 
 def test_request_policies_reach_the_server_unfiltered() -> None:
@@ -2218,17 +2044,7 @@ def test_fork_sends_vgpu_as_the_only_resource() -> None:
     t.add_json(
         lambda method, url: method == "POST" and url.endswith("/v1/fork"),
         200,
-        {
-            "vm_id": "vm_child",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [],
-            "network": {},
-            "resources": {},
-        },
+        vm_response("vm_child"),
     )
 
     with use_transport(t):
@@ -2251,17 +2067,7 @@ def test_fork_mixes_gpu_and_cpu_resources() -> None:
     t.add_json(
         lambda method, url: method == "POST" and url.endswith("/v1/fork"),
         200,
-        {
-            "vm_id": "vm_child",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [],
-            "network": {},
-            "resources": {},
-        },
+        vm_response("vm_child"),
     )
 
     with use_transport(t):
@@ -2286,17 +2092,7 @@ def test_fork_omits_resources_when_no_sizing_requested() -> None:
     t.add_json(
         lambda method, url: method == "POST" and url.endswith("/v1/fork"),
         200,
-        {
-            "vm_id": "vm_child",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [],
-            "network": {},
-            "resources": {},
-        },
+        vm_response("vm_child"),
     )
 
     with use_transport(t):
@@ -2312,17 +2108,7 @@ def test_fork_omits_disk_so_nodisk_sources_work() -> None:
         t.add_json(
             lambda method, url: method == "POST" and url.endswith("/v1/fork"),
             200,
-            {
-                "vm_id": "vm_child",
-                "owner_org_id": "owner",
-                "created_at": "now",
-                "description": None,
-                "public": False,
-                "state": "idle",
-                "sessions": [],
-                "network": {},
-                "resources": {},
-            },
+            vm_response("vm_child"),
         )
 
     with use_transport(t):
@@ -2391,17 +2177,7 @@ def test_retry_after_hint_drives_the_actual_sleep() -> None:
     t.add_json(
         predicate,
         200,
-        {
-            "vm_id": "vm_child",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [session()],
-            "network": {},
-            "resources": {},
-        },
+        vm_response("vm_child", sessions=[session()]),
     )
 
     started = time.monotonic()
@@ -2499,17 +2275,7 @@ def test_fork_forwards_queueing_timeout() -> None:
     t.add_json(
         lambda method, url: method == "POST" and url.endswith("/v1/fork"),
         200,
-        {
-            "vm_id": "vm_child",
-            "owner_org_id": "owner",
-            "created_at": "now",
-            "description": None,
-            "public": False,
-            "state": "idle",
-            "sessions": [session()],
-            "network": {},
-            "resources": {},
-        },
+        vm_response("vm_child", sessions=[session()]),
     )
 
     with use_transport(t):
@@ -2879,17 +2645,7 @@ def test_the_shared_client_does_not_multiplex_requests_over_one_socket() -> None
 # A retryable gateway response may arrive after a fork succeeds. The
 # idempotency key prevents a retry from creating a second VM.
 
-_FORK_VM = {
-    "vm_id": "vm_child",
-    "owner_org_id": "owner",
-    "created_at": "now",
-    "description": None,
-    "public": False,
-    "state": "idle",
-    "sessions": [],
-    "network": {},
-    "resources": {},
-}
+_FORK_VM = vm_response("vm_child")
 
 
 def _fork_transport(*statuses: int) -> FakeTransport:
@@ -3078,3 +2834,82 @@ def test_pool_shell_is_refused_before_creating_session() -> None:
         with pytest.raises(ValueError, match="interactive shells"):
             vm.connect_pty()
     assert t.calls == []
+
+
+@pytest.mark.parametrize("via_vm", [False, True])
+@pytest.mark.parametrize("metadata", [None, {}, {"nested": {"value": None}}])
+def test_fork_metadata_preserves_explicit_nulls(via_vm, metadata):
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "POST" and url.endswith("/v1/fork"),
+        200,
+        vm_response("vm_child", sessions=[session()]),
+    )
+    with use_transport(t):
+        api = client()
+        if via_vm:
+            api.vm("vm_parent").fork(metadata=metadata)
+        else:
+            api.fork(source_vm_id="vm_parent", metadata=metadata)
+    assert json.loads(t.calls[0]["body"])["metadata"] == metadata
+
+
+def test_fork_omitted_metadata_inherits():
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "POST" and url.endswith("/v1/fork"),
+        200,
+        vm_response("vm_child", sessions=[session()]),
+    )
+    with use_transport(t):
+        client().fork(source_vm_id="vm_parent")
+    assert "metadata" not in json.loads(t.calls[0]["body"])
+
+
+def test_list_vms_encodes_metadata_filter_without_dropping_nested_nulls():
+    from urllib.parse import parse_qs, urlsplit
+
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "GET" and "/v1/vms?" in url, 200, {"vms": [], "next_cursor": None})
+    metadata_filter = {"arker_e2b": {"version": 1, "metadata": {"optional": None}}}
+    with use_transport(t):
+        client().list_vms(metadata_filter=metadata_filter, cursor="next", limit=2)
+    query = parse_qs(urlsplit(t.calls[0]["url"]).query)
+    assert json.loads(query["metadata_filter"][0]) == metadata_filter
+    assert query["cursor"] == ["next"] and query["limit"] == ["2"]
+
+
+@pytest.mark.parametrize("conditional", [None, False, True])
+def test_filesystem_conditional_delete_exact_query(conditional):
+    transport = FakeTransport()
+    suffix = "" if conditional is None else f"?only_if_unmounted={str(conditional).lower()}"
+    url = "https://test.invalid/api/v1/filesystems/dir-owned" + suffix
+    transport.add_json(
+        lambda method, actual: method == "DELETE" and actual == url,
+        200,
+        {"filesystem_id": "dir-owned", "deleted": True},
+    )
+    with use_transport(transport):
+        client().delete_filesystem("dir-owned", only_if_unmounted=conditional)
+    assert transport.calls[0]["body"] is None
+
+
+def test_mount_subpath_exact_body_and_projection():
+    transport = FakeTransport()
+    mount = {
+        "mount_id": "mount-1",
+        "vm_id": "vm-1",
+        "filesystem_id": "fs-1",
+        "path": "/data",
+        "subpath": "team/nested",
+        "state": "attaching",
+    }
+    transport.add_json(lambda method, url: method == "POST" and url.endswith("/mounts"), 200, mount)
+    with use_transport(transport):
+        result = client().vm("vm-1").create_mount(filesystem_id="fs-1", path="/data", subpath="team/nested")
+    assert json.loads(transport.calls[0]["body"]) == {
+        "filesystem_id": "fs-1",
+        "path": "/data",
+        "subpath": "team/nested",
+    }
+    assert result.subpath == "team/nested"
