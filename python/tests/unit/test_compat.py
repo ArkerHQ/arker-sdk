@@ -405,7 +405,7 @@ def test_python_shims_translate_or_reject_arker_create_options(arker_env, monkey
     assert blaxel == {
         "image": "ubuntu:24.04",
         "name": "blaxel",
-        "metadata": {"arker_blaxel": {"version": 1, "labels": {}}},
+        "metadata": {"arker_blaxel": {"version": 1, "labels": {}, "ttl": "5m"}},
         "resources": {"memory_mib": 4096},
         "policies": {
             "rules": {"computesdk-blaxel-lifetime": {"type": "schedule", "after_created": 300, "action": "delete"}}

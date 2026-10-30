@@ -77,6 +77,19 @@ def translate_error(error, operation):
         return translated
     if not isinstance(error, ArkerError):
         return error
+    if operation == "fork" and error.status > 0:
+        import json
+
+        from blaxel.core.client import errors
+        from blaxel.core.client.models import Error
+        from blaxel.core.sandbox import SandboxAPIError
+
+        body = {"code": error.status, "error": error.message}
+        if error.status in (400, 404, 409, 500):
+            return SandboxAPIError(
+                error.message, status_code=error.status, code=error.message, error=Error.from_dict(body)
+            )
+        return errors.from_response(error.status, json.dumps(body).encode())
     if operation in ("get", "delete") and error.status == 404 and error.code == "not_found":
         return not_found()
     # A transport failure or timeout does not prove the creation was cancelled.

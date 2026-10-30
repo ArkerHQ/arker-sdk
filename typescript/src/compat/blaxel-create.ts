@@ -16,19 +16,20 @@ export function blaxelLifetimePolicies(ttl: unknown, configured: ArkerComputePro
   return {rules: {[id]: {type: "schedule" as const, after_created: seconds, action: "delete" as const}}};
 }
 
-export function validateBlaxelName(name: unknown): void {
+export function validateBlaxelName(name: unknown, operation: "create" | "fork" = "create"): void {
   if (name == null || name === "") return;
   let message: string;
   if (typeof name !== "string") message = "Failed to parse sandbox body";
   else if (name.length > 49) message = "Invalid sandbox configuration: metadata.name is too long (maximum 49 characters)";
   else if (!/^[a-z0-9-]+$/.test(name)) message = "Invalid sandbox configuration: metadata.name must contain only lower case alphanumeric characters and hyphens";
   else return;
+  if (operation === "fork") throw {code: 400, error: message};
   throw { code: "VALIDATION_FAILED", status_code: 400, message };
 }
 
-export function namedBlaxelFork(config: ArkerComputeProviderConfig = {}, getOrCreate = false) {
+export function namedBlaxelFork(config: ArkerComputeProviderConfig = {}, getOrCreate = false, operation: "create" | "fork" = "create") {
   return async (client: Arker, request: ForkOptions): Promise<VM> => {
-    validateBlaxelName(request.name);
+    validateBlaxelName(request.name, operation);
     if (!request.name) return client.fork(request);
     if ((config.baseUrl || process.env.ARKER_BASE_URL) && !(config.controlBaseUrl || process.env.ARKER_CONTROL_BASE_URL)) {
       throw new Error("Named Blaxel creation with a custom baseUrl requires controlBaseUrl for its public global gateway");
@@ -60,7 +61,7 @@ export function namedBlaxelFork(config: ArkerComputeProviderConfig = {}, getOrCr
           }
         }
         // The pinned native SDK throws the API error object, not an Error subclass.
-        if (error instanceof ArkerError && error.status === 409 && error.code === "conflict"
+        if (operation === "create" && error instanceof ArkerError && error.status === 409 && error.code === "conflict"
             && error.body?.code === "conflict" && error.body.details.resource === "vm") {
           throw { code: "SANDBOX_ALREADY_EXISTS", message: error.message, status_code: 409 };
         }
@@ -94,10 +95,10 @@ function stringLabels(value: unknown): value is Record<string, string> {
     && Object.values(value).every(entry => typeof entry === "string");
 }
 
-export function blaxelCreationMetadata(labels: unknown): Record<string, unknown> {
+export function blaxelCreationMetadata(labels: unknown, ttl?: unknown): Record<string, unknown> {
   labels ??= {};
   if (!stringLabels(labels)) throw new TypeError("Blaxel labels must be a string mapping");
-  return { arker_blaxel: { version: 1, labels: { ...labels } } };
+  return { arker_blaxel: { version: 1, labels: { ...labels }, ...(ttl ? {ttl} : {}) } };
 }
 
 export function blaxelSandboxMetadata(vm: VM) {
@@ -106,4 +107,20 @@ export function blaxelSandboxMetadata(vm: VM) {
     && stored.version === 1 && "labels" in stored && stringLabels(stored.labels) ? stored.labels : undefined;
   return { name: vm.name || vm.id, ...(vm.created_at ? { createdAt: vm.created_at } : {}),
     ...(labels && Object.keys(labels).length ? { labels: { ...labels } } : {}) };
+}
+
+
+export function blaxelSandboxSpec(vm: VM): import("@blaxel/core").SandboxInstance["spec"] {
+  const stored = vm.metadata?.arker_blaxel;
+  const ttl = stored && typeof stored === "object" && "version" in stored && stored.version === 1
+    && "ttl" in stored ? stored.ttl : undefined;
+  let expected: ReturnType<typeof blaxelLifetimePolicies>;
+  try { expected = blaxelLifetimePolicies(ttl); } catch { return {runtime: undefined}; }
+  const rule = vm.policies?.rules?.["computesdk-blaxel-lifetime"];
+  const wanted = expected?.rules["computesdk-blaxel-lifetime"];
+  if (rule && wanted && Object.entries(rule).filter(([,value]) => value != null).length === 3
+      && rule.type === "schedule" && rule.action === wanted.action && rule.after_created === wanted.after_created) {
+    return {runtime: {ttl: ttl as string}};
+  }
+  return {runtime: undefined};
 }

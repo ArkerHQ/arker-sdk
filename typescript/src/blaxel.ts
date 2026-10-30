@@ -8,7 +8,7 @@ import { createCompatSdk, type CompatSdk } from "./compat/runtime.js";
 import type { ArkerComputeProviderConfig } from "./compat/arker-provider.js";
 import { createBlaxelDataPlane, validateBlaxelNative, type BlaxelDataPlane } from "./compat/blaxel-data-plane.js";
 import { blaxelControlCall, blaxelNotFound } from "./compat/blaxel-errors.js";
-import { blaxelLifetimePolicies, blaxelCreationMetadata, blaxelSandboxMetadata, blaxelImageConfiguration, namedBlaxelFork, validateBlaxelName } from "./compat/blaxel-create.js";
+import { blaxelSandboxSpec, blaxelLifetimePolicies, blaxelCreationMetadata, blaxelSandboxMetadata, blaxelImageConfiguration, namedBlaxelFork, validateBlaxelName } from "./compat/blaxel-create.js";
 import { bootstrapBlaxel } from "./compat/blaxel-bootstrap.js";
 import { privateFetch } from "./compat/private-fetch.js";
 import { createNativeBlaxelProvider } from "./compat/blaxel-provider.js";
@@ -57,7 +57,7 @@ function makeSdk(config: BlaxelCompatConfig = {}, getOrCreate = false, ttl?: unk
       validateFirewallStartup(options.image, config.arker?.imageConfig);
       validateBlaxelNative();
       const imageConfig = blaxelImageConfiguration(options, config.arker);
-      return { ...rest, metadata: blaxelCreationMetadata(labels), ...(imageConfig !== undefined ? { imageConfig } : {}) };
+      return { ...rest, metadata: blaxelCreationMetadata(labels, _ttl), ...(imageConfig !== undefined ? { imageConfig } : {}) };
     },
     fallbackProvider: createNativeBlaxelProvider({
       apiKey: config.apiKey,
@@ -96,7 +96,7 @@ export class SandboxInstance {
   declare readonly snapshots: NativeBlaxelSandbox["snapshots"];
   declare readonly status: NativeBlaxelSandbox["status"];
   declare readonly events: NativeBlaxelSandbox["events"];
-  declare readonly spec: NativeBlaxelSandbox["spec"];
+
   declare readonly lastUsedAt: NativeBlaxelSandbox["lastUsedAt"];
   declare readonly errors: NativeBlaxelSandbox["errors"];
   declare readonly h2Domain: NativeBlaxelSandbox["h2Domain"];
@@ -105,11 +105,12 @@ export class SandboxInstance {
   declare readonly listSnapshots: NativeBlaxelSandbox["listSnapshots"];
   declare readonly deleteSnapshot: NativeBlaxelSandbox["deleteSnapshot"];
   declare readonly restore: NativeBlaxelSandbox["restore"];
-  declare readonly fork: NativeBlaxelSandbox["fork"];
+
   declare readonly wait: NativeBlaxelSandbox["wait"];
   declare readonly archive: NativeBlaxelSandbox["archive"];
   declare readonly unarchive: NativeBlaxelSandbox["unarchive"];
   #box: UniversalSandbox;
+  #forkConfig: ArkerComputeProviderConfig;
   #native?: NativeBlaxelSandbox;
   #h2Eligible: boolean;
   #dataPlane?: BlaxelDataPlane;
@@ -117,8 +118,9 @@ export class SandboxInstance {
   readonly process: NativeBlaxelSandbox["process"];
   readonly fs: NativeBlaxelSandbox["fs"];
 
-  private constructor(box: UniversalSandbox, native?: NativeBlaxelSandbox, profile = fetchProfile(), dataPlane?: BlaxelDataPlane) {
+  private constructor(box: UniversalSandbox, native?: NativeBlaxelSandbox, profile = fetchProfile(), dataPlane?: BlaxelDataPlane, config: ArkerComputeProviderConfig = {}) {
     this.#box = box;
+    this.#forkConfig = {...config};
     this.#native = native;
     this.#dataPlane = dataPlane;
     this.#h2Eligible = Boolean(profile.region) && !profile.disableH2;
@@ -134,17 +136,34 @@ export class SandboxInstance {
     return guardUnsupported(this, "blaxel", native);
   }
 
+  get spec(): NativeBlaxelSandbox["spec"] {
+    if (this.#native) return this.#native.spec;
+    return blaxelSandboxSpec((this.#box as UniversalSandbox & {getInstance(): VM}).getInstance());
+  }
+
+  async fork(...[targetName, options = {}]: Parameters<NativeBlaxelSandbox["fork"]>): ReturnType<NativeBlaxelSandbox["fork"]> {
+    if (this.#native) return this.#native.fork(targetName, options);
+    if ((options.targetType ?? "sandbox") !== "sandbox"
+        || Object.entries(options).some(([key, value]) => key !== "targetType" && value !== undefined)) {
+      throw new Error("Unsupported Blaxel fork options: Arker supports live sandbox forks without additional options");
+    }
+    if (!targetName) throw {code: 400, error: "A fork target name is required"};
+    const vm = (this.#box as UniversalSandbox & {getInstance(): VM}).getInstance();
+    const child = await blaxelControlCall("fork", () => namedBlaxelFork(this.#forkConfig, false, "fork")(vm._client, {source_vm_id: vm.id, name: targetName}));
+    return {name: child.name ?? undefined, type: "sandbox", snapshotId: ""};
+  }
+
   async fetch(port: number, path = "/", init?: RequestInit): Promise<Response> {
     if (this.#native) return this.#native.fetch(port, path, init);
     const vm = (this.#box as unknown as { getInstance(): VM }).getInstance();
     return privateFetch(vm, port, path, init, this.#h2Eligible && !blaxelSettings.disableH2 ? "blaxel-h2" : "fetch");
   }
 
-  private static async wrap(box: UniversalSandbox, profile?: FetchProfile): Promise<SandboxInstance> {
+  private static async wrap(box: UniversalSandbox, profile?: FetchProfile, config?: ArkerComputeProviderConfig): Promise<SandboxInstance> {
     if (box.provider !== "blaxel") {
       const vm = (box as UniversalSandbox & { getInstance(): VM }).getInstance();
       await bootstrapBlaxel(vm);
-      return new SandboxInstance(box, undefined, profile, createBlaxelDataPlane(vm));
+      return new SandboxInstance(box, undefined, profile, createBlaxelDataPlane(vm), config);
     }
     return new SandboxInstance(box, nativeInstance(box) as NativeBlaxelSandbox);
   }
@@ -169,7 +188,7 @@ export class SandboxInstance {
         : {}),
     });
     try {
-      return await SandboxInstance.wrap(box, profile);
+      return await SandboxInstance.wrap(box, profile, callOptions.arker);
     } catch (error) {
       if (box.provider === "arker" && !callOptions.createIfNotExist) {
         try { await box.destroy(); } catch (cleanupError) {
@@ -191,7 +210,7 @@ export class SandboxInstance {
   static async get(id: string, config: BlaxelCompatConfig = {}): Promise<SandboxInstance> {
     const box = await blaxelControlCall("get", () => makeSdk(config).sandbox.getById(id));
     if (!box) throw blaxelNotFound();
-    return SandboxInstance.wrap(box);
+    return SandboxInstance.wrap(box, undefined, config.arker);
   }
 
   static async delete(id: string, config: BlaxelCompatConfig = {}): Promise<void> {

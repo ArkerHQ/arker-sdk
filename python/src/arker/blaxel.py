@@ -18,12 +18,13 @@ from ._compat import (
     routed_get,
 )
 from ._compat_async import NativeBridge, RoutingCancelled, call, route
-from ._compat_blaxel_create import creation_metadata, sandbox_metadata
+from ._compat_blaxel_create import creation_metadata, fork_sandbox, sandbox_metadata, sandbox_spec
 from ._compat_blaxel_errors import control_call, not_found
 from ._compat_blaxel_network import validate_network
 from .computer import VM
 
 if TYPE_CHECKING:
+    from blaxel.core.client.models import Env, SandboxForkResponse, SandboxLifecycle, SandboxSpec
     from blaxel.core.sandbox import SandboxFileSystem, SandboxProcess, SyncSandboxFileSystem, SyncSandboxProcess
 
 
@@ -107,8 +108,9 @@ class _Network:
 class SyncSandboxInstance(UnsupportedMixin):
     _compat_name = "blaxel"
 
-    def __init__(self, vm: VM | None = None, native: Any | None = None) -> None:
+    def __init__(self, vm: VM | None = None, native: Any | None = None, arker_config=None) -> None:
         self._vm = vm
+        self._fork_config = dict(arker_config or {})
         self._native = native
         metadata = getattr(native, "metadata", None)
         metadata_name = metadata.get("name") if isinstance(metadata, dict) else getattr(metadata, "name", None)
@@ -120,6 +122,43 @@ class SyncSandboxInstance(UnsupportedMixin):
         self.metadata = sandbox_metadata(vm) if vm is not None else metadata
         self._data_plane = None
         self.network = getattr(native, "network", None) if native is not None else _Network(vm)
+
+    @property
+    def spec(self) -> SandboxSpec:
+        return self._native.spec if self._native is not None else sandbox_spec(self._vm)
+
+    def fork(
+        self,
+        target_name: str,
+        *,
+        target_type: str = "sandbox",
+        port: int | None = None,
+        traffic: int | None = None,
+        custom_domain: str | None = None,
+        prefix: str | None = None,
+        snapshot_id: str | None = None,
+        envs: list[Env] | None = None,
+        lifecycle: SandboxLifecycle | dict[str, Any] | None = None,
+    ) -> SandboxForkResponse:
+        options = {
+            "target_type": target_type,
+            **{
+                key: value
+                for key, value in {
+                    "port": port,
+                    "traffic": traffic,
+                    "custom_domain": custom_domain,
+                    "prefix": prefix,
+                    "snapshot_id": snapshot_id,
+                    "envs": envs,
+                    "lifecycle": lifecycle,
+                }.items()
+                if value is not None
+            },
+        }
+        if self._native is not None:
+            return self._native.fork(target_name, **options)
+        return fork_sandbox(self._vm, target_name, options, self._fork_config)
 
     def _plane(self):
         if self._data_plane is None:
@@ -204,7 +243,7 @@ class SyncSandboxInstance(UnsupportedMixin):
                     get_or_create=get_or_create,
                     cancelled=cls._creation_cancelled,
                 ),
-                metadata=creation_metadata(values.get("labels")),
+                metadata=creation_metadata(values.get("labels"), values.get("ttl")),
                 policies=policies,
                 name=values.get("name"),
                 image=values.get("image"),
@@ -220,7 +259,11 @@ class SyncSandboxInstance(UnsupportedMixin):
                 "blaxel": create_native,
             },
         )
-        instance = cls(vm=result if provider == "arker" else None, native=result if provider == "blaxel" else None)
+        instance = cls(
+            vm=result if provider == "arker" else None,
+            native=result if provider == "blaxel" else None,
+            arker_config=arker_config,
+        )
         if provider == "arker":
             try:
                 instance._plane()
@@ -259,7 +302,11 @@ class SyncSandboxInstance(UnsupportedMixin):
         if found is None:
             raise not_found()
         provider, result = found
-        return cls(vm=result if provider == "arker" else None, native=result if provider == "blaxel" else None)
+        return cls(
+            vm=result if provider == "arker" else None,
+            native=result if provider == "blaxel" else None,
+            arker_config=arker_config,
+        )
 
     @classmethod
     def create_if_not_exists(cls, sandbox: Any = None, **kwargs: Any) -> SyncSandboxInstance:
@@ -397,6 +444,33 @@ class SandboxInstance:
     @classmethod
     async def get(cls, sandbox_id: str, **kwargs: Any) -> SandboxInstance:
         return await cls._wrap(await asyncio.to_thread(SyncSandboxInstance.get, sandbox_id, **kwargs))
+
+    async def fork(
+        self,
+        target_name: str,
+        *,
+        target_type: str = "sandbox",
+        port: int | None = None,
+        traffic: int | None = None,
+        custom_domain: str | None = None,
+        prefix: str | None = None,
+        snapshot_id: str | None = None,
+        envs: list[Env] | None = None,
+        lifecycle: SandboxLifecycle | dict[str, Any] | None = None,
+    ) -> SandboxForkResponse:
+        method = self._native.fork if self._native is not None else self._sandbox.fork
+        return await call(
+            method,
+            target_name,
+            target_type=target_type,
+            port=port,
+            traffic=traffic,
+            custom_domain=custom_domain,
+            prefix=prefix,
+            snapshot_id=snapshot_id,
+            envs=envs,
+            lifecycle=lifecycle,
+        )
 
     async def delete(self) -> None:
         if isinstance(self, str):

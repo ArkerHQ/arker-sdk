@@ -8,7 +8,7 @@ import time
 
 from ._compat import UnsupportedCompatibilityOption
 from ._compat_async import RoutingCancelled
-from ._compat_blaxel_errors import creation_error
+from ._compat_blaxel_errors import creation_error, translate_error
 from .computer import REQUEST_TIMEOUT_S, VM, ArkerError, _drop_none, _policy_update, _vm_info
 
 
@@ -37,7 +37,7 @@ def lifetime_policies(ttl, config):
     return {"rules": {policy_id: {"type": "schedule", "after_created": int(seconds), "action": "delete"}}}
 
 
-def validate_name(name):
+def validate_name(name, operation="create"):
     if name is None or name == "":
         return
     if not isinstance(name, str):
@@ -51,14 +51,16 @@ def validate_name(name):
         )
     else:
         return
+    if operation == "fork":
+        raise translate_error(ArkerError("invalid_request", message, 400), "fork")
     raise creation_error(message, status=400, code="VALIDATION_FAILED")
 
 
-def fork_named(client, request, *, config, get_or_create=False, cancelled=lambda: False):
+def fork_named(client, request, *, config, get_or_create=False, cancelled=lambda: False, operation="create"):
     name = request.get("name")
     if cancelled():
         raise RoutingCancelled("Async routing was cancelled")
-    validate_name(name)
+    validate_name(name, operation)
     if not name:
         return client.fork(**request)
     # A regional URL is not a global coordinator. Never silently send
@@ -104,7 +106,8 @@ def fork_named(client, request, *, config, get_or_create=False, cancelled=lambda
                     time.sleep(delay)
                     continue
             if (
-                error.status == 409
+                operation == "create"
+                and error.status == 409
                 and error.code == "conflict"
                 and isinstance(details, dict)
                 and details.get("resource") == "vm"
@@ -142,12 +145,12 @@ def image_configuration(values, config):
     return {**inherited, "env": {**(inherited.get("env") or {}), **environment}}
 
 
-def creation_metadata(labels=None):
+def creation_metadata(labels=None, ttl=None):
     if labels is None:
         labels = {}
     if not isinstance(labels, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in labels.items()):
         raise ValueError("Blaxel labels must be a string mapping")
-    return {"arker_blaxel": {"version": 1, "labels": dict(labels)}}
+    return {"arker_blaxel": {"version": 1, "labels": dict(labels), **({"ttl": ttl} if ttl else {})}}
 
 
 def sandbox_metadata(vm):
@@ -167,3 +170,43 @@ def sandbox_metadata(vm):
         if isinstance(labels, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in labels.items()):
             values["labels"] = labels
     return native.Metadata.from_dict(values)
+
+
+def sandbox_spec(vm):
+    from blaxel.core.client.models import SandboxRuntime, SandboxSpec
+    from blaxel.core.client.types import UNSET
+
+    stored = (getattr(vm, "metadata", None) or {}).get("arker_blaxel")
+    ttl = stored.get("ttl") if isinstance(stored, dict) and stored.get("version") == 1 else None
+    try:
+        expected = lifetime_policies(ttl, {})
+    except UnsupportedCompatibilityOption:
+        expected = None
+    policies = _drop_none(getattr(vm, "policies", None)) or {}
+    rule = (policies.get("rules") or {}).get("computesdk-blaxel-lifetime")
+    if expected and rule == expected["rules"]["computesdk-blaxel-lifetime"]:
+        return SandboxSpec(enabled=UNSET, runtime=SandboxRuntime(ttl=ttl))
+    return SandboxSpec(enabled=UNSET)
+
+
+def fork_sandbox(vm, target_name, options, config):
+    from blaxel.core.client.models import SandboxForkResponse
+
+    from ._compat_blaxel_errors import control_call
+
+    if options.get("target_type", "sandbox") != "sandbox" or any(
+        value is not None for key, value in options.items() if key != "target_type"
+    ):
+        raise UnsupportedCompatibilityOption("Arker supports Blaxel live sandbox forks without additional options")
+    if not target_name:
+        raise translate_error(ArkerError("invalid_request", "A fork target name is required", 400), "fork")
+    child = control_call(
+        "fork",
+        lambda: fork_named(
+            vm._client,
+            {"source_vm_id": vm.id, "name": target_name},
+            config=config,
+            operation="fork",
+        ),
+    )
+    return SandboxForkResponse.from_dict({"name": child.name, "type": "sandbox", "snapshotId": ""})
