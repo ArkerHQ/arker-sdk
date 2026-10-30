@@ -82,7 +82,10 @@ for (const failure of ["sync", "chmod-exit", "chmod-error", "cleanup-error", "cl
   });
 }
 
-for (const target of [
+for (const source of [
+  "https://github.com/blaxel-ai/sandbox/releases/download/v0.2.74/sandbox-api-linux-amd64",
+  "https://github.com/ArkerHQ/arker-sdk/releases/download/blaxel-sandbox-api-v0.2.74-activity.1/sandbox-api-linux-amd64",
+]) for (const target of [
   "https://release-assets.githubusercontent.com/github-production-release-asset/123/binary?signature=public",
   "https://example.com/binary",
   "http://release-assets.githubusercontent.com/binary",
@@ -91,11 +94,11 @@ for (const target of [
   "https://release-assets.githubusercontent.com:444/binary",
   "missing", "loop", "corrupt",
 ]) {
-  test(`cold pinned release download confines redirects: ${target}`, async () => {
+  test(`cold pinned release download confines redirects: ${source} ${target}`, async () => {
     const { stagePinnedArtifact } = await import("../src/compat/e2b-artifact.js");
     const cache = await mkdtemp(join(tmpdir(), "artifact-redirect-"));
     const content = Buffer.from("public fixture artifact");
-    const artifact = { url: "https://github.com/blaxel-ai/sandbox/releases/download/v0.2.74/sandbox-api-linux-amd64",
+    const artifact = { url: source,
       sha256: createHash("sha256").update(content).digest("hex") };
     const original = globalThis.fetch;
     const requests: string[] = []; const writes: unknown[] = [];

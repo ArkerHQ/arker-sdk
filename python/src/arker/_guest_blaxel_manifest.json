@@ -1,14 +1,21 @@
 {
-  "version": "0.2.74",
+  "version": "0.2.74+arker.activity.1",
   "artifacts": {
     "amd64": {
-      "url": "https://github.com/blaxel-ai/sandbox/releases/download/v0.2.74/sandbox-api-linux-amd64",
-      "sha256": "ff1efa41b1d70d8c2613b0acdf3a2f60eeeb90035c4e0b48b39eb71b358e9dd5"
+      "url": "https://github.com/ArkerHQ/arker-sdk/releases/download/blaxel-sandbox-api-v0.2.74-activity.1/sandbox-api-linux-amd64",
+      "sha256": "dd783b27706fd3f024ce5e10f4c05203748f86b3827c0ab57f2fd4b01732b918"
     },
     "arm64": {
-      "url": "https://github.com/blaxel-ai/sandbox/releases/download/v0.2.74/sandbox-api-linux-arm64",
-      "sha256": "32258d9d01ce5f6c5ca78efb50c31ff34b89d96300e9f4e69f52d3c9451726c7"
+      "url": "https://github.com/ArkerHQ/arker-sdk/releases/download/blaxel-sandbox-api-v0.2.74-activity.1/sandbox-api-linux-arm64",
+      "sha256": "13f4234d66e89102b471dba309eb558887ccb5bddb50cce023289aad9e04c4f6"
     }
   },
-  "license": "MIT License\n\nCopyright (c) 2025 Beamlit, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE."
+  "license": "MIT License\n\nCopyright (c) 2025 Beamlit, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.",
+  "source": {
+    "url": "https://github.com/ArkerHQ/arker-sdk/releases/download/blaxel-sandbox-api-v0.2.74-activity.1/sandbox-api-0.2.74-activity.1-source.tar.gz",
+    "sha256": "8b70b7c9ec2a7510d43ed8ba6362753822e885733f36467f7b0979ad63f8ee10",
+    "upstream_commit": "4fa83f2a7dad33f4d8a9889c7f953221df473e25",
+    "patch_sha256": "e877a58aa9aceaf716e1c36ddb20af4ee4240145765211d3eb48509b1555ffd8"
+  },
+  "notice": "Modified from sandbox-api v0.2.74 to publish private activity intent for process admission, restart, and finalization. The matching source archive includes the patch, offline build recipe, pinned dependency source, and license notices. Asynchronous archive work retains intent; self-upgrade is unavailable while intent tracking is enabled."
 }

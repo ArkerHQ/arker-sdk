@@ -38,7 +38,7 @@ def registered_bootstrap(vm, command, request, version):
                 vm._client._request(
                     "POST",
                     f"/v1/vms/{vm.id}/daemon-activity",
-                    {key: identity[key] for key in ("pid", "start_ticks", "boot_id")},
+                    {**{key: identity[key] for key in ("pid", "start_ticks", "boot_id")}, "intent_version": 1},
                     base_url=vm.base_url,
                     request_timeout=60,
                 )

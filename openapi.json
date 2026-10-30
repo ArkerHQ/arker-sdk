@@ -14413,6 +14413,11 @@
           "boot_id"
         ],
         "properties": {
+          "intent_version": {
+            "type": "integer",
+            "enum": [1],
+            "description": "Require the version 1 daemon intent reader. Sending this field makes older servers reject enrollment instead of acknowledging cgroup-only activity tracking."
+          },
           "pid": {
             "type": "integer",
             "format": "int32",

@@ -28,7 +28,7 @@ export async function registeredBootstrap(vm: VM, command: string, request: stri
           throw new Error('Invalid daemon activity identity');
         }
         await vm._client._request('POST', `/v1/vms/${vm.id}/daemon-activity`,
-          {pid: identity.pid, start_ticks: identity.start_ticks, boot_id: identity.boot_id}, vm.baseUrl,
+          {pid: identity.pid, start_ticks: identity.start_ticks, boot_id: identity.boot_id, intent_version: 1}, vm.baseUrl,
           undefined, undefined, undefined, {signal: AbortSignal.timeout(60_000)});
         await vm.sync(acknowledgement, '{"registered":true}', {isSecret: true});
         acknowledged = true;

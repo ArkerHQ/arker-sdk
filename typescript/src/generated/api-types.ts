@@ -4014,6 +4014,11 @@ export interface components {
         ImageArgv: string[];
         RegisterDaemonActivityRequest: {
             /**
+             * @description Require the version 1 daemon intent reader. Sending this field makes older servers reject enrollment instead of acknowledging cgroup-only activity tracking.
+             * @enum {integer}
+             */
+            intent_version?: 1;
+            /**
              * Format: int32
              * @description Daemon process ID in the guest.
              */

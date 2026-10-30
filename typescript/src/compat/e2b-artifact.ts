@@ -62,7 +62,7 @@ export async function stagePinnedArtifact(vm: Pick<VM, "sync" | "run">, rootPath
 }
 async function downloadArtifact(source: string): Promise<Response> {
   const signal = AbortSignal.timeout(60_000);
-  const release = /^https:\/\/github\.com\/blaxel-ai\/sandbox\/releases\/download\/v0\.2\.74\/sandbox-api-linux-(amd64|arm64)$/.test(source);
+  const release = /^https:\/\/github\.com\/(?:blaxel-ai\/sandbox\/releases\/download\/v0\.2\.74|ArkerHQ\/arker-sdk\/releases\/download\/blaxel-sandbox-api-v0\.2\.74-activity\.1)\/sandbox-api-linux-(amd64|arm64)$/.test(source);
   let url = source;
   for (let redirects = 0; ; redirects++) {
     // Artifact downloads carry no platform or vendor credentials.

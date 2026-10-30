@@ -157,7 +157,7 @@ def ensure(request_path):
             if not home or not Path(home).is_absolute():
                 raise security.BootstrapError("invalid_home")
             Path(home).mkdir(parents=True, exist_ok=True)
-            command = [str(target), "-port", "49983", "-disable-telemetry"]
+            command = [str(target), "-port", "49983", "-disable-telemetry", "-activity-intent"]
             if desired["user"]:
                 command.extend(["-user", desired["user"]])
             with os.fdopen(

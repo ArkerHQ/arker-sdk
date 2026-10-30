@@ -1791,6 +1791,7 @@ class RegisterDaemonActivityRequest:
     pid: int
     start_ticks: int
     boot_id: str
+    intent_version: Literal[1] | None = None
 
 
 @dataclass(frozen=True)

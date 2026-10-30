@@ -17,6 +17,7 @@ def fixture(monkeypatch, *, identity=None, failure=None, final="completed"):
     def request(method, path, body, **kwargs):
         events.append(("register", method, path, body, kwargs))
         assert not ack
+        assert body == {**IDENTITY, "intent_version": 1}
         if failure:
             raise failure
 
@@ -55,7 +56,7 @@ def test_registers_before_releasing_guard_and_waits_for_completion(monkeypatch):
     result = module.registered_bootstrap(vm, "bootstrap", "/private/request.json", "test")
     assert result["activity"] == IDENTITY
     registration = next(event for event in events if event[0] == "register")
-    assert registration[1:4] == ("POST", "/v1/vms/test/daemon-activity", IDENTITY)
+    assert registration[1:4] == ("POST", "/v1/vms/test/daemon-activity", {**IDENTITY, "intent_version": 1})
     assert registration[4]["base_url"] == vm.base_url
     assert ack == [{"registered": True}]
     assert events[-1] == ("poll", True)

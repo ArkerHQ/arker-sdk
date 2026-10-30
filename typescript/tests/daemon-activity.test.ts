@@ -23,7 +23,7 @@ for (const failure of [undefined, new Error('unsupported_operation')]) {
       },
       _client: {_request: async (method: string, path: string, body: unknown, base: string) => {
         assert.equal(method, 'POST');assert.equal(path, '/v1/vms/test/daemon-activity');
-        assert.deepEqual(body, identity);assert.equal(base, 'https://custom.example/api');
+        assert.deepEqual(body, {...identity, intent_version: 1});assert.equal(base, 'https://custom.example/api');
         assert.equal(acknowledged, false);events.push('register');if(failure) throw failure;
       }},
     } as unknown as VM;
