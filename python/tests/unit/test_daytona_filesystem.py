@@ -735,3 +735,64 @@ def test_stream_success_cleanup_failure_preserves_identity_and_owned_stage():
     assert cleanup.staging_directory == str(Path(path).parent)
     assert cleanup.staging_directory in cleanup.__notes__[0]
     assert len(calls) == 2
+
+
+def test_search_matches_native_literal_and_path_semantics(guest):
+    fs = guest[0].fs
+    fs.create_folder("search/nested", "700")
+    fs.upload_file(b"hello TODO\nTODO.* literal\n", "search/a.txt")
+    fs.upload_file(b"hello\n", "search/nested/b.py")
+    assert fs.search_files("search", "[ab]*").files == ["search/a.txt", "search/nested/b.py"]
+    assert fs.search_files("search", "[").files == []
+    assert fs.search_files("search", "**").files == [
+        "search",
+        "search/a.txt",
+        "search/nested",
+        "search/nested/b.py",
+    ]
+    assert [(m.file, m.line, m.content) for m in fs.find_files("search", "TODO.*")] == [
+        ("search/a.txt", 2, "TODO.* literal"),
+    ]
+    with pytest.raises(DaytonaBadRequestError):
+        fs.search_files("search", "")
+
+
+@pytest.mark.parametrize(
+    ("pattern", "name", "expected"),
+    [
+        (r"[\]]", "]", True),
+        (r"[\-]", "-", True),
+        (r"[\\]", "\\", True),
+        ("[z-a]", "z", False),
+        ("[^z-a]", "a", True),
+        ("[a-]", "a", False),
+        ("[-a]", "a", False),
+        ("[!a]", "!", True),
+        ("[雪-雲]", "雪", True),
+    ],
+)
+def test_search_glob_character_class_boundaries(pattern, name, expected):
+    from arker._guest_daytona_filesystem import search_pattern
+
+    matcher = search_pattern(pattern)
+    assert bool(matcher and matcher.fullmatch(name)) is expected
+
+
+@pytest.mark.parametrize("size", [65534, 65535, 65536])
+@pytest.mark.parametrize("ending", [b"", b"\n", b"\r\n"])
+def test_search_scanner_token_boundary(tmp_path, size, ending):
+    from arker._guest_daytona_filesystem import search
+
+    file = tmp_path / "line"
+    file.write_bytes(b"X" * size + ending)
+    result = search(str(file), str(file), "X", True)
+    accepted = size + len(ending) < 65536 or (size + len(ending) == 65536 and ending.endswith(b"\n"))
+    assert [item["content"] for item in result] == (["X" * size] if accepted else [])
+
+
+def test_search_invalid_utf8_replaces_each_invalid_byte(tmp_path):
+    from arker._guest_daytona_filesystem import search
+
+    file = tmp_path / "invalid"
+    file.write_bytes(b"X\xe2\x82\n")
+    assert search(str(file), str(file), "X", True)[0]["content"] == "X\ufffd\ufffd"

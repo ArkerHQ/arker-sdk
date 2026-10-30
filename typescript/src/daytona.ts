@@ -88,7 +88,7 @@ function arkerCreateOptions(options: Record<string, unknown>): Record<string, un
 export class Sandbox {
   readonly id: string;
   readonly provider: string;
-  readonly fs: Pick<NativeSandbox["fs"], "createFolder" | "deleteFile" | "getFileDetails" | "listFiles" | "moveFiles" | "setFilePermissions" | "uploadFile" | "uploadFiles" | "downloadFile" | "downloadFiles" | "uploadFileStream" | "downloadFileStream">;
+  readonly fs: Pick<NativeSandbox["fs"], "createFolder" | "deleteFile" | "getFileDetails" | "listFiles" | "moveFiles" | "setFilePermissions" | "uploadFile" | "uploadFiles" | "downloadFile" | "downloadFiles" | "uploadFileStream" | "downloadFileStream" | "findFiles" | "searchFiles">;
   #box: UniversalSandbox;
 
   readonly process: TerminalAPI & SessionAPI & {

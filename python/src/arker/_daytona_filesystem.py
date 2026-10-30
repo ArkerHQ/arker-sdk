@@ -128,6 +128,20 @@ class FileSystem(UnsupportedMixin):
             raise DaytonaError("depth must be at least 1")
         return [self._info(value) for value in self._call("list", path, request_timeout, depth=depth)]
 
+    def find_files(self, path: str, pattern: str, request_timeout: float | None = None):
+        if self._asynchronous:
+            from daytona_toolbox_api_client_async import Match
+        else:
+            from daytona_toolbox_api_client import Match
+        return [Match.from_dict(value) for value in self._call("find", path, request_timeout, pattern=pattern)]
+
+    def search_files(self, path: str, pattern: str, request_timeout: float | None = None):
+        if self._asynchronous:
+            from daytona_toolbox_api_client_async import SearchFilesResponse
+        else:
+            from daytona_toolbox_api_client import SearchFilesResponse
+        return SearchFilesResponse.from_dict(self._call("search", path, request_timeout, pattern=pattern))
+
     def move_files(self, source: str, destination: str, request_timeout: float | None = None) -> None:
         self._call("move", source, request_timeout, destination=destination)
 
@@ -230,6 +244,16 @@ class AsyncFileSystem:
         from ._compat_async import call
 
         return await call(self._sync.list_files, path, depth, request_timeout)
+
+    async def find_files(self, path: str, pattern: str, request_timeout: float | None = None):
+        from ._compat_async import call
+
+        return await call(self._sync.find_files, path, pattern, request_timeout)
+
+    async def search_files(self, path: str, pattern: str, request_timeout: float | None = None):
+        from ._compat_async import call
+
+        return await call(self._sync.search_files, path, pattern, request_timeout)
 
     async def move_files(self, source: str, destination: str, request_timeout: float | None = None) -> None:
         from ._compat_async import call

@@ -6,6 +6,7 @@ import grp
 import json
 import os
 import pwd
+import re
 import shutil
 import stat
 import sys
@@ -95,6 +96,105 @@ def transfer(target, writing):
         os.close(descriptor)
 
 
+def search_pattern(pattern):
+    """Translate pathname glob syntax without interpreting content as a regex."""
+    pieces = []
+    index = 0
+    while index < len(pattern):
+        token = pattern[index]
+        index += 1
+        if token == "*":
+            pieces.append("[^/]*")
+        elif token == "?":
+            pieces.append("[^/]")
+        elif token == "\\":
+            if index == len(pattern):
+                return None
+            pieces.append(re.escape(pattern[index]))
+            index += 1
+        elif token == "[":
+            negated = index < len(pattern) and pattern[index] == "^"
+            index += int(negated)
+            ranges = []
+
+            def character(position):
+                if position >= len(pattern) or pattern[position] in "-]":
+                    raise ValueError("invalid character class")
+                if pattern[position] == "\\":
+                    position += 1
+                if position >= len(pattern) - 1:
+                    raise ValueError("unterminated character class")
+                return pattern[position], position + 1
+
+            try:
+                count = 0
+                while True:
+                    if index < len(pattern) and pattern[index] == "]" and count:
+                        index += 1
+                        break
+                    low, index = character(index)
+                    high = low
+                    if pattern[index] == "-":
+                        high, index = character(index + 1)
+                    count += 1
+                    if low <= high:
+                        ranges.append(re.escape(low) + "-" + re.escape(high))
+            except ValueError:
+                return None
+            pieces.append(
+                "[" + ("^" if negated else "") + "".join(ranges) + "]"
+                if ranges
+                else ("[\\s\\S]" if negated else "(?!)")
+            )
+        else:
+            pieces.append(re.escape(token))
+    try:
+        return re.compile("".join(pieces) + r"\Z")
+    except re.error:
+        return None
+
+
+def search(target, requested, pattern, contents):
+    if not isinstance(pattern, str) or not pattern:
+        raise ValueError("path and pattern are required")
+    matcher = None if contents else search_pattern(pattern)
+    matches = []
+
+    def visit(current, display):
+        try:
+            value = os.lstat(current)
+        except OSError:
+            return
+        if not contents and matcher is not None and matcher.fullmatch(os.path.basename(current)):
+            matches.append(display)
+        if stat.S_ISDIR(value.st_mode):
+            try:
+                names = sorted(os.listdir(current))
+            except OSError:
+                return
+            for name in names:
+                visit(os.path.join(current, name), os.path.join(display, name))
+        elif contents and stat.S_ISREG(value.st_mode):
+            try:
+                with open(current, "rb") as stream:
+                    if b"\0" in stream.read(512):
+                        return
+                    stream.seek(0)
+                    for number, line in enumerate(iter(lambda: stream.readline(65536), b""), 1):
+                        # The native scanner stops at its 64 KiB token limit.
+                        if len(line) >= 65536 and not line.endswith(b"\n"):
+                            break
+                        text = line.rstrip(b"\n").removesuffix(b"\r").decode("utf-8", "surrogateescape")
+                        text = "".join("\ufffd" if 0xDC80 <= ord(char) <= 0xDCFF else char for char in text)
+                        if pattern in text:
+                            matches.append({"file": display, "line": number, "content": text})
+            except OSError:
+                return
+
+    visit(target, os.path.normpath(requested))
+    return matches if contents else {"files": matches}
+
+
 def main(request):
     identity()
     operation = request["operation"]
@@ -108,7 +208,9 @@ def main(request):
         transfer(target, operation == "upload")
         return
     result = None
-    if operation == "info":
+    if operation in {"find", "search"}:
+        result = search(target, request["path"], request.get("pattern"), operation == "find")
+    elif operation == "info":
         result = info(target)
     elif operation == "list":
         depth = request.get("depth") or 1

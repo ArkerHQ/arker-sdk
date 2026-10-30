@@ -32,6 +32,7 @@ function guest() {
       }
     },
     getInstance: () => ({
+      _runWithTransport: (command: string) => box.runCommand(command),
       async *_syncReadChunks(path: string) {
         stages.push(path);
         const bytes = readFileSync(path);
@@ -234,5 +235,18 @@ test("Daytona download destroys unconsumed streams and cleans staging", async ()
     const cancellation = finished(cancelled);
     controller.abort();
     await assert.rejects(cancellation, /Download cancelled/);
+  } finally { g.close(); }
+});
+
+test("Daytona search preserves native relative paths and literal content matching", async () => {
+  const g = guest();
+  try {
+    const fs = g.sandbox.fs;
+    await fs.createFolder("search/nested", "700");
+    await fs.uploadFile(Buffer.from("TODO.* literal\n"), "search/a.txt");
+    await fs.uploadFile(Buffer.from("hello\n"), "search/nested/b.py");
+    assert.deepEqual((await fs.searchFiles("search", "[ab]*")).files, ["search/a.txt", "search/nested/b.py"]);
+    assert.deepEqual(await fs.findFiles("search", "TODO.*"), [{ file: "search/a.txt", line: 1, content: "TODO.* literal" }]);
+    await assert.rejects(fs.searchFiles("search", ""), DaytonaBadRequestError);
   } finally { g.close(); }
 });

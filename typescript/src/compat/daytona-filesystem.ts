@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { open } from "node:fs/promises";
 import { constants } from "node:fs";
-import { DaytonaError, DaytonaBadRequestError, DaytonaForbiddenError, DaytonaNotFoundError, type DownloadStreamOptions, type UploadStreamOptions, type UploadSource, type FileInfo, type FilePermissionsParams, type FileUpload, type FileDownloadRequest, type FileDownloadResponse } from "@daytona/sdk";
+import { DaytonaError, DaytonaBadRequestError, DaytonaForbiddenError, DaytonaNotFoundError, type DownloadStreamOptions, type UploadStreamOptions, type UploadSource, type Match, type SearchFilesResponse, type FileInfo, type FilePermissionsParams, type FileUpload, type FileDownloadRequest, type FileDownloadResponse } from "@daytona/sdk";
 import { ArkerError, type VM } from "../index.js";
 import { assertSupportedObjectKeys, guardUnsupported, shellQuote, type UniversalSandbox } from "./common.js";
 import { downloadStream, uploadStream } from "./daytona-streams.js";
@@ -56,6 +56,14 @@ export class DaytonaFileSystem {
 
   private async call<T>(operation: string, path: string, options?: Record<string, unknown>): Promise<T> {
     return JSON.parse(await this.run(this.command(operation, path, options)));
+  }
+
+  async findFiles(path: string, pattern: string): Promise<Match[]> {
+    return this.call("find", path, { pattern });
+  }
+
+  async searchFiles(path: string, pattern: string): Promise<SearchFilesResponse> {
+    return this.call("search", path, { pattern });
   }
 
   private async transfer(operation: "upload" | "download", path: string, data?: Buffer): Promise<Buffer | undefined> {
