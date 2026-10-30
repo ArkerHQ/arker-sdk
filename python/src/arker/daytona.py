@@ -23,6 +23,8 @@ from ._compat import (
 from ._compat_daytona_async import AsyncDaytona as AsyncDaytona
 from ._compat_daytona_async import AsyncSandbox as AsyncSandbox
 from ._daytona_filesystem import FileSystem, guest_command
+from ._daytona_pty import PtyProcess
+from ._daytona_sessions import SessionProcess
 from .computer import VM
 
 
@@ -42,7 +44,7 @@ class ExecuteResponse:
         self.stderr = result.stderr
 
 
-class Process:
+class Process(PtyProcess, SessionProcess):
     def __init__(self, vm: VM) -> None:
         self._vm = vm
 

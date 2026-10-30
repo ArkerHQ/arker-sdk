@@ -83,7 +83,9 @@ class GuestProcesses:
         self._input_lock = threading.Lock()
         self._control_session = None
         self._source = files("arker").joinpath("_guest_process.py").read_text()
-        self._path = f"/tmp/arker-compat-process-{hashlib.sha256(self._source.encode()).hexdigest()[:16]}.py"
+        self._path = (
+            f"/usr/local/lib/arker-compat/guest-process-{hashlib.sha256(self._source.encode()).hexdigest()[:16]}.py"
+        )
 
     def _call(self, action: str, **values: Any) -> Any:
         with self._lock:
@@ -94,7 +96,7 @@ class GuestProcesses:
         if action == "exec":
             session = self._vm.create_session()
             response = self._vm.run(
-                f"python3 {shlex.quote(self._path)} supervise {shlex.quote(payload)}",
+                f"python3 -I {shlex.quote(self._path)} supervise {shlex.quote(payload)}",
                 session_id=session.session_id,
                 time_to_background=0,
             )
@@ -114,7 +116,7 @@ class GuestProcesses:
                 if self._control_session is None:
                     self._control_session = self._vm.create_session().session_id
                 response = self._vm.run(
-                    f"python3 {shlex.quote(self._path)} call {shlex.quote(payload)}",
+                    f"python3 -I {shlex.quote(self._path)} call {shlex.quote(payload)}",
                     session_id=self._control_session,
                 )
                 if not isinstance(response, CompletedRunResult):
@@ -146,8 +148,8 @@ class GuestProcesses:
     ) -> ProcessResult:
         return result(self._call("get", identifier=identifier, **({"rawExitCode": True} if raw_exit_code else {})))
 
-    def list(self) -> list[ProcessResult]:
-        return [result(value) for value in self._call("list")]
+    def list(self, *, include_output: bool = True) -> list[ProcessResult]:
+        return [result(value) for value in self._call("list", includeOutput=include_output)]
 
     def _wait(self, identifier, max_wait, interval, callbacks=None):
         if max_wait < -1 or interval <= 0:

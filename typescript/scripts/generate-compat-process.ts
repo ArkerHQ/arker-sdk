@@ -7,6 +7,8 @@ for (const [source, target] of [
   ["_guest_filesystem.py", "guest-filesystem"],
   ["_guest_e2b_mount_ready.py", "e2b-mount-ready"],
   ["_guest_daytona_filesystem.py", "daytona-filesystem"],
+  ["_guest_daytona_pty.py", "daytona-pty"],
+  ["_guest_daytona_session.py", "daytona-session"],
 ]) {
   const text = await readFile(new URL(`../../python/src/arker/${source}`, import.meta.url), "utf8");
   const isJson = source.endsWith(".json");

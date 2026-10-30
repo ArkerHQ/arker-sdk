@@ -4,6 +4,8 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { createNativeDaytonaProvider } from "./compat/daytona-provider.js";
 import { DaytonaFileSystem, daytonaGuestCommand } from "./compat/daytona-filesystem.js";
+import { createDaytonaSessions, type SessionAPI } from "./compat/daytona-sessions.js";
+import { createDaytonaTerminals, type TerminalAPI } from "./compat/daytona-pty.js";
 import { DaytonaVolumeService } from "./compat/daytona-volumes.js";
 import * as lifecycle from "./compat/daytona-lifecycle.js";
 import { ArkerComputeSandbox } from "./compat/arker-provider.js";
@@ -89,7 +91,7 @@ export class Sandbox {
   readonly fs: Pick<NativeSandbox["fs"], "createFolder" | "deleteFile" | "getFileDetails" | "listFiles" | "moveFiles" | "setFilePermissions" | "uploadFile" | "uploadFiles" | "downloadFile" | "downloadFiles">;
   #box: UniversalSandbox;
 
-  readonly process: {
+  readonly process: TerminalAPI & SessionAPI & {
     exec: (command: string, options?: ExecuteCommandOptions) => Promise<ExecuteResponse>;
     executeCommand: (
       command: string,
@@ -128,7 +130,28 @@ export class Sandbox {
       };
     };
     const native = nativeInstance(box) as { process?: { executeCommand: (command: string, cwd?: string, env?: Record<string, string>, timeout?: number) => Promise<NativeExecuteResponse> } } | undefined;
+    const nativeProcess = (nativeInstance(box) as NativeSandbox | undefined)?.process;
+    const terminals: TerminalAPI = nativeProcess ? {
+      createPty: (...args) => nativeProcess.createPty(...args),
+      connectPty: (...args) => nativeProcess.connectPty(...args),
+      listPtySessions: (...args) => nativeProcess.listPtySessions(...args),
+      getPtySessionInfo: (...args) => nativeProcess.getPtySessionInfo(...args),
+      resizePtySession: (...args) => nativeProcess.resizePtySession(...args),
+      killPtySession: (...args) => nativeProcess.killPtySession(...args),
+    } : createDaytonaTerminals(box);
+    const sessions: SessionAPI = nativeProcess ? {
+      createSession: (...args) => nativeProcess.createSession(...args),
+      getSession: (...args) => nativeProcess.getSession(...args),
+      listSessions: (...args) => nativeProcess.listSessions(...args),
+      deleteSession: (...args) => nativeProcess.deleteSession(...args),
+      getSessionCommand: (...args) => nativeProcess.getSessionCommand(...args),
+      executeSessionCommand: (...args) => nativeProcess.executeSessionCommand(...args),
+      getSessionCommandLogs: ((...args: Parameters<SessionAPI["getSessionCommandLogs"]>) => nativeProcess.getSessionCommandLogs(...args)) as SessionAPI["getSessionCommandLogs"],
+      sendSessionCommandInput: (...args) => nativeProcess.sendSessionCommandInput(...args),
+    } : createDaytonaSessions(box);
     this.process = {
+      ...terminals,
+      ...sessions,
       exec: run,
       executeCommand: typeof native?.process?.executeCommand === "function"
         ? native.process.executeCommand.bind(native.process)

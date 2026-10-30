@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import pty
+import pwd
 import re
 import select
 import signal
@@ -58,11 +59,15 @@ def identity(pid):
         return None
 
 
-def snapshot(directory, *, raw_exit_code=False):
+def snapshot(directory, *, raw_exit_code=False, include_output=True):
     state = json.loads((directory / "state").read_text())
     for stream in ("stdout", "stderr"):
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
-        state[stream] = decoder.decode((directory / stream).read_bytes(), final=state["status"] in TERMINAL)
+        state[stream] = (
+            decoder.decode((directory / stream).read_bytes(), final=state["status"] in TERMINAL)
+            if include_output
+            else ""
+        )
     state["logs"] = state["stdout"] + state["stderr"]
     if raw_exit_code and state["status"] in TERMINAL:
         if "_returnCode" not in state:
@@ -93,10 +98,17 @@ def terminal_size(value):
     return struct.pack("HHHH", value["rows"], value["cols"], 0, 0)
 
 
-def claim_terminal():
-    # The supervisor is single-threaded; this runs in its forked child before exec.
+def prepare_child(terminal, account, cwd):
+    # The supervisor is single-threaded; credentials change before exec applies
+    # the caller's environment (including dynamic-loader variables).
     os.setsid()
-    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+    if terminal:
+        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+    if account is not None:
+        os.initgroups(account.pw_name, account.pw_gid)
+        os.setgid(account.pw_gid)
+        os.setuid(account.pw_uid)
+        os.chdir(cwd)
 
 
 def drain_terminal(fd, output):
@@ -172,6 +184,12 @@ def reap_descendants(directory):
             time.sleep(0.02)
 
 
+def release_admission(request):
+    descriptor = request.pop("_admissionFd", None)
+    if descriptor is not None:
+        os.close(descriptor)
+
+
 def worker(request, ready_fd):
     directory = Path(request["_directory"])
     command = request["command"]
@@ -179,6 +197,7 @@ def worker(request, ready_fd):
     if cwd == "/blaxel":
         Path(cwd).mkdir(parents=True, exist_ok=True)
     environment = {**os.environ, **(request.get("env") or {})}
+    account = pwd.getpwnam(request["user"]) if "user" in request else None
     state = {
         "name": request["name"],
         "command": command,
@@ -191,6 +210,7 @@ def worker(request, ready_fd):
         "stdin": bool(request.get("stdin")),
         "_identity": None,
         "_request_id": request.get("_requestId"),
+        "_exclusiveName": request.get("exclusiveName"),
         "_resizeAck": True,
         "_preserveDescendants": request.get("preserveDescendants") is True,
         "_workerPid": os.getpid(),
@@ -201,6 +221,7 @@ def worker(request, ready_fd):
         (directory / "stderr").open("ab", buffering=0) as stderr,
     ):
         child = None
+        failed = False
         master = slave = None
         try:
             if request.get("preserveDescendants"):
@@ -212,25 +233,30 @@ def worker(request, ready_fd):
             if "tty" in request:
                 master, slave = pty.openpty()
                 fcntl.ioctl(slave, termios.TIOCSWINSZ, terminal_size(request["tty"]))
+                if account is not None:
+                    os.fchown(slave, account.pw_uid, account.pw_gid)
                 os.set_blocking(master, False)
                 state["tty"] = request["tty"]
             child = subprocess.Popen(
                 request.get("argv", command),
                 shell="argv" not in request,
                 executable=None if "argv" in request else "/bin/sh",
-                cwd=cwd,
+                cwd=None if account is not None else cwd,
                 env=environment,
                 stdout=slave if slave is not None else stdout,
                 stderr=slave if slave is not None else stderr,
                 stdin=slave if slave is not None else (subprocess.PIPE if request.get("stdin") else subprocess.DEVNULL),
-                start_new_session=slave is None,
-                preexec_fn=claim_terminal if slave is not None else None,
+                start_new_session=slave is None and account is None,
+                preexec_fn=(lambda: prepare_child(slave is not None, account, cwd))
+                if slave is not None or account is not None
+                else None,
             )
             if slave is not None:
                 os.close(slave)
                 slave = None
             state.update(pid=str(child.pid), _identity=identity(child.pid))
             write_json(directory / "state", state)
+            release_admission(request)
             os.write(ready_fd, b"1")
             os.close(ready_fd)
             ready_fd = -1
@@ -307,13 +333,26 @@ def worker(request, ready_fd):
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(child.pid, signal.SIGKILL)
                 child.wait()
+            failed = child is not None
+            if failed:
+                write_json(directory / "termination", {"status": "killed"})
             write_json(directory / "error", {"error": str(error)})
         finally:
             try:
+                release_admission(request)
                 if ready_fd >= 0:
                     os.close(ready_fd)
                 if request.get("preserveDescendants"):
                     reap_descendants(directory)
+                if failed:
+                    code = child.returncode
+                    state.update(
+                        status="failed",
+                        exitCode=code if code >= 0 else 128 - code,
+                        _returnCode=code,
+                        completedAt=timestamp(),
+                    )
+                    write_json(directory / "state", state)
                 control = request.get("_modalControl", "")
                 if isinstance(control, str) and re.fullmatch(r"exec-[0-9a-f]{32}\.json", control):
                     with contextlib.suppress(FileNotFoundError):
@@ -334,6 +373,9 @@ def worker(request, ready_fd):
 
 def dispatch(request):
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+    root_info = ROOT.lstat()
+    if ROOT.is_symlink() or root_info.st_uid != os.geteuid() or root_info.st_mode & 0o077:
+        raise PermissionError("Process state directory must be private and owned by the supervisor")
     action = request["action"]
     if action == "exec":
         if request.get("preserveDescendants"):
@@ -349,6 +391,8 @@ def dispatch(request):
                     os.close(descriptor)
             except OSError as error:
                 raise RuntimeError("Descendant supervision requires permitted Linux pidfd operations") from error
+        if "user" in request and (not isinstance(request["user"], str) or not request["user"]):
+            raise ValueError("Process user must be a nonempty account name")
         if "tty" in request:
             terminal_size(request["tty"])
         if "ttyOutput" in request and (
@@ -357,6 +401,10 @@ def dispatch(request):
             or (request["ttyOutput"] == "writers" and request.get("preserveDescendants") is not True)
         ):
             raise ValueError("Invalid terminal output lifetime")
+        if "exclusiveName" in request and (
+            not isinstance(request["exclusiveName"], str) or not request["exclusiveName"]
+        ):
+            raise ValueError("Exclusive process name must be a nonempty string")
         if "signalExitCode" in request and (
             type(request["signalExitCode"]) is not int or request["signalExitCode"] != -1
         ):
@@ -380,6 +428,16 @@ def dispatch(request):
         directory = ROOT / hashlib.sha256(request["name"].encode()).hexdigest()
         with (ROOT / ".exec-lock").open("a+") as root_lock:
             fcntl.flock(root_lock, fcntl.LOCK_EX)
+            exclusive = request.get("exclusiveName")
+            if exclusive:
+                for candidate in ROOT.glob("*/state"):
+                    current = json.loads(candidate.read_text())
+                    if (
+                        current.get("_exclusiveName") == exclusive
+                        and current["status"] not in TERMINAL
+                        and current.get("_request_id") != request.get("_requestId")
+                    ):
+                        raise ValueError("Process name is already active")
             created = False
             try:
                 directory.mkdir(mode=0o700)
@@ -392,48 +450,54 @@ def dispatch(request):
                 pass
             process_lock = (directory / "lock").open("r+")
             fcntl.flock(process_lock, fcntl.LOCK_EX)
-        with process_lock:
-            if not created:
-                try:
-                    original = json.loads((directory / "request").read_text())
-                except (FileNotFoundError, ValueError):
+            with process_lock:
+                if not created:
                     try:
-                        original = json.loads((directory / "state").read_text())
+                        original = json.loads((directory / "request").read_text())
                     except (FileNotFoundError, ValueError):
-                        original = {}
-                original_request_id = original.get("_requestId", original.get("_request_id"))
-                if request.get("_requestId") and original_request_id == request["_requestId"]:
-                    if (directory / "error").exists():
-                        raise RuntimeError(json.loads((directory / "error").read_text())["error"])
-                    return snapshot(directory)
-                raise ValueError(f"Process {request['name']!r} already exists") from None
-            read_fd, write_fd = os.pipe()
-            try:
-                subprocess.Popen(
-                    [
-                        sys.executable,
-                        __file__,
-                        "worker",
-                        base64.b64encode(json.dumps(request).encode()).decode(),
-                        str(write_fd),
-                    ],
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True,
-                    pass_fds=(write_fd,),
-                )
-            finally:
-                os.close(write_fd)
-            try:
-                os.read(read_fd, 1)
-            finally:
-                os.close(read_fd)
-            if (directory / "error").exists():
-                raise RuntimeError(json.loads((directory / "error").read_text())["error"])
-            return snapshot(directory)
+                        try:
+                            original = json.loads((directory / "state").read_text())
+                        except (FileNotFoundError, ValueError):
+                            original = {}
+                    original_request_id = original.get("_requestId", original.get("_request_id"))
+                    if request.get("_requestId") and original_request_id == request["_requestId"]:
+                        if (directory / "error").exists():
+                            raise RuntimeError(json.loads((directory / "error").read_text())["error"])
+                        return snapshot(directory)
+                    raise ValueError(f"Process {request['name']!r} already exists") from None
+                read_fd, write_fd = os.pipe()
+                request["_admissionFd"] = root_lock.fileno()
+                try:
+                    subprocess.Popen(
+                        [
+                            sys.executable,
+                            "-I",
+                            __file__,
+                            "worker",
+                            base64.b64encode(json.dumps(request).encode()).decode(),
+                            str(write_fd),
+                        ],
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                        pass_fds=(write_fd, root_lock.fileno()),
+                    )
+                finally:
+                    os.close(write_fd)
+                try:
+                    os.read(read_fd, 1)
+                finally:
+                    os.close(read_fd)
+                if (directory / "error").exists():
+                    raise RuntimeError(json.loads((directory / "error").read_text())["error"])
+                return snapshot(directory)
     if action == "list":
-        return [snapshot(path) for path in ROOT.glob("*") if (path / "state").exists()]
+        return [
+            snapshot(path, include_output=request.get("includeOutput", True))
+            for path in ROOT.glob("*")
+            if (path / "state").exists()
+        ]
     directory = locate(request["identifier"])
     if action == "readStream":
         stream = request.get("stream")
@@ -451,7 +515,9 @@ def dispatch(request):
         return {
             "data": base64.b64encode(data).decode(),
             "nextOffset": end,
+            "size": size,
             "eof": state["status"] in TERMINAL and end >= size,
+            "exitCode": state["exitCode"] if state["status"] in TERMINAL else None,
         }
     if action == "resize":
         terminal_size(request.get("tty"))
@@ -484,7 +550,11 @@ def dispatch(request):
                     raise RuntimeError("Process supervisor exited before resizing the terminal")
                 time.sleep(0.01)
     if action == "get":
-        return snapshot(directory, raw_exit_code=request.get("rawExitCode") is True)
+        return snapshot(
+            directory,
+            raw_exit_code=request.get("rawExitCode") is True,
+            include_output=request.get("includeOutput", True),
+        )
     if action in {"kill", "stop"}:
         state = json.loads((directory / "state").read_text())
         if (state["status"] not in TERMINAL or state.get("_preserveDescendants")) and (
@@ -515,7 +585,17 @@ def dispatch(request):
 if __name__ == "__main__":
     payload = json.loads(base64.b64decode(sys.argv[2]))
     if sys.argv[1] == "worker":
-        worker(payload, int(sys.argv[3]))
+        ready_fd = int(sys.argv[3])
+        try:
+            worker(payload, ready_fd)
+        except Exception as error:
+            directory = Path(payload["_directory"])
+            write_json(directory / "error", {"error": str(error)})
+            (directory / "worker-complete").touch()
+            release_admission(payload)
+            with contextlib.suppress(OSError):
+                os.close(ready_fd)
+            sys.exit(1)
     else:
         try:
             current = dispatch(payload)

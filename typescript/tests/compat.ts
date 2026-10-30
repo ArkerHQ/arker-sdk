@@ -388,7 +388,7 @@ async function testModalSurface(): Promise<void> {
   GuestProcesses.prototype.get = async () => current;
   GuestProcesses.prototype.readOutput = async (_id, stream, offset) => {
     const bytes = new TextEncoder().encode(`${stream}:echo modal`);
-    return { data: bytes.slice(offset), nextOffset: bytes.length, eof: true };
+    return { data: bytes.slice(offset), nextOffset: bytes.length, size: bytes.length, eof: true, exitCode: current.exitCode };
   };
   const client = new ModalClient({ tokenId: "modal-token-id", tokenSecret: "modal-token-secret" });
   try {

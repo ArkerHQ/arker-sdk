@@ -41,8 +41,9 @@ class LocalVM:
     def run(self, command, **options):
         import os
 
-        # The production path is content-addressed in /tmp; local tests keep
+        # Production code is installed outside user-writable directories; local tests keep
         # their process state and installed agent inside the pytest directory.
+        command = command.replace("/usr/local/lib/arker-compat/guest-process-", str(self.directory / "guest-process-"))
         command = command.replace("/tmp/arker-compat-process-", str(self.directory / "arker-compat-process-"))
         self.calls.append(options)
         if options.get("time_to_background") == 0:
@@ -677,6 +678,23 @@ print("unexpected-eof",flush=True)
     assert "unexpected-eof" not in result.stdout
 
 
+def test_exclusive_terminal_name_reuse_keeps_old_process_output(processes):
+    manager, directory = processes
+    request = {"command": "cat", "stdin": True, "workingDir": str(directory), "exclusiveName": "terminal"}
+    first = manager.exec({**request, "name": "first"})
+    manager.write_stdin(first.name, "old-output\n")
+    with pytest.raises(Exception, match="already active"):
+        manager.exec({**request, "name": "conflicting"})
+    manager.close_stdin(first.name)
+    manager.wait(first.name, max_wait=5000, interval=10)
+    second = manager.exec({**request, "name": "second"})
+    assert second.pid != first.pid
+    assert manager.get(first.name).stdout == "old-output\n"
+    assert all(not value.stdout and not value.stderr for value in manager.list(include_output=False))
+    manager.close_stdin(second.name)
+    manager.wait(second.name, max_wait=5000, interval=10)
+
+
 @pytest.mark.parametrize("exit_before_resize", [False, True])
 def test_resize_waits_for_its_ioctl_ack_or_reports_exit(processes, exit_before_resize):
     import json
@@ -929,3 +947,225 @@ def test_descendant_support_is_checked_before_process_launch(tmp_path, monkeypat
     with pytest.raises(RuntimeError, match="Descendant supervision requires"):
         guest.dispatch({"action": "exec", "preserveDescendants": True, "command": "touch forbidden"})
     assert list(tmp_path.iterdir()) == []
+
+
+def test_guest_supervisor_ignores_python_import_injection(processes, monkeypatch):
+    manager, directory = processes
+    marker = directory / "injected-import"
+    (directory / "json.py").write_text(f"open({str(marker)!r}, 'w').close(); raise RuntimeError('injected')")
+    monkeypatch.setenv("PYTHONPATH", str(directory))
+    current = manager.exec({"command": "printf safe", "workingDir": str(directory)})
+    assert manager.wait(current.name, max_wait=5000, interval=10).stdout == "safe"
+    assert not marker.exists()
+
+
+def test_guest_supervisor_rejects_precreated_public_state_directory(processes):
+    manager, directory = processes
+    state = directory / "processes"
+    state.mkdir(mode=0o777)
+    state.chmod(0o777)
+    try:
+        with pytest.raises(Exception, match="state directory must be private"):
+            manager.exec({"command": "touch forbidden", "workingDir": str(directory)})
+        assert not (directory / "forbidden").exists()
+    finally:
+        state.chmod(0o700)
+
+
+@pytest.mark.parametrize("first_fails", [False, True])
+def test_exclusive_admission_waits_for_worker_publication(tmp_path, monkeypatch, first_fails):
+    import importlib.util
+    import json
+    import os
+    import threading
+
+    source = Path(__file__).parents[2] / "src/arker/_guest_process.py"
+    spec = importlib.util.spec_from_file_location("exclusive_admission", source)
+    guest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guest)
+    monkeypatch.setattr(guest, "ROOT", tmp_path / "private")
+    entered, release, second_entered = threading.Event(), threading.Event(), threading.Event()
+    spawned = []
+
+    def spawn(argv, **kwargs):
+        request = json.loads(base64.b64decode(argv[-2]))
+        directory = Path(request["_directory"])
+        spawned.append(request["name"])
+        if request["name"] == "first":
+            entered.set()
+            assert release.wait(5)
+            if first_fails:
+                guest.write_json(directory / "error", {"error": "launch failed"})
+                return
+        guest.write_json(
+            directory / "state",
+            {
+                "name": request["name"],
+                "pid": 123,
+                "status": "running",
+                "exitCode": None,
+                "_exclusiveName": request["exclusiveName"],
+                "_request_id": request["_requestId"],
+            },
+        )
+        os.write(int(argv[-1]), b"1")
+
+    monkeypatch.setattr(guest.subprocess, "Popen", spawn)
+
+    def launch(name):
+        if name == "second":
+            second_entered.set()
+        return guest.dispatch(
+            {"action": "exec", "name": name, "command": "true", "exclusiveName": "same", "_requestId": name}
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(launch, "first")
+        try:
+            assert entered.wait(5)
+            second = pool.submit(launch, "second")
+            assert second_entered.wait(5)
+            with pytest.raises(concurrent.futures.TimeoutError):
+                second.result(timeout=0.1)
+            assert spawned == ["first"]
+            release.set()
+            if first_fails:
+                with pytest.raises(RuntimeError, match="launch failed"):
+                    first.result(timeout=5)
+                assert second.result(timeout=5)["name"] == "second"
+            else:
+                assert first.result(timeout=5)["name"] == "first"
+                with pytest.raises(ValueError, match="already active"):
+                    second.result(timeout=5)
+                assert spawned == ["first"]
+        finally:
+            release.set()
+
+
+@pytest.mark.parametrize("failure", ["account", "directory"])
+def test_worker_pre_state_failure_preserves_diagnostic_and_releases_admission(processes, failure):
+    manager, directory = processes
+    marker = directory / "must-not-run"
+    missing_user = "arker_missing_account_" + uuid.uuid4().hex
+    blocked = directory / "not-a-directory"
+    blocked.write_text("file")
+    expected = missing_user if failure == "account" else "Not a directory"
+    with pytest.raises(Exception, match=expected):
+        manager.exec(
+            {
+                "name": "bad-user",
+                "exclusiveName": "same-startup",
+                **({"user": missing_user} if failure == "account" else {}),
+                "command": f"touch {marker}",
+                "workingDir": str(directory if failure == "account" else blocked / "child"),
+            }
+        )
+    state = directory / "processes" / hashlib.sha256(b"bad-user").hexdigest()
+    assert not marker.exists()
+    assert not (state / "state").exists()
+    assert (state / "worker-complete").exists()
+    replacement = manager.exec(
+        {
+            "name": "valid-user",
+            "exclusiveName": "same-startup",
+            "command": "printf retried",
+            "workingDir": str(directory),
+        }
+    )
+    assert manager.wait(replacement.name, max_wait=5000, interval=10).stdout == "retried"
+
+
+def test_worker_retains_admission_lease_after_dispatcher_death(tmp_path):
+    import json
+    import shlex
+    import sys
+    import time
+
+    source = (Path(__file__).parents[2] / "src/arker/_guest_process.py").read_text()
+    root, entered, release = tmp_path / "state", tmp_path / "entered", tmp_path / "release"
+    source = source.replace(
+        "    payload = json.loads(base64.b64decode(sys.argv[2]))",
+        f"    ROOT = Path({str(root)!r})\n    payload = json.loads(base64.b64decode(sys.argv[2]))",
+    )
+    source = source.replace(
+        "        ready_fd = int(sys.argv[3])",
+        f"        Path({str(entered)!r}).touch()\n"
+        f"        while not Path({str(release)!r}).exists():\n"
+        "            time.sleep(0.01)\n        ready_fd = int(sys.argv[3])",
+    )
+    marker, descendant = tmp_path / "effects", tmp_path / "descendant"
+    source = source.replace(
+        '            os.write(ready_fd, b"1")',
+        f'            if request["name"] == "first":\n'
+        f"                while not Path({str(marker)!r}).exists():\n"
+        "                    time.sleep(0.01)\n"
+        '            os.write(ready_fd, b"1")',
+        1,
+    )
+    script = tmp_path / "worker.py"
+    script.write_text(source)
+
+    def start(name):
+        child_program = (
+            "import subprocess,time; from pathlib import Path; "
+            "p=subprocess.Popen(['sleep','60'],start_new_session=True); "
+            f"Path({str(descendant)!r}).write_text(str(p.pid)); "
+            f"Path({str(marker)!r}).write_text('x'); time.sleep(60)"
+        )
+        payload = {
+            "action": "exec",
+            "name": name,
+            "exclusiveName": "same",
+            "_requestId": name,
+            "command": shlex.quote(sys.executable) + " -c " + shlex.quote(child_program)
+            if name == "first"
+            else "printf x >> " + shlex.quote(str(marker)),
+            "preserveDescendants": True,
+            "workingDir": str(tmp_path),
+        }
+        return subprocess.Popen(
+            [sys.executable, "-I", str(script), "dispatch", base64.b64encode(json.dumps(payload).encode()).decode()],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    first = start("first")
+    second = None
+    try:
+        deadline = time.monotonic() + 5
+        while not entered.exists():
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        first.kill()
+        first.communicate(timeout=5)
+        second = start("second")
+        with pytest.raises(subprocess.TimeoutExpired):
+            second.communicate(timeout=0.15)
+        assert len(list(root.glob("*/request"))) == 1
+        second.kill()
+        second.communicate(timeout=5)
+        release.touch()
+        directory = root / hashlib.sha256(b"first").hexdigest()
+        deadline = time.monotonic() + 5
+        while not (directory / "worker-complete").exists():
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        assert json.loads((directory / "state").read_text())["status"] == "failed"
+        assert (directory / "error").exists()
+        assert marker.read_text() == "x"
+        assert not Path("/proc", descendant.read_text()).exists()
+        second = start("retry")
+        output, _ = second.communicate(timeout=5)
+        assert json.loads(output)["result"]["name"] == "retry"
+    finally:
+        release.touch()
+        for process in (first, second):
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.communicate(timeout=5)
+        deadline = time.monotonic() + 5
+        for directory in root.glob("*/request"):
+            while not (directory.parent / "worker-complete").exists():
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+    assert marker.read_text() == "xx"

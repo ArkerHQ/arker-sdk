@@ -22,6 +22,8 @@ for (const cleanupFails of [false, true]) {
         readOutput: async () => ({
           data: new Uint8Array(),
           nextOffset: 0,
+          size: 0,
+          exitCode: null,
           eof: true,
         }),
         writeStdin: async (_id, data) => {
@@ -74,6 +76,8 @@ test("Modal streaming stdin lets the native filesystem inspect a terminal helper
       readOutput: async () => ({
         data: new Uint8Array(),
         nextOffset: 0,
+        size: 0,
+        exitCode: current.exitCode,
         eof: true,
       }),
       writeStdin: async () => {
@@ -123,6 +127,8 @@ test("Modal handles use native streaming classes, binary bytes and stdin EOF", a
       return {
         data,
         nextOffset: offset + data.length,
+        size: value.length,
+        exitCode: closed ? 17 : null,
         eof: closed && offset + data.length >= value.length,
       };
     },
@@ -162,6 +168,8 @@ test("Modal native text decoding preserves multibyte boundaries and signed signa
       return {
         data,
         nextOffset: offset + data.length,
+        size: bytes.length,
+        exitCode: 137,
         eof: offset + data.length >= bytes.length,
       };
     },

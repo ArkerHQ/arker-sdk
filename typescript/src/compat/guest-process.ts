@@ -38,7 +38,7 @@ export class GuestProcesses {
   private installed?: Promise<unknown>;
   private controlSession?: Promise<string>;
   private pending: Promise<unknown> = Promise.resolve();
-  private readonly path = `/tmp/arker-compat-process-${createHash("sha256").update(source).digest("hex").slice(0, 16)}.py`;
+  private readonly path = `/usr/local/lib/arker-compat/guest-process-${createHash("sha256").update(source).digest("hex").slice(0, 16)}.py`;
 
   constructor(private readonly sandbox: SandboxInterface) {}
 
@@ -63,7 +63,7 @@ export class GuestProcesses {
     if (action === "exec") {
       const vm = (this.sandbox as unknown as { getInstance(): VM }).getInstance();
       const session = await vm.createSession();
-      const started = await vm.run(`python3 ${shellQuote(this.path)} supervise ${shellQuote(payload)}`, {
+      const started = await vm.run(`python3 -I ${shellQuote(this.path)} supervise ${shellQuote(payload)}`, {
         session_id: session.session_id, time_to_background: 0,
       });
       const deadline = Date.now() + 300_000;
@@ -85,7 +85,7 @@ export class GuestProcesses {
         this.controlSession = undefined;
         throw error;
       });
-      const completed = await vm.run(`python3 ${shellQuote(this.path)} call ${shellQuote(payload)}`, {
+      const completed = await vm.run(`python3 -I ${shellQuote(this.path)} call ${shellQuote(payload)}`, {
         session_id: await this.controlSession,
       });
       if (completed.type !== "completed") throw new Error("Guest process control did not complete synchronously");
@@ -117,11 +117,11 @@ export class GuestProcesses {
     });
   }
 
-  list(): Promise<GuestProcessResult[]> { return this.call("list"); }
+  list(options?: { includeOutput?: boolean }): Promise<GuestProcessResult[]> { return this.call("list", options); }
 
-  async readOutput(identifier: string, stream: "stdout" | "stderr", offset: number, signal?: AbortSignal): Promise<{ data: Uint8Array; nextOffset: number; eof: boolean }> {
+  async readOutput(identifier: string, stream: "stdout" | "stderr", offset: number, signal?: AbortSignal): Promise<{ data: Uint8Array; nextOffset: number; size: number; eof: boolean; exitCode: number | null }> {
     signal?.throwIfAborted();
-    const result = await this.call<{ data: string; nextOffset: number; eof: boolean }>("readStream", { identifier, stream, offset, limit: 65536 });
+    const result = await this.call<{ data: string; nextOffset: number; size: number; eof: boolean; exitCode: number | null }>("readStream", { identifier, stream, offset, limit: 65536 });
     signal?.throwIfAborted();
     return { ...result, data: Buffer.from(result.data, "base64") };
   }
