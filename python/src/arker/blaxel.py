@@ -458,19 +458,26 @@ class SandboxInstance:
         envs: list[Env] | None = None,
         lifecycle: SandboxLifecycle | dict[str, Any] | None = None,
     ) -> SandboxForkResponse:
-        method = self._native.fork if self._native is not None else self._sandbox.fork
-        return await call(
-            method,
-            target_name,
-            target_type=target_type,
-            port=port,
-            traffic=traffic,
-            custom_domain=custom_domain,
-            prefix=prefix,
-            snapshot_id=snapshot_id,
-            envs=envs,
-            lifecycle=lifecycle,
-        )
+        options = {
+            "target_type": target_type,
+            "port": port,
+            "traffic": traffic,
+            "custom_domain": custom_domain,
+            "prefix": prefix,
+            "snapshot_id": snapshot_id,
+            "envs": envs,
+            "lifecycle": lifecycle,
+        }
+        if self._native is not None:
+            return await self._native.fork(target_name, **options)
+        cancelled = threading.Event()
+        try:
+            return await asyncio.to_thread(
+                fork_sandbox, self._sandbox._vm, target_name, options, self._sandbox._fork_config, cancelled.is_set
+            )
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
 
     async def delete(self) -> None:
         if isinstance(self, str):

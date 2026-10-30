@@ -161,3 +161,54 @@ def test_fork_error_class_matches_native_parser(status):
     mapped = translate_error(ArkerError("conflict", "failure", status), "fork")
     assert type(mapped) is type(native.value)
     assert mapped.status_code == native.value.status_code
+
+
+def test_async_fork_cancellation_prevents_another_post(monkeypatch):
+    import asyncio
+    import threading
+
+    from arker.computer import ArkerError
+
+    sleeping, release, finished = threading.Event(), threading.Event(), threading.Event()
+    requests = []
+    source = vm()
+
+    def request(*args, **kwargs):
+        requests.append(args)
+        raise ArkerError("resource_busy", "busy", 409, raw={"retry_after_seconds": 1})
+
+    source._client._request = request
+
+    def sleep(_):
+        sleeping.set()
+        assert release.wait(5)
+        if len(requests) > 1:
+            raise RuntimeError("cancelled fork retried")
+
+    monkeypatch.setattr(creation.time, "sleep", sleep)
+    original = creation.fork_named
+
+    def tracked(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(creation, "fork_named", tracked)
+    box = facade.SandboxInstance.__new__(facade.SandboxInstance)
+    box._native = None
+    box._sandbox = facade.SyncSandboxInstance(vm=source)
+
+    async def run():
+        task = asyncio.create_task(box.fork("child"))
+        try:
+            assert await asyncio.to_thread(sleeping.wait, 5)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            release.set()
+        assert await asyncio.to_thread(finished.wait, 5)
+
+    asyncio.run(run())
+    assert len(requests) == 1

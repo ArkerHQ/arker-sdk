@@ -189,7 +189,7 @@ def sandbox_spec(vm):
     return SandboxSpec(enabled=UNSET)
 
 
-def fork_sandbox(vm, target_name, options, config):
+def fork_sandbox(vm, target_name, options, config, cancelled=lambda: False):
     from blaxel.core.client.models import SandboxForkResponse
 
     from ._compat_blaxel_errors import control_call
@@ -207,6 +207,7 @@ def fork_sandbox(vm, target_name, options, config):
             {"source_vm_id": vm.id, "name": target_name},
             config=config,
             operation="fork",
+            cancelled=cancelled,
         ),
     )
     return SandboxForkResponse.from_dict({"name": child.name, "type": "sandbox", "snapshotId": ""})
