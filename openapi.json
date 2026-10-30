@@ -206,8 +206,11 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
-            "$ref": "#/components/responses/AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError"
+            "$ref": "#/components/responses/AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLargeError"
@@ -620,6 +623,9 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -666,6 +672,9 @@
           },
           "409": {
             "$ref": "#/components/responses/InvalidStateOrResourceBusyError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -724,6 +733,9 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/AlreadyExistsOrInvalidStateOrResourceBusyError"
           },
@@ -731,7 +743,7 @@
             "$ref": "#/components/responses/PayloadTooLargeError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -788,7 +800,7 @@
             "$ref": "#/components/responses/InvalidStateError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -845,6 +857,9 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
@@ -852,7 +867,7 @@
             "$ref": "#/components/responses/PayloadTooLargeError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -932,6 +947,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFoundError"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
           },
           "409": {
             "$ref": "#/components/responses/ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError"
@@ -1037,6 +1055,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -1094,6 +1115,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -1139,10 +1163,10 @@
             "$ref": "#/components/responses/NotFoundError"
           },
           "409": {
-            "$ref": "#/components/responses/InvalidStateError"
+            "$ref": "#/components/responses/InvalidStateOrResourceBusyError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1151,7 +1175,7 @@
             "$ref": "#/components/responses/InternalError"
           },
           "503": {
-            "$ref": "#/components/responses/UnavailableError"
+            "$ref": "#/components/responses/CapacityUnavailableOrUnavailableError"
           },
           "504": {
             "$ref": "#/components/responses/GatewayTimeoutError"
@@ -1215,6 +1239,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -1272,11 +1299,17 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/ConflictOrInvalidStateError"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -1335,6 +1368,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -1389,11 +1425,17 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1440,7 +1482,10 @@
             "$ref": "#/components/responses/NotFoundError"
           },
           "409": {
-            "$ref": "#/components/responses/InvalidStateError"
+            "$ref": "#/components/responses/InvalidStateOrResourceBusyError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1449,7 +1494,7 @@
             "$ref": "#/components/responses/InternalError"
           },
           "503": {
-            "$ref": "#/components/responses/UnavailableError"
+            "$ref": "#/components/responses/CapacityUnavailableOrUnavailableError"
           },
           "504": {
             "$ref": "#/components/responses/GatewayTimeoutError"
@@ -1562,7 +1607,7 @@
             "$ref": "#/components/responses/InvalidStateOrResourceBusyError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -1621,11 +1666,17 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -1690,6 +1741,9 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/ConflictOrInvalidStateError"
           },
@@ -1697,7 +1751,7 @@
             "$ref": "#/components/responses/PayloadTooLargeError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1765,7 +1819,7 @@
             "$ref": "#/components/responses/InvalidStateError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1825,7 +1879,7 @@
             "$ref": "#/components/responses/InvalidStateError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1876,7 +1930,7 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/BadRequestError"
+            "$ref": "#/components/responses/BadRequestOrInsufficientResourcesError"
           },
           "401": {
             "$ref": "#/components/responses/UnauthorizedError"
@@ -1890,6 +1944,9 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/ConflictOrInvalidStateOrResourceBusyError"
           },
@@ -1897,7 +1954,7 @@
             "$ref": "#/components/responses/PayloadTooLargeError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -2013,6 +2070,9 @@
           },
           "403": {
             "$ref": "#/components/responses/ForbiddenError"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
           },
           "409": {
             "$ref": "#/components/responses/AlreadyExistsError"
@@ -2251,6 +2311,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       }
@@ -2296,6 +2359,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       },
@@ -2353,6 +2419,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       },
@@ -2394,6 +2463,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       }
@@ -2442,6 +2514,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       }
@@ -2879,7 +2954,7 @@
         "name": "Idempotency-Key",
         "in": "header",
         "required": false,
-        "description": "Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet.",
+        "description": "Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork retried while the original is still running may wait for it and returns the same VM; when it cannot wait, it answers 409 resource_busy with Retry-After and the VM id.",
         "schema": {
           "type": "string",
           "minLength": 1,
@@ -3319,7 +3394,7 @@
         }
       },
       "InvalidStateError": {
-        "description": "HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses unavailable.",
+        "description": "HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses resource_busy.",
         "x-http-status": 409,
         "headers": {
           "Retry-After": {
@@ -3490,6 +3565,39 @@
                     },
                     "details": {
                       "maximum_bytes": 1048576
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "RequestTimeoutError": {
+        "description": "HTTP 408: The request body was not received before the server's read deadline. Send the body promptly; the request did not start.",
+        "x-http-status": 408,
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RequestTimeoutErrorResponse"
+            },
+            "examples": {
+              "request_timeout": {
+                "summary": "RequestTimeout",
+                "value": {
+                  "error": {
+                    "code": "request_timeout",
+                    "message": "The request body was not received before its read deadline.",
+                    "timestamp": "2026-09-11T12:00:00Z",
+                    "request_id": "example-request-id",
+                    "request": {
+                      "kind": "matched",
+                      "operation_id": "fork"
                     }
                   }
                 }
@@ -4002,8 +4110,8 @@
           }
         }
       },
-      "AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError": {
-        "description": "HTTP 409: already_exists, conflict, invalid_state, resource_busy. The code selects the required details.",
+      "AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError": {
+        "description": "HTTP 409: already_exists, conflict, idempotency_conflict, invalid_state, resource_busy. The code selects the required details.",
         "x-http-status": 409,
         "headers": {
           "Retry-After": {
@@ -4013,7 +4121,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse"
+              "$ref": "#/components/schemas/AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse"
             },
             "examples": {
               "already_exists": {
@@ -4021,6 +4129,9 @@
               },
               "conflict": {
                 "$ref": "#/components/responses/ConflictError/content/application~1json/examples/conflict"
+              },
+              "idempotency_conflict": {
+                "$ref": "#/components/responses/IdempotencyConflictError/content/application~1json/examples/idempotency_conflict"
               },
               "invalid_state": {
                 "$ref": "#/components/responses/InvalidStateError/content/application~1json/examples/invalid_state"
@@ -4427,6 +4538,7 @@
           "idempotency_conflict",
           "expired",
           "payload_too_large",
+          "request_timeout",
           "method_not_allowed",
           "unsupported_operation",
           "unrecoverable",
@@ -4481,6 +4593,9 @@
             "$ref": "#/components/schemas/PayloadTooLarge"
           },
           {
+            "$ref": "#/components/schemas/RequestTimeout"
+          },
+          {
             "$ref": "#/components/schemas/MethodNotAllowed"
           },
           {
@@ -4533,6 +4648,7 @@
             "idempotency_conflict": "#/components/schemas/IdempotencyConflict",
             "expired": "#/components/schemas/Expired",
             "payload_too_large": "#/components/schemas/PayloadTooLarge",
+            "request_timeout": "#/components/schemas/RequestTimeout",
             "method_not_allowed": "#/components/schemas/MethodNotAllowed",
             "unsupported_operation": "#/components/schemas/UnsupportedOperation",
             "unrecoverable": "#/components/schemas/Unrecoverable",
@@ -5190,7 +5306,7 @@
               "boolean",
               "null"
             ],
-            "description": "Request nested virtualization for a VM forked from `image`, including access to `/dev/kvm` inside the guest. Omit this field or pass `false` to disable it. The request returns 400 when the selected placement cannot provide nested virtualization."
+            "description": "Request nested virtualization for a VM forked from `image`, including access to `/dev/kvm` inside the guest. Omit this field or pass `false` to disable it. The request fails with 422 `unsupported_operation` (reason `feature_not_supported`, feature `nested_virtualization`) when the selected placement cannot provide nested virtualization, and always for a fork of a VM."
           },
           "source_org_id": {
             "type": [
@@ -7192,6 +7308,9 @@
             "$ref": "#/components/schemas/SyncBadRequestError"
           },
           {
+            "$ref": "#/components/schemas/SyncForbiddenError"
+          },
+          {
             "$ref": "#/components/schemas/SyncNotFoundError"
           },
           {
@@ -7199,6 +7318,9 @@
           },
           {
             "$ref": "#/components/schemas/SyncPayloadTooLargeError"
+          },
+          {
+            "$ref": "#/components/schemas/SyncInsufficientResourcesError"
           },
           {
             "$ref": "#/components/schemas/SyncUnsupportedOperationError"
@@ -7218,9 +7340,11 @@
           "propertyName": "code",
           "mapping": {
             "bad_request": "#/components/schemas/SyncBadRequestError",
+            "forbidden": "#/components/schemas/SyncForbiddenError",
             "not_found": "#/components/schemas/SyncNotFoundError",
             "conflict": "#/components/schemas/SyncConflictError",
             "payload_too_large": "#/components/schemas/SyncPayloadTooLargeError",
+            "insufficient_resources": "#/components/schemas/SyncInsufficientResourcesError",
             "unsupported_operation": "#/components/schemas/SyncUnsupportedOperationError",
             "unavailable": "#/components/schemas/SyncUnavailableError",
             "internal": "#/components/schemas/SyncInternalError",
@@ -9397,7 +9521,7 @@
         "unevaluatedProperties": false
       },
       "InvalidState": {
-        "description": "The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses unavailable.",
+        "description": "The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses resource_busy.",
         "x-http-status": 409,
         "allOf": [
           {
@@ -9512,6 +9636,28 @@
               },
               "details": {
                 "$ref": "#/components/schemas/PayloadTooLargeDetails"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "RequestTimeout": {
+        "description": "The request body was not received before the server's read deadline. Send the body promptly; the request did not start.",
+        "x-http-status": 408,
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ErrorMetadata"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "request_timeout"
               }
             },
             "required": [
@@ -9958,6 +10104,32 @@
         ],
         "unevaluatedProperties": false
       },
+      "SyncForbiddenError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "forbidden",
+            "description": "Identifies this code as `forbidden`."
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Safe explanation of this file-operation failure."
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "description": "Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ErrorExecutionContext"
+          }
+        ],
+        "unevaluatedProperties": false
+      },
       "SyncNotFoundError": {
         "type": "object",
         "properties": {
@@ -10068,6 +10240,36 @@
         "required": [
           "code",
           "message"
+        ],
+        "description": "Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ErrorExecutionContext"
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "SyncInsufficientResourcesError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "insufficient_resources",
+            "description": "Identifies this code as `insufficient_resources`."
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Safe explanation of this file-operation failure."
+          },
+          "details": {
+            "$ref": "#/components/schemas/InsufficientResourcesDetails"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "details"
         ],
         "description": "Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope.",
         "allOf": [
@@ -10409,6 +10611,18 @@
           }
         }
       },
+      "RequestTimeoutErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/RequestTimeout"
+          }
+        }
+      },
       "MethodNotAllowedErrorResponse": {
         "type": "object",
         "required": [
@@ -10556,7 +10770,7 @@
           }
         }
       },
-      "AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse": {
+      "AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse": {
         "type": "object",
         "required": [
           "error"
@@ -10572,6 +10786,9 @@
                 "$ref": "#/components/schemas/Conflict"
               },
               {
+                "$ref": "#/components/schemas/IdempotencyConflict"
+              },
+              {
                 "$ref": "#/components/schemas/InvalidState"
               },
               {
@@ -10583,6 +10800,7 @@
               "mapping": {
                 "already_exists": "#/components/schemas/AlreadyExists",
                 "conflict": "#/components/schemas/Conflict",
+                "idempotency_conflict": "#/components/schemas/IdempotencyConflict",
                 "invalid_state": "#/components/schemas/InvalidState",
                 "resource_busy": "#/components/schemas/ResourceBusy"
               }
