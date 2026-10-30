@@ -81,7 +81,14 @@ must pass with fresh evidence before claiming parity.
 - Blaxel Python 0.4.21 and TypeScript 0.3.32 watch/stream comparisons pass 18
   cases on the corrected cancellation implementation. Recursive directory reads
   and named creation also have bounded comparisons. Qualification uses a private
-  prepared derivative; public bootstrap, archive and drive mounts remain incomplete.
+  prepared derivative; public bootstrap and archive remain incomplete. Writable
+  drive mount/list/unmount bindings are implemented in Python and TypeScript,
+  including authoritative readback after a lost mount response. TypeScript also
+  supports writable mountDrives setup. Read-only mounts, UID/GID mapping and
+  full DriveInstance routing remain unsupported. Native drive comparisons are
+  authorization-blocked; live sharing/persistence is not yet qualified. Python
+  cancellation stops subsequent drive operations but cannot interrupt an already
+  in-flight synchronous HTTP request.
   Python Docker registry config supports explicit registry basic-auth entries for
   image forks. Credential helpers and token-based registry entries remain unsupported;
   private registry pulls still need live qualification. Registry config is not a Dockerfile.
