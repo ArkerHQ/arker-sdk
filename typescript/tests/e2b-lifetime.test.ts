@@ -31,7 +31,7 @@ test('lifetime reconnect uses the same cross-language key and dedicated unbounde
   const argument = '["vm-a",123,"456","boot","owned"]';
   assert.ok(vm.calls[0]!.command.includes(argument));
   assert.deepEqual(vm.calls[0]!.options, {session_id:'owned', timeout:0, time_to_background:0,
-    end_after_all_subprocesses:false, idempotencyKey:createHash('sha256').update(argument).digest('hex')});
+    end_after_all_subprocesses:true, idempotencyKey:createHash('sha256').update(argument).digest('hex')});
   assert.deepEqual(vm.deleted, []);
 });
 for (const state of ['completed','failed','cancelled']) test(`stale ready cannot acknowledge ${state}`, async () => {

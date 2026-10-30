@@ -141,7 +141,7 @@ function facadeVM(failDelegation = false) {
       if (command.includes(" monitor ")) {
         assert.deepEqual(options, {
           session_id: "hold", timeout: 0, time_to_background: 0,
-          end_after_all_subprocesses: false, idempotencyKey: options.idempotencyKey,
+          end_after_all_subprocesses: true, idempotencyKey: options.idempotencyKey,
         });
         assert.match(options.idempotencyKey, /^[a-f0-9]{64}$/);
         calls.push("admit");

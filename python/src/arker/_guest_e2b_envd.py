@@ -359,12 +359,12 @@ def connected_peer_owned(connection, record):
         return False
 
 
-def request(path, token=None, body=None, record=None):
+def request(path, token=None, body=None, record=None, content_type="application/json"):
     headers = {"X-Access-Token": token} if token else {}
     data = None
     if body is not None:
-        headers["Content-Type"] = "application/json"
-        data = json.dumps(body).encode()
+        headers["Content-Type"] = content_type
+        data = body if isinstance(body, bytes) else json.dumps(body).encode()
     if token is not None or body is not None:
         if record is None:
             raise BootstrapError("daemon_identity_required")
@@ -596,8 +596,8 @@ def lifetime(argument):
             raise BootstrapError("daemon_identity_mismatch")
         path = directory / "lifetime.json"
         current = load(path) if path.exists() else None
-        if current is None or current["incarnation"] != incarnation:
-            current = {"incarnation": incarnation, "session_id": None}
+        if current is None or current["incarnation"] != incarnation or current.get("tracking") != 1:
+            current = {"incarnation": incarnation, "session_id": None, "tracking": 1}
         candidate = request.get("session_id")
         if candidate is not None:
             if not isinstance(candidate, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", candidate):
@@ -610,12 +610,45 @@ def lifetime(argument):
         os.close(lock)
 
 
+def process_cgroup(pid):
+    rows = (Path("/proc") / str(pid) / "cgroup").read_text().splitlines()
+    paths = [row[3:] for row in rows if row.startswith("0::")]
+    if len(paths) != 1 or not paths[0].startswith("/") or paths[0] == "/" or ".." in paths[0].split("/"):
+        raise BootstrapError("lifetime_cgroup_unavailable")
+    return paths[0]
+
+
+def bind_lifetime_cgroup(active, token):
+    # Write zero through the verified daemon connection: the kernel moves the
+    # writer itself. A numeric PID write could move an unrelated recycled PID.
+    group = process_cgroup(os.getpid())
+    leaf = Path("/sys/fs/cgroup") / group.lstrip("/")
+    if str(os.getpid()) not in (leaf / "cgroup.procs").read_text().splitlines():
+        raise BootstrapError("lifetime_cgroup_unavailable")
+    path = str(leaf / "cgroup.procs")
+    body = (
+        b'--lifetime\r\nContent-Disposition: form-data; name="file"; filename="cgroup.procs"\r\n'
+        b"\r\n0\r\n--lifetime--\r\n"
+    )
+    status, _ = request(
+        "/files?" + urllib.parse.urlencode({"path": path, "user": "root"}),
+        token=token,
+        body=body,
+        record=active,
+        content_type="multipart/form-data; boundary=lifetime",
+    )
+    if status != 200 or process_cgroup(active["pid"]) != group:
+        raise BootstrapError("lifetime_cgroup_mismatch")
+    return group
+
+
 def monitor(argument):
     """Hold a host run until the exact daemon exits; never signal the daemon."""
     vm_id, pid, start_ticks, boot_id, session_id = json.loads(argument)
     expected = {
         "incarnation": {"vm_id": vm_id, "pid": pid, "start": start_ticks, "boot_id": boot_id},
         "session_id": session_id,
+        "tracking": 1,
     }
     current = lifetime(json.dumps({"vm_id": expected["incarnation"]["vm_id"]}))
     if current != expected or current["session_id"] is None:
@@ -630,7 +663,14 @@ def monitor(argument):
         events.register(descriptor, select.POLLIN)
         if events.poll(0):
             raise BootstrapError("daemon_exited")
-        save(vm_directory(vm_id) / "monitor.json", {"lifetime": current, "process": fingerprint(os.getpid())})
+        active = load(ROOT / "active.json")
+        if active["pid"] != pid or active["start"] != start_ticks or active["vm_id"] != vm_id:
+            raise BootstrapError("lifetime_identity_mismatch")
+        token = load(vm_directory(vm_id) / "state.json")["token"]
+        group = bind_lifetime_cgroup(active, token)
+        if lifetime(json.dumps({"vm_id": vm_id})) != current or events.poll(0):
+            raise BootstrapError("lifetime_identity_mismatch")
+        save(vm_directory(vm_id) / "monitor.json", {"lifetime": current, "cgroup": group})
         print(json.dumps({"ready": True, "lifetime": current}), flush=True)
         events.poll()
     finally:
@@ -643,6 +683,7 @@ def publish(argument):
     expected = {
         "incarnation": {"vm_id": vm_id, "pid": pid, "start": start_ticks, "boot_id": boot_id},
         "session_id": session_id,
+        "tracking": 1,
     }
     lock = private_open(ROOT / "lock", os.O_RDWR | os.O_CREAT)
     try:
@@ -657,7 +698,7 @@ def publish(argument):
             or not same_process(active)
             or not owns_listener(active)
             or held["lifetime"] != expected
-            or not same_process(held["process"])
+            or held.get("cgroup") != process_cgroup(pid)
             or load(vm_directory(vm_id) / "lifetime.json") != expected
         ):
             raise BootstrapError("lifetime_identity_mismatch")

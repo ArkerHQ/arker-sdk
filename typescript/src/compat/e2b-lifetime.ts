@@ -23,7 +23,7 @@ export async function retainEnvd(vm: VM): Promise<string> {
   if (identity.vm_id !== vm.id || !current.session_id) throw new Error('Invalid envd lifetime identity');
   const argument = JSON.stringify([vm.id, identity.pid, identity.start, identity.boot_id, current.session_id]);
   const run = await vm.run(`python3 ${quote(scriptPath)} monitor ${quote(argument)}`, {
-    session_id: current.session_id, timeout: 0, time_to_background: 0, end_after_all_subprocesses: false,
+    session_id: current.session_id, timeout: 0, time_to_background: 0, end_after_all_subprocesses: true,
     idempotencyKey: createHash('sha256').update(argument).digest('hex'),
   });
   if (run.type !== 'background') throw new Error('Envd lifetime run is not active');

@@ -37,7 +37,7 @@ def retain_envd(vm):
         session_id=current["session_id"],
         timeout=0,
         time_to_background=0,
-        end_after_all_subprocesses=False,
+        end_after_all_subprocesses=True,
         idempotency_key=hashlib.sha256(argument.encode()).hexdigest(),
     )
     if run.type != "background":

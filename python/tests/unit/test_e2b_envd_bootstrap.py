@@ -92,6 +92,7 @@ def guest(tmp_path, monkeypatch):
     monkeypatch.setattr(helper, "fingerprint", lambda pid: {"pid": pid, "start": "100", "executable": str(binary)})
     monkeypatch.setattr(helper, "same_process", lambda record: True)
     monkeypatch.setattr(helper, "owns_listener", lambda record: state.listener)
+    monkeypatch.setattr(helper, "process_cgroup", lambda pid: "/fixture")
     monkeypatch.setattr(helper, "request", request)
     monkeypatch.setattr(helper, "authenticated", lambda token, marker, record: state.auth)
     monkeypatch.setenv("ARKER_API_KEY", "must-never-enter-the-guest-daemon")
@@ -295,8 +296,13 @@ def test_listener_ownership_checks_both_address_families(tmp_path, monkeypatch, 
 
 
 @pytest.mark.parametrize("peer_owned", [True, False])
-def test_secret_requests_verify_connected_peer_before_sending(monkeypatch, peer_owned):
+@pytest.mark.parametrize("self_join", [True, False])
+def test_secret_requests_verify_connected_peer_before_sending(monkeypatch, peer_owned, self_join):
     events = []
+    payload = b"0" if self_join else {"accessToken": TOKEN}
+    options = {"body": payload, "record": {"pid": 42}}
+    if self_join:
+        options["content_type"] = "multipart/form-data; boundary=lifetime"
 
     class Response(io.BytesIO):
         status = 204
@@ -310,7 +316,7 @@ def test_secret_requests_verify_connected_peer_before_sending(monkeypatch, peer_
 
         def request(self, method, path, body, headers):
             events.append("send")
-            assert json.loads(body) == {"accessToken": TOKEN}
+            assert body == b"0" if self_join else json.loads(body) == {"accessToken": TOKEN}
 
         def getresponse(self):
             return Response(b"")
@@ -328,11 +334,11 @@ def test_secret_requests_verify_connected_peer_before_sending(monkeypatch, peer_
     ticks = iter(range(10))
     monkeypatch.setattr(helper.time, "monotonic", lambda: next(ticks))
     if peer_owned:
-        assert helper.request("/init", body={"accessToken": TOKEN}, record={"pid": 42}) == (204, b"")
+        assert helper.request("/files" if self_join else "/init", **options) == (204, b"")
         assert events == ["connect", "verify", "send", "close"]
     else:
         with pytest.raises(helper.BootstrapError, match="connected_peer_identity_mismatch"):
-            helper.request("/init", body={"accessToken": TOKEN}, record={"pid": 42})
+            helper.request("/files" if self_join else "/init", **options)
         assert "send" not in events
         assert events[-1] == "close"
 
@@ -539,7 +545,7 @@ def test_lifetime_bootstrap_keeps_existing_descriptor_blocked_until_monitor_publ
     assert guest.events[-1] != "release"
 
 
-@pytest.mark.parametrize("failure", ["admission", "terminal", "dead-monitor"])
+@pytest.mark.parametrize("failure", ["admission", "terminal", "lost-cgroup"])
 def test_failed_lifetime_admission_cannot_reopen_existing_client_ingress(guest, monkeypatch, failure):
     from arker import _compat_e2b_bootstrap as bootstrap
     from arker._compat_e2b_lifetime import retain_envd
@@ -548,8 +554,8 @@ def test_failed_lifetime_admission_cannot_reopen_existing_client_ingress(guest, 
     guest.ensure(retain_activity=True)
     assert guest.state.closed
     current = helper.lifetime(json.dumps({"vm_id": "vm-a", "session_id": "owned"}))
-    helper.save(helper.vm_directory("vm-a") / "monitor.json", {"lifetime": current, "process": {"pid": 777}})
-    monkeypatch.setattr(helper, "same_process", lambda record: record["pid"] != 777)
+    helper.save(helper.vm_directory("vm-a") / "monitor.json", {"lifetime": current, "cgroup": "/fixture"})
+    monkeypatch.setattr(helper, "process_cgroup", lambda pid: "/other")
 
     def invoke(vm, operation, argument):
         return helper.lifetime(argument) if operation == "lifetime" else helper.publish(argument)
@@ -579,7 +585,7 @@ def test_failed_lifetime_admission_cannot_reopen_existing_client_ingress(guest, 
 def test_lifetime_publish_revalidates_identity_then_opens_ingress(guest):
     guest.ensure(retain_activity=True)
     current = helper.lifetime(json.dumps({"vm_id": "vm-a", "session_id": "owned"}))
-    helper.save(helper.vm_directory("vm-a") / "monitor.json", {"lifetime": current, "process": {"pid": 777}})
+    helper.save(helper.vm_directory("vm-a") / "monitor.json", {"lifetime": current, "cgroup": "/fixture"})
     inc = current["incarnation"]
     argument = json.dumps([inc["vm_id"], inc["pid"], inc["start"], inc["boot_id"], current["session_id"]])
     assert guest.state.closed
@@ -590,4 +596,32 @@ def test_lifetime_publish_revalidates_identity_then_opens_ingress(guest):
     helper.save(guest.root / "active.json", {**active, "start": "replaced"})
     with pytest.raises(helper.BootstrapError, match="lifetime_identity_mismatch"):
         helper.publish(argument)
+    assert guest.state.closed
+
+
+def test_daemon_leaving_retained_cgroup_cannot_republish_stale_ready_record(guest, monkeypatch):
+    guest.ensure(retain_activity=True)
+    current = helper.lifetime(json.dumps({"vm_id": "vm-a", "session_id": "owned"}))
+    helper.save(helper.vm_directory("vm-a") / "monitor.json", {"lifetime": current, "cgroup": "/fixture"})
+    inc = current["incarnation"]
+    argument = json.dumps([inc["vm_id"], inc["pid"], inc["start"], inc["boot_id"], current["session_id"]])
+    assert helper.publish(argument) == {"ready": True}
+    assert not guest.state.closed
+    monkeypatch.setattr(helper, "process_cgroup", lambda pid: "/other")
+    with pytest.raises(helper.BootstrapError, match="lifetime_identity_mismatch"):
+        helper.publish(argument)
+    assert guest.state.closed
+    assert helper.lifetime(json.dumps({"vm_id": "vm-a"})) == current
+    assert len(guest.state.launches) == 1
+
+
+def test_legacy_monitor_claim_requires_new_session_before_publication(guest):
+    guest.ensure(retain_activity=True)
+    current = helper.lifetime(json.dumps({"vm_id": "vm-a", "session_id": "legacy"}))
+    legacy = {key: value for key, value in current.items() if key != "tracking"}
+    helper.save(helper.vm_directory("vm-a") / "lifetime.json", legacy)
+    unclaimed = helper.lifetime(json.dumps({"vm_id": "vm-a"}))
+    assert unclaimed == {**current, "session_id": None}
+    selected = helper.lifetime(json.dumps({"vm_id": "vm-a", "session_id": "tracked"}))
+    assert selected == {**current, "session_id": "tracked"}
     assert guest.state.closed

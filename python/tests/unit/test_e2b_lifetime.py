@@ -69,7 +69,7 @@ def test_reconnect_replays_same_run_without_deadline_or_default_session(vm):
         "session_id": "owned",
         "timeout": 0,
         "time_to_background": 0,
-        "end_after_all_subprocesses": False,
+        "end_after_all_subprocesses": True,
         "idempotency_key": hashlib.sha256(argument.encode()).hexdigest(),
     }
     assert not vm.deleted
@@ -133,6 +133,7 @@ def test_pidfd_monitor_and_guest_session_claim(tmp_path, monkeypatch, cancel_mon
         active = {**guest.fingerprint(daemon.pid), "vm_id": "parent"}
         guest.vm_directory("parent").mkdir(parents=True)
         guest.save(root / "active.json", active)
+        guest.save(guest.vm_directory("parent") / "state.json", {"token": "fixture"})
         with ThreadPoolExecutor(max_workers=4) as pool:
             claims = list(
                 pool.map(lambda n: guest.lifetime(json.dumps({"vm_id": "parent", "session_id": str(n)})), range(4))
@@ -152,7 +153,8 @@ def test_pidfd_monitor_and_guest_session_claim(tmp_path, monkeypatch, cancel_mon
         # Run the actual monitor in a separate process; only listener discovery is substituted.
         program = (
             "from arker import _guest_e2b_envd as g; from pathlib import Path; import sys; "
-            "g.ROOT=Path(sys.argv[1]); g.owns_listener=lambda _:True; g.monitor(sys.argv[2])"
+            "g.ROOT=Path(sys.argv[1]); g.owns_listener=lambda _:True; "
+            "g.bind_lifetime_cgroup=lambda active, token: '/fixture'; g.monitor(sys.argv[2])"
         )
         monitor = subprocess.Popen(
             [sys.executable, "-c", program, str(root), argument], stdout=subprocess.PIPE, text=True
@@ -221,3 +223,40 @@ def test_lost_run_response_reconnect_replays_without_cleanup_of_uncertain_owner(
     assert retain_envd(vm) == "shared-run"
     assert vm.calls[0] == vm.calls[1]
     assert not vm.deleted
+
+
+def test_repeated_concurrent_connects_replay_only_the_selected_monitor(vm):
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        runs = list(pool.map(lambda _: retain_envd(vm), range(32)))
+    assert runs == ["shared-run"] * 32
+    assert len(vm.calls) == 32
+    assert all(call == vm.calls[0] for call in vm.calls)
+    assert not vm.deleted
+
+
+@pytest.mark.parametrize("moved", [False, True])
+def test_cgroup_binding_verifies_membership_after_move(tmp_path, monkeypatch, moved):
+    from pathlib import Path
+
+    leaf = tmp_path / "session"
+    leaf.mkdir()
+    (leaf / "cgroup.procs").write_text(str(os.getpid()))
+    monkeypatch.setattr(guest, "Path", lambda path: tmp_path if path == "/sys/fs/cgroup" else Path(path))
+    monkeypatch.setattr(guest, "process_cgroup", lambda pid: "/session" if pid == os.getpid() or moved else "/other")
+    requests = []
+
+    def upload(path, **options):
+        requests.append((path, options))
+        assert options["record"] == {"pid": 123}
+        assert options["body"].endswith(b"\r\n0\r\n--lifetime--\r\n")
+        assert b"123" not in options["body"]
+        return 200, b""
+
+    monkeypatch.setattr(guest, "request", upload)
+    if moved:
+        assert guest.bind_lifetime_cgroup({"pid": 123}, "fixture") == "/session"
+    else:
+        with pytest.raises(guest.BootstrapError, match="lifetime_cgroup_mismatch"):
+            guest.bind_lifetime_cgroup({"pid": 123}, "fixture")
+    assert (leaf / "cgroup.procs").read_text() == str(os.getpid())
+    assert len(requests) == 1
