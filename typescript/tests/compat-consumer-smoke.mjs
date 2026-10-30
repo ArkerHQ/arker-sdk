@@ -136,6 +136,7 @@ async function verifyDaytona(native, shim) {
 }
 
 async function verifyModal(native, shim) {
+  const { ClientError, Status } = createRequire(require.resolve("modal"))("nice-grpc");
   for (const deleted of [false, true]) {
     const { ArkerError } = require("@arker-ai/sdk");
     const error = new ArkerError("not_found", "Unavailable", 404, {
@@ -151,8 +152,17 @@ async function verifyModal(native, shim) {
       sandboxId: "consumer", provider: "arker", getInstance: () => vm,
       runCommand: async () => { throw error; },
     });
-    await assert.rejects(sandbox.exec(["true"], { env: { VALUE: "synthetic" } }),
-      deleted ? native.NotFoundError : native.ConflictError);
+    await assert.rejects(sandbox.exec(["true"], { env: { VALUE: "synthetic" } }), observed => {
+      const expected = deleted ? ClientError : native.ConflictError;
+      assert.equal(Object.getPrototypeOf(observed), expected.prototype);
+      if (deleted) {
+        assert.equal(observed.code, Status.NOT_FOUND);
+        assert.equal(observed.path, "/modal.task_command_router.TaskCommandRouter/TaskExecStart");
+      }
+      assert.ok(observed.cause === error ||
+        (observed.cause instanceof AggregateError && observed.cause.errors[0] === error));
+      return true;
+    });
   }
   const previous = native.SandboxService.prototype.create;
   const app = { appId: "ap-consumer" };
