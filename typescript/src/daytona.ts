@@ -162,7 +162,7 @@ export class Sandbox {
         },
     };
     if (!nativeProcess) {
-      for (const key of ["createSession", "getSession", "listSessions", "deleteSession", "getSessionCommand", "sendSessionCommandInput", "createPty", "listPtySessions", "getPtySessionInfo", "resizePtySession", "killPtySession"] as const) {
+      for (const key of ["createSession", "getSession", "listSessions", "deleteSession", "getSessionCommand", "sendSessionCommandInput", "listPtySessions", "getPtySessionInfo", "resizePtySession", "killPtySession"] as const) {
         const method = this.process[key].bind(this.process) as (...args: unknown[]) => Promise<unknown>;
         Object.defineProperty(this.process, key, { value: (...args: unknown[]) => daytonaRequest(this.requestTimeoutMs, () => method(...args)), enumerable: true });
       }
