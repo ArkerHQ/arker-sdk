@@ -333,6 +333,7 @@ class Sandbox(UnsupportedMixin):
         timeout_ms = kwargs.pop("timeout_ms", kwargs.pop("timeoutMs", None))
         native_streams = import_optional("modal.container_process") is not None
         stream_options = {}
+        tty = None
         if native_streams:
             from modal._utils.async_utils import synchronizer
             from modal.exception import InvalidError
@@ -361,7 +362,21 @@ class Sandbox(UnsupportedMixin):
                 **_local_secret_env(secrets),
                 **{k: v for k, v in (environment or {}).items() if v is not None},
             }
-            for key, default in (("pty", False), ("pty_info", None), ("_pty_info", None)):
+            if kwargs.pop("pty", False):
+                from modal._output.pty import get_pty_info
+
+                info = get_pty_info(shell=True, no_terminate_on_idle_stdin=True)
+                tty = {"rows": info.winsz_rows, "cols": info.winsz_cols}
+                environment = {
+                    "TERM": info.env_term,
+                    "COLORTERM": info.env_colorterm,
+                    "TERM_PROGRAM": info.env_term_program,
+                    **environment,
+                }
+                # Native pty=True overrides both deprecated terminal descriptors.
+                kwargs.pop("pty_info", None)
+                kwargs.pop("_pty_info", None)
+            for key, default in (("pty_info", None), ("_pty_info", None)):
                 if key in kwargs and kwargs[key] == default:
                     kwargs.pop(key)
         if not native_streams:
@@ -397,6 +412,7 @@ class Sandbox(UnsupportedMixin):
                         "preserveDescendants": True,
                         "workingDir": "/" if control_name else workdir or "/",
                         "stdin": True,
+                        **({"tty": tty} if tty is not None else {}),
                         **({"timeout": milliseconds} if milliseconds is not None else {}),
                     }
                 )

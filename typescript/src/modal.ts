@@ -49,8 +49,8 @@ function toRunCommandOptions(opts: unknown): RunCommandOptions | undefined {
   const modalOpts = opts as ModalExecOptions;
 
   assertOptionValue(
-    modalOpts.pty === undefined || modalOpts.pty === false,
-    "Sandbox.exec PTY is not supported by Arker; pty must be false or omitted.",
+    modalOpts.pty === undefined || typeof modalOpts.pty === "boolean",
+    "Sandbox.exec option pty must be a boolean.",
   );
   assertOptionValue(
     modalOpts.secrets === undefined || (Array.isArray(modalOpts.secrets) && modalOpts.secrets.length === 0),
@@ -140,7 +140,10 @@ export class Sandbox {
         if (typeof inheritedWorkdir !== "string" || !inheritedWorkdir.startsWith("/")) throw new Error("Invalid prepared image workdir");
         runOptions.cwd = inheritedWorkdir;
       }
-      runOptions.env = { ...environment, ...runOptions.env };
+      runOptions.env = {
+        ...(opts?.pty ? { TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "" } : {}),
+        ...environment, ...runOptions.env,
+      };
       if (!this.#processes) throw new Error("Native Modal sandbox instance is unavailable");
       if (!argv.length || argv.some(arg => typeof arg !== "string")) throw new TypeError("Modal exec requires a nonempty array of string arguments");
       const control = await prepareExec(this.#box, argv, runOptions.env, runOptions.cwd);
@@ -148,7 +151,7 @@ export class Sandbox {
       try {
         current = await this.#processes.exec({
           command: argv.map(shellQuote).join(" "), argv: control.argv, _modalControl: control.name, spawnFailureExitCode: 128, preserveDescendants: true, workingDir: control.name ? "/" : runOptions.cwd ?? "/", env: {},
-          stdin: true, ...(runOptions.timeout !== undefined ? { timeout: runOptions.timeout } : {}),
+          stdin: true, ...(opts?.pty ? { tty: { rows: 24, cols: 80 } } : {}), ...(runOptions.timeout !== undefined ? { timeout: runOptions.timeout } : {}),
         });
       } catch (error) {
         await discardExec(this.#box, control.name, error);

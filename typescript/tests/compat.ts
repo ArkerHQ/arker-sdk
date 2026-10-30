@@ -454,8 +454,8 @@ async function testModalSurface(): Promise<void> {
       /unsupported option\(s\) 'unsupported'/,
     );
     await assert.rejects(
-      () => sandbox.exec("pwd", { pty: true } as any),
-      /Sandbox.exec PTY is not supported.*pty must be false or omitted/,
+      () => sandbox.exec("pwd", { pty: null } as any),
+      /Sandbox.exec option pty must be a boolean/,
     );
     assert.equal(typeof client.sandboxes.list, "function");
   } finally {

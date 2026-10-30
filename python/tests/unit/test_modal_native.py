@@ -198,7 +198,6 @@ def test_exec_local_secrets_precedence_and_native_defaults(tmp_path, monkeypatch
     "case, error, match",
     [
         ("remote-secret", UnsupportedCompatibilityOption, "named or deployed"),
-        ("pty", TypeError, "unsupported option"),
         ("pty_info", TypeError, "unsupported option"),
         ("_pty_info", TypeError, "unsupported option"),
     ],

@@ -116,14 +116,41 @@ test("Arker Modal exec accepts explicit native defaults without changing the com
   assert.equal(spawn.mock.calls[1]!.arguments[0]!.timeout, undefined);
 });
 
-test("Arker Modal exec refuses unsupported PTY and secret values before spawning", async t => {
+test("Arker Modal exec refuses invalid PTY and unsupported secret values before spawning", async t => {
   const spawn = t.mock.method(GuestProcesses.prototype, "exec", async () => ({ pid: "test" }) as GuestProcessResult);
   const sandbox = new Sandbox({ sandboxId: "test", provider: "arker",
     getInstance: () => ({ metadata: {}, sync: async () => {} }),
     runCommand: async () => ({ exitCode: 0 }),
   } as never);
-  for (const options of [{ pty: true }, { pty: null }, { secrets: [new Secret("st-test")] }, { secrets: {} }, { secrets: null }]) {
-    await assert.rejects(sandbox.exec(["true"], options as SandboxExecParams & { mode?: "text" }), /not supported by Arker|local secrets.fromObject recipes|secrets must be an array/);
+  for (const options of [{ pty: null }, { secrets: [new Secret("st-test")] }, { secrets: {} }, { secrets: null }]) {
+    await assert.rejects(sandbox.exec(["true"], options as SandboxExecParams & { mode?: "text" }), /pty must be a boolean|not supported by Arker|local secrets.fromObject recipes|secrets must be an array/);
   }
   assert.equal(spawn.mock.callCount(), 0);
 });
+
+for (const pty of [false, true]) {
+  test(`Modal PTY uses private environment control and native defaults (${pty})`, async (t) => {
+    const spawn = t.mock.method(GuestProcesses.prototype, "exec", async () => ({ pid: "owned-process" }) as GuestProcessResult);
+    const payloads: string[] = [];
+    const sandbox = new Sandbox({ sandboxId: "owned-vm", provider: "arker",
+      getInstance: () => ({ metadata: {}, sync: async (_path: string, data: string) => { payloads.push(data); } }),
+      runCommand: async () => ({ exitCode: 0 }),
+    } as never);
+    const process = await sandbox.exec(["cat"], { pty, mode: "binary", workdir: "/tmp", env: { TERM: "explicit-term", SECRET: "synthetic-value" } });
+    assert.ok(process.stdin);
+    assert.ok(process.stdout);
+    const control = JSON.parse(payloads[0]!);
+    assert.deepEqual(control.argv, ["cat"]);
+    assert.deepEqual(control.env, {
+      ...(pty ? { COLORTERM: "truecolor", TERM_PROGRAM: "" } : {}),
+      TERM: "explicit-term", SECRET: "synthetic-value",
+    });
+    assert.equal(control.workdir, "/tmp");
+    const request = spawn.mock.calls[0]!.arguments[0]!;
+    assert.deepEqual(request.tty, pty ? { rows: 24, cols: 80 } : undefined);
+    assert.deepEqual(request.env, {});
+    assert.equal(JSON.stringify(request).includes("synthetic-value"), false);
+    assert.equal(request.preserveDescendants, true);
+    assert.ok(request._modalControl);
+  });
+}

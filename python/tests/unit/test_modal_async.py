@@ -117,13 +117,19 @@ def test_arker_cancelled_control_operation_finishes_without_deleting_lookup(monk
     assert deletes == ([] if operation == "from_id" else ["owned"])
 
 
-def test_cancelled_arker_exec_kills_only_its_late_process(monkeypatch):
+@pytest.mark.parametrize("pty", [False, True])
+def test_cancelled_arker_exec_kills_only_its_late_process(monkeypatch, pty):
     pytest.importorskip("modal")
+    if pty:
+        from arker import _modal_defaults
+
+        monkeypatch.setattr(_modal_defaults, "prepare_exec", lambda vm, argv, env, cwd: (list(argv), None))
     started, release, killed = threading.Event(), threading.Event(), threading.Event()
     calls = []
 
     def spawn(self, request):
         assert request["argv"] == ["sleep", "60"]
+        assert ("tty" in request) is pty
         started.set()
         assert release.wait(5)
         return SimpleNamespace(pid="owned-process")
@@ -137,7 +143,7 @@ def test_cancelled_arker_exec_kills_only_its_late_process(monkeypatch):
     sandbox = shim.Sandbox(vm=SimpleNamespace(id="vm", delete=lambda: pytest.fail("must not delete sandbox")))
 
     async def run():
-        pending = asyncio.create_task(sandbox.exec.aio("sleep", "60"))
+        pending = asyncio.create_task(sandbox.exec.aio("sleep", "60", pty=pty))
         try:
             assert await asyncio.to_thread(started.wait, 5)
             pending.cancel()
