@@ -50,14 +50,21 @@ must pass with fresh evidence before claiming parity.
   through its authenticated filesystem connection. Separate comparisons against
   E2B 2.58 and 2.62 passed all nine scenarios each, including additional monitor
   termination checks. Host-loss recovery remains unqualified.
+- E2B keyed creation uses stable routing with unchanged configuration and credentials;
+  keyed retries never fall back to another provider. Outbound deny-all policies
+  support explicit host/IP exceptions and DNS address restrictions. Live Arker
+  qualification of these options remains pending. See [creation options](e2b-creation.md).
 - E2B sandbox expiry, request timeouts, cancellation, streamed reads, process
   enumeration and native error identities have unverified or unsupported cases.
 - Daytona PTY/session comparisons against 0.227 pass nine Python sync/async and
   TypeScript cases across all three routes, covering persistent shell state,
   streams, resizing, tagged log lines and termination signals. Bounded file
   streams are implemented; downloads stage the guest file before iteration and
-  unknown-length uploads spool locally. Custom users, image working-directory
-  selection, search and custom timeout/error combinations remain incomplete.
+  unknown-length uploads spool locally. Filename glob and literal content search
+  are implemented. Python file transfers honor native connect/pool and read/write
+  phase timeouts, including zero for an unbounded transfer phase; cleanup uses
+  independent request limits. Custom users, image working-directory selection,
+  metadata deadlines and TypeScript transfer timeout combinations remain incomplete.
   The pinned native filesystem exposes neither watch nor signed file URLs. See the
   [filesystem contract](daytona-filesystem.md) for source prerequisites and
   [volume contract](daytona-volumes.md) for mount and deletion limits.
@@ -73,8 +80,10 @@ must pass with fresh evidence before claiming parity.
 - Blaxel Python 0.4.21 and TypeScript 0.3.32 watch/stream comparisons pass 18
   cases on the corrected cancellation implementation. Recursive directory reads
   and named creation also have bounded comparisons. Qualification uses a private
-  prepared derivative; public bootstrap, archive, drive mounts and Docker build
-  configuration remain incomplete.
+  prepared derivative; public bootstrap, archive and drive mounts remain incomplete.
+  Python Docker registry config supports explicit registry basic-auth entries for
+  image forks. Credential helpers and token-based registry entries remain unsupported;
+  private registry pulls still need live qualification. Registry config is not a Dockerfile.
 - Guest process helpers require Python; arbitrary Python-free images are not
   drop-in compatible. Preparing a source is an explicit prerequisite, not proof
   of default-image equivalence.
