@@ -111,7 +111,8 @@ attributes without discoverable types, and option combinations require more
 scenarios. This bounded inventory does not enumerate every vendor behavior.
 
 `scenario_verified` means the same scenario passed with the original SDK, the
-shim on the vendor, and the shim on Arker for the reported API. API attribution
+shim on the vendor, and the shim on Arker for the reported API, with a
+recognized cleanup receipt on each route. API attribution
 can come from runtime observations or explicit scenario assertion lists; a
 static list is not runtime proof that every listed call executed. New Python
 records label this distinction with `api_evidence` (`runtime` or `assertion`).
@@ -126,8 +127,18 @@ and measurement code; changing the test also requires new evidence. A failed
 route invalidates that scenario. Different runs cannot be
 combined to manufacture a passing comparison.
 
+Cleanup receipts contain enrolled resource IDs and provider readback results;
+a `passed` event, termination acknowledgement, or `cleanup_verified: true` alone
+does not qualify. The initial supported protocol is `modal-terminal-v1`: fresh
+sandbox lookup followed by an integer terminal `poll` result for every enrolled
+sandbox. Harnesses without a supported receipt remain unverified, including
+historical passes and other providers until their readback protocols are wired.
+Receipts are trusted, auditable harness observations, not signed provider proof:
+they do not independently prove that the harness enrolled every allocation.
+Later private cleanup checks do not retroactively qualify earlier events.
+
 Signature credit is explicit: pass `signatures={"Sandbox.create": [signature]}`
-to Python `record_scenario`, or the equivalent final argument to TypeScript
+to Python `record_scenario`, or the equivalent `signatures` argument to TypeScript
 `recordEvidence`. Use the exact signature string from the pinned inventory only
 when the scenario exercises that overload. Attestations for APIs outside the
 scenario are rejected; unlisted signatures receive no credit. Do not populate

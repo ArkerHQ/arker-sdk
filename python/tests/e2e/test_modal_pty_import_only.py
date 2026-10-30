@@ -4,7 +4,7 @@ import asyncio
 import os
 
 import pytest
-from compat_evidence import record_scenario
+from compat_evidence import ModalCleanup, record_scenario
 
 PROGRAM = r"""
 import modal
@@ -14,7 +14,7 @@ import asyncio
 import json
 import time
 
-async def program(asynchronous):
+async def program(asynchronous, cleanup):
     async def call(method, *args, **options):
         if asynchronous:
             return await method.aio(*args, **options)
@@ -22,6 +22,7 @@ async def program(asynchronous):
     app = await asyncio.to_thread(modal.App.lookup, "arker-compat-lifecycle", create_if_missing=True)
     image = modal.Image.from_registry("python:3.12-slim-bookworm")
     box = await call(modal.Sandbox.create, app=app, image=image, timeout=60)
+    cleanup.allocated(box.object_id)
     print(json.dumps({"event": "allocated", "id": box.object_id}), flush=True)
     try:
         info = get_pty_info(shell=True)
@@ -50,6 +51,9 @@ async def program(asynchronous):
         while await call(box.poll) is None:
             assert time.monotonic() < end, "Owned sandbox cleanup unconfirmed"
             await asyncio.sleep(0.5)
+        await cleanup.observe(box.object_id,
+            lambda identifier: call(modal.Sandbox.from_id, identifier),
+            lambda retained: call(retained.poll))
         print(json.dumps({"event": "cleanup_confirmed", "id": box.object_id}), flush=True)
 """
 
@@ -67,6 +71,7 @@ def test_modal_pty_import_only(provider, shim, asynchronous, live_router, monkey
     namespace = {}
     source = PROGRAM.replace("import modal\n", "from arker import modal\n", 1) if shim else PROGRAM
     exec(compile(source, "modal_pty_import_only.py", "exec"), namespace)
+    cleanup = ModalCleanup()
     with record_scenario(
         "modal",
         "async" if asynchronous else "sync",
@@ -82,5 +87,6 @@ def test_modal_pty_import_only(provider, shim, asynchronous, live_router, monkey
             "ContainerProcess.wait",
             "Sandbox.terminate",
         ],
+        cleanup=cleanup,
     ):
-        asyncio.run(namespace["program"](asynchronous))
+        asyncio.run(namespace["program"](asynchronous, cleanup))

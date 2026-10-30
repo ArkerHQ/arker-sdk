@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModalClient as Native } from "modal";
 import { ModalClient as Shim } from "../src/modal.js";
-import { recordEvidence } from "../scripts/compat-evidence.js";
+import { ModalCleanup, recordEvidence } from "../scripts/compat-evidence.js";
 
 interface CoreClient<A, I> {
   apps: { fromName(name: string, options: { createIfMissing: true }): Promise<A> };
@@ -14,16 +14,17 @@ interface CoreClient<A, I> {
     exec(command: string[], options: { pty: true; env: Record<string, string> }): Promise<import("modal").ContainerProcess<string>>;
     terminate(): Promise<void>;
     poll(): Promise<number | null>;
-  }> };
+  }>; fromId(id: string): Promise<{ sandboxId: string; poll(): Promise<number | null> }> };
 }
 
-async function workload<A, I>(client: CoreClient<A, I>, called: Set<string>) {
+async function workload<A, I>(client: CoreClient<A, I>, called: Set<string>, cleanup: ModalCleanup) {
   called.add("ModalClient.apps.fromName");
   const app = await client.apps.fromName("arker-compat-lifecycle", { createIfMissing: true });
   called.add("ModalClient.images.fromRegistry");
   const image = client.images.fromRegistry("python:3.12-slim-bookworm");
   called.add("ModalClient.sandboxes.create");
   const box = await client.sandboxes.create(app, image, { timeoutMs: 60_000 });
+  cleanup.allocated(box.sandboxId);
   console.log(JSON.stringify({ event: "allocated", id: box.sandboxId }));
   try {
     const code = 'import os,json,sys;line=sys.stdin.readline();print("RESULT:"+json.dumps({"tty":[os.isatty(n) for n in range(3)],"size":list(os.get_terminal_size()),"term":os.getenv("TERM"),"color":os.getenv("COLORTERM"),"line":line}));os.write(2,b"stderr-marker\\n");raise SystemExit(7)';
@@ -53,6 +54,7 @@ async function workload<A, I>(client: CoreClient<A, I>, called: Set<string>) {
       assert.ok(performance.now() < until, "Owned sandbox cleanup unconfirmed");
       await new Promise(resolve => setTimeout(resolve, 500));
     }
+    await cleanup.observe(box.sandboxId, id => client.sandboxes.fromId(id));
     console.log(JSON.stringify({ event: "cleanup_confirmed", id: box.sandboxId }));
   }
 }
@@ -71,11 +73,12 @@ await writeFile(config, JSON.stringify({ version: 1,
   create: { strategy: "priority", order: [route === "arker" ? "arker" : "modal"] },
 }));
 const called = new Set<string>();
+const cleanup = new ModalCleanup();
 let outcome = "failed";
 try {
   const client = route === "native" ? new Native() : new Shim({ routerConfigPath: config });
   try {
-    console.log(JSON.stringify({ route, id: await workload(client, called), passed: true, cleanupRequested: true }));
+    console.log(JSON.stringify({ route, id: await workload(client, called, cleanup), passed: true, cleanupRequested: true }));
   } finally { client.close(); }
   outcome = "passed";
 } finally {
@@ -85,7 +88,7 @@ try {
       route === "native" ? "reference" : route === "modal" ? "native" : "arker",
       "pty-text-terminal-input-output",
       [...called].sort(),
-      outcome,
+      outcome, {}, cleanup.receipt(),
     );
   } finally { await rm(directory, { recursive: true }); }
 }

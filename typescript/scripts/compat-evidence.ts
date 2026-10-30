@@ -70,6 +70,49 @@ export async function implementationFingerprint(read: (path: string) => Promise<
   return hash.digest("hex");
 }
 
+export interface ModalCleanupReceipt {
+  protocol: "modal-terminal-v1";
+  resources: string[];
+  observations: Array<{ id: string; operation: "Sandbox.from_id.poll"; returncode: number }>;
+}
+
+// These are trusted harness observations, not signed provider proofs.
+export function cleanupObserved(item: any): boolean {
+  const receipt = item.cleanup;
+  return item.provider === "modal" && receipt?.protocol === "modal-terminal-v1" &&
+    Array.isArray(receipt.resources) && receipt.resources.length > 0 &&
+    receipt.resources.every((id: unknown) => typeof id === "string" && id.length > 0) &&
+    new Set(receipt.resources).size === receipt.resources.length &&
+    Array.isArray(receipt.observations) && receipt.observations.length === receipt.resources.length &&
+    receipt.observations.every((observation: any, index: number) => observation?.id === receipt.resources[index] &&
+      observation.operation === "Sandbox.from_id.poll" && Number.isSafeInteger(observation.returncode));
+}
+
+export class ModalCleanup {
+  private resources: string[] = [];
+  private observations = new Map<string, ModalCleanupReceipt["observations"][number]>();
+
+  allocated(id: string): void {
+    if (!id || this.resources.includes(id)) throw new Error("Expected a new sandbox identifier");
+    this.resources.push(id);
+  }
+
+  async observe(id: string, lookup: (id: string) => Promise<{ sandboxId: string; poll(): Promise<number | null> }>): Promise<void> {
+    if (!this.resources.includes(id)) throw new Error("Sandbox was not enrolled");
+    this.observations.delete(id);
+    const sandbox = await lookup(id);
+    if (sandbox.sandboxId !== id) throw new Error("Cleanup readback returned a different sandbox");
+    const returncode = await sandbox.poll();
+    if (!Number.isSafeInteger(returncode)) throw new Error("Sandbox termination has not been observed");
+    this.observations.set(id, { id, operation: "Sandbox.from_id.poll", returncode: returncode! });
+  }
+
+  receipt(): ModalCleanupReceipt {
+    return { protocol: "modal-terminal-v1", resources: [...this.resources],
+      observations: this.resources.flatMap(id => { const observation = this.observations.get(id); return observation ? [{ ...observation }] : []; }) };
+  }
+}
+
 export function verifiedScenarios(api: string, evidence: any[], version: string, fingerprint: string): string[] {
   const groups = new Map<string, { routes: Set<string>; failed: boolean }>();
   for (const item of evidence) {
@@ -82,7 +125,7 @@ export function verifiedScenarios(api: string, evidence: any[], version: string,
     }
     const key = JSON.stringify([item.run, item.scenario]);
     const group = groups.get(key) ?? { routes: new Set<string>(), failed: false };
-    if (item.outcome === "passed" && item.apis.includes(api)) group.routes.add(item.route);
+    if (item.outcome === "passed" && cleanupObserved(item) && item.apis.includes(api)) group.routes.add(item.route);
     else if (item.outcome !== "passed") group.failed = true;
     groups.set(key, group);
   }
@@ -107,7 +150,7 @@ const initialVersions = Promise.all((Object.keys(packages) as Array<keyof typeof
   [provider, await vendorVersion(provider)] as const
 ))).then(Object.fromEntries);
 
-export async function recordEvidence(provider: "blaxel" | "e2b" | "modal" | "daytona", route: string, scenario: string, apis: string[], outcome: string, signatures: Record<string, string[]> = {}): Promise<void> {
+export async function recordEvidence(provider: "blaxel" | "e2b" | "modal" | "daytona", route: string, scenario: string, apis: string[], outcome: string, signatures: Record<string, string[]> = {}, cleanup?: ModalCleanupReceipt): Promise<void> {
   const output = process.env.COMPAT_COVERAGE_EVIDENCE;
   if (!output) return;
   if (!process.env.COMPAT_COVERAGE_RUN) throw new Error("COMPAT_COVERAGE_RUN is required when recording evidence");
@@ -128,7 +171,7 @@ export async function recordEvidence(provider: "blaxel" | "e2b" | "modal" | "day
   const versions = await initialVersions;
   const changed = snapshot.changed || versions[provider] !== version;
   await appendFile(output, JSON.stringify({
-    provider,
+    provider, cleanup,
     run: process.env.COMPAT_COVERAGE_RUN,
     scenario, route, outcome: changed ? "failed" : outcome,
     implementation_fingerprint: fingerprint,

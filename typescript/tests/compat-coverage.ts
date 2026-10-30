@@ -1,3 +1,4 @@
+import "./compat-cleanup.js";
 import { guestScript as envdSource } from "../src/compat/e2b-envd-guest.generated.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -57,6 +58,9 @@ for (const name of ["DriveInstance", "VolumeInstance", "Snapshot", "ImageInstanc
 assert.equal(guestSource, await readFile(new URL("../../python/src/arker/_guest_process.py", import.meta.url), "utf8"));
 
 const event = (route: string, options: Record<string, unknown> = {}) => ({
+  provider: "modal", cleanup: { protocol: "modal-terminal-v1", resources: ["box"], observations: [
+    { id: "box", operation: "Sandbox.from_id.poll", returncode: 137 },
+  ] },
   run: "run-1", scenario: "stdin", route, outcome: "passed", apis: ["process.exec"],
   vendor_version: "1", implementation_fingerprint: "current", ...options,
 });
@@ -105,10 +109,10 @@ try {
   process.env.COMPAT_COVERAGE_RUN = "synthetic-recorder-test";
   const api = "Sandbox.create", signature = "(template?: string): Promise<Sandbox>";
   for (const route of ["reference", "native", "arker"]) {
-    await recordEvidence("e2b", route, "explicit", [api], "passed", {[api]: [signature]});
+    await recordEvidence("modal", route, "explicit", [api], "passed", {[api]: [signature]}, { protocol: "modal-terminal-v1", resources: ["box"], observations: [{ id: "box", operation: "Sandbox.from_id.poll", returncode: 137 }] });
   }
   const events = (await readFile(path, "utf8")).trim().split("\n").map(line => JSON.parse(line));
-  const id = "typescript:e2b:async:" + api;
+  const id = "typescript:modal:async:" + api;
   assert.ok(events.every(event => event.outcome === "passed"));
   assert.ok(events.every(event => JSON.stringify(event.signatures) === JSON.stringify({[id]: [signature]})));
   const attest = (value: string) => events.map(event => ({...event, apis: event.signatures[id]?.includes(value) ? event.apis : []}));
@@ -116,7 +120,7 @@ try {
   assert.equal(verifiedScenarios(id, attest(signature), events[0].vendor_version, events[0].implementation_fingerprint).length, 1);
   assert.deepEqual(verifiedScenarios(id, attest("other overload"), events[0].vendor_version, events[0].implementation_fingerprint), []);
   for (const invalid of [{"Unexercised.api": [signature]}, {[api]: []}, {[api]: [""]}, {[api]: signature}]) {
-    await assert.rejects(recordEvidence("e2b", "arker", "invalid", [api], "passed", invalid as unknown as Record<string, string[]>), /Signature attestations/);
+    await assert.rejects(recordEvidence("modal", "arker", "invalid", [api], "passed", invalid as unknown as Record<string, string[]>), /Signature attestations/);
   }
   assert.equal((await readFile(path, "utf8")).trim().split("\n").length, 3);
 } finally {

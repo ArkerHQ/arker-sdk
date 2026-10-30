@@ -4,7 +4,7 @@ import asyncio
 import os
 
 import pytest
-from compat_evidence import record_scenario
+from compat_evidence import ModalCleanup, record_scenario
 
 PROGRAM = r"""
 import modal
@@ -13,7 +13,7 @@ import asyncio
 import json
 import time
 
-async def program(asynchronous, reason):
+async def program(asynchronous, reason, cleanup):
     async def call(method, *args, **options):
         if asynchronous:
             return await method.aio(*args, **options)
@@ -22,6 +22,7 @@ async def program(asynchronous, reason):
     image = modal.Image.from_registry("python:3.12-slim-bookworm")
     options = {"timeout": 30} if reason == "deadline" else {}
     box = await call(modal.Sandbox.create, app=app, image=image, **options)
+    cleanup.allocated(box.object_id)
     print(json.dumps({"event": "allocated", "id": box.object_id}), flush=True)
     try:
         assert await call(box.poll) is None
@@ -49,8 +50,11 @@ async def program(asynchronous, reason):
         else:
             raise AssertionError("A retained handle must never admit execution")
     finally:
-        await call(box.terminate)
-        print(json.dumps({"event": "cleanup_requested", "id": box.object_id}), flush=True)
+        await call(box.terminate, wait=True)
+        await cleanup.observe(box.object_id,
+            lambda identifier: call(modal.Sandbox.from_id, identifier),
+            lambda retained: call(retained.poll))
+        print(json.dumps({"event": "cleanup_confirmed", "id": box.object_id}), flush=True)
 """
 
 
@@ -68,6 +72,7 @@ def test_modal_terminal_import_only(provider, shim, asynchronous, reason, live_r
     namespace = {}
     source = PROGRAM.replace("import modal\n", "from arker import modal\n", 1) if shim else PROGRAM
     exec(compile(source, "modal_terminal_import_only.py", "exec"), namespace)
+    cleanup = ModalCleanup()
     with record_scenario(
         "modal",
         "async" if asynchronous else "sync",
@@ -75,5 +80,6 @@ def test_modal_terminal_import_only(provider, shim, asynchronous, reason, live_r
         shim,
         f"import-only-retained-terminal-{reason}",
         ["Sandbox.create", "Sandbox.from_id", "Sandbox.poll", "Sandbox.wait", "Sandbox.terminate", "Sandbox.exec"],
+        cleanup=cleanup,
     ):
-        asyncio.run(namespace["program"](asynchronous, reason))
+        asyncio.run(namespace["program"](asynchronous, reason, cleanup))

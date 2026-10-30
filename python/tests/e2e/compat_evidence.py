@@ -24,7 +24,7 @@ def vendor_version(provider):
 INITIAL_VERSIONS = {provider: vendor_version(provider) for provider in ("blaxel", "e2b", "modal", "daytona")}
 
 
-def record(provider, style, route, scenario, apis, outcome, *, signatures=None, api_evidence="assertion"):
+def record(provider, style, route, scenario, apis, outcome, *, signatures=None, api_evidence="assertion", cleanup=None):
     output = os.environ.get("COMPAT_COVERAGE_EVIDENCE")
     if not output:
         return
@@ -44,6 +44,7 @@ def record(provider, style, route, scenario, apis, outcome, *, signatures=None, 
     changed = fingerprint != INITIAL_FINGERPRINT or version != INITIAL_VERSIONS[provider]
     event = {
         "api_evidence": api_evidence,
+        "cleanup": cleanup,
         "provider": provider,
         "run": os.environ["COMPAT_COVERAGE_RUN"],
         "scenario": scenario,
@@ -64,12 +65,64 @@ def record(provider, style, route, scenario, apis, outcome, *, signatures=None, 
 
 
 @contextmanager
-def record_scenario(vendor, style, provider, shim, scenario, apis, *, signatures=None, api_evidence="assertion"):
-    """A scenario passes only after its program and cleanup have completed."""
+def record_scenario(
+    vendor, style, provider, shim, scenario, apis, *, signatures=None, api_evidence="assertion", cleanup=None
+):
+    """Record program outcome; strict credit additionally requires cleanup readbacks."""
     outcome = "failed"
     try:
         yield
         outcome = "passed"
     finally:
         route = "reference" if not shim else "arker" if provider == "arker" else "native"
-        record(vendor, style, route, scenario, sorted(apis), outcome, signatures=signatures, api_evidence=api_evidence)
+        record(
+            vendor,
+            style,
+            route,
+            scenario,
+            sorted(apis),
+            outcome,
+            signatures=signatures,
+            api_evidence=api_evidence,
+            **({"cleanup": cleanup.receipt()} if cleanup is not None else {}),
+        )
+
+
+class ModalCleanup:
+    """Enroll each allocation immediately; read retained terminal state after cleanup.
+
+    A termination acknowledgement alone is insufficient. The harness must enroll
+    every owned allocation; this is an auditable observation, not cryptographic proof.
+    """
+
+    def __init__(self):
+        self.resources = []
+        self.observations = {}
+
+    def allocated(self, identifier):
+        if not isinstance(identifier, str) or not identifier or identifier in self.resources:
+            raise ValueError("Expected a new sandbox identifier")
+        self.resources.append(identifier)
+
+    async def observe(self, identifier, lookup, poll):
+        if identifier not in self.resources:
+            raise ValueError("Sandbox was not enrolled")
+        self.observations.pop(identifier, None)
+        sandbox = await lookup(identifier)
+        if sandbox.object_id != identifier:
+            raise RuntimeError("Cleanup readback returned a different sandbox")
+        returncode = await poll(sandbox)
+        if type(returncode) is not int:
+            raise RuntimeError("Sandbox termination has not been observed")
+        self.observations[identifier] = {
+            "id": identifier,
+            "operation": "Sandbox.from_id.poll",
+            "returncode": returncode,
+        }
+
+    def receipt(self):
+        return {
+            "protocol": "modal-terminal-v1",
+            "resources": list(self.resources),
+            "observations": [self.observations[x] for x in self.resources if x in self.observations],
+        }

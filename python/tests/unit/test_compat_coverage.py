@@ -167,7 +167,8 @@ def test_e2b_async_volume_evidence_matches_only_real_vendor_names(monkeypatch, t
     assert all(hasattr(native.AsyncVolume, row["api"].removeprefix("Volume.")) for row in rows.values())
     verified = {name for name, row in rows.items() if row["status"] == "scenario_verified"}
     expected = {f"python:e2b:async:{api}"} if api in ("Volume.create", "Volume.destroy") else set()
-    assert verified == expected
+    assert set(rows) & {f"python:e2b:async:{api}"} == expected
+    assert verified == set()  # API attribution alone is not cleanup evidence.
     assert "python:e2b:async:AsyncVolume.create" not in rows
     assert "python:e2b:async:Volume.nonexistent" not in rows
 
@@ -189,6 +190,12 @@ def test_inventory_includes_public_context_and_iteration_protocols():
 def test_evidence_requires_reference_and_both_routes_for_current_code_and_version():
     def event(route, **options):
         return {
+            "provider": "modal",
+            "cleanup": {
+                "protocol": "modal-terminal-v1",
+                "resources": ["box"],
+                "observations": [{"id": "box", "operation": "Sandbox.from_id.poll", "returncode": 137}],
+            },
             "run": "run-1",
             "scenario": "stdin",
             "route": route,
@@ -417,17 +424,43 @@ def test_recorder_attests_only_explicit_signatures_after_all_routes_pass(monkeyp
     fingerprint = helper["INITIAL_FINGERPRINT"]
     monkeypatch.setattr(runpy, "run_path", lambda _: {"implementation_fingerprint": lambda: fingerprint})
     api, signature = "Sandbox.create", "(template=None)"
-    identifier = "python:e2b:sync:" + api
+    identifier = "python:modal:sync:" + api
     for route in ("reference", "native", "arker"):
-        helper["record"]("e2b", "sync", route, "explicit", [api], "passed", signatures={api: [signature]})
+        helper["record"](
+            "modal",
+            "sync",
+            route,
+            "explicit",
+            [api],
+            "passed",
+            signatures={api: [signature]},
+            cleanup={
+                "protocol": "modal-terminal-v1",
+                "resources": ["box"],
+                "observations": [{"id": "box", "operation": "Sandbox.from_id.poll", "returncode": 137}],
+            },
+        )
     evidence = [json.loads(line) for line in output.read_text().splitlines()]
     assert coverage.verified_scenarios(identifier, evidence[:2], "1", fingerprint, signature) == []
     assert coverage.verified_scenarios(identifier, evidence, "1", fingerprint, signature)
     assert coverage.verified_scenarios(identifier, evidence, "1", fingerprint, "(other overload)") == []
-    helper["record"]("e2b", "sync", "arker", "explicit", [api], "failed", signatures={api: [signature]})
+    helper["record"](
+        "modal",
+        "sync",
+        "arker",
+        "explicit",
+        [api],
+        "failed",
+        signatures={api: [signature]},
+        cleanup={
+            "protocol": "modal-terminal-v1",
+            "resources": ["box"],
+            "observations": [{"id": "box", "operation": "Sandbox.from_id.poll", "returncode": 137}],
+        },
+    )
     evidence = [json.loads(line) for line in output.read_text().splitlines()]
     assert coverage.verified_scenarios(identifier, evidence, "1", fingerprint, signature) == []
     for invalid in ({"Unexercised.api": [signature]}, {api: []}, {api: [""]}, {api: signature}):
         with pytest.raises(ValueError, match="Signature attestations"):
-            helper["record"]("e2b", "sync", "arker", "invalid", [api], "passed", signatures=invalid)
+            helper["record"]("modal", "sync", "arker", "invalid", [api], "passed", signatures=invalid)
     assert len(output.read_text().splitlines()) == 4

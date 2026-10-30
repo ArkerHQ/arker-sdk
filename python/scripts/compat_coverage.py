@@ -229,6 +229,33 @@ def signatures(member):
     return [value for method in (get_overloads(member) or [member]) if (value := signature(method))]
 
 
+def cleanup_observed(item):
+    """Validate recorded readbacks, not the truth of a caller-supplied attestation.
+
+    JSON evidence remains a trusted harness artifact, not a signed provider proof.
+    Missing receipts (including historical passes) cannot earn strict credit.
+    """
+    receipt = item.get("cleanup")
+    if not isinstance(receipt, dict) or receipt.get("protocol") != "modal-terminal-v1":
+        return False
+    if item.get("provider") != "modal":
+        return False
+    resources, observations = receipt.get("resources"), receipt.get("observations")
+    if not isinstance(resources, list) or not resources or not all(isinstance(x, str) and x for x in resources):
+        return False
+    if len(set(resources)) != len(resources) or not isinstance(observations, list):
+        return False
+    if len(observations) != len(resources):
+        return False
+    return all(
+        isinstance(observation, dict)
+        and observation.get("id") == resource
+        and observation.get("operation") == "Sandbox.from_id.poll"
+        and type(observation.get("returncode")) is int
+        for resource, observation in zip(resources, observations, strict=True)
+    )
+
+
 def verified_scenarios(api, evidence, version, fingerprint, required_signature=None):
     groups = {}
     failures = set()
@@ -253,8 +280,10 @@ def verified_scenarios(api, evidence, version, fingerprint, required_signature=N
         group = (item["run"], item["scenario"])
         if item.get("outcome") != "passed":
             failures.add(group)
-        elif api in item.get("apis", []) and (
-            required_signature is None or required_signature in item.get("signatures", {}).get(api, [])
+        elif (
+            cleanup_observed(item)
+            and api in item.get("apis", [])
+            and (required_signature is None or required_signature in item.get("signatures", {}).get(api, []))
         ):
             groups.setdefault(group, set()).add(item["route"])
     return sorted(
