@@ -68,6 +68,38 @@ async function* readableChunks(stream: ReadableStream<Uint8Array> | null) {
   finally { try { await reader.cancel(); } finally { reader.releaseLock(); } }
 }
 
+/** Own upload cancellation even when fetch does not cancel its request body. */
+function ownedUpload(body: ReadableStream<Uint8Array> | null, signal: AbortSignal) {
+  if (!body) return { body: null, close() {} };
+  const reader = body.getReader();
+  let released = false;
+  const finish = () => {
+    if (released) return;
+    released = true; signal.removeEventListener("abort", abort); reader.releaseLock();
+  };
+  let cancellation: Promise<void> | undefined;
+  const cancel = (reason?: unknown) => {
+    if (released) return Promise.resolve();
+    return cancellation ??= reader.cancel(reason).finally(finish);
+  };
+  const close = (reason?: unknown) => { void cancel(reason).catch(() => {}); };
+  const abort = () => close(signal.reason);
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) abort();
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (released) { controller.close(); return; }
+      try {
+        const next = await reader.read();
+        if (next.done) { controller.close(); finish(); }
+        else controller.enqueue(next.value);
+      } catch (error) { controller.error(error); finish(); }
+    },
+    cancel,
+  });
+  return { body: stream, close };
+}
+
 /** Credentials and request ownership are scoped to one endpoint, never global fetch. */
 export function scopedEnvdFetch(descriptor: EnvdDescriptor, platformKey: string, fetcher: typeof fetch = fetch,
   requests = new Requests()): typeof fetch {
@@ -76,11 +108,15 @@ export function scopedEnvdFetch(descriptor: EnvdDescriptor, platformKey: string,
     const request = new Request(input, { ...init, duplex: "half" } as RequestInit);
     assertEndpoint(descriptor.endpoint, request.url);
     const lifetime = requests.begin(request.signal);
+    let upload: ReturnType<typeof ownedUpload> | undefined;
+    const finish = () => { upload?.close(); lifetime.finish(); };
     try {
+      upload = ownedUpload(request.body, lifetime.controller.signal);
       const headers = new Headers(request.headers);
       headers.set("X-API-Key", platformKey); headers.set("X-Access-Token", descriptor.envd_access_token);
       const response = await fetcher(new Request(request, {
         headers, redirect: "error", signal: lifetime.controller.signal, duplex: "half",
+        body: upload.body,
       } as RequestInit));
       if (response.status === 409) {
         try {
@@ -89,24 +125,24 @@ export function scopedEnvdFetch(descriptor: EnvdDescriptor, platformKey: string,
           return complete && paused(409, body)
             ? new Response(JSON.stringify({ message: stopped }), { status: 502, headers: { "content-type": "application/json" } })
             : new Response(new Uint8Array(body), { status: 409, statusText: response.statusText, headers });
-        } finally { lifetime.controller.abort(); lifetime.finish(); }
+        } finally { lifetime.controller.abort(); finish(); }
       }
-      if (!response.body) { lifetime.finish(); return response; }
+      if (!response.body) { finish(); return response; }
       const reader = response.body.getReader();
       const body = new ReadableStream<Uint8Array>({
         async pull(controller) {
           try {
             const next = await reader.read();
-            if (next.done) { controller.close(); reader.releaseLock(); lifetime.finish(); }
+            if (next.done) { controller.close(); reader.releaseLock(); finish(); }
             else controller.enqueue(next.value);
-          } catch (error) { lifetime.finish(); reader.releaseLock(); controller.error(error); }
+          } catch (error) { finish(); reader.releaseLock(); controller.error(error); }
         },
         async cancel(reason) {
-          try { await reader.cancel(reason); } finally { lifetime.controller.abort(); lifetime.finish(); reader.releaseLock(); }
+          try { await reader.cancel(reason); } finally { lifetime.controller.abort(); finish(); reader.releaseLock(); }
         },
       });
       return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
-    } catch (error) { lifetime.controller.abort(); lifetime.finish(); throw error; }
+    } catch (error) { lifetime.controller.abort(); finish(); throw error; }
   };
 }
 
