@@ -22,7 +22,7 @@ def test_scenario_records_completion_and_failure_identity(harness, monkeypatch, 
     records, apis = [], set()
 
     def capture(*args, **kwargs):
-        assert kwargs == {"signatures": signatures}
+        assert kwargs == {"signatures": signatures, "api_evidence": "assertion"}
         records.append(args)
 
     monkeypatch.setattr(evidence, "record", capture)
@@ -95,3 +95,153 @@ finally:
     asyncio.run(namespace["program"]())
     assert calls == ["create", "read", "kill"]
     assert sum(isinstance(node, ast.Await) for node in ast.walk(ast.parse(derived))) == 3
+
+
+def test_runtime_trace_skips_unexecuted_calls_and_preserves_objects(harness):
+    programs, _ = harness
+    called, getters = set(), []
+    marker = object()
+
+    class Box:
+        @property
+        def name(self):
+            getters.append("name")
+            return marker
+
+        def read(self, value):
+            assert self is box
+            return value
+
+        def skipped(self):
+            pytest.fail("unexecuted branch")
+
+    box = Box()
+    namespace = {"box": box, "marker": marker}
+    source = """
+assert box.name is marker
+assert box.read(marker) is marker
+assert box.read == box.read
+if False:
+    box.skipped()
+"""
+    exec(programs.trace_program(source, "observed", namespace, {"box": "Sandbox"}, called), namespace)
+    assert called == {"Sandbox.name", "Sandbox.read"}
+    assert getters == ["name"]
+    assert namespace["box"] is box
+
+
+def test_runtime_trace_does_not_credit_argument_or_getter_failure(harness):
+    programs, _ = harness
+    called = set()
+    failure = RuntimeError("same failure")
+
+    class Box:
+        @property
+        def name(self):
+            raise failure
+
+        def read(self, value):
+            pytest.fail("argument failed before invocation")
+
+    def broken():
+        raise failure
+
+    for source in ("box.name", "box.read(broken())"):
+        namespace = {"box": Box(), "broken": broken}
+        with pytest.raises(RuntimeError) as caught:
+            exec(programs.trace_program(source, "observed", namespace, {"box": "Sandbox"}, called), namespace)
+        assert caught.value is failure
+    assert called == set()
+
+
+def test_runtime_trace_credits_async_only_when_awaited_and_keeps_error_identity(harness):
+    programs, _ = harness
+    called = set()
+    failure = RuntimeError("same failure")
+
+    class Box:
+        async def read(self):
+            raise failure
+
+    namespace = {"box": Box()}
+    source = "unawaited = box.read()\nasync def run():\n    await box.read()"
+    exec(programs.trace_program(source, "observed", namespace, {"box": "Sandbox"}, called), namespace)
+    assert called == set()
+    namespace["unawaited"].close()
+    assert called == set()
+    with pytest.raises(RuntimeError) as caught:
+        asyncio.run(namespace["run"]())
+    assert caught.value is failure
+    assert called == {"Sandbox.read"}
+
+
+@pytest.mark.parametrize("case", ["stream-read", "stream-cancel"])
+def test_core_program_observations_exclude_other_case_apis(harness, monkeypatch, case):
+    import sys
+    from types import SimpleNamespace
+
+    programs, _ = harness
+    scenario = importlib.import_module("test_e2b_core_extended_import_only")
+    called, deleted = set(), []
+    data = {}
+
+    class Files:
+        def write(self, path, content):
+            data[path] = content
+
+        def read(self, path, format=None):
+            content = data[path]
+            if format == "stream":
+                return iter_chunks(content)
+            return content
+
+    def iter_chunks(content):
+        yield content[:3]
+        yield content[3:]
+
+    box = SimpleNamespace(
+        files=Files(),
+        commands=SimpleNamespace(run=lambda command: SimpleNamespace(stdout="alive")),
+        kill=lambda: deleted.append(True),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "e2b",
+        SimpleNamespace(
+            Sandbox=SimpleNamespace(create=lambda: box),
+            CommandExitException=RuntimeError,
+            PtySize=object,
+        ),
+    )
+    namespace = {"case": case}
+    code = programs.trace_program(
+        scenario.PROGRAM, "core-program", namespace, {"Sandbox": "Sandbox", "sandbox": "Sandbox"}, called
+    )
+    exec(code, namespace)
+    assert called == {
+        "Sandbox.create",
+        "Sandbox.kill",
+        "Sandbox.files.write",
+        "Sandbox.files.read",
+        "Sandbox.commands.run",
+    }
+    assert deleted == [True]
+    assert namespace["sandbox"] is box
+
+
+@pytest.mark.parametrize("kind", ["assertion", "runtime"])
+def test_record_labels_api_attribution_without_attesting_signatures(harness, monkeypatch, tmp_path, kind):
+    import json
+
+    _, evidence = harness
+    path = tmp_path / "events.jsonl"
+    monkeypatch.setenv("COMPAT_COVERAGE_EVIDENCE", str(path))
+    monkeypatch.setenv("COMPAT_COVERAGE_RUN", "local-observation-test")
+    evidence.record("daytona", "sync", "reference", "example", ["Sandbox.id"], "passed", api_evidence=kind)
+    event = json.loads(path.read_text())
+    assert event["api_evidence"] == kind
+    assert event["apis"] == ["python:daytona:sync:Sandbox.id"]
+    assert event["signatures"] == {}
+    with pytest.raises(ValueError, match="Unknown API evidence kind"):
+        evidence.record("daytona", "sync", "reference", "example", [], "passed", api_evidence="inferred")
+    assert len(path.read_text().splitlines()) == 1

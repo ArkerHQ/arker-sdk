@@ -110,8 +110,16 @@ statically discoverable service objects to depth two. Returned handles, dynamic
 attributes without discoverable types, and option combinations require more
 scenarios. This bounded inventory does not enumerate every vendor behavior.
 
-`scenario_verified` means runtime tracing observed a call and the same scenario
-passed with the original SDK, the shim on the vendor, and the shim on Arker.
+`scenario_verified` means the same scenario passed with the original SDK, the
+shim on the vendor, and the shim on Arker for the reported API. API attribution
+can come from runtime observations or explicit scenario assertion lists; a
+static list is not runtime proof that every listed call executed. New Python
+records label this distinction with `api_evidence` (`runtime` or `assertion`).
+Records without that field do not establish runtime observation. The common
+Python tracing hook credits executed calls and field reads on named roots;
+skipped branches and unawaited async calls receive no credit. Dynamic aliases
+and calls outside those roots remain unobserved. Tracing changes require fresh
+runs and do not upgrade existing evidence.
 Evidence must match the SDK version, implementation fingerprint, scenario, and
 test-run ID. The fingerprint includes implementation, dependencies, scenarios,
 and measurement code; changing the test also requires new evidence. A failed

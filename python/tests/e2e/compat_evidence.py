@@ -24,10 +24,12 @@ def vendor_version(provider):
 INITIAL_VERSIONS = {provider: vendor_version(provider) for provider in ("blaxel", "e2b", "modal", "daytona")}
 
 
-def record(provider, style, route, scenario, apis, outcome, *, signatures=None):
+def record(provider, style, route, scenario, apis, outcome, *, signatures=None, api_evidence="assertion"):
     output = os.environ.get("COMPAT_COVERAGE_EVIDENCE")
     if not output:
         return
+    if api_evidence not in {"assertion", "runtime"}:
+        raise ValueError("Unknown API evidence kind")
     signatures = {} if signatures is None else signatures
     if not isinstance(signatures, dict) or not all(
         api in apis
@@ -41,6 +43,7 @@ def record(provider, style, route, scenario, apis, outcome, *, signatures=None):
     version = vendor_version(provider)
     changed = fingerprint != INITIAL_FINGERPRINT or version != INITIAL_VERSIONS[provider]
     event = {
+        "api_evidence": api_evidence,
         "provider": provider,
         "run": os.environ["COMPAT_COVERAGE_RUN"],
         "scenario": scenario,
@@ -61,7 +64,7 @@ def record(provider, style, route, scenario, apis, outcome, *, signatures=None):
 
 
 @contextmanager
-def record_scenario(vendor, style, provider, shim, scenario, apis, *, signatures=None):
+def record_scenario(vendor, style, provider, shim, scenario, apis, *, signatures=None, api_evidence="assertion"):
     """A scenario passes only after its program and cleanup have completed."""
     outcome = "failed"
     try:
@@ -69,4 +72,4 @@ def record_scenario(vendor, style, provider, shim, scenario, apis, *, signatures
         outcome = "passed"
     finally:
         route = "reference" if not shim else "arker" if provider == "arker" else "native"
-        record(vendor, style, route, scenario, sorted(apis), outcome, signatures=signatures)
+        record(vendor, style, route, scenario, sorted(apis), outcome, signatures=signatures, api_evidence=api_evidence)

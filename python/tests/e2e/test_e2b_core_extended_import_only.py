@@ -4,6 +4,7 @@ import os
 
 import pytest
 from compat_evidence import record_scenario
+from compat_program import trace_program
 
 # Only vendor import statements are substituted between routes.
 PROGRAM = r"""
@@ -127,49 +128,24 @@ else:
         sandbox.kill()
 """
 
-BASE_APIS = ["Sandbox.create", "Sandbox.kill"]
-CASES = {
-    "home-reconnect-user": ["Sandbox.connect", "Sandbox.files.write", "Sandbox.files.read", "Sandbox.commands.run"],
-    "stream-read": ["Sandbox.files.write", "Sandbox.files.read", "Sandbox.commands.run"],
-    "stream-cancel": ["Sandbox.files.write", "Sandbox.files.read", "Sandbox.commands.run"],
-    "pty": [
-        "Sandbox.pty.create",
-        "Sandbox.pty.resize",
-        "Sandbox.pty.send_stdin",
-        "CommandHandle.wait",
-        "Sandbox.files.read",
-    ],
-    "pty-reconnect": [
-        "Sandbox.pty.create",
-        "CommandHandle.pid",
-        "CommandHandle.disconnect",
-        "Sandbox.pty.connect",
-        "Sandbox.pty.send_stdin",
-        "CommandHandle.wait",
-    ],
-    "pty-kill": ["Sandbox.pty.create", "CommandHandle.pid", "Sandbox.pty.kill", "CommandHandle.wait"],
-    "pause-full": [
-        "Sandbox.pause",
-        "Sandbox.connect",
-        "Sandbox.files.write",
-        "Sandbox.files.read",
-        "Sandbox.commands.run",
-    ],
-    "pause-filesystem": [
-        "Sandbox.pause",
-        "Sandbox.connect",
-        "Sandbox.files.write",
-        "Sandbox.files.read",
-        "Sandbox.commands.run",
-    ],
-    "volume-mount": ["Volume.create", "Volume.destroy", "Sandbox.files.write", "Sandbox.files.read"],
-}
+CASES = (
+    "home-reconnect-user",
+    "stream-read",
+    "stream-cancel",
+    "pty",
+    "pty-reconnect",
+    "pty-kill",
+    "pause-full",
+    "pause-filesystem",
+    "volume-mount",
+)
 
 
 @pytest.mark.parametrize("case", CASES)
 @pytest.mark.parametrize("provider,shim", [("e2b", False), ("e2b", True), ("arker", True)])
 def test_core_extended_import_only(case, provider, shim, live_router, monkeypatch):
-    with record_scenario("e2b", "sync", provider, shim, "import-only-core-" + case, BASE_APIS + CASES[case]):
+    called = set()
+    with record_scenario("e2b", "sync", provider, shim, "import-only-core-" + case, called, api_evidence="runtime"):
         for name in ("E2B_API_KEY", "ARKER_API_KEY", "COMPAT_COVERAGE_EVIDENCE", "COMPAT_COVERAGE_RUN"):
             assert os.environ.get(name, "").strip(), f"Missing live prerequisite: {name}"
         assert any(os.environ.get(name) for name in ("ARKER_SOURCE", "ARKER_SOURCE_VM", "ARKER_SOURCE_VM_ID")), (
@@ -178,4 +154,24 @@ def test_core_extended_import_only(case, provider, shim, live_router, monkeypatc
         if provider == "arker":
             monkeypatch.delenv("E2B_API_KEY")
         program = PROGRAM.replace("from e2b import", "from arker.e2b import") if shim else PROGRAM
-        exec(compile(program, __file__, "exec"), {"case": case})
+        namespace = {"case": case}
+        exec(
+            trace_program(
+                program,
+                __file__,
+                namespace,
+                {
+                    "Sandbox": "Sandbox",
+                    "AsyncSandbox": "Sandbox",
+                    "sandbox": "Sandbox",
+                    "connected": "Sandbox",
+                    "terminal": "CommandHandle",
+                    "process": "CommandHandle",
+                    "Volume": "Volume",
+                    "AsyncVolume": "Volume",
+                    "volume": "Volume",
+                },
+                called,
+            ),
+            namespace,
+        )

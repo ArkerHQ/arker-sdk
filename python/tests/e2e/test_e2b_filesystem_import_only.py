@@ -4,7 +4,7 @@ import os
 
 import pytest
 from compat_evidence import record_scenario
-from compat_program import async_program
+from compat_program import async_program, trace_program
 
 SYNC_PROGRAM = r"""
 from e2b import FileType, Sandbox
@@ -98,22 +98,6 @@ ASYNC_PROGRAM = (
 )
 
 
-APIS = [
-    "Sandbox.create",
-    "Sandbox.commands.run",
-    "Sandbox.files.make_dir",
-    "Sandbox.files.write",
-    "Sandbox.files.write_files",
-    "Sandbox.files.read",
-    "Sandbox.files.exists",
-    "Sandbox.files.get_info",
-    "Sandbox.files.list",
-    "Sandbox.files.rename",
-    "Sandbox.files.remove",
-    "Sandbox.kill",
-]
-
-
 @pytest.mark.parametrize("style,program", [("sync", SYNC_PROGRAM), ("async", ASYNC_PROGRAM)], ids=["sync", "async"])
 @pytest.mark.parametrize("provider,shim", [("e2b", False), ("e2b", True), ("arker", True)])
 def test_filesystem_import_only(style, program, provider, shim, live_router, monkeypatch):
@@ -126,5 +110,10 @@ def test_filesystem_import_only(style, program, provider, shim, live_router, mon
         monkeypatch.delenv("E2B_API_KEY", raising=False)
     if shim:
         program = program.replace("from e2b import", "from arker.e2b import")
-    with record_scenario("e2b", style, provider, shim, "import-only-filesystem-crud-metadata", APIS):
-        exec(compile(program, "e2b_filesystem_import_only.py", "exec"), {})
+    called = set()
+    with record_scenario(
+        "e2b", style, provider, shim, "import-only-filesystem-crud-metadata", called, api_evidence="runtime"
+    ):
+        namespace = {}
+        roots = {"Sandbox": "Sandbox", "AsyncSandbox": "Sandbox", "sandbox": "Sandbox"}
+        exec(trace_program(program, __file__, namespace, roots, called), namespace)
