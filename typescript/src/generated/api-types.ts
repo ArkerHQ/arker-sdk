@@ -1241,7 +1241,7 @@ export interface components {
             image?: string | null;
             /** @description Dockerfile source. Accepted by the schema and ALWAYS REFUSED with a 400: the API does not build Dockerfiles, the SDKs do. Use arker.fork(dockerfile="./Dockerfile") from the Python or TypeScript SDK, or pass `image` to fork a prebuilt image here. COPY is why it works that way: it reads files on the caller's machine, and this field carries text while the caller waits for the fork response, so the server can never be handed those files. The field is kept rather than removed so this refusal can point at the SDK instead of answering with a bare `unknown field`. */
             dockerfile?: string | null;
-            /** @description Request nested virtualization for a VM forked from `image`, including access to `/dev/kvm` inside the guest. Omit this field or pass `false` to disable it. The request returns 400 when the selected placement cannot provide nested virtualization. */
+            /** @description Request nested virtualization for a VM forked from `image`, including access to `/dev/kvm` inside the guest. Omit this field or pass `false` to disable it. The request fails with 422 `unsupported_operation` (reason `feature_not_supported`, feature `nested_virtualization`) when the selected placement cannot provide nested virtualization, and always for a fork of a VM. */
             nestedvirt?: boolean | null;
             /**
              * @deprecated

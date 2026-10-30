@@ -6584,7 +6584,7 @@
               "boolean",
               "null"
             ],
-            "description": "Request nested virtualization for a VM forked from `image`, including access to `/dev/kvm` inside the guest. Omit this field or pass `false` to disable it. The request returns 400 when the selected placement cannot provide nested virtualization."
+            "description": "Request nested virtualization for a VM forked from `image`, including access to `/dev/kvm` inside the guest. Omit this field or pass `false` to disable it. The request fails with 422 `unsupported_operation` (reason `feature_not_supported`, feature `nested_virtualization`) when the selected placement cannot provide nested virtualization, and always for a fork of a VM."
           },
           "source_org_id": {
             "type": [
