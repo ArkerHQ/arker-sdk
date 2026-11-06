@@ -1987,10 +1987,17 @@ async function testOnlyAKeyedBusyForkWithARetryHintIsReplayed(): Promise<void> {
       assert.equal(fetch.calls[0]!.body, fetch.calls[1]!.body);
     }
   }
-  const fetch = new FakeFetch();
-  fetch.addJson(() => true, 409, { error: { code: "resource_busy", message: "busy", details: { resource: "vm" }, retry_after_seconds: 0, recovery: { work: "unknown" }, timestamp: "2026-01-01T00:00:00Z", request_id: "request-test", request: { kind: "matched", operation_id: "fork" } } });
-  await assert.rejects(clientWithRetry(fetch, 2)._request("POST", "/v1/vms/child/runs", {}, undefined, { "Idempotency-Key": "same-key" }), ArkerError);
-  assert.equal(fetch.calls.length, 1);
+  for (const [status, code] of [[409, "resource_busy"], [503, "unavailable"]] as const) {
+    for (const work of ["unknown", "continuing", "stopped"] as const) {
+      const fetch = new FakeFetch();
+      fetch.addJson(() => true, status, { error: { code, message: "busy",
+        ...(code === "resource_busy" ? { details: { resource: "vm" } } : {}),
+        retry_after_seconds: 0, recovery: { work, context: { vm_id: "child", run_id: "run-existing" } }, timestamp: "2026-01-01T00:00:00Z", request_id: "request-test", request: { kind: "matched", operation_id: "fork" } } });
+      await assert.rejects(clientWithRetry(fetch, 2)._request("POST", "/v1/vms/child/runs", {}, undefined, { "Idempotency-Key": "same-key" }),
+        (error: unknown) => error instanceof ArkerError && error.body?.recovery?.work === work);
+      assert.equal(fetch.calls.length, 1);
+    }
+  }
 }
 
 async function testForkUsesAnExplicitIdempotencyKeyVerbatim(): Promise<void> {
@@ -1999,6 +2006,31 @@ async function testForkUsesAnExplicitIdempotencyKeyVerbatim(): Promise<void> {
   await client(fetch).fork({ source_vm_id: "source-vm-id", idempotencyKey: "caller-chosen" });
 
   assert.equal(fetch.calls[0]!.headers["idempotency-key"], "caller-chosen");
+}
+
+async function testBusyForkKeepsItsKeyAndRespectsRetryWindow(): Promise<void> {
+  for (const [window, disabled, calls] of [[3, false, 2], [1, false, 1], [3, true, 1]] as const) {
+    await withFakeClock(async () => {
+      const fetch = new FakeFetch();
+      fetch.addJson(() => true, 409, { error: {
+        code: "resource_busy", message: "busy", details: { resource: "vm" },
+        recovery: { work: "unknown" }, retry_after_seconds: 2,
+        timestamp: "2026-01-01T00:00:00Z", request_id: "request-test",
+        request: { kind: "matched", operation_id: "fork" },
+      } });
+      fetch.addJson(() => true, 200, FORK_VM);
+      const ar = new Arker({ apiKey: "k", baseUrl: "https://test.invalid/api", fetch: fetch.fetch,
+        retry: disabled ? false : { attempts: 2, baseDelayMs: 0, jitterMs: 0 } });
+      const started = Date.now();
+      const operation = ar.fork({ source_vm_id: "source-vm-id", idempotencyKey: "saved-operation", queueing_timeout: window });
+      if (calls === 2) assert.equal((await operation).id, FORK_VM.vm_id);
+      else await assert.rejects(operation, ArkerError);
+      assert.equal(fetch.calls.length, calls);
+      assert.equal(Date.now() - started, calls === 2 ? 2000 : 0);
+      assert.ok(fetch.calls.every(call => call.headers["idempotency-key"] === "saved-operation"));
+      if (calls === 2) assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), { source_vm_id: "source-vm-id", queueing_timeout: 1 });
+    });
+  }
 }
 
 async function testVmForkAlsoCarriesAKey(): Promise<void> {
@@ -2042,6 +2074,7 @@ await testForkSendsNoKeyUnlessAsked,
   testAnExplicitKeyWinsOverTheFlag();
 await testForkRetryReusesTheSameIdempotencyKey();
 await testOnlyAKeyedBusyForkWithARetryHintIsReplayed();
+await testBusyForkKeepsItsKeyAndRespectsRetryWindow();
 await testForkUsesAnExplicitIdempotencyKeyVerbatim();
 await testVmForkAlsoCarriesAKey();
 await testTwoForksDoNotShareAGeneratedKey();
