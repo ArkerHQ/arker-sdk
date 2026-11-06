@@ -133,6 +133,42 @@ func TestForkRetryReusesTheSameIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestOnlyAKeyedBusyForkWithARetryHintIsReplayed(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		keyed bool
+		code  string
+		hint  string
+		want  int
+	}{
+		{"keyed", true, "resource_busy", `,"retry_after_seconds":0`, 2},
+		{"unkeyed", false, "resource_busy", `,"retry_after_seconds":0`, 1},
+		{"conflicting", true, "idempotency_conflict", `,"retry_after_seconds":0`, 1},
+		{"no_hint", true, "resource_busy", "", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var keys []string
+			c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+				keys = append(keys, r.Header.Get("Idempotency-Key"))
+				if len(keys) == 1 {
+					w.WriteHeader(http.StatusConflict)
+					fmt.Fprintf(w, `{"error":{"code":%q,"message":"busy","recovery":{"work":"unknown"}%s}}`, tc.code, tc.hint)
+					return
+				}
+				fmt.Fprint(w, forkVM)
+			})
+			defer done()
+			_, err := c.Fork(context.Background(), arker.ForkRequest{SourceVMName: "base", Idempotency: tc.keyed})
+			if (err == nil) != (tc.want == 2) || len(keys) != tc.want {
+				t.Fatalf("got %d requests, error %v; wanted %d", len(keys), err, tc.want)
+			}
+			if tc.want == 2 && (keys[0] == "" || keys[0] != keys[1]) {
+				t.Fatal("retry did not preserve its nonempty key")
+			}
+		})
+	}
+}
+
 func TestForkUsesAnExplicitKeyVerbatim(t *testing.T) {
 	var key string
 	c, done := testClient(t, func(w http.ResponseWriter, r *http.Request) {

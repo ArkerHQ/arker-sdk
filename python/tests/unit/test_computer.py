@@ -2958,6 +2958,101 @@ def test_fork_retry_reuses_the_same_idempotency_key() -> None:
     assert first == t.calls[1]["headers"]["idempotency-key"]
 
 
+@pytest.mark.parametrize(
+    "keyed,code,hint,retries",
+    [
+        (True, "resource_busy", 0, True),
+        (False, "resource_busy", 0, False),
+        (True, "idempotency_conflict", 0, False),
+        (True, "resource_busy", None, False),
+        (True, "resource_busy", -1, False),
+        (True, "resource_busy", 0.5, False),
+        (True, "resource_busy", True, False),
+    ],
+)
+def test_only_a_keyed_busy_fork_with_a_retry_hint_is_replayed(keyed, code, hint, retries) -> None:
+    t = FakeTransport()
+    error = {"code": code, "message": "busy", "details": {"resource": "vm"}, "recovery": {"work": "unknown"}}
+    error.update(
+        timestamp="2026-01-01T00:00:00Z", request_id="request-test", request={"kind": "matched", "operation_id": "fork"}
+    )
+    if hint is not None:
+        error["retry_after_seconds"] = hint
+    t.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 409, {"error": error})
+    t.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, _FORK_VM)
+    with use_transport(t):
+        if retries:
+            _retrying_client().fork(source_vm_id="source-vm-id", idempotency=keyed)
+        else:
+            with pytest.raises(sdk.ArkerError):
+                _retrying_client().fork(source_vm_id="source-vm-id", idempotency=keyed)
+    assert len(t.calls) == (2 if retries else 1)
+    if retries:
+        assert t.calls[0]["headers"]["idempotency-key"] == t.calls[1]["headers"]["idempotency-key"]
+        assert t.calls[0]["body"] == t.calls[1]["body"]
+
+
+@pytest.mark.parametrize("status,code", [(409, "resource_busy"), (503, "unavailable")])
+@pytest.mark.parametrize("work", ["unknown", "continuing", "stopped"])
+def test_a_busy_nonfork_mutation_is_not_replayed_even_with_a_key(status, code, work) -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: True,
+        status,
+        {
+            "error": {
+                "code": code,
+                "message": "busy",
+                **({"details": {"resource": "vm"}} if code == "resource_busy" else {}),
+                "timestamp": "2026-01-01T00:00:00Z",
+                "request_id": "request-test",
+                "request": {"kind": "matched", "operation_id": "fork"},
+                "recovery": {"work": work, "context": {"vm_id": "child", "run_id": "run-existing"}},
+                "retry_after_seconds": 0,
+            }
+        },
+    )
+    with use_transport(t), pytest.raises(sdk.ArkerError) as caught:
+        _retrying_client()._request("POST", "/v1/vms/child/runs", {}, extra_headers={"Idempotency-Key": "same-key"})
+    assert caught.value.body.recovery.work == work
+    assert len(t.calls) == 1
+
+
+@pytest.mark.parametrize("window,disabled,calls", [(3, False, 2), (1, False, 1), (3, True, 1)])
+def test_busy_fork_keeps_its_key_and_respects_retry_window(monkeypatch, window, disabled, calls) -> None:
+    clock = [0.0]
+    sleeps = []
+
+    def sleep(delay):
+        sleeps.append(delay)
+        clock[0] += delay
+
+    monkeypatch.setattr(sdk.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(sdk.time, "sleep", sleep)
+    t = FakeTransport()
+    t.add_json(lambda method, url: True, 409, {"error": {
+        "code": "resource_busy", "message": "busy", "details": {"resource": "vm"},
+        "recovery": {"work": "unknown"}, "retry_after_seconds": 2,
+        "timestamp": "2026-01-01T00:00:00Z", "request_id": "request-test",
+        "request": {"kind": "matched", "operation_id": "fork"},
+    }})
+    t.add_json(lambda method, url: True, 200, _FORK_VM)
+    with use_transport(t):
+        ar = sdk.Arker(api_key="k", base_url="https://test.invalid/api",
+                       retry=False if disabled else {"attempts": 2, "base_delay_s": 0, "jitter_s": 0})
+        if calls == 2:
+            vm = ar.fork(source_vm_id="source-vm-id", idempotency_key="saved-operation", queueing_timeout=window)
+            assert vm.id == _FORK_VM["vm_id"]
+        else:
+            with pytest.raises(sdk.ArkerError):
+                ar.fork(source_vm_id="source-vm-id", idempotency_key="saved-operation", queueing_timeout=window)
+    assert len(t.calls) == calls
+    assert sleeps == ([2] if calls == 2 else [])
+    assert all(call["headers"]["idempotency-key"] == "saved-operation" for call in t.calls)
+    if calls == 2:
+        assert json.loads(t.calls[1]["body"]) == {"source_vm_id": "source-vm-id", "queueing_timeout": 1}
+
+
 def test_fork_uses_an_explicit_idempotency_key_verbatim() -> None:
     t = _fork_transport(200)
 
