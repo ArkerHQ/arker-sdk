@@ -43,7 +43,7 @@ class ReleaseAuthorization(unittest.TestCase):
             "RELEASE_AUTHORIZATION_PROJECT": "project",
             "RELEASE_AUTHORIZATION_REPOSITORY": "example/authorization",
             "RELEASE_AUTHORIZATION_REF": "b" * 40,
-            "RELEASE_AUTHORIZATION_READ_TOKEN": "test-only",
+            "RELEASE_AUTHORIZATION_READ_TOKEN": "private-token",
             "RELEASE_AUTHORIZATION_ROLE": "test-only",
             "RELEASE_AUTHORIZATION_REGION": "test-only",
             "ARKER_RELEASE_BUCKET": "test-only",
@@ -112,7 +112,7 @@ class ReleaseAuthorization(unittest.TestCase):
             ],
         )
         self.assertTrue(run.call_args.kwargs["capture_output"])
-        self.assertNotIn("RELEASE_AUTHORIZATION_READ_TOKEN", " ".join(argv))
+        self.assertNotIn(self.env["RELEASE_AUTHORIZATION_READ_TOKEN"], " ".join(argv))
 
     def test_each_ecosystem_uses_its_actual_package_metadata(self):
         for directory, ecosystem, name in [
