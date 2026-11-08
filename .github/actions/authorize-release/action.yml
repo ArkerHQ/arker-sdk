@@ -1,0 +1,49 @@
+name: Authorize package release
+description: Verify candidate evidence for the exact package source and version.
+inputs:
+  ecosystem:
+    required: true
+    description: Package ecosystem
+  package:
+    required: true
+    description: Exact package name
+  directory:
+    required: true
+    description: Package directory
+runs:
+  using: composite
+  steps:
+    - name: Validate authorization configuration
+      shell: bash
+      run: |
+        set -euo pipefail
+        [[ "$RELEASE_AUTHORIZATION_REF" =~ ^[0-9a-f]{40}$ ]]
+        test -n "$RELEASE_AUTHORIZATION_REPOSITORY"
+        test -n "$RELEASE_AUTHORIZATION_ROLE"
+        test -n "$RELEASE_AUTHORIZATION_BUCKET"
+        test -n "$RELEASE_AUTHORIZATION_SCRIPT"
+        test -n "$RELEASE_AUTHORIZATION_PROJECT"
+        test -n "$RELEASE_AUTHORIZATION_REGION"
+        for value in "$RELEASE_AUTHORIZATION_REPOSITORY" "$RELEASE_AUTHORIZATION_REF" "$RELEASE_AUTHORIZATION_ROLE" "$RELEASE_AUTHORIZATION_BUCKET" "$RELEASE_AUTHORIZATION_SCRIPT" "$RELEASE_AUTHORIZATION_PROJECT"; do
+          echo "::add-mask::$value"
+        done
+    - uses: astral-sh/setup-uv@v5
+    - name: Check candidate authorization
+      shell: bash
+      env:
+        RELEASE_CANDIDATE: ${{ github.event.inputs.candidate }}
+        RELEASE_STEP: ${{ github.event.inputs.step }}
+        RELEASE_ATTEMPT: ${{ github.event.inputs.attempt }}
+        RELEASE_SDK_COMMIT: ${{ github.event.inputs.sdk_commit }}
+        RELEASE_SDK_VERSION: ${{ github.event.inputs.sdk_version }}
+        RELEASE_ECOSYSTEM: ${{ inputs.ecosystem }}
+        RELEASE_PACKAGE: ${{ inputs.package }}
+        RELEASE_DIRECTORY: ${{ inputs.directory }}
+        RELEASE_AUTHORIZATION_SCRIPT: ${{ env.RELEASE_AUTHORIZATION_SCRIPT }}
+        RELEASE_AUTHORIZATION_PROJECT: ${{ env.RELEASE_AUTHORIZATION_PROJECT }}
+        RELEASE_AUTHORIZATION_REPOSITORY: ${{ env.RELEASE_AUTHORIZATION_REPOSITORY }}
+        RELEASE_AUTHORIZATION_REF: ${{ env.RELEASE_AUTHORIZATION_REF }}
+        RELEASE_AUTHORIZATION_READ_TOKEN: ${{ env.RELEASE_AUTHORIZATION_READ_TOKEN }}
+        ARKER_RELEASE_BUCKET: ${{ env.RELEASE_AUTHORIZATION_BUCKET }}
+      working-directory: ${{ github.workspace }}
+      run: python3 .publisher/scripts/authorize-release.py

@@ -1,12 +1,25 @@
 name: Publish Go
 
-# Run manually to create the required `go/vX.Y.Z` module tag.
 on:
   workflow_dispatch:
     inputs:
-      confirm:
-        description: 'Type the version from go/VERSION to publish it'
+      candidate:
+        description: Release candidate identifier
         required: true
+      step:
+        description: Candidate publication step
+        required: true
+      attempt:
+        description: Current attempt token
+        required: true
+      sdk_commit:
+        description: Full SDK commit SHA
+        required: true
+      sdk_version:
+        description: Exact package version
+        required: true
+
+run-name: Publish go ${{ inputs.sdk_version }} (${{ inputs.attempt }})
 
 concurrency:
   group: publish-go
@@ -14,81 +27,64 @@ concurrency:
 
 permissions:
   contents: write
-  id-token: write   # the card's AWS role
+  id-token: write
 
 jobs:
-  tag:
+  publish:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
+    env:
+      RELEASE_AUTHORIZATION_REPOSITORY: ${{ secrets.RELEASE_AUTHORIZATION_REPOSITORY }}
+      RELEASE_AUTHORIZATION_REF: ${{ vars.RELEASE_AUTHORIZATION_REF }}
+      RELEASE_AUTHORIZATION_ROLE: ${{ secrets.RELEASE_AUTHORIZATION_ROLE }}
+      RELEASE_AUTHORIZATION_REGION: ${{ vars.RELEASE_AUTHORIZATION_REGION }}
+      RELEASE_AUTHORIZATION_BUCKET: ${{ secrets.RELEASE_AUTHORIZATION_BUCKET }}
+      RELEASE_AUTHORIZATION_SCRIPT: ${{ secrets.RELEASE_AUTHORIZATION_SCRIPT }}
+      RELEASE_AUTHORIZATION_PROJECT: ${{ secrets.RELEASE_AUTHORIZATION_PROJECT }}
+      RELEASE_AUTHORIZATION_READ_TOKEN: ${{ secrets.RELEASE_AUTHORIZATION_READ_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: source
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          path: .publisher
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sdk_commit }}
+          path: source
+      - uses: ./.publisher/.github/actions/authorize-release
+        with:
+          ecosystem: go
+          package: github.com/ArkerHQ/arker-sdk/go
+          directory: go
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go/go.mod
-          cache-dependency-path: go/go.sum
-
-      - id: decide
-        env:
-          CONFIRM: ${{ inputs.confirm }}
+          go-version-file: source/go/go.mod
+          cache-dependency-path: source/go/go.sum
+      - name: Check Go module
+        working-directory: source/go
         run: |
-          version="$(tr -d '[:space:]' < go/VERSION)"
-          [ -n "$version" ] || { echo "go/VERSION is empty"; exit 1; }
-          # The typed version must match the file, so publishing is never a
-          # stray click on the wrong branch.
-          [ "$CONFIRM" = "$version" ] || {
-            echo "confirm '$CONFIRM' does not match go/VERSION '$version'"; exit 1; }
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if git rev-parse -q --verify "refs/tags/go/v$version" >/dev/null; then
-            echo "go/v$version is already tagged; nothing to do"
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - id: card
-        if: steps.decide.outputs.publish == 'true'
-        continue-on-error: true
-        uses: ./.github/actions/release-card
-        with:
-          role-arn: ${{ vars.RELEASE_CARD_ROLE_ARN }}
-          token-parameter: ${{ vars.RELEASE_CARD_TOKEN_PARAMETER }}
-          post-channel: ${{ vars.RELEASE_CARD_CHANNEL }}
-          state: publishing
-          package: go
-          version: ${{ steps.decide.outputs.version }}
-          registry-url: https://pkg.go.dev/github.com/ArkerHQ/arker-sdk/go@v${{ steps.decide.outputs.version }}
-
-      # A tag is IMMUTABLE once the proxy has seen it, so the gate runs before
-      # it is created rather than after.
-      - if: steps.decide.outputs.publish == 'true'
-        working-directory: go
-        run: |
-          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          set -euo pipefail
+          test -z "$(gofmt -l .)"
           go vet ./...
           go build ./...
           go test ./tests/unit/ -count=1
-
-      - if: steps.decide.outputs.publish == 'true'
-        env:
-          VERSION: ${{ steps.decide.outputs.version }}
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "go/v$VERSION" -m "go/v$VERSION"
-          git push origin "go/v$VERSION"
-
-      - if: always() && steps.decide.outputs.publish == 'true' && steps.card.outputs.ts != ''
-        continue-on-error: true
-        uses: ./.github/actions/release-card
+      - uses: ./.publisher/.github/actions/authorize-release
         with:
-          role-arn: ${{ vars.RELEASE_CARD_ROLE_ARN }}
-          token-parameter: ${{ vars.RELEASE_CARD_TOKEN_PARAMETER }}
-          post-channel: ${{ vars.RELEASE_CARD_CHANNEL }}
-          state: ${{ job.status == 'success' && 'published' || job.status == 'cancelled' && 'cancelled' || 'failed' }}
-          package: go
-          version: ${{ steps.decide.outputs.version }}
-          registry-url: https://pkg.go.dev/github.com/ArkerHQ/arker-sdk/go@v${{ steps.decide.outputs.version }}
-          ts: ${{ steps.card.outputs.ts }}
-          channel: ${{ steps.card.outputs.channel }}
+          ecosystem: go
+          package: github.com/ArkerHQ/arker-sdk/go
+          directory: go
+      - name: Tag published source
+        env:
+          VERSION: ${{ inputs.sdk_version }}
+        run: |
+          set -euo pipefail
+          tag="go/v$VERSION"
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git tag -a "$tag" -m "$tag"
+          git push origin "refs/tags/$tag"
