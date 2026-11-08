@@ -176,6 +176,8 @@ def authorize(root: Path, env: dict[str, str]) -> None:
             str(project),
             "python",
             str(script),
+            "--bucket",
+            env["ARKER_RELEASE_BUCKET"],
             "authorize",
             env["RELEASE_CANDIDATE"],
             "--step",

@@ -89,6 +89,10 @@ class ReleaseAuthorization(unittest.TestCase):
             guard.authorize(self.root, self.env)
         argv = run.call_args.args[0]
         self.assertEqual(
+            argv[argv.index("--bucket") + 1], self.env["ARKER_RELEASE_BUCKET"]
+        )
+        self.assertLess(argv.index("--bucket"), argv.index("authorize"))
+        self.assertEqual(
             argv[argv.index("authorize") :],
             [
                 "authorize",
@@ -108,7 +112,7 @@ class ReleaseAuthorization(unittest.TestCase):
             ],
         )
         self.assertTrue(run.call_args.kwargs["capture_output"])
-        self.assertNotIn("test-only", " ".join(argv))
+        self.assertNotIn("RELEASE_AUTHORIZATION_READ_TOKEN", " ".join(argv))
 
     def test_each_ecosystem_uses_its_actual_package_metadata(self):
         for directory, ecosystem, name in [
