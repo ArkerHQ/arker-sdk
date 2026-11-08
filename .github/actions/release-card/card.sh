@@ -3,9 +3,9 @@
 # with the outcome. Editing needs the message ts, hence chat.postMessage/update
 # with the bot token rather than a webhook.
 #
-# Env: STATE PACKAGE VERSION REGISTRY_URL TS CHANNEL TOKEN_PARAMETER
+# Env: STATE PACKAGE VERSION REGISTRY_URL SOURCE_COMMIT TS CHANNEL TOKEN_PARAMETER
 # POST_CHANNEL, plus GitHub's own
-# GITHUB_SHA GITHUB_ACTOR GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID.
+# GITHUB_ACTOR GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID.
 # CARD_DRY_RUN=1 prints the payload and touches neither AWS nor Slack.
 set -euo pipefail
 
@@ -22,7 +22,7 @@ render() {
   jq -n \
     --arg icon "$icon" --arg color "$color" --arg status "$status" \
     --arg pkg "$PACKAGE" --arg version "$VERSION" --arg state "$STATE" \
-    --arg sha "$GITHUB_SHA" --arg actor "$GITHUB_ACTOR" --arg run_url "$run_url" \
+    --arg sha "$SOURCE_COMMIT" --arg actor "$GITHUB_ACTOR" --arg run_url "$run_url" \
     --arg repo_web "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" '
     "arker-sdk \($pkg) \($version) \($state)" as $fallback
     | {text: $fallback,

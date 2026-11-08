@@ -12,6 +12,9 @@ inputs:
     required: true
   registry-url:
     required: true
+  source-commit:
+    description: Published source commit
+    default: ${{ github.sha }}
   ts:
     description: Message ts to edit. Empty posts a new card.
     default: ""
@@ -49,6 +52,7 @@ runs:
         PACKAGE: ${{ inputs.package }}
         VERSION: ${{ inputs.version }}
         REGISTRY_URL: ${{ inputs.registry-url }}
+        SOURCE_COMMIT: ${{ inputs.source-commit }}
         TS: ${{ inputs.ts }}
         CHANNEL: ${{ inputs.channel }}
         TOKEN_PARAMETER: ${{ inputs.token-parameter }}

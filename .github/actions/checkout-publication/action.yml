@@ -1,0 +1,27 @@
+name: Check out publication source
+description: Select publication source and verify an optional pinned commit and version.
+inputs:
+  package:
+    description: Package to publish
+    required: true
+  commit:
+    description: Optional full source commit SHA
+    required: false
+  version:
+    description: Optional exact package version
+    required: false
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.commit || github.sha }}
+        path: source
+        fetch-depth: 0
+    - shell: bash
+      working-directory: source
+      env:
+        PUBLICATION_PACKAGE: ${{ inputs.package }}
+        PUBLICATION_COMMIT: ${{ inputs.commit }}
+        PUBLICATION_VERSION: ${{ inputs.version }}
+      run: python3 "$GITHUB_ACTION_PATH/check-source.py"

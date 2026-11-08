@@ -1,96 +1,195 @@
 name: Publish CLI
 
+# Version bumps on main publish and then create `cli-v<version>`.
+
 on:
   workflow_dispatch:
     inputs:
       candidate:
-        description: Release candidate identifier
-        required: true
+        description: Optional release candidate identifier
+        required: false
       step:
-        description: Candidate publication step
-        required: true
+        description: Optional candidate publication step
+        required: false
       attempt:
-        description: Current attempt token
-        required: true
+        description: Optional publication attempt token
+        required: false
       sdk_commit:
-        description: Full SDK commit SHA
-        required: true
+        description: Full SDK commit SHA (requires sdk_version)
+        required: false
       sdk_version:
-        description: Exact package version
-        required: true
+        description: Exact package version (requires sdk_commit)
+        required: false
+  push:
+    branches: [main]
+    tags: ["cli-v*"]
 
-run-name: Publish cli ${{ inputs.sdk_version }} (${{ inputs.attempt }})
+run-name: ${{ inputs.attempt && format('Publish cli {0} ({1})', inputs.sdk_version, inputs.attempt) || github.event.head_commit.message || github.ref_name }}
 
 concurrency:
   group: publish-cli
   cancel-in-progress: false
 
-permissions:
-  contents: write
-  id-token: write
+defaults:
+  run:
+    working-directory: source
 
 jobs:
-  publish:
-    if: github.ref == 'refs/heads/main'
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write   # the card's AWS role
+    outputs:
+      version: ${{ steps.decide.outputs.version }}
+      publish: ${{ steps.decide.outputs.publish }}
+      card_ts: ${{ steps.card.outputs.ts }}
+      card_channel: ${{ steps.card.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-publication
+        with:
+          package: cli
+          commit: ${{ inputs.sdk_commit }}
+          version: ${{ inputs.sdk_version }}
+
+      - id: decide
+        working-directory: source/cli
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "Tag push: publishing $version"
+          elif git ls-remote --exit-code --tags origin "refs/tags/cli-v$version" >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "cli-v$version is already tagged - nothing to release"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "New version $version - releasing"
+          fi
+
+      # The card lives in check and card, not build-and-publish: that job runs in
+      # the npm environment, so its OIDC sub is environment:npm, and the AWS
+      # role trusts only refs/heads/main.
+      - id: card
+        if: steps.decide.outputs.publish == 'true'
+        continue-on-error: true
+        uses: ./.github/actions/release-card
+        with:
+          role-arn: ${{ vars.RELEASE_CARD_ROLE_ARN }}
+          token-parameter: ${{ vars.RELEASE_CARD_TOKEN_PARAMETER }}
+          post-channel: ${{ vars.RELEASE_CARD_CHANNEL }}
+          source-commit: ${{ inputs.sdk_commit || github.sha }}
+          state: publishing
+          package: cli
+          version: ${{ steps.decide.outputs.version }}
+          registry-url: https://www.npmjs.com/package/@arker-ai/cli/v/${{ steps.decide.outputs.version }}
+
+  build-and-publish:
+    needs: check
+    if: needs.check.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
       name: npm
-    env:
-      RELEASE_AUTHORIZATION_REPOSITORY: ${{ secrets.RELEASE_AUTHORIZATION_REPOSITORY }}
-      RELEASE_AUTHORIZATION_REF: ${{ vars.RELEASE_AUTHORIZATION_REF }}
-      RELEASE_AUTHORIZATION_ROLE: ${{ secrets.RELEASE_AUTHORIZATION_ROLE }}
-      RELEASE_AUTHORIZATION_REGION: ${{ vars.RELEASE_AUTHORIZATION_REGION }}
-      RELEASE_AUTHORIZATION_BUCKET: ${{ secrets.RELEASE_AUTHORIZATION_BUCKET }}
-      RELEASE_AUTHORIZATION_SCRIPT: ${{ secrets.RELEASE_AUTHORIZATION_SCRIPT }}
-      RELEASE_AUTHORIZATION_PROJECT: ${{ secrets.RELEASE_AUTHORIZATION_PROJECT }}
-      RELEASE_AUTHORIZATION_READ_TOKEN: ${{ secrets.RELEASE_AUTHORIZATION_READ_TOKEN }}
-    defaults:
-      run:
-        shell: bash
-        working-directory: source
+      url: https://www.npmjs.com/package/@arker-ai/cli
+    permissions:
+      contents: write   # read the repo, and push the release tag
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
-          path: .publisher
           persist-credentials: false
-      - uses: actions/checkout@v4
+      - uses: ./.github/actions/checkout-publication
         with:
-          ref: ${{ inputs.sdk_commit }}
-          path: source
-      - uses: ./.publisher/.github/actions/authorize-release
-        with:
-          ecosystem: npm
-          package: '@arker-ai/cli'
-          directory: cli
+          package: cli
+          commit: ${{ inputs.sdk_commit }}
+          version: ${{ inputs.sdk_version }}
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.8
+
       - uses: actions/setup-node@v6
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - run: npm install --global npm@^11.5.1
-      - run: bun ci
-      - run: bun run build:sdk
-        working-directory: source/typescript
-      - run: bun run typecheck && bun run test
+
+      - name: Install OIDC-capable npm
+        run: npm install --global npm@^11.5.1
+
+      - name: Install dependencies
+        run: bun ci
+
+      - name: Verify package version matches the release version
         working-directory: source/cli
-      - uses: ./.publisher/.github/actions/authorize-release
-        with:
-          ecosystem: npm
-          package: '@arker-ai/cli'
-          directory: cli
-      - run: npm publish --access public
-        working-directory: source/cli
-      - name: Tag published source
-        env:
-          VERSION: ${{ inputs.sdk_version }}
         run: |
           set -euo pipefail
-          tag="cli-v$VERSION"
-          git config user.name 'github-actions[bot]'
-          git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git tag -a "$tag" -m "$tag"
-          git push origin "refs/tags/$tag"
+          want="${{ needs.check.outputs.version }}"
+          pkg=$(bun -e "console.log(require('./package.json').version)")
+          if [ "$want" != "$pkg" ]; then
+            echo "Release version $want does not match package.json version $pkg"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "${GITHUB_REF_NAME#cli-v}" != "$pkg" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $pkg"
+            exit 1
+          fi
+
+      - name: Build SDK
+        working-directory: source/typescript
+        run: bun run build:sdk
+
+      - name: Typecheck
+        working-directory: source/cli
+        run: bun run typecheck
+
+      - name: Test
+        working-directory: source/cli
+        run: bun run test
+
+      - name: Publish to npm
+        working-directory: source/cli
+        run: npm publish --access public
+
+      # Tag only after a successful publish.
+      - name: Tag the release
+        if: github.ref_type != 'tag'
+        run: |
+          set -euo pipefail
+          tag="cli-v${{ needs.check.outputs.version }}"
+          git tag "$tag"
+          git push origin "$tag"
+          echo "Tagged $tag"
+
+  card:
+    needs: [check, build-and-publish]
+    if: always() && needs.check.outputs.publish == 'true' && needs.check.outputs.card_ts != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write   # the card's AWS role
+    steps:
+      - uses: actions/checkout@v4
+
+      - continue-on-error: true
+        uses: ./.github/actions/release-card
+        with:
+          role-arn: ${{ vars.RELEASE_CARD_ROLE_ARN }}
+          token-parameter: ${{ vars.RELEASE_CARD_TOKEN_PARAMETER }}
+          post-channel: ${{ vars.RELEASE_CARD_CHANNEL }}
+          source-commit: ${{ inputs.sdk_commit || github.sha }}
+          state: ${{ needs.build-and-publish.result == 'success' && 'published' || needs.build-and-publish.result == 'cancelled' && 'cancelled' || 'failed' }}
+          package: cli
+          version: ${{ needs.check.outputs.version }}
+          registry-url: https://www.npmjs.com/package/@arker-ai/cli/v/${{ needs.check.outputs.version }}
+          ts: ${{ needs.check.outputs.card_ts }}
+          channel: ${{ needs.check.outputs.card_channel }}
