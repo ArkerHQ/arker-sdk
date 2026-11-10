@@ -1,6 +1,9 @@
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { PtyConnection } from "@arker-ai/sdk";
 
+/** The reason a terminal's normal close gives when its VM was deleted. */
+const VM_DELETED = "the VM was deleted";
+
 export interface PtyBridgeOptions {
   fallbackCols: number;
   fallbackRows: number;
@@ -84,6 +87,7 @@ export function bridgePty(
     const offData = pty.onData((data) => { output.write(data); });
     const offClose = pty.onClose((event) => {
       if (event.code === 1000) {
+        if (event.reason === VM_DELETED) runtime.reportError(`pty closed: ${event.reason}`);
         finish(0);
         return;
       }

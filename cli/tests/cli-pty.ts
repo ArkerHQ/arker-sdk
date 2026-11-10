@@ -89,6 +89,16 @@ async function testNormalCloseSucceeds(): Promise<void> {
   assert.deepEqual(rt.errors, []);
 }
 
+async function testDeletedVmCloseSaysSo(): Promise<void> {
+  const pty = new FakePty();
+  const rt = runtime();
+  const result = bridgePty(pty, { fallbackCols: 80, fallbackRows: 24, autoResize: false }, rt.value);
+  await pty.ready;
+  pty.emitClose({ code: 1000, reason: "the VM was deleted" });
+  assert.equal(await result, 0);
+  assert.deepEqual(rt.errors, ["pty closed: the VM was deleted"]);
+}
+
 async function testMissingCloseCodeFails(): Promise<void> {
   const pty = new FakePty();
   const rt = runtime();
@@ -134,6 +144,7 @@ async function testSettledErrorIsNotReportedAgainByReady(): Promise<void> {
 await testAbnormalCloseFails();
 await testPostOpenErrorFails();
 await testNormalCloseSucceeds();
+await testDeletedVmCloseSaysSo();
 await testMissingCloseCodeFails();
 await testOpenFailureFails();
 await testInputEofClosesNormally();
