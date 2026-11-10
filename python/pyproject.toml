@@ -59,7 +59,7 @@ addopts = "-q"
 
 [dependency-groups]
 dev = [
-    "datamodel-code-generator==0.64.0",
+    "datamodel-code-generator==0.81.0",
     "pytest>=9.0.3",
     "ruff>=0.16.6",
 ]
