@@ -187,6 +187,13 @@ const RETRYABLE_CODES: ReadonlySet<string> = new Set([
 const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 export type ComputeProvider = string;
 const DEFAULT_CONTROL_BASE_URL = "https://arker.ai/api";
+// This SDK's release, sent in the User-Agent. Kept equal to package.json by a unit test.
+const SDK_VERSION = "1.3.0";
+// A browser sets its own User-Agent; only server runtimes name the SDK.
+const CLIENT_HEADERS: Readonly<Record<string, string>> =
+  typeof process !== "undefined" && process.versions?.node
+    ? { "user-agent": `arker-ts/${SDK_VERSION}` }
+    : {};
 
 type FetchLike = typeof fetch;
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -934,9 +941,7 @@ export class Arker {
     retryNetworkFailures?: boolean,
   ): Promise<T> {
     const url = `${baseUrl}${path}`;
-    const headers: Record<string, string> = {
-      authorization: `Bearer ${this.apiKey}`,
-    };
+    const headers: Record<string, string> = this._authHeaders();
     if (extraHeaders) {
       for (const [key, value] of Object.entries(extraHeaders)) {
         if (value !== undefined) headers[key] = value;
@@ -972,7 +977,7 @@ export class Arker {
 
   /** @internal */
   _authHeaders(): Record<string, string> {
-    return { authorization: `Bearer ${this.apiKey}` };
+    return { ...CLIENT_HEADERS, authorization: `Bearer ${this.apiKey}` };
   }
 
   /**
