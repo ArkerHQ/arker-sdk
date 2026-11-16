@@ -1,0 +1,47 @@
+{
+  "description": "Where a VM handle sends its calls; every SDK's unit tests run these cases. A VM whose provider and region are known goes to its regional endpoint unless the client is pinned (a base URL other than the public control plane). Otherwise it keeps the endpoint it was reached through, which in these cases is the client's base URL.",
+  "cases": [
+    {
+      "name": "public control plane, placed VM",
+      "client": { "base_url": "https://arker.ai/api" },
+      "vm": { "provider": "aws", "region": "us-west-2" },
+      "expected": "https://aws-us-west-2.arker.ai/api"
+    },
+    {
+      "name": "public control plane with a trailing slash, placed VM",
+      "client": { "base_url": "https://arker.ai/api/" },
+      "vm": { "provider": "aws", "region": "us-west-2" },
+      "expected": "https://aws-us-west-2.arker.ai/api"
+    },
+    {
+      "name": "public control plane, unplaced VM",
+      "client": { "base_url": "https://arker.ai/api" },
+      "vm": null,
+      "expected": "https://arker.ai/api"
+    },
+    {
+      "name": "configured placement, VM in another region",
+      "client": { "provider": "aws", "region": "us-east-1" },
+      "vm": { "provider": "aws", "region": "us-west-2" },
+      "expected": "https://aws-us-west-2.arker.ai/api"
+    },
+    {
+      "name": "configured placement, unplaced VM",
+      "client": { "provider": "aws", "region": "us-east-1" },
+      "vm": null,
+      "expected": "https://aws-us-east-1.arker.ai/api"
+    },
+    {
+      "name": "pinned private endpoint, placed VM",
+      "client": { "base_url": "https://arker.example.test/api" },
+      "vm": { "provider": "aws", "region": "us-west-2" },
+      "expected": "https://arker.example.test/api"
+    },
+    {
+      "name": "pinned regional endpoint, VM in another region",
+      "client": { "base_url": "https://aws-us-east-1.arker.ai/api" },
+      "vm": { "provider": "aws", "region": "us-west-2" },
+      "expected": "https://aws-us-east-1.arker.ai/api"
+    }
+  ]
+}
