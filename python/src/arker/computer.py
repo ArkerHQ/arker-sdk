@@ -41,6 +41,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from pydantic import TypeAdapter, ValidationError
 
+from ._version import __version__
 from .generated.api_models import (
     ApiKeyScope,
     BackgroundRunResponse,
@@ -1469,7 +1470,7 @@ class VM:
             ticket = response.ticket
         else:
             # Header auth (server-side use): Bearer key on the WS upgrade.
-            headers = {"authorization": f"Bearer {self._client._api_key}"}
+            headers = {"user-agent": USER_AGENT, "authorization": f"Bearer {self._client._api_key}"}
 
         ws_params = dict(params)
         if ticket is not None:
@@ -1652,6 +1653,7 @@ class Pty:
 # to "Network failure ... outcome is unknown", each one orphaning the VM the
 # server may already have created. The connection limit is the real concurrency
 # bound.
+USER_AGENT = f"arker-python/{__version__}"
 _http_client = httpx.Client(
     http2=False,
     limits=httpx.Limits(max_connections=256, max_keepalive_connections=256),
@@ -1684,7 +1686,9 @@ def _request_json(
     retry_network_failures: bool | None = None,
 ) -> dict[str, Any]:
     url = base_url + path
-    headers = {"authorization": f"Bearer {api_key}"} if api_key else {}
+    headers = {"user-agent": USER_AGENT}
+    if api_key:
+        headers["authorization"] = f"Bearer {api_key}"
     if extra_headers:
         for key, value in extra_headers.items():
             if value is not None:

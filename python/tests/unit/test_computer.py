@@ -3,8 +3,10 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
+import re
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -282,6 +284,23 @@ def test_whoami_uses_authenticated_control_plane() -> None:
     assert isinstance(identity, sdk.WhoamiResponse)
     assert identity.org_id == "org_01"
     assert identity.org_name == "ArkerHQ"
+
+
+def test_requests_name_the_sdk_and_its_package_version() -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "GET" and url.endswith("/v1/whoami"),
+        200,
+        {"org_id": "org_01", "org_name": "ArkerHQ"},
+    )
+
+    with use_transport(t):
+        sdk.Arker(api_key="ark_live_test", control_base_url="https://control.invalid/api", retry=False).whoami()
+
+    pyproject = (Path(__file__).parents[2] / "pyproject.toml").read_text()
+    version = re.search(r'^version = "([^"]+)"$', pyproject, re.MULTILINE)
+    assert version is not None
+    assert t.calls[0]["headers"]["user-agent"] == f"arker-python/{version[1]}"
 
 
 POOL_REQUEST = {
