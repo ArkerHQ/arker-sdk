@@ -641,6 +641,8 @@ export class Arker {
   readonly region?: string;
   readonly provider?: ComputeProvider;
   private readonly apiKey: string;
+  /** A base URL other than the public control plane: VMs are never readdressed away from it. */
+  private readonly pinned: boolean;
   private readonly fetchImpl: FetchLike;
   private readonly http2: boolean;
   private readonly retry: RetryConfig;
@@ -662,6 +664,9 @@ export class Arker {
     if (!apiKey) throw new Error("apiKey is required; pass apiKey or set ARKER_API_KEY");
     this.apiKey = apiKey;
     this.computeBaseUrl = baseUrl ? normalizeBaseUrl(baseUrl) : undefined;
+    this.pinned =
+      explicitBaseUrl !== undefined &&
+      normalizeBaseUrl(explicitBaseUrl) !== normalizeBaseUrl(DEFAULT_CONTROL_BASE_URL);
     this.controlBaseUrl = normalizeBaseUrl(controlBaseUrl);
     this.region = region;
     this.provider = provider;
@@ -735,7 +740,7 @@ export class Arker {
       key ? { "Idempotency-Key": key } : undefined,
       request.queueing_timeout,
     );
-    return new VM(this, wire.vm_id, baseUrl, wire);
+    return new VM(this, wire.vm_id, this._baseUrlFor(wire.vm_id, wire, baseUrl), wire);
   }
 
   private async forkDockerfile(
@@ -841,7 +846,7 @@ export class Arker {
   async getVm(vmId: string, placement?: VmPlacement): Promise<VM> {
     const baseUrl = this._baseUrlFor(vmId, placement);
     const data = await this._request<Vm>("GET", vmPath(vmId), undefined, baseUrl);
-    return new VM(this, vmId, baseUrl, data);
+    return new VM(this, vmId, this._baseUrlFor(vmId, data, baseUrl), data);
   }
 
   // ── Filesystems (region-scoped) ────────────────────────────────────
@@ -986,15 +991,22 @@ export class Arker {
     return this.fetchImpl === globalThis.fetch;
   }
 
-  /** @internal */
+  /**
+   * Where a VM's calls go: its own region when the placement is known and the
+   * client is not pinned, else the endpoint it was reached through (the
+   * client's base URL by default). The same rule in every SDK;
+   * tests/vm-endpoint-cases.json is the shared definition.
+   * @internal
+   */
   _baseUrlFor(
     ref: string,
     placement?: { provider?: unknown; region?: string | null },
+    reachedThrough?: string,
   ): string {
     const provider = optionalComputeProvider(placement?.provider);
     const region = placement?.region?.trim();
-    if (provider && region) return computeBaseUrl(provider, region);
-    return this.baseUrl;
+    if (!this.pinned && provider && region) return computeBaseUrl(provider, region);
+    return reachedThrough ?? this.baseUrl;
   }
 }
 
@@ -1058,7 +1070,7 @@ export class VM {
   /** Re-fetch this VM and return a fresh, fully-populated handle. */
   async refresh(): Promise<VM> {
     const data = await this._client._request<Vm>("GET", vmPath(this.id), undefined, this.baseUrl);
-    return new VM(this._client, this.id, this.baseUrl, data);
+    return new VM(this._client, this.id, this._client._baseUrlFor(this.id, data, this.baseUrl), data);
   }
 
   /** Fork this VM and return its child. */

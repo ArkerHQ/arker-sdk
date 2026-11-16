@@ -197,17 +197,21 @@ func (c *Client) VM(vmID string) *VM {
 	return &VM{ID: vmID, client: c, baseURL: c.baseURL}
 }
 
-// newVM binds a decoded VMInfo to base VERBATIM.
-//
-// It deliberately does not derive an endpoint from the VM's provider/region.
-// Fork and GetVM already went to the endpoint the caller configured, and that
-// endpoint is what serves the machine; recomputing a public URL from the
-// response would send every later per-VM call for a test or private
-// deployment to production instead. Only ListVMs, which aggregates across
-// regions through the control plane, needs a per-VM endpoint -- and it derives
-// one itself.
-func (c *Client) newVM(info *VMInfo, base string) *VM {
-	return &VM{ID: info.VMID, Info: info, client: c, baseURL: base}
+// newVM binds a decoded VMInfo to the endpoint vmBaseURL picks for it.
+func (c *Client) newVM(info *VMInfo, reachedThrough string) *VM {
+	return &VM{ID: info.VMID, Info: info, client: c, baseURL: c.vmBaseURL(info, reachedThrough)}
+}
+
+// vmBaseURL is where a VM's calls go: its own region when the placement is
+// known and the client is not pinned, else the endpoint it was reached
+// through. A pinned client (a test or private deployment) is never sent to a
+// public regional endpoint. The same rule in every SDK;
+// tests/vm-endpoint-cases.json is the shared definition.
+func (c *Client) vmBaseURL(info *VMInfo, reachedThrough string) string {
+	if !c.pinned && info.Provider != "" && info.Region != "" {
+		return computeBaseURL(info.Provider, info.Region)
+	}
+	return reachedThrough
 }
 
 // Fork creates a VM from a source.
@@ -298,13 +302,7 @@ func (c *Client) ListVMs(ctx context.Context, opts ListVMsOptions) (*VMList, err
 	}
 	list := &VMList{VMs: make([]*VM, 0, len(out.VMs)), NextCursor: out.NextCursor}
 	for i := range out.VMs {
-		// This listing spans regions, so a placed VM is addressed at its own
-		// regional endpoint rather than the client's.
-		base := c.baseURL
-		if info := &out.VMs[i]; info.Provider != "" && info.Region != "" {
-			base = computeBaseURL(info.Provider, info.Region)
-		}
-		list.VMs = append(list.VMs, c.newVM(&out.VMs[i], base))
+		list.VMs = append(list.VMs, c.newVM(&out.VMs[i], c.baseURL))
 	}
 	return list, nil
 }
@@ -316,6 +314,7 @@ func (v *VM) Refresh(ctx context.Context) error {
 		return err
 	}
 	v.Info = &info
+	v.baseURL = v.client.vmBaseURL(&info, v.baseURL)
 	return nil
 }
 

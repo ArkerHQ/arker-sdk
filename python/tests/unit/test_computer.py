@@ -5,6 +5,7 @@ import contextlib
 import json
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -282,6 +283,52 @@ def test_whoami_uses_authenticated_control_plane() -> None:
     assert isinstance(identity, sdk.WhoamiResponse)
     assert identity.org_id == "org_01"
     assert identity.org_name == "ArkerHQ"
+
+
+VM_ENDPOINT_CASES = json.loads((Path(__file__).parents[3] / "tests" / "vm-endpoint-cases.json").read_text())["cases"]
+
+
+@pytest.mark.parametrize("case", VM_ENDPOINT_CASES, ids=[c["name"] for c in VM_ENDPOINT_CASES])
+def test_vm_endpoint_cases_shared_by_every_sdk(case: dict[str, Any], monkeypatch) -> None:
+    for name in ("ARKER_BASE_URL", "ARKER_PROVIDER", "ARKER_REGION", "ARKER_CONTROL_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    arker = sdk.Arker(
+        api_key="ark_live_test",
+        base_url=case["client"].get("base_url"),
+        provider=case["client"].get("provider"),
+        region=case["client"].get("region"),
+    )
+    vm = case["vm"] or {}
+
+    assert arker._vm_base_url(vm.get("provider"), vm.get("region")) == case["expected"]
+
+
+def test_fork_through_the_control_plane_addresses_the_vm_region() -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "POST" and url == "https://arker.ai/api/v1/fork",
+        200,
+        {
+            "vm_id": "vm_child",
+            "owner_org_id": "owner",
+            "created_at": "now",
+            "description": None,
+            "public": False,
+            "state": "idle",
+            "provider": "aws",
+            "region": "us-west-2",
+            "network": {},
+            "sessions": [],
+            "resources": {},
+        },
+    )
+
+    with use_transport(t):
+        vm = sdk.Arker(api_key="ark_live_test", base_url="https://arker.ai/api", retry=False).fork(
+            source_vm_name="ubuntu"
+        )
+
+    assert vm.base_url == "https://aws-us-west-2.arker.ai/api"
 
 
 POOL_REQUEST = {
@@ -738,7 +785,8 @@ def test_listed_vm_uses_its_placement_endpoint() -> None:
 
     arker = sdk.Arker(
         api_key="ark_live_test",
-        base_url="https://fallback.invalid/api",
+        provider="provider-one",
+        region="region-one",
         retry=False,
     )
     with use_transport(t):

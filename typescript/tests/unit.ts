@@ -145,6 +145,48 @@ function decode(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
 }
 
+type VmEndpointCase = {
+  name: string;
+  client: { base_url?: string; provider?: string; region?: string };
+  vm: { provider: string; region: string } | null;
+  expected: string;
+};
+
+function testVmEndpointCasesSharedByEverySdk(): void {
+  const { cases } = JSON.parse(
+    fs.readFileSync(new URL("../../tests/vm-endpoint-cases.json", import.meta.url), "utf8"),
+  ) as { cases: VmEndpointCase[] };
+  for (const c of cases) {
+    const arker = new Arker({
+      apiKey: "ark_live_test",
+      baseUrl: c.client.base_url,
+      provider: c.client.provider,
+      region: c.client.region,
+      fetch: new FakeFetch().fetch,
+    });
+    assert.equal(arker.vm("vm_1", c.vm ?? undefined).baseUrl, c.expected, c.name);
+  }
+}
+
+async function testForkThroughTheControlPlaneAddressesTheVmRegion(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson((method, url) => method === "POST" && url === "https://arker.ai/api/v1/fork", 200, {
+    vm_id: "vm_child",
+    owner_org_id: "owner",
+    created_at: "now",
+    public: false,
+    state: "idle",
+    sessions: [],
+    provider: "aws",
+    region: "us-west-2",
+  });
+  const arker = new Arker({ apiKey: "ark_live_test", baseUrl: "https://arker.ai/api", fetch: fetch.fetch, retry: false });
+
+  const vm = await arker.fork({ source_vm_name: "ubuntu" });
+
+  assert.equal(vm.baseUrl, "https://aws-us-west-2.arker.ai/api");
+}
+
 async function testForkPostsDirectlyToSourceVm(): Promise<void> {
   const fetch = new FakeFetch();
   // VM.fork() uses the top-level operation and supplies its own ID.
@@ -789,7 +831,8 @@ async function testListedVmUsesItsPlacementEndpoint(): Promise<void> {
 
   const arker = new Arker({
     apiKey: "ark_live_test",
-    baseUrl: "https://fallback.invalid/api",
+    provider: "provider-one",
+    region: "region-one",
     fetch: fetch.fetch,
     retry: false,
   });
@@ -798,14 +841,13 @@ async function testListedVmUsesItsPlacementEndpoint(): Promise<void> {
   await vms[0]!.run("printf ok");
 }
 
-function testExplicitVmHandleUsesPlacementEndpoint(): void {
-  const arker = new Arker({
-    apiKey: "ark_live_test",
-    baseUrl: "https://fallback.invalid/api",
-    retry: false,
-  });
-  const vm = arker.vm("vm_placed", { provider: "provider-two", region: "region-two" });
-  assert.equal(vm.baseUrl, "https://provider-two-region-two.arker.ai/api");
+function testExplicitVmHandleUsesPlacementEndpointUnlessPinned(): void {
+  const placement = { provider: "provider-two", region: "region-two" };
+  const unpinned = new Arker({ apiKey: "ark_live_test", provider: "provider-one", region: "region-one", retry: false });
+  assert.equal(unpinned.vm("vm_placed", placement).baseUrl, "https://provider-two-region-two.arker.ai/api");
+
+  const pinned = new Arker({ apiKey: "ark_live_test", baseUrl: "https://fallback.invalid/api", retry: false });
+  assert.equal(pinned.vm("vm_placed", placement).baseUrl, "https://fallback.invalid/api");
 }
 
 async function testListRunsUsesControlPlaneAndFilters(): Promise<void> {
@@ -1327,7 +1369,7 @@ await testPoolRefusals();
 await testPoolQuotaIsNotRetried();
 await testDiscoverRegionsRequiresNoConfiguredClient();
 await testListedVmUsesItsPlacementEndpoint();
-testExplicitVmHandleUsesPlacementEndpoint();
+testExplicitVmHandleUsesPlacementEndpointUnlessPinned();
 await testListRunsUsesControlPlaneAndFilters();
 await testListVmsPreservesForkLimitFields();
 await testForkSendsDurableFlag();
@@ -2935,6 +2977,8 @@ async function testAFailedDockerfileBuildDeletesTheVm(): Promise<void> {
   );
 }
 
+testVmEndpointCasesSharedByEverySdk();
+await testForkThroughTheControlPlaneAddressesTheVmRegion();
 testDockerfileParsingBasics();
 testDockerfileRefusalsAreNamed();
 testDockerfileShell();
