@@ -461,7 +461,8 @@ export interface CompletedRunResult {
   /** Exactly what the command wrote - use these when the output is not text. */
   stdoutBytes: Uint8Array;
   stderrBytes: Uint8Array;
-  exitCode: number;
+  /** Null when a prompt (`end_symbol`) ended the run, or it was cancelled. */
+  exitCode: number | null;
   /** The session this run used. A run always occupies exactly one, and it
    * cannot otherwise be learned: `sessionIdx` is find-or-create and the id is
    * assigned server-side. Null for operation acks, which run no command. */
@@ -2111,8 +2112,8 @@ function withoutUndefined(value: unknown): unknown {
  * A negative `exitCode` means no process status was obtained - the run was
  * killed or the compute was lost - which is `"failed"`. Keeps the synchronous
  * run result and `getRun()` reporting the same state for the same run. */
-function terminalRunState(state: unknown, exitCode: number): string {
-  if (exitCode < 0) return "failed";
+function terminalRunState(state: unknown, exitCode: number | null): string {
+  if (exitCode !== null && exitCode < 0) return "failed";
   return typeof state === "string" ? state : "completed";
 }
 
@@ -2123,7 +2124,7 @@ function parseRunResponse(payload: unknown): RunResult {
     const stdoutEncoding = stringField(body.stdout_encoding, "run response.stdout_encoding");
     const stderr = stringValue(body.stderr, "run response.stderr");
     const stderrEncoding = stringField(body.stderr_encoding, "run response.stderr_encoding");
-    const exitCode = numberField(body.exit_code, "run response.exit_code");
+    const exitCode = body.exit_code === null ? null : numberField(body.exit_code, "run response.exit_code");
     return {
       type: "completed",
       runId: typeof body.run_id === "string" ? body.run_id : undefined,
