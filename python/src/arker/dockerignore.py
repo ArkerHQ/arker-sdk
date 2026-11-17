@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 
-__all__ = ["DockerIgnore", "load_dockerignore"]
+__all__ = ["DockerIgnore", "load_dockerignore", "parse_dockerignore"]
 
 
 def _pattern_to_regex(pattern: str) -> re.Pattern[str]:
@@ -84,9 +85,13 @@ def load_dockerignore(context_root: str) -> DockerIgnore:
             text = handle.read()
     except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
         return DockerIgnore(rules=[])
+    return parse_dockerignore(text.splitlines())
 
+
+def parse_dockerignore(lines: Iterable[str]) -> DockerIgnore:
+    """Compile `.dockerignore` lines: patterns, `!` exceptions and comments."""
     rules: list[tuple[re.Pattern[str], bool]] = []
-    for raw in text.splitlines():
+    for raw in lines:
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
