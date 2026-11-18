@@ -499,6 +499,9 @@ export class Process {
       if (this.#pid !== undefined) break;
       await this.#refresh();
       if (this.done) {
+        // It may have recorded its pid and exited since the read above.
+        this.#pid = await this.sandbox.processPid(this.sessionId);
+        if (this.#pid !== undefined) break;
         this.result();
         throw new this.errors.failed("The command ended before it reported its process id.");
       }

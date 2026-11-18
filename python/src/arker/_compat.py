@@ -453,6 +453,10 @@ class Process:
             if self._pid is None:
                 self._refresh()
                 if self.done:
+                    # It may have recorded its pid and exited since the read above.
+                    self._pid = self._sandbox._process_pid(self.session_id)
+                    if self._pid is not None:
+                        break
                     self.result()
                     raise self._errors.failed("The command ended before it reported its process id.")
                 time.sleep(POLL_INTERVAL / 5)
