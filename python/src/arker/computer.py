@@ -177,9 +177,11 @@ def run_poll_budget_s(timeout: int | None) -> float | None:
 # set is treated as non-terminal, so an unknown future state degrades to
 # "keep polling" rather than a false completion.
 TERMINAL_RUN_STATES = frozenset({"completed", "failed", "cancelled"})
-# Must exceed the server's 120s sync window, or the request is given up on just
-# as the background ack arrives and run() never gets to poll.
-REQUEST_TIMEOUT_S = 300
+# The contract's longest sync window (`time_to_background`). A request must
+# outlive it, or it is given up on just as the background ack arrives and run()
+# never gets to poll.
+MAX_TIME_TO_BACKGROUND_S = 300
+REQUEST_TIMEOUT_S = MAX_TIME_TO_BACKGROUND_S + RUN_POLL_MARGIN_S
 RETRYABLE_HTTP = {429, 502, 503, 504}
 RETRYABLE_CODES = {"unavailable", "capacity_unavailable", "rate_limited", "gateway_timeout"}
 ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -1032,8 +1034,9 @@ class VM:
             return _decode_bytes(response.content, response.encoding)
         if not isinstance(response, SyncReadPresignedResponse):
             raise ArkerError("internal", "unrecognized sync read response", 200)
-        signed = _http_client.get(response.presigned_url, timeout=300)
-        signed.raise_for_status()
+        signed = _http_client.get(response.presigned_url, timeout=REQUEST_TIMEOUT_S)
+        if signed.is_error:
+            raise ArkerError("internal", f"signed GET failed: {signed.status_code}", signed.status_code)
         return signed.content
 
     def _sync_write_inline(self, path: str, data: bytes) -> None:
@@ -1099,8 +1102,8 @@ class VM:
     ) -> SyncDirResult:
         """Recursively sync a local directory INTO this VM at ``remote_dir``,
         rsync-style: compare the local tree with the VM's current contents and
-        upload only files that are new or changed. Works on a VM that has never
-        run.
+        upload only files whose content or permissions differ. Works on a VM
+        that has never run.
 
         The remote manifest is authoritative. ``cache`` (an optional dict you own
         and reuse across calls) is a pure accelerator: it skips re-hashing local
@@ -1123,7 +1126,7 @@ class VM:
 
         # 2. Enumerate local regular files (skip symlinks - the manifest lists
         #    regular files only, so a symlink would always look "missing").
-        local_files: dict[str, tuple[str, int, int]] = {}
+        local_files: dict[str, tuple[str, int, int, int]] = {}
         for root, _dirs, files in os.walk(local_root):
             for name in files:
                 abs_path = os.path.join(root, name)
@@ -1133,7 +1136,7 @@ class VM:
                 if ignore is not None and ignore(rel):
                     continue
                 st = os.stat(abs_path)
-                local_files[rel] = (abs_path, st.st_size, st.st_mtime_ns)
+                local_files[rel] = (abs_path, st.st_size, st.st_mtime_ns, st.st_mode & 0o7777)
 
         # 3. Diff local vs the REMOTE manifest → the set of new/changed files.
         result = SyncDirResult(manifest_truncated=manifest_truncated)
@@ -1153,13 +1156,14 @@ class VM:
                 )
         else:
             hashes = [
-                _file_hash_cached(abs_path, size, mtime_ns, cache) for _rel, (abs_path, size, mtime_ns) in entries
+                _file_hash_cached(abs_path, size, mtime_ns, cache)
+                for _rel, (abs_path, size, mtime_ns, _mode) in entries
             ]
 
         # Diff in sorted order so the tarball is reproducible and the counters
         # are deterministic regardless of which hash finished first.
-        for (rel, (abs_path, size, _mtime_ns)), local_hash in zip(entries, hashes, strict=True):
-            if remote.get(rel) == local_hash:
+        for (rel, (abs_path, size, _mtime_ns, mode)), local_hash in zip(entries, hashes, strict=True):
+            if remote.get(rel) == (local_hash, mode):
                 result.skipped += 1
                 continue
             changed.append((rel, abs_path))
@@ -1172,9 +1176,10 @@ class VM:
             self._upload_and_extract_tarball(changed, remote_root)
         return result
 
-    def _remote_manifest(self, path: str) -> tuple[dict[str, str], bool]:
-        """Fetch the VM's file manifest under ``path`` → ({rel_path: sha256},
-        truncated). A path that doesn't exist yet yields an empty manifest.
+    def _remote_manifest(self, path: str) -> tuple[dict[str, tuple[str, int]], bool]:
+        """Fetch the VM's file manifest under ``path`` → ({rel_path: (sha256,
+        permission bits)}, truncated). A path that doesn't exist yet yields an
+        empty manifest.
 
         The server caps the walk (50,000 entries) and reports ``truncated``.
         Past the cap every omitted file looks absent, so the diff marks it
@@ -1190,7 +1195,7 @@ class VM:
         )
         response = _decode_model(SyncManifestResponse, payload)
         return (
-            {entry.path: entry.hash for entry in response.entries},
+            {entry.path: (entry.hash, entry.mode & 0o7777) for entry in response.entries},
             bool(getattr(response, "truncated", False)),
         )
 
@@ -1241,7 +1246,8 @@ class VM:
             # tarball is removed on success. Missing parent dirs are created by
             # mkdir/tar.
             cmd = (
-                f"set -e; mkdir -p {q(remote_root)}; tar -xf {q(remote_tar)} -C {q(remote_root)}; rm -f {q(remote_tar)}"
+                f"set -e; mkdir -p {q(remote_root)}; "
+                f"tar -xpf {q(remote_tar)} -C {q(remote_root)}; rm -f {q(remote_tar)}"
             )
             res = self.run(cmd)
             code = getattr(res, "exit_code", None)
@@ -1796,7 +1802,7 @@ def _build_query(
 
 
 def _env(name: str) -> str | None:
-    return os.environ.get(name) or None
+    return os.environ.get(name, "").strip() or None
 
 
 def _normalize_base_url(base_url: str) -> str:
@@ -2213,6 +2219,7 @@ def _run_to_completed_result(run: RunRecord) -> CompletedRunResult:
         stderr_bytes=run.stderr_bytes,
         exit_code=exit_code,
         run_id=run.run_id,
+        session_id=run.session_id,
         state=run.state,
         fail_reason=run.fail_reason,
     )

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import hashlib
 import json
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -3078,3 +3080,99 @@ def test_pool_shell_is_refused_before_creating_session() -> None:
         with pytest.raises(ValueError, match="interactive shells"):
             vm.connect_pty()
     assert t.calls == []
+
+
+RUN_RESULT_FIXTURES = json.loads(
+    (Path(__file__).resolve().parents[3] / "tests" / "contract-fixtures" / "run-results.json").read_text()
+)["cases"]
+
+
+@pytest.mark.parametrize("case", RUN_RESULT_FIXTURES, ids=[case["name"] for case in RUN_RESULT_FIXTURES])
+def test_run_result_matches_the_shared_contract_fixture(monkeypatch, case: dict[str, Any]) -> None:
+    monkeypatch.setattr(sdk.time, "sleep", lambda _s: None)
+    t = FakeTransport()
+    for response in case["responses"]:
+        t.add_json(
+            lambda method, url, r=response: method == r["method"] and url.endswith(r["path"]),
+            200,
+            response["body"],
+        )
+
+    with use_transport(t):
+        result = client().vm("vm_1").run("true", **case["options"])
+
+    assert {field: getattr(result, field) for field in case["expect"]} == case["expect"]
+    assert not t.script, "every recorded response must be consumed"
+
+
+def test_env_values_are_trimmed(monkeypatch) -> None:
+    monkeypatch.setenv("ARKER_API_KEY", " ark_live_env\n")
+    monkeypatch.setenv("ARKER_BASE_URL", "  ")
+    monkeypatch.setenv("ARKER_PROVIDER", "provider-one ")
+    monkeypatch.setenv("ARKER_REGION", "\tregion-one")
+    arker = sdk.Arker()
+    assert arker._api_key == "ark_live_env"
+    assert arker.base_url == "https://provider-one-region-one.arker.ai/api"
+
+
+def test_request_timeout_outlives_the_longest_sync_window() -> None:
+    contract = json.loads(sdk.package_files("arker").joinpath("_openapi.json").read_text())
+    window = contract["components"]["schemas"]["RunRequest"]["properties"]["time_to_background"]
+    assert window["maximum"] == sdk.MAX_TIME_TO_BACKGROUND_S
+    assert sdk.REQUEST_TIMEOUT_S > sdk.MAX_TIME_TO_BACKGROUND_S
+
+
+def test_failed_presigned_read_raises_arker_error() -> None:
+    t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "POST" and url.endswith("/sync"),
+        200,
+        {
+            "ok": True,
+            "op": "read",
+            "path": "/home/user/big",
+            "size": 5,
+            "presigned_url": "https://s3.invalid/file",
+            "expires_in": 900,
+            "method": "GET",
+        },
+    )
+    t.add_raw(lambda method, url: method == "GET" and url == "https://s3.invalid/file", 403, b"expired")
+
+    with use_transport(t), pytest.raises(sdk.ArkerError) as excinfo:
+        client().vm("vm_1").sync("/home/user/big")
+
+    assert (excinfo.value.code, excinfo.value.status) == ("internal", 403)
+
+
+def test_sync_dir_resends_a_file_whose_permissions_changed(tmp_path, monkeypatch) -> None:
+    script = tmp_path / "run.sh"
+    script.write_bytes(b"echo hi\n")
+    script.chmod(0o755)
+    digest = hashlib.sha256(b"echo hi\n").hexdigest()
+
+    def manifest(mode: int) -> dict[str, Any]:
+        return {
+            "root": "/app",
+            "hash_algo": "sha256",
+            "entries": [{"path": "run.sh", "size": 8, "mode": 0o100000 | mode, "hash": digest}],
+            "truncated": False,
+        }
+
+    uploaded: list[list[str]] = []
+    vm = client().vm("vm_1")
+    monkeypatch.setattr(
+        vm, "_upload_and_extract_tarball", lambda changed, _root: uploaded.append([r for r, _ in changed])
+    )
+    t = FakeTransport()
+    sync = lambda method, url: method == "POST" and url.endswith("/sync")
+    t.add_json(sync, 200, manifest(0o644))
+    t.add_json(sync, 200, manifest(0o755))
+
+    with use_transport(t):
+        changed = vm.sync_dir(str(tmp_path), "/app")
+        unchanged = vm.sync_dir(str(tmp_path), "/app")
+
+    assert (changed.sent, changed.skipped) == (1, 0)
+    assert (unchanged.sent, unchanged.skipped) == (0, 1)
+    assert uploaded == [["run.sh"]]
