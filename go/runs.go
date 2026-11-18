@@ -41,9 +41,15 @@ type RunRequest struct {
 	// QueueingTimeout queues instead of failing fast when capacity is short.
 	QueueingTimeout *int `json:"queueing_timeout,omitempty"`
 
-	EndSymbol string        `json:"end_symbol,omitempty"`
-	Signal    string        `json:"signal,omitempty"`
-	Policies  *PolicyUpdate `json:"policies,omitempty"`
+	EndSymbol string `json:"end_symbol,omitempty"`
+	Signal    string `json:"signal,omitempty"`
+
+	// Policies changes the VM's network policy before the command runs, and
+	// the change is kept afterwards. Run sends it with Update first and runs
+	// the command only once it is applied.
+	//
+	// Deprecated: set the policy with Update before calling Run.
+	Policies *PolicyUpdate `json:"policies,omitempty"`
 
 	// EndAfterAllSubprocesses ends the run only after every process Command
 	// started has exited, backgrounded and detached ones included. The server
@@ -169,6 +175,12 @@ type RunRecord struct {
 // bounded by Timeout plus a margin; exceeding it returns an error with code
 // "timeout" while the run keeps executing server-side.
 func (v *VM) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
+	if req.Policies != nil {
+		if _, err := v.Update(ctx, UpdateRequest{Policies: req.Policies}); err != nil {
+			return nil, err
+		}
+		req.Policies = nil
+	}
 	var wire runWire
 	status, err := v.client.do(ctx, call{
 		method: http.MethodPost, path: v.path("/runs"), base: v.baseURL,

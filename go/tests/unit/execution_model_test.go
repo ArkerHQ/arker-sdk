@@ -369,3 +369,51 @@ func TestReadModifyWriteKeepsRulesAndSendsNoReadOnlyFields(t *testing.T) {
 		}
 	}
 }
+
+func TestRunAppliesPoliciesWithUpdateBeforeTheCommand(t *testing.T) {
+	var calls []string
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		calls = append(calls, r.Method+" "+r.URL.Path+" "+string(body))
+		if r.Method == http.MethodPatch {
+			fmt.Fprint(w, `{"vm_id":"vm_1"}`)
+			return
+		}
+		fmt.Fprint(w, `{"stdout":"","stdout_encoding":"utf-8","stderr":"","stderr_encoding":"utf-8","exit_code":0}`)
+	}, reject(t, "control"))
+
+	req := arker.RunRequest{
+		Command:  "true",
+		Policies: &arker.PolicyUpdate{Secrets: map[string]*string{"TOKEN": arker.Ptr("value")}},
+	}
+	if _, err := c.VM("vm_1").Run(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		`PATCH /v1/vms/vm_1 {"policies":{"secrets":{"TOKEN":"value"}}}`,
+		`POST /v1/vms/vm_1/runs {"command":"true"}`,
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls %q, want %q", calls, want)
+	}
+}
+
+func TestRunWhosePolicyIsRefusedRunsNothing(t *testing.T) {
+	var calls []string
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":{"code":"invalid_request","message":"bad policy","timestamp":"2026-10-16T00:00:00Z","request_id":"req_1"}}`)
+	}, reject(t, "control"))
+
+	req := arker.RunRequest{
+		Command:  "true",
+		Policies: &arker.PolicyUpdate{Secrets: map[string]*string{"TOKEN": arker.Ptr("value")}},
+	}
+	if _, err := c.VM("vm_1").Run(context.Background(), req); err == nil {
+		t.Fatal("a refused policy must fail the run")
+	}
+	if want := []string{"PATCH /v1/vms/vm_1"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls %q, want %q", calls, want)
+	}
+}
