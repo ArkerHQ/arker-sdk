@@ -235,8 +235,10 @@ def split_addresses(entries: list[str]) -> tuple[list[str], list[str]]:
 
 def _egress_rules(egress: Egress) -> list[dict[str, Any]]:
     """Arker outbound rules, highest priority first. Arker matches a host and
-    every name under it, so each exact host has a deny for the names under it
-    just above; deeper names come first so that deny never hides another allow."""
+    every name under it, so each exact host has a deny for ``*.host`` just
+    above; deeper names come first so that deny never hides another allow.
+    ``*.`` covers one label, so names two or more labels under an exact host
+    stay allowed."""
 
     def rule(action: str, **match: list[str]) -> dict[str, Any]:
         return {"type": "outbound", "action": action, **({"match": match} if match else {})}
@@ -245,7 +247,7 @@ def _egress_rules(egress: Egress) -> list[dict[str, Any]]:
     exact = sorted((host for host in egress.allow_hosts if not host.startswith("*.")), key=lambda h: -h.count("."))
     rules = [rule("allow", hosts=wildcards)] if wildcards else []
     for host in exact:
-        rules += [rule("deny", hosts=[f"**.{host}"]), rule("allow", hosts=[host])]
+        rules += [rule("deny", hosts=[f"*.{host}"]), rule("allow", hosts=[host])]
     if egress.allow_ips:
         rules.append(rule("allow", ips=list(egress.allow_ips)))
     if egress.deny_ips:

@@ -223,16 +223,17 @@ export function splitAddresses(entries: string[]): [string[], string[]] {
 
 /**
  * Arker outbound rules, highest priority first. Arker matches a host and every
- * name under it, so each exact host has a deny for the names under it just
- * above; deeper names come first so that deny never hides another allow.
+ * name under it, so each exact host has a deny for `*.host` just above; deeper
+ * names come first so that deny never hides another allow. `*.` covers one
+ * label, so names two or more labels under an exact host stay allowed.
  */
-function egressRules(egress: Egress): Record<string, unknown>[] {
+export function egressRules(egress: Egress): Record<string, unknown>[] {
   const rule = (action: string, match?: Record<string, string[]>) => ({ type: "outbound", action, ...(match ? { match } : {}) });
   const hosts = egress.allowHosts ?? [];
   const wildcards = hosts.filter((host) => host.startsWith("*."));
   const exact = hosts.filter((host) => !host.startsWith("*.")).sort((a, b) => b.split(".").length - a.split(".").length);
   const rules = wildcards.length > 0 ? [rule("allow", { hosts: wildcards })] : [];
-  for (const host of exact) rules.push(rule("deny", { hosts: [`**.${host}`] }), rule("allow", { hosts: [host] }));
+  for (const host of exact) rules.push(rule("deny", { hosts: [`*.${host}`] }), rule("allow", { hosts: [host] }));
   if (egress.allowIps?.length) rules.push(rule("allow", { ips: egress.allowIps }));
   if (egress.denyIps?.length) rules.push(rule("deny", { ips: egress.denyIps }));
   if (egress.denyAll) rules.push(rule("deny"));

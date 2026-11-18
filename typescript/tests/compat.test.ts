@@ -4,7 +4,7 @@
 import { expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
-import { arkerSource, CompatSandbox, splitAddresses } from "../src/compat/core.js";
+import { arkerSource, CompatSandbox, egressRules, splitAddresses } from "../src/compat/core.js";
 import { FILE_SERVER, INTERPRETER, NODE_INTERPRETER } from "../src/compat/interpreter.js";
 import { VM } from "../src/index.js";
 import { Daytona, DaytonaNotFoundError, DaytonaNotSupportedError } from "../src/daytona.js";
@@ -194,4 +194,16 @@ test("addresses split into IPs and host names as the Python SDK splits them", ()
   const entries = ["1.2.3.4", "10.0.0.0/8", "::1", "2001:db8::/32", "::ffff:1.2.3.4", "1.2.3.4/032"];
   const hosts = ["999.1.1.1", "host:8080", "1.2.3.4/33", "example.com", "01.2.3.4", "1.2.3", "*.example.com"];
   expect(splitAddresses([...entries, ...hosts])).toEqual([entries, hosts]);
+});
+
+test("an exact host allow denies the names one label under it, with only single-label wildcards", () => {
+  const hosts = (action: string, ...names: string[]) => ({ type: "outbound", action, match: { hosts: names } });
+  expect(egressRules({ allowHosts: ["example.com", "*.cdn.net", "api.example.com"], denyAll: true })).toEqual([
+    hosts("allow", "*.cdn.net"),
+    hosts("deny", "*.api.example.com"),
+    hosts("allow", "api.example.com"),
+    hosts("deny", "*.example.com"),
+    hosts("allow", "example.com"),
+    { type: "outbound", action: "deny" },
+  ]);
 });

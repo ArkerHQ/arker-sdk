@@ -13,7 +13,7 @@ import httpx2 as httpx
 import pytest
 
 import arker.computer as sdk
-from arker._compat import arker_source
+from arker._compat import Egress, _egress_rules, arker_source
 from arker.daytona import Daytona, DaytonaNotFoundError
 from arker.e2b import Sandbox as E2BSandbox
 from arker.e2b import SandboxNotFoundException
@@ -230,3 +230,18 @@ def test_a_volume_is_found_past_the_first_page_of_its_prefix(monkeypatch) -> Non
         ("GET", "/v1/filesystems?cursor=c2&name_prefix=data", 200, {"filesystems": [volume("data")]}),
     ):
         assert ModalVolume.from_name("data")._id(None) == "fs-data"
+
+
+def test_an_exact_host_allow_denies_the_names_one_label_under_it() -> None:
+    def hosts(action: str, *names: str) -> dict[str, Any]:
+        return {"type": "outbound", "action": action, "match": {"hosts": list(names)}}
+
+    egress = Egress(allow_hosts=("example.com", "*.cdn.net", "api.example.com"), deny_all=True)
+    assert _egress_rules(egress) == [
+        hosts("allow", "*.cdn.net"),
+        hosts("deny", "*.api.example.com"),
+        hosts("allow", "api.example.com"),
+        hosts("deny", "*.example.com"),
+        hosts("allow", "example.com"),
+        {"type": "outbound", "action": "deny"},
+    ]
