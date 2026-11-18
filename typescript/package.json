@@ -60,7 +60,8 @@
     "typecheck": "bun run generate:validators && tsc -p tsconfig.test.json",
     "prepublishOnly": "bun run build",
     "generate:validators": "bun scripts/generate-error-validators.ts",
-    "test:modal-live": "bun tests/modal-live.ts && bun tests/modal-lifecycle-live.ts"
+    "test:modal-live": "bun tests/modal-live.ts && bun tests/modal-lifecycle-live.ts",
+    "test:run-live": "bun tests/run-live.ts"
   },
   "keywords": [
     "arker",

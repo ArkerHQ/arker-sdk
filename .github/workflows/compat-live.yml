@@ -24,6 +24,7 @@ env:
   ARKER_API_KEY: ${{ secrets.ARKER_COMPAT_API_KEY }}
   ARKER_BASE_URL: ${{ vars.ARKER_COMPAT_BASE_URL }}
   ARKER_CONTROL_BASE_URL: ${{ vars.ARKER_COMPAT_CONTROL_BASE_URL }}
+  ARKER_SOURCE_VM: ubuntu-coding
 
 jobs:
   python:
@@ -43,7 +44,7 @@ jobs:
       - run: uv sync --locked --extra test --extra pty
       - run: >-
           uv run --locked --extra test --extra pty python -m pytest -v
-          tests/e2e/test_e2b*_e2e.py tests/e2e/test_modal*_e2e.py tests/e2e/test_daytona*_e2e.py
+          tests/e2e/test_e2e.py tests/e2e/test_e2b*_e2e.py tests/e2e/test_modal*_e2e.py tests/e2e/test_daytona*_e2e.py
 
   typescript:
     name: typescript
@@ -62,6 +63,7 @@ jobs:
         working-directory: .
       # Generated files the SDK imports are not checked in.
       - run: bun run generate:validators
+      - run: bun run test:run-live
       - run: bun run test:e2b-live
       - run: bun run test:e2b-code-interpreter-live
       - run: bun run test:modal-live

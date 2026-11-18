@@ -2211,7 +2211,7 @@ function runToCompletedResult(run: RunRecord): CompletedRunResult {
     stderr: run.stderr,
     stdoutBytes: run.stdoutBytes,
     stderrBytes: run.stderrBytes,
-    exitCode: run.exit_code ?? (run.state === "completed" ? 0 : 1),
+    exitCode: run.exit_code ?? null,
     failReason: run.fail_reason ?? null,
   };
 }
