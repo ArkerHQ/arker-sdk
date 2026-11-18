@@ -834,9 +834,9 @@ class VM:
         ``idempotency_key`` asks the server to deduplicate the command. It does
         not make an ambiguous network failure safe to retry automatically.
 
-        ``policies`` is deprecated: set the policy with :meth:`update` first.
-        It is sent with :meth:`update` before the command, which runs only
-        once the policy is applied, and the change is kept afterwards.
+        ``policies`` changes the VM's network policy with :meth:`update`
+        before the command, which runs only once the policy is applied; the
+        change is kept afterwards. Prefer calling :meth:`update` yourself.
         """
         if policies is not None:
             self.update(policies=policies)
