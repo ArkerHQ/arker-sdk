@@ -51,6 +51,9 @@ const PORT_RULE_PRIORITY = 100_000;
 // The API's limit on a VM description, where sandbox metadata is kept.
 const MAX_DESCRIPTION = 1024;
 const POLL_INTERVAL_MS = 500;
+/** How often a command left pending by a suspend wakes its VM again, while it stays pending. */
+const WAKE_INTERVAL_MS = 5_000;
+const WAKE_FILE = "/etc/hostname";
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const TIMED_OUT = /command timed out after \d+ms\n?$/;
@@ -482,6 +485,7 @@ export class Process {
   #failReason: string | null | undefined;
 
   #pid: number | undefined;
+  #wokeAt = 0;
 
   /** A process in a session it does not own (`ownsSession: false`) leaves the session alone. */
   constructor(
@@ -560,6 +564,17 @@ export class Process {
     this.#exitCode = run.exit_code;
     this.#failReason = run.fail_reason;
     if (this.done && this.options.ownsSession !== false) await this.#closeSession();
+    if (this.#state === "pending") await this.#wake();
+  }
+
+  /**
+   * A suspend leaves the VM's runs pending until something uses the VM, and
+   * reading a run is not a use: a file read is, and the run goes on.
+   */
+  async #wake(): Promise<void> {
+    if (Date.now() - this.#wokeAt < WAKE_INTERVAL_MS) return;
+    this.#wokeAt = Date.now();
+    await this.sandbox.read(WAKE_FILE);
   }
 
   async #closeSession(): Promise<boolean> {

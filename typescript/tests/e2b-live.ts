@@ -290,6 +290,16 @@ try {
   await limited.kill();
 }
 
+// a command running across a pause finishes
+const acrossPause = await Sandbox.create();
+try {
+  const handle = await acrossPause.commands.run("sleep 3; echo done", { background: true });
+  assert.ok(await acrossPause.pause());
+  assert.equal((await handle.wait()).stdout, "done\n");
+} finally {
+  await acrossPause.kill();
+}
+
 // network allow and deny lists
 const urls = ["https://example.com", "https://www.example.com", "https://github.com", "https://1.1.1.1", "https://8.8.8.8"];
 const allowing = await Sandbox.create({ timeoutMs: 120_000, network: { allowOut: ["example.com", "1.1.1.1"], denyOut: [ALL_TRAFFIC] } });

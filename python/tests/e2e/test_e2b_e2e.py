@@ -139,6 +139,13 @@ def test_info_reconnect_and_lifecycle(sbx: Sandbox) -> None:
     assert again.pause()
 
 
+def test_a_command_running_across_a_pause_finishes() -> None:
+    with Sandbox.create() as sandbox:
+        handle = sandbox.commands.run("sleep 3; echo done", background=True)
+        assert sandbox.pause()
+        assert handle.wait().stdout == "done\n"
+
+
 def test_timeout_deletes_the_sandbox() -> None:
     sandbox = Sandbox.create(timeout=5)
     deadline = time.monotonic() + 120

@@ -67,6 +67,9 @@ FILE_SERVER_PATH = "/opt/arker-compat/file_server.py"
 MIB = 1024 * 1024
 LIST_PAGE_SIZE = 1000
 POLL_INTERVAL = 0.5
+# How often a command left pending by a suspend wakes its VM again, while it stays pending.
+WAKE_INTERVAL = 5.0
+WAKE_FILE = "/etc/hostname"
 # Rules of one type need distinct priorities; ports are at most 65535.
 PORT_RULE_PRIORITY = 100_000
 # The API's limit on a VM description, where sandbox metadata is kept.
@@ -376,6 +379,7 @@ class Process:
         self._state = "running"
         self._exit_code: int | None = None
         self._fail_reason: str | None = None
+        self._woke_at: float | None = None
 
     @_translated
     def _refresh(self) -> None:
@@ -386,6 +390,16 @@ class Process:
         self._state, self._exit_code, self._fail_reason = run.state, run.exit_code, run.fail_reason
         if self.done and self._owns_session:
             self._close_session()
+        if self._state == "pending":
+            self._wake()
+
+    def _wake(self) -> None:
+        """A suspend leaves the VM's runs pending until something uses the VM,
+        and reading a run is not a use: a file read is, and the run goes on."""
+        if self._woke_at is not None and time.monotonic() - self._woke_at < WAKE_INTERVAL:
+            return
+        self._woke_at = time.monotonic()
+        self._sandbox.read(WAKE_FILE)
 
     def _close_session(self) -> bool:
         try:
