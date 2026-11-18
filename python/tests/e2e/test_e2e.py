@@ -107,6 +107,13 @@ def test_run_reports_a_failing_command(vm: VM) -> None:
     assert "to-stderr" in run.stderr
 
 
+def test_a_prompt_ends_a_run_without_an_exit_code(vm: VM) -> None:
+    # Its own session: the command is still running when the prompt ends the run.
+    run = vm.run("echo READY; sleep 30", end_symbol="READY", session_idx=9)
+    assert (run.state, run.exit_code) == ("completed", None)
+    assert "READY" in run.stdout
+
+
 def test_sync_round_trips_bytes(vm: VM) -> None:
     vm.sync(REMOTE_PATH, PAYLOAD)
 

@@ -1,0 +1,70 @@
+name: Compatibility live
+
+# Runs the E2B, Modal and Daytona compatibility layers against a live
+# deployment, so a server change that breaks them shows up within a day.
+# Each run creates and deletes a few small VMs.
+#
+# Needs the ARKER_COMPAT_API_KEY secret. ARKER_COMPAT_BASE_URL and
+# ARKER_COMPAT_CONTROL_BASE_URL are optional repository variables; unset,
+# the tests use the public default placement.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compat-live
+  cancel-in-progress: false
+
+env:
+  ARKER_API_KEY: ${{ secrets.ARKER_COMPAT_API_KEY }}
+  ARKER_BASE_URL: ${{ vars.ARKER_COMPAT_BASE_URL }}
+  ARKER_CONTROL_BASE_URL: ${{ vars.ARKER_COMPAT_CONTROL_BASE_URL }}
+  ARKER_SOURCE_VM: ubuntu-coding
+
+jobs:
+  python:
+    name: python
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require credentials
+        # Without a key the live tests skip themselves and would report green.
+        run: test -n "$ARKER_API_KEY" || { echo "::error::ARKER_COMPAT_API_KEY is not set"; exit 1; }
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked --extra test --extra pty
+      - run: >-
+          uv run --locked --extra test --extra pty python -m pytest -v
+          tests/e2e/test_e2e.py tests/e2e/test_e2b*_e2e.py tests/e2e/test_modal*_e2e.py tests/e2e/test_daytona*_e2e.py
+
+  typescript:
+    name: typescript
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require credentials
+        run: test -n "$ARKER_API_KEY" || { echo "::error::ARKER_COMPAT_API_KEY is not set"; exit 1; }
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.8
+      - run: bun ci
+        working-directory: .
+      # Generated files the SDK imports are not checked in.
+      - run: bun run generate:validators
+      - run: bun run test:run-live
+      - run: bun run test:e2b-live
+      - run: bun run test:e2b-code-interpreter-live
+      - run: bun run test:modal-live
+      - run: bun run test:daytona-live

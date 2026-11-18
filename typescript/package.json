@@ -25,6 +25,11 @@
       "import": "./dist/e2b.js",
       "require": "./dist/e2b.cjs"
     },
+    "./e2b-code-interpreter": {
+      "types": "./dist/e2b-code-interpreter.d.ts",
+      "import": "./dist/e2b-code-interpreter.js",
+      "require": "./dist/e2b-code-interpreter.cjs"
+    },
     "./modal": {
       "types": "./dist/modal.d.ts",
       "import": "./dist/modal.js",
@@ -42,18 +47,21 @@
   "packageManager": "bun@1.3.8",
   "scripts": {
     "build": "bun run build:sdk && ../scripts/build-legacy-cli",
-    "build:sdk": "bun run generate:validators && tsup src/index.ts src/daytona.ts src/e2b.ts src/modal.ts --format esm,cjs --dts --clean --target=node18",
+    "build:sdk": "bun run generate:validators && tsup src/index.ts src/daytona.ts src/e2b.ts src/e2b-code-interpreter.ts src/modal.ts --format esm,cjs --dts --clean --target=node18",
     "check:api-types": "openapi-typescript ../openapi.json --default-non-nullable false -o src/generated/api-types.ts --check",
     "example:ios-qa": "bun examples/ios-qa.ts",
     "generate:api-types": "openapi-typescript ../openapi.json --default-non-nullable false -o src/generated/api-types.ts",
     "smoke": "bun tests/conformance/fork-run-sync.ts",
-    "test": "bun run generate:validators && bun test tests/typed-errors.test.ts tests/execution-model.test.ts tests/api-keys.test.ts && bun tests/unit.ts && bun tests/compat.ts && bun run build && bun tests/http2.ts",
-    "test:compat": "bun tests/compat.ts",
-    "test:compat-live": "bun tests/compat-live.ts",
-    "test:compat-fallback-live": "bun tests/compat-fallback-live.ts",
+    "test": "bun run generate:validators && bun test tests/typed-errors.test.ts tests/execution-model.test.ts tests/api-keys.test.ts tests/compat.test.ts && bun tests/unit.ts && bun run build && bun tests/http2.ts",
+    "test:compat": "bun test tests/compat.test.ts",
+    "test:e2b-live": "bun tests/e2b-live.ts && bun tests/e2b-lifecycle-live.ts && bun tests/e2b-access-live.ts",
+    "test:e2b-code-interpreter-live": "bun tests/e2b-code-interpreter-live.ts",
+    "test:daytona-live": "bun tests/daytona-live.ts && bun tests/daytona-lifecycle-live.ts && bun tests/daytona-access-live.ts",
     "typecheck": "bun run generate:validators && tsc -p tsconfig.test.json",
     "prepublishOnly": "bun run build",
-    "generate:validators": "bun scripts/generate-error-validators.ts"
+    "generate:validators": "bun scripts/generate-error-validators.ts",
+    "test:modal-live": "bun tests/modal-live.ts && bun tests/modal-lifecycle-live.ts",
+    "test:run-live": "bun tests/run-live.ts"
   },
   "keywords": [
     "arker",
@@ -71,12 +79,8 @@
   },
   "bugs": "https://github.com/ArkerHQ/arker-sdk/issues",
   "devDependencies": {
-    "@computesdk/daytona": "^1.7.30",
-    "@computesdk/e2b": "^1.7.51",
-    "@computesdk/modal": "^1.9.3",
     "@types/node": "^25.6.0",
     "@types/ws": "^8.18.1",
-    "computesdk": "^4.1.3",
     "openapi-typescript": "^7.13.0",
     "tsup": "^8.3.0",
     "typescript": "^5.6.0",
@@ -84,22 +88,18 @@
     "ajv-formats": "^3.0.1"
   },
   "peerDependencies": {
-    "@computesdk/daytona": "^1.7.30",
-    "@computesdk/e2b": "^1.7.51",
-    "@computesdk/modal": "^1.9.3",
-    "computesdk": "^4.1.3"
+    "@daytonaio/sdk": "^0.232.0",
+    "e2b": "^2.0.0",
+    "modal": "^0.11.0"
   },
   "peerDependenciesMeta": {
-    "@computesdk/daytona": {
+    "@daytonaio/sdk": {
       "optional": true
     },
-    "@computesdk/e2b": {
+    "e2b": {
       "optional": true
     },
-    "@computesdk/modal": {
-      "optional": true
-    },
-    "computesdk": {
+    "modal": {
       "optional": true
     }
   },

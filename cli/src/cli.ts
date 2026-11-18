@@ -1073,7 +1073,8 @@ interface PrintableRun {
    * carries the exact bytes: decoding here would corrupt binary output. */
   stdout: Uint8Array;
   stderr: Uint8Array;
-  exitCode: number;
+  /** Null when no process exit was recorded: a prompt ended the run, or it was cancelled. */
+  exitCode: number | null;
   failReason?: string | null;
 }
 
@@ -1098,7 +1099,7 @@ function printStoredRun(run: RunRecord, json: boolean): void {
     // Exact bytes - the CLI pipes them through unchanged.
     stdout: run.stdoutBytes,
     stderr: run.stderrBytes,
-    exitCode: run.exit_code ?? (run.state === "completed" ? 0 : 1),
+    exitCode: run.exit_code ?? null,
     failReason: run.fail_reason,
   }, json);
 }
@@ -1125,7 +1126,8 @@ function printCompletedRun(result: PrintableRun, json: boolean): void {
   process.exitCode = runExitCode(result.state, result.exitCode);
 }
 
-function runExitCode(state: string, exitCode: number): number {
+function runExitCode(state: string, exitCode: number | null): number {
+  if (exitCode === null) return state === "completed" ? 0 : 1;
   if (state === "failed" && exitCode === 0) return 1;
   return exitCode;
 }

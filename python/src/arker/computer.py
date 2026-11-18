@@ -253,7 +253,9 @@ class CompletedRunResult:
     stderr: str
     stdout_bytes: bytes
     stderr_bytes: bytes
-    exit_code: int
+    # None when no process exit was recorded: a prompt (``end_symbol``) ended
+    # the run, or it was cancelled.
+    exit_code: int | None
     run_id: str | None = None  # present for executed runs; None for operation acks
     # The session this run used. A run always occupies exactly one, and it could
     # not otherwise be learned: `session_idx` is find-or-create and `session_id`
@@ -2203,15 +2205,12 @@ def _run_to_completed_result(run: RunRecord) -> CompletedRunResult:
     ``run.stdout``/``run.stderr`` are already bytes - :func:`_run_status_response`
     decodes at the wire boundary - so they pass through untouched here. Decoding
     again would corrupt base64 payloads."""
-    exit_code = run.exit_code
-    if exit_code is None:
-        exit_code = 0 if run.state == "completed" else 1
     return CompletedRunResult(
         stdout=run.stdout,
         stderr=run.stderr,
         stdout_bytes=run.stdout_bytes,
         stderr_bytes=run.stderr_bytes,
-        exit_code=exit_code,
+        exit_code=run.exit_code,
         run_id=run.run_id,
         state=run.state,
         fail_reason=run.fail_reason,
