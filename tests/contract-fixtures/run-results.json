@@ -1,0 +1,201 @@
+{
+  "description": "Recorded run responses and the result each SDK's run() must produce from them. The Python and TypeScript unit suites both replay every case, so the two clients cannot drift apart on how they read the run contract. Expected fields use the wire names; each suite maps them to its own spelling.",
+  "cases": [
+    {
+      "name": "a completed run reports its session",
+      "options": {},
+      "responses": [
+        {
+          "method": "POST",
+          "path": "/v1/vms/vm_1/runs",
+          "body": {
+            "run_id": "run_1",
+            "session_id": "ses_1",
+            "state": "completed",
+            "exit_code": 0,
+            "stdout": "hi\n",
+            "stdout_encoding": "utf-8",
+            "stderr": "",
+            "stderr_encoding": "utf-8"
+          }
+        }
+      ],
+      "expect": {
+        "type": "completed",
+        "run_id": "run_1",
+        "session_id": "ses_1",
+        "state": "completed",
+        "exit_code": 0,
+        "stdout": "hi\n",
+        "stderr": "",
+        "fail_reason": null
+      }
+    },
+    {
+      "name": "base64 output is decoded",
+      "options": {},
+      "responses": [
+        {
+          "method": "POST",
+          "path": "/v1/vms/vm_1/runs",
+          "body": {
+            "run_id": "run_1",
+            "session_id": "ses_1",
+            "state": "completed",
+            "exit_code": 3,
+            "stdout": "b2s=",
+            "stdout_encoding": "base64",
+            "stderr": "oops",
+            "stderr_encoding": "utf-8"
+          }
+        }
+      ],
+      "expect": {
+        "type": "completed",
+        "run_id": "run_1",
+        "session_id": "ses_1",
+        "state": "completed",
+        "exit_code": 3,
+        "stdout": "ok",
+        "stderr": "oops",
+        "fail_reason": null
+      }
+    },
+    {
+      "name": "a negative exit code is a failed run",
+      "options": {},
+      "responses": [
+        {
+          "method": "POST",
+          "path": "/v1/vms/vm_1/runs",
+          "body": {
+            "run_id": "run_1",
+            "session_id": "ses_1",
+            "state": "completed",
+            "exit_code": -1,
+            "stdout": "",
+            "stdout_encoding": "utf-8",
+            "stderr": "",
+            "stderr_encoding": "utf-8",
+            "fail_reason": "the VM became unavailable"
+          }
+        }
+      ],
+      "expect": {
+        "type": "completed",
+        "run_id": "run_1",
+        "session_id": "ses_1",
+        "state": "failed",
+        "exit_code": -1,
+        "stdout": "",
+        "stderr": "",
+        "fail_reason": "the VM became unavailable"
+      }
+    },
+    {
+      "name": "time_to_background 0 returns the ack",
+      "options": { "time_to_background": 0 },
+      "responses": [
+        {
+          "method": "POST",
+          "path": "/v1/vms/vm_1/runs",
+          "body": { "run_id": "run_1", "session_id": "ses_1", "state": "running" }
+        }
+      ],
+      "expect": {
+        "type": "background",
+        "run_id": "run_1",
+        "session_id": "ses_1",
+        "state": "running"
+      }
+    },
+    {
+      "name": "a backgrounded run is polled to completion and keeps its session",
+      "options": {},
+      "responses": [
+        {
+          "method": "POST",
+          "path": "/v1/vms/vm_1/runs",
+          "body": { "run_id": "run_1", "session_id": "ses_1", "state": "running" }
+        },
+        {
+          "method": "GET",
+          "path": "/v1/vms/vm_1/runs/run_1",
+          "body": {
+            "run_id": "run_1",
+            "session_id": "ses_1",
+            "state": "running",
+            "started_at": "2026-01-01T00:00:00Z",
+            "exit_code": null,
+            "stdout": "",
+            "stdout_encoding": "utf-8",
+            "stderr": "",
+            "stderr_encoding": "utf-8"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/v1/vms/vm_1/runs/run_1",
+          "body": {
+            "run_id": "run_1",
+            "session_id": "ses_1",
+            "state": "completed",
+            "started_at": "2026-01-01T00:00:00Z",
+            "exit_code": 0,
+            "stdout": "done\n",
+            "stdout_encoding": "utf-8",
+            "stderr": "",
+            "stderr_encoding": "utf-8"
+          }
+        }
+      ],
+      "expect": {
+        "type": "completed",
+        "run_id": "run_1",
+        "session_id": "ses_1",
+        "state": "completed",
+        "exit_code": 0,
+        "stdout": "done\n",
+        "stderr": "",
+        "fail_reason": null
+      }
+    },
+    {
+      "name": "a polled run that failed keeps its reason",
+      "options": {},
+      "responses": [
+        {
+          "method": "POST",
+          "path": "/v1/vms/vm_1/runs",
+          "body": { "run_id": "run_1", "session_id": "ses_1", "state": "running" }
+        },
+        {
+          "method": "GET",
+          "path": "/v1/vms/vm_1/runs/run_1",
+          "body": {
+            "run_id": "run_1",
+            "session_id": "ses_1",
+            "state": "failed",
+            "started_at": "2026-01-01T00:00:00Z",
+            "exit_code": -1,
+            "stdout": "partial",
+            "stdout_encoding": "utf-8",
+            "stderr": "",
+            "stderr_encoding": "utf-8",
+            "fail_reason": "the VM became unavailable"
+          }
+        }
+      ],
+      "expect": {
+        "type": "completed",
+        "run_id": "run_1",
+        "session_id": "ses_1",
+        "state": "failed",
+        "exit_code": -1,
+        "stdout": "partial",
+        "stderr": "",
+        "fail_reason": "the VM became unavailable"
+      }
+    }
+  ]
+}

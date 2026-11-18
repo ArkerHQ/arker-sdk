@@ -6,7 +6,7 @@ import { validateHttpError, validateFileError } from "./generated/error-validato
  * Arker endpoints, or pass baseUrl directly for a custom endpoint.
  */
 
-import { runPollBudgetMs } from "./internal/run-poll.js";
+import { RUN_POLL_MARGIN_MS, runPollBudgetMs } from "./internal/run-poll.js";
 import type { components, operations } from "./generated/api-types.js";
 
 type ApiSchema<Name extends keyof components["schemas"]> = components["schemas"][Name];
@@ -1073,7 +1073,7 @@ export class VM {
    * Run `command` in this VM via `POST /v1/vms/{id}/runs`.
    *
    * Synchronous by default. If the run outlives the server sync window
-   * (`time_to_background`, default 120s) the API returns a background ack
+   * (`time_to_background`, default 300s) the API returns a background ack
    * with a `run_id`; run() then transparently polls {@link getRun} until the
    * run reaches a terminal state and resolves to the completed run - so a
    * synchronous caller always receives the final result. Polling is bounded
@@ -2212,6 +2212,7 @@ function runToCompletedResult(run: RunRecord): CompletedRunResult {
     stderrBytes: run.stderrBytes,
     exitCode: run.exit_code ?? (run.state === "completed" ? 0 : 1),
     failReason: run.fail_reason ?? null,
+    sessionId: run.session_id ?? null,
   };
 }
 
@@ -2279,6 +2280,9 @@ async function requestJson<T>(
           text.slice(0, 300) || `HTTP ${status}`,
           status,
         );
+      }
+      if (!isObject(payload)) {
+        throw new ArkerError("internal", "response must be a JSON object", status);
       }
 
       return payload as T;
@@ -2356,8 +2360,10 @@ function retryDelay(retry: RetryConfig, attempt: number, error?: ArkerError): nu
   // The server's hint beats backoff, bounded by an explicitly configured
   // maxDelayMs - the caller's latency budget outranks the server. The DEFAULT
   // max only shapes backoff; applying it here would neuter real capacity waits.
-  const hint = error?.body && "retry_after_seconds" in error.body
-    ? wireRetryAfter(error.body.retry_after_seconds) : undefined;
+  // Read from the raw envelope: the hint is on every typed error, including
+  // codes newer than the schema this SDK validates bodies against.
+  const envelope = error?.raw ?? error?.body;
+  const hint = isObject(envelope) ? wireRetryAfter(envelope.retry_after_seconds) : undefined;
   if (hint !== undefined) {
     return Math.min(hint * 1000, retry.hintCapMs ?? Number.POSITIVE_INFINITY) + jitter(retry.jitterMs);
   }
@@ -2525,9 +2531,11 @@ function loadHttp2(): Promise<Http2Module | null> {
   })());
 }
 
-// Must exceed the server's 120s sync window, or the request is torn down just
-// as the background ack arrives and run() never gets to poll.
-const HTTP2_REQUEST_TIMEOUT_MS = 300_000;
+// The contract's longest sync window (`time_to_background`). A request must
+// outlive it, or it is torn down just as the background ack arrives and run()
+// never gets to poll.
+const MAX_TIME_TO_BACKGROUND_MS = 300_000;
+const HTTP2_REQUEST_TIMEOUT_MS = MAX_TIME_TO_BACKGROUND_MS + RUN_POLL_MARGIN_MS;
 const BUN_RUNTIME = Boolean((globalThis as unknown as {
   process?: { versions?: { bun?: string } };
 }).process?.versions?.bun);

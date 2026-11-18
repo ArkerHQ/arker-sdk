@@ -2947,3 +2947,73 @@ await testBuildStepsInheritTheForkQueueingWindow();
 await testBuildStepsOmitTheWindowWhenTheForkHadNone();
 await testForkDockerfileGivesBuildStepsTheQueueingWindow();
 await testAFailedDockerfileBuildDeletesTheVm();
+
+type RunResultFixture = {
+  name: string;
+  options: Record<string, unknown>;
+  responses: Array<{ method: string; path: string; body: unknown }>;
+  expect: Record<string, unknown>;
+};
+
+const RUN_RESULT_FIELDS: Record<string, string> = {
+  type: "type",
+  run_id: "runId",
+  session_id: "sessionId",
+  state: "state",
+  exit_code: "exitCode",
+  stdout: "stdout",
+  stderr: "stderr",
+  fail_reason: "failReason",
+};
+
+async function testRunResultsMatchTheSharedContractFixtures(): Promise<void> {
+  const fixtures = JSON.parse(
+    fs.readFileSync(new URL("../../tests/contract-fixtures/run-results.json", import.meta.url), "utf8"),
+  ) as { cases: RunResultFixture[] };
+  for (const fixture of fixtures.cases) {
+    const fetch = new FakeFetch();
+    for (const response of fixture.responses) {
+      fetch.addJson(
+        (method, url) => method === response.method && url.endsWith(response.path),
+        200,
+        response.body,
+      );
+    }
+    const result = (await client(fetch).vm("vm_1").run("true", fixture.options)) as unknown as Record<string, unknown>;
+    const actual = Object.fromEntries(
+      Object.keys(fixture.expect).map((field) => [field, result[RUN_RESULT_FIELDS[field]!]]),
+    );
+    assert.deepEqual(actual, fixture.expect, fixture.name);
+    assert.equal(fetch.calls.length, fixture.responses.length, `${fixture.name}: every recorded response is consumed`);
+  }
+}
+
+async function testRetryHintIsHonouredOnAnUnvalidatedErrorBody(): Promise<void> {
+  // A code this SDK's schema does not know yet still carries the hint.
+  const fetchImpl = new FakeFetch();
+  const getVm = (m: string, u: string) => m === "GET" && u.endsWith("/v1/vms/vm-1");
+  fetchImpl.addJson(getVm, 503, { error: { code: "unavailable", message: "busy", retry_after_seconds: 1 } });
+  fetchImpl.addJson(getVm, 200, { vm_id: "vm-1", state: "running" });
+  const arker = new Arker({
+    apiKey: "k",
+    baseUrl: "http://x",
+    fetch: fetchImpl.fetch,
+    retry: { attempts: 2, baseDelayMs: 1, jitterMs: 0 },
+  });
+  const started = Date.now();
+  await arker.getVm("vm-1");
+  assert.ok(Date.now() - started >= 950, "the one-second hint must drive the sleep");
+}
+
+async function testNonObjectSuccessBodyIsRejected(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson((m, u) => m === "GET" && u.endsWith("/v1/vms/vm-1"), 200, ["not", "an", "object"]);
+  await assert.rejects(
+    client(fetch).getVm("vm-1"),
+    (error: unknown) => error instanceof ArkerError && error.code === "internal" && error.status === 200,
+  );
+}
+
+await testRunResultsMatchTheSharedContractFixtures();
+await testRetryHintIsHonouredOnAnUnvalidatedErrorBody();
+await testNonObjectSuccessBodyIsRejected();
