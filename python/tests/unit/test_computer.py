@@ -941,8 +941,23 @@ def test_removed_background_argument_is_rejected() -> None:
         client().vm("vm_1").run("sleep 999", background=True)  # type: ignore[call-arg]
 
 
-def test_run_sends_policies() -> None:
+def test_run_applies_policies_with_update_before_the_command() -> None:
     t = FakeTransport()
+    t.add_json(
+        lambda method, url: method == "PATCH" and url.endswith("/v1/vms/vm_1"),
+        200,
+        {
+            "vm_id": "vm_1",
+            "owner_org_id": "owner",
+            "created_at": "now",
+            "description": None,
+            "public": False,
+            "state": "idle",
+            "sessions": [],
+            "resources": {"vcpu": 2, "memory_mib": 1024, "disk_mib": 4096},
+            "network": {},
+        },
+    )
     t.add_json(
         lambda method, url: method == "POST" and url.endswith("/v1/vms/vm_1/runs"),
         200,
@@ -973,10 +988,9 @@ def test_run_sends_policies() -> None:
     with use_transport(t):
         client().vm("vm_1").run("curl https://example.com", policies=policies)
 
-    assert json.loads(t.calls[0]["body"]) == {
-        "command": "curl https://example.com",
-        "policies": policies,
-    }
+    assert [call["method"] for call in t.calls] == ["PATCH", "POST"]
+    assert json.loads(t.calls[0]["body"]) == {"policies": policies}
+    assert json.loads(t.calls[1]["body"]) == {"command": "curl https://example.com"}
 
 
 @pytest.mark.parametrize(

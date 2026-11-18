@@ -833,7 +833,13 @@ class VM:
 
         ``idempotency_key`` asks the server to deduplicate the command. It does
         not make an ambiguous network failure safe to retry automatically.
+
+        ``policies`` is deprecated: set the policy with :meth:`update` first.
+        It is sent with :meth:`update` before the command, which runs only
+        once the policy is applied, and the change is kept afterwards.
         """
+        if policies is not None:
+            self.update(policies=policies)
         body = RunRequest(
             command=command,
             session_id=session_id,
@@ -844,7 +850,6 @@ class VM:
             end_symbol=end_symbol,
             end_after_all_subprocesses=end_after_all_subprocesses,
             signal=signal,
-            policies=policies,
         )
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
         result = _run_response(
