@@ -2037,7 +2037,10 @@ function clampPtyDimension(value: number): number {
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  // A loop, not `/\/+$/`, which takes quadratic time on a long run of slashes.
+  let end = baseUrl.trimEnd().length;
+  while (end > 0 && baseUrl[end - 1] === "/") end--;
+  const trimmed = baseUrl.slice(0, end).trim();
   if (!trimmed) throw new Error("baseUrl must not be empty");
   return trimmed;
 }

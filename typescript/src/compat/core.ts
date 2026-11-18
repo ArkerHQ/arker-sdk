@@ -127,7 +127,7 @@ function entryFrom(line: string): Entry {
   const [kind, size, mode, owner, group, modified, target, ...rest] = line.split("\t");
   const path = rest.join("\t");
   return {
-    name: path.replace(/\/+$/, "").split("/").pop() || path,
+    name: withoutTrailingSlashes(path).split("/").pop() || path,
     path,
     isDir: kind === "d",
     size: Number(size),
@@ -305,6 +305,13 @@ export function guardUnsupported<T extends object>(
       throw unsupported(errors, `${path}.${prop}`, hints[prop]);
     },
   });
+}
+
+/** A loop, not `/\/+$/`, which takes quadratic time on a long run of slashes. */
+export function withoutTrailingSlashes(text: string): string {
+  let end = text.length;
+  while (end > 0 && text[end - 1] === "/") end--;
+  return text.slice(0, end);
 }
 
 function env(key: string): string | undefined {
@@ -1493,7 +1500,7 @@ export class CompatGit {
     args.push("--", url, ...(path ? [path] : []));
     const result = await this.run(args, undefined, rest);
     if (commit) {
-      const target = path ?? url.replace(/\/+$/, "").split("/").pop()!.replace(/\.git$/, "");
+      const target = path ?? withoutTrailingSlashes(url).split("/").pop()!.replace(/\.git$/, "");
       await this.run(["checkout", this.#ref(commit)], target, withoutCredentials(rest));
     }
     return result;

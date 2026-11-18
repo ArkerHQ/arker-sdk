@@ -16,6 +16,7 @@ import {
   permissions,
   splitAddresses,
   unsupported,
+  withoutTrailingSlashes,
   importOptional,
   newPortAuth,
   rejectOptions,
@@ -399,7 +400,7 @@ function absolute(path: string): string {
 }
 
 function basename(path: string): string {
-  return path.replace(/\/+$/, "").split("/").pop() ?? path;
+  return withoutTrailingSlashes(path).split("/").pop() ?? path;
 }
 
 function entryInfo(entry: Entry): EntryInfo {
