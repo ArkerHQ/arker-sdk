@@ -992,7 +992,7 @@ export interface components {
             ports?: (number | number[])[];
             /** @description IPs or CIDRs. Outbound rules match destination IPs; inbound rules match the caller source IP. */
             ips?: string[];
-            /** @description Label-boundary suffix match on the request host: `github.com` matches `github.com` and `api.github.com`, not `evilgithub.com`. A leading `*.` matches names exactly one label under the rest (`*.github.com` matches `api.github.com`, not `a.b.github.com`); a leading `**.` matches names any depth under it. Neither wildcard matches the name itself: to match only `github.com`, deny `**.github.com` in an earlier rule. Other wildcards are rejected. */
+            /** @description Label-boundary suffix match on the request host: `github.com` matches `github.com` and `api.github.com`, not `evilgithub.com`. A leading `*.` matches names exactly one label under the rest (`*.github.com` matches `api.github.com`, not `a.b.github.com`, and not `github.com` itself). Other wildcards are rejected. */
             hosts?: string[];
             /** @description HTTP methods matched by this rule. */
             methods?: string[];
