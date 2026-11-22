@@ -37,6 +37,7 @@ POLICY_RULES = {
     "ttl": {"type": "schedule", "after_created": 86400, "action": "delete"},
     "end": {"type": "schedule", "at": "2030-01-01T00:00:00Z", "action": "delete"},
     "now": {"type": "schedule", "at": "2020-01-01T00:00:00Z", "action": "suspend"},
+    "daemon": {"type": "runtime", "action": "keep_running"},
 }
 
 
@@ -115,6 +116,8 @@ def test_policy_rules_decode_to_typed_models() -> None:
     assert (rules["nap"].after_last_running_start, rules["nap"].action) == (600, "suspend")
     assert (rules["ttl"].after_created, rules["ttl"].action) == (86400, "delete")
     assert (rules["end"].at, rules["end"].action) == ("2030-01-01T00:00:00Z", "delete")
+    assert isinstance(rules["daemon"], models.RuntimeRule)
+    assert rules["daemon"].action == "keep_running"
 
 
 def test_update_sends_rules_verbatim() -> None:
@@ -139,7 +142,7 @@ def test_typed_inbound_ssh_and_pty_rules_round_trip() -> None:
         match=models.PolicyMatch(via=["ssh"], ssh_keys=[SSH_KEY]),
         action="allow",
     )
-    rules = {"shell": shell, "dev-key": dev_key}
+    rules = {"shell": shell, "dev-key": dev_key, "daemon": models.RuntimeRule(type="runtime", action="keep_running")}
     t = FakeTransport()
     t.add_json(lambda m, u: m == "PATCH", 200, vm_payload("idle"))
     with use_transport(t):
@@ -174,7 +177,9 @@ def test_typed_policy_surface_has_no_withdrawn_shapes() -> None:
         "after_last_running_start",
     }
     _, rule = get_args(models.PolicyRules)
-    assert set(get_args(rule)) == {models.PolicyRule, models.ScheduleRule, models.LifecycleRule}
+    assert set(get_args(rule)) == {models.PolicyRule, models.ScheduleRule, models.LifecycleRule, models.RuntimeRule}
+    assert get_type_hints(models.RuntimeRule)["type"] == Literal["runtime"]
+    assert get_type_hints(models.RuntimeRule)["action"] == Literal["keep_running"]
     assert get_type_hints(models.PolicyRule)["type"] == Literal["outbound", "inbound"]
     for withdrawn in ("ResourcesRule", "WebhookRule", "Webhook"):
         assert not hasattr(models, withdrawn)

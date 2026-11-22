@@ -272,6 +272,7 @@ export type PolicyMatch = ApiSchema<"PolicyMatch">;
 export type PolicyAction = ApiSchema<"PolicyAction">;
 export type PolicyRule = ApiSchema<"PolicyRule">;
 export type ScheduleRule = ApiSchema<"ScheduleRule">;
+export type RuntimeRule = ApiSchema<"RuntimeRule">;
 export type PolicyUpdate = ApiSchema<"PolicyUpdate">;
 export type VmPolicies = ApiSchema<"VmPolicies">;
 export type Rewrite = ApiSchema<"Rewrite">;

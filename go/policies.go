@@ -125,7 +125,8 @@ type LifecycleWhen struct {
 // ExpiresAt and the deprecated Auth. Type "schedule" rules name exactly one
 // clock -- At, AfterCreated or AfterLastRunningStart (seconds) -- and Action
 // "suspend" or "delete". The deprecated type "lifecycle" takes When and
-// Action "delete".
+// Action "delete". Type "runtime" takes Action "keep_running" without a
+// Priority or Match; running compute remains allocated and billed.
 type PolicyRule struct {
 	Type                  string              `json:"type"`
 	Priority              *int                `json:"priority,omitempty"`

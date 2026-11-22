@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   Arker, ArkerError,
-  type PolicyAction, type PolicyRule, type PolicyUpdate, type ScheduleRule, type SessionState, type VmState,
+  type PolicyAction, type PolicyRule, type PolicyUpdate, type RuntimeRule, type ScheduleRule, type SessionState, type VmState,
 } from '../src/index';
 
 const sshKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl dev@laptop';
@@ -23,6 +23,7 @@ const rules = {
   ttl: {type: 'schedule', after_created: 86400, action: 'delete'},
   end: {type: 'schedule', at: '2030-01-01T00:00:00Z', action: 'delete'},
   now: {type: 'schedule', at: '2020-01-01T00:00:00Z', action: 'suspend'},
+  daemon: {type: 'runtime', action: 'keep_running'},
 } satisfies PolicyUpdate['rules'];
 
 // Compile-time: exactly the contract's states and policy shapes.
@@ -43,6 +44,11 @@ const noVia: PolicyRule = {type: 'inbound', priority: 1, match: {via: ['http']},
 const noConnectionState: PolicyRule = {type: 'inbound', priority: 1, match: {connection_state: ['closed']}, action: 'deny'};
 // @ts-expect-error there is no resources rule
 const noResourcesRule: PolicyRule = {type: 'resources', priority: 1, action: 'suspend'};
+// @ts-expect-error runtime rules do not accept network actions
+const noRuntimeAllow: RuntimeRule = {type: 'runtime', action: 'allow'};
+// @ts-expect-error runtime rules do not accept network priorities
+const noRuntimePriority: RuntimeRule = {type: 'runtime', action: 'keep_running', priority: 1};
+void [noRuntimeAllow, noRuntimePriority];
 void [vmStates, sessionStates, verbs, noPendingVm, noScale, noWebhook, noAfterWake, noResourcesRule, noVia, noConnectionState];
 
 type Call = {method: string; url: string; body?: unknown};
