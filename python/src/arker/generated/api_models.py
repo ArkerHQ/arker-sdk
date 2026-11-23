@@ -448,6 +448,35 @@ class VmNetwork:
 
 
 @dataclass(frozen=True)
+class AutoscalingRule:
+    min: int
+    max: int
+    target_utilization: float
+    window_seconds: int
+
+
+@dataclass(frozen=True)
+class DiskAutoscalingRule:
+    max: int
+    target_utilization: float
+    window_seconds: int
+
+
+@dataclass(frozen=True)
+class ResourcesAutoscaling:
+    vcpu: AutoscalingRule | None = None
+    memory_mib: AutoscalingRule | None = None
+    disk_mib: DiskAutoscalingRule | None = None
+
+
+@dataclass(frozen=True)
+class ResourcesAutoscalingUpdate:
+    vcpu: AutoscalingRule | None = None
+    memory_mib: AutoscalingRule | None = None
+    disk_mib: DiskAutoscalingRule | None = None
+
+
+@dataclass(frozen=True)
 class GpuResourceBand:
     min: int
     max: int
@@ -603,6 +632,7 @@ OperationFailureReason: TypeAlias = Literal[
 
 
 Feature: TypeAlias = Literal[
+    'resources_autoscaling',
     'durability',
     'nested_virtualization',
     'diskless',
@@ -1745,6 +1775,7 @@ class VmMetricsPoint:
 
 
 EventAction: TypeAlias = Literal[
+    'vm_autoscale',
     'run',
     'fork',
     'sync',
@@ -2488,6 +2519,7 @@ class ForkRequest1:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    resources_autoscaling: ResourcesAutoscalingUpdate | None = None
 
 
 @dataclass(frozen=True)
@@ -2514,6 +2546,7 @@ class ForkRequest2:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    resources_autoscaling: ResourcesAutoscalingUpdate | None = None
 
 
 @dataclass(frozen=True)
@@ -2540,6 +2573,7 @@ class ForkRequest3:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    resources_autoscaling: ResourcesAutoscalingUpdate | None = None
 
 
 @dataclass(frozen=True)
@@ -2566,6 +2600,7 @@ class ForkRequest4:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    resources_autoscaling: ResourcesAutoscalingUpdate | None = None
 
 
 @dataclass(frozen=True)
@@ -2592,6 +2627,7 @@ class ForkRequest5:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    resources_autoscaling: ResourcesAutoscalingUpdate | None = None
 
 
 @dataclass(frozen=True)
@@ -2618,6 +2654,7 @@ class ForkRequest6:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    resources_autoscaling: ResourcesAutoscalingUpdate | None = None
 
 
 ForkRequest: TypeAlias = (
@@ -2657,6 +2694,7 @@ class PatchVmRequest:
     resources: ResourcesInput | None = None
     ssh_public_keys: SshKeysUpdate | list[str] | None = None
     policies: PolicyUpdate | None = None
+    resources_autoscaling: ResourcesAutoscalingUpdate | None = None
 
 
 @dataclass(frozen=True)
@@ -2697,6 +2735,7 @@ class Vm:
     platform: str | None = None
     compatible_platforms: list[CompatiblePlatform] | None = None
     pool_id: str | None = None
+    resources_autoscaling: ResourcesAutoscaling | None = None
 
 
 @dataclass(frozen=True)

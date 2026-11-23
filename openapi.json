@@ -6029,6 +6029,9 @@
             "type": "string",
             "minLength": 1,
             "description": "A command to start on the new VM once it is forked, as a background run on its default session: the response is the VM, and the run is listed with `GET /v1/vms/{id}/runs`."
+          },
+          "resources_autoscaling": {
+            "$ref": "#/components/schemas/ResourcesAutoscalingUpdate"
           }
         },
         "not": {
@@ -6356,6 +6359,9 @@
             "type": "string",
             "format": "uuid",
             "description": "The pool the VM belongs to, set when the VM is created and never changed. Absent when the VM is in no pool."
+          },
+          "resources_autoscaling": {
+            "$ref": "#/components/schemas/ResourcesAutoscaling"
           }
         }
       },
@@ -8203,6 +8209,124 @@
           }
         }
       },
+      "AutoscalingRule": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "min",
+          "max",
+          "target_utilization",
+          "window_seconds"
+        ],
+        "properties": {
+          "min": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Smallest permitted allocation, in vCPUs or MiB for the selected resource."
+          },
+          "max": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Largest permitted allocation, in vCPUs or MiB for the selected resource."
+          },
+          "target_utilization": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "description": "Desired fraction of the allocated resource in use, greater than zero and at most one."
+          },
+          "window_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400,
+            "description": "Seconds of measured running time used to evaluate the rule."
+          }
+        }
+      },
+      "DiskAutoscalingRule": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "max",
+          "target_utilization",
+          "window_seconds"
+        ],
+        "properties": {
+          "max": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Largest permitted root disk size in MiB."
+          },
+          "target_utilization": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "description": "Desired fraction of the allocated resource in use, greater than zero and at most one."
+          },
+          "window_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400,
+            "description": "Seconds of measured running time used to evaluate the rule."
+          }
+        }
+      },
+      "ResourcesAutoscaling": {
+        "description": "Autoscaling rules for CPU, memory and disk. A fork inherits the source VM’s rule for each resource omitted from the request.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "vcpu": {
+            "$ref": "#/components/schemas/AutoscalingRule"
+          },
+          "memory_mib": {
+            "$ref": "#/components/schemas/AutoscalingRule"
+          },
+          "disk_mib": {
+            "$ref": "#/components/schemas/DiskAutoscalingRule"
+          }
+        }
+      },
+      "ResourcesAutoscalingUpdate": {
+        "description": "Update named resource rules. Null removes a rule and omitted dimensions retain their settings.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "vcpu": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AutoscalingRule"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replacement vCPU rule. Set to null to disable it or omit it to keep the current rule."
+          },
+          "memory_mib": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AutoscalingRule"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replacement memory rule. Set to null to disable it or omit it to keep the current rule."
+          },
+          "disk_mib": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiskAutoscalingRule"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replacement root disk rule. Set to null to disable it or omit it to keep the current rule."
+          }
+        }
+      },
       "PatchVmRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -8256,6 +8380,9 @@
                 "type": "null"
               }
             ]
+          },
+          "resources_autoscaling": {
+            "$ref": "#/components/schemas/ResourcesAutoscalingUpdate"
           }
         }
       },
@@ -8602,6 +8729,7 @@
       "Feature": {
         "type": "string",
         "enum": [
+          "resources_autoscaling",
           "durability",
           "nested_virtualization",
           "diskless",
@@ -13690,6 +13818,7 @@
       "EventAction": {
         "type": "string",
         "enum": [
+          "vm_autoscale",
           "run",
           "fork",
           "sync",
