@@ -494,8 +494,12 @@ class Arker:
         vms = []
         for item in payload.get("vms", []):
             info = _vm_info(item)
-            placed = info.provider and info.region
-            base_url = _compute_base_url(info.provider, info.region) if placed else self.base_url
+            if self._base_url and self._base_url == self._control_base_url:
+                base_url = self._base_url
+            elif info.provider and info.region:
+                base_url = _compute_base_url(info.provider, info.region)
+            else:
+                base_url = self.base_url
             vms.append(VM(self, info.vm_id, base_url, info))
         return VmList(vms=vms, next_cursor=_optional_str(payload.get("next_cursor")))
 

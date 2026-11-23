@@ -298,10 +298,10 @@ func (c *Client) ListVMs(ctx context.Context, opts ListVMsOptions) (*VMList, err
 	}
 	list := &VMList{VMs: make([]*VM, 0, len(out.VMs)), NextCursor: out.NextCursor}
 	for i := range out.VMs {
-		// This listing spans regions, so a placed VM is addressed at its own
-		// regional endpoint rather than the client's.
+		// A shared compute/control endpoint owns routing; a separate control
+		// plane can list VMs across regional endpoints.
 		base := c.baseURL
-		if info := &out.VMs[i]; info.Provider != "" && info.Region != "" {
+		if info := &out.VMs[i]; c.baseURL != c.controlURL && info.Provider != "" && info.Region != "" {
 			base = computeBaseURL(info.Provider, info.Region)
 		}
 		list.VMs = append(list.VMs, c.newVM(&out.VMs[i], base))

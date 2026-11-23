@@ -758,6 +758,25 @@ async function testDiscoverRegionsRequiresNoConfiguredClient(): Promise<void> {
   assert.equal(fetch.calls[0]?.headers.authorization, undefined);
 }
 
+async function testListedVmPreservesASharedConfiguredEndpoint(): Promise<void> {
+  const fetch = new FakeFetch();
+  const record = {
+    vm_id: "vm_placed", owner_org_id: "owner", created_at: "now",
+    provider: "aws", region: "us-west-2", description: "saved state", immutable: true,
+  };
+  fetch.addJson((method, url) => method === "GET" && url === "https://shared.invalid/api/v1/vms", 200, { vms: [record] });
+  fetch.addJson((method, url) => method === "GET" && url === "https://shared.invalid/api/v1/vms/vm_placed", 200, record);
+  const arker = new Arker({
+    apiKey: "ark_live_test", baseUrl: "https://shared.invalid/api/",
+    controlBaseUrl: "https://shared.invalid/api", fetch: fetch.fetch, retry: false,
+  });
+  const { vms } = await arker.listVms();
+  assert.equal(vms[0]?.baseUrl, "https://shared.invalid/api");
+  const refreshed = await vms[0]!.refresh();
+  assert.equal(refreshed.description, "saved state");
+  assert.equal(refreshed.immutable, true);
+}
+
 async function testListedVmUsesItsPlacementEndpoint(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(
@@ -796,6 +815,17 @@ async function testListedVmUsesItsPlacementEndpoint(): Promise<void> {
   const { vms } = await arker.listVms();
   assert.equal(vms[0]?.baseUrl, "https://provider-two-region-two.arker.ai/api");
   await vms[0]!.run("printf ok");
+}
+
+async function testControlOnlyListedVmUsesItsPlacementEndpoint(): Promise<void> {
+  const fetch = new FakeFetch();
+  const record = { vm_id: "vm_placed", owner_org_id: "owner", created_at: "now", provider: "aws", region: "us-west-2" };
+  fetch.addJson((method, url) => method === "GET" && url === "https://control.invalid/api/v1/vms", 200, { vms: [record] });
+  fetch.addJson((method, url) => method === "GET" && url === "https://aws-us-west-2.arker.ai/api/v1/vms/vm_placed", 200, record);
+  const arker = new Arker({ apiKey: "ark_live_test", controlBaseUrl: "https://control.invalid/api", fetch: fetch.fetch, retry: false });
+  const { vms } = await arker.listVms();
+  assert.equal(vms[0]?.baseUrl, "https://aws-us-west-2.arker.ai/api");
+  await vms[0]!.refresh();
 }
 
 function testExplicitVmHandleUsesPlacementEndpoint(): void {
@@ -1326,7 +1356,9 @@ await testPoolsV2();
 await testPoolRefusals();
 await testPoolQuotaIsNotRetried();
 await testDiscoverRegionsRequiresNoConfiguredClient();
+await testListedVmPreservesASharedConfiguredEndpoint();
 await testListedVmUsesItsPlacementEndpoint();
+await testControlOnlyListedVmUsesItsPlacementEndpoint();
 testExplicitVmHandleUsesPlacementEndpoint();
 await testListRunsUsesControlPlaneAndFilters();
 await testListVmsPreservesForkLimitFields();

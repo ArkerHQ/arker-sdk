@@ -164,6 +164,40 @@ func TestPlacementDerivesTheRegionalURL(t *testing.T) {
 	}
 }
 
+func TestListedVMsPreserveASharedConfiguredEndpoint(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/v1/vms":
+			fmt.Fprint(w, `{"vms":[{"vm_id":"vm_placed","provider":"aws","region":"us-west-2"}]}`)
+		case "/v1/vms/vm_placed":
+			fmt.Fprint(w, `{"vm_id":"vm_placed","provider":"aws","region":"us-west-2"}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	c, err := arker.New(arker.Options{APIKey: "k", BaseURL: server.URL + "/", ControlBaseURL: server.URL, Retry: fastRetry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := c.ListVMs(context.Background(), arker.ListVMsOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.VMs) != 1 || listed.VMs[0].BaseURL() != server.URL {
+		t.Fatalf("listed handles escaped configured endpoint: %+v", listed.VMs)
+	}
+	if err := listed.VMs[0].Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(paths, []string{"/v1/vms", "/v1/vms/vm_placed"}) {
+		t.Fatalf("unexpected requests: %v", paths)
+	}
+}
+
 func TestListedVMsCarryTheirOwnEndpoint(t *testing.T) {
 	// ListVMs aggregates across regions, so a returned handle must address the
 	// VM's OWN region. Reusing the client's endpoint would send every call for
@@ -180,6 +214,24 @@ func TestListedVMsCarryTheirOwnEndpoint(t *testing.T) {
 	}
 	if got := list.VMs[0].BaseURL(); got != "https://gcp-us-central1.arker.ai/api" {
 		t.Fatalf("remote VM bound to %q", got)
+	}
+}
+
+func TestControlOnlyListedVMsCarryTheirOwnEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"vms":[{"vm_id":"vm_far","provider":"gcp","region":"us-central1"}]}`)
+	}))
+	defer server.Close()
+	c, err := arker.New(arker.Options{APIKey: "k", ControlBaseURL: server.URL, Retry: fastRetry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := c.ListVMs(context.Background(), arker.ListVMsOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.VMs) != 1 || listed.VMs[0].BaseURL() != "https://gcp-us-central1.arker.ai/api" {
+		t.Fatalf("control-only listing lost placement: %+v", listed.VMs)
 	}
 }
 
