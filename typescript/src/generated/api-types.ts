@@ -1143,6 +1143,7 @@ export interface components {
             pool_name?: string;
             /** @description A command to start on the new VM once it is forked, as a background run on its default session: the response is the VM, and the run is listed with `GET /v1/vms/{id}/runs`. */
             command?: string;
+            resources_autoscaling?: components["schemas"]["ResourcesAutoscalingUpdate"];
         } & ({
             source_vm_id: string;
             source_vm_name?: null;
@@ -1279,6 +1280,7 @@ export interface components {
              * @description The pool the VM belongs to, set when the VM is created and never changed. Absent when the VM is in no pool.
              */
             pool_id?: string;
+            resources_autoscaling?: components["schemas"]["ResourcesAutoscaling"];
         };
         ListVmsResponse: {
             /** @description VMs visible to the authenticated caller. */
@@ -1891,6 +1893,39 @@ export interface components {
             /** @description Authorized SSH keys with fingerprints. Returned by GET /v1/vms/{id}; omitted from list responses when empty. */
             ssh_public_keys?: components["schemas"]["SshPublicKeyInfo"][];
         };
+        AutoscalingRule: {
+            /** @description Smallest permitted allocation, in vCPUs or MiB for the selected resource. */
+            min: number;
+            /** @description Largest permitted allocation, in vCPUs or MiB for the selected resource. */
+            max: number;
+            /** @description Desired fraction of the allocated resource in use, greater than zero and at most one. */
+            target_utilization: number;
+            /** @description Seconds of measured running time used to evaluate the rule. */
+            window_seconds: number;
+        };
+        DiskAutoscalingRule: {
+            /** @description Largest permitted root disk size in MiB. */
+            max: number;
+            /** @description Desired fraction of the allocated resource in use, greater than zero and at most one. */
+            target_utilization: number;
+            /** @description Seconds of measured running time used to evaluate the rule. */
+            window_seconds: number;
+        };
+        /** @description Autoscaling rules for CPU, memory and disk. A fork inherits the source VM’s rule for each resource omitted from the request. */
+        ResourcesAutoscaling: {
+            vcpu?: components["schemas"]["AutoscalingRule"];
+            memory_mib?: components["schemas"]["AutoscalingRule"];
+            disk_mib?: components["schemas"]["DiskAutoscalingRule"];
+        };
+        /** @description Update named resource rules. Null removes a rule and omitted dimensions retain their settings. */
+        ResourcesAutoscalingUpdate: {
+            /** @description Replacement vCPU rule. Set to null to disable it or omit it to keep the current rule. */
+            vcpu?: components["schemas"]["AutoscalingRule"] | null;
+            /** @description Replacement memory rule. Set to null to disable it or omit it to keep the current rule. */
+            memory_mib?: components["schemas"]["AutoscalingRule"] | null;
+            /** @description Replacement root disk rule. Set to null to disable it or omit it to keep the current rule. */
+            disk_mib?: components["schemas"]["DiskAutoscalingRule"] | null;
+        };
         PatchVmRequest: {
             /** @description Replace the VM description. Null or a blank string clears it; omit this field to leave it unchanged. */
             description?: string | null;
@@ -1902,6 +1937,7 @@ export interface components {
             ssh_public_keys?: components["schemas"]["SshKeysUpdate"] | string[];
             /** @description A change to the VM's network policy. Rules and secrets named are written or removed; the rest are kept, so concurrent changes to different rules do not overwrite each other. Omit it to leave the policy unchanged. If the policy cannot be stored and applied, the request fails. Changing only `policies` is allowed while the organization's billing is restricted. */
             policies?: components["schemas"]["PolicyUpdate"] | null;
+            resources_autoscaling?: components["schemas"]["ResourcesAutoscalingUpdate"];
         };
         /** @description One platform this source can be forked onto, with the resource limits that apply there. This is the authoritative per-platform record: when an entry carries bounds they win over the flat `min_*`/`max_*` fields on the VM, which are a single-platform convenience projection of the same data. CPU, memory, and disk limits come from the source VM; GPU limits come from the platform catalog. */
         CompatiblePlatform: {
@@ -2002,7 +2038,7 @@ export interface components {
         /** @enum {string} */
         OperationFailureReason: "image_pull_failed" | "image_conversion_failed" | "command_failed" | "unexpected_interpreter" | "deadline_exceeded";
         /** @enum {string} */
-        Feature: "durability" | "nested_virtualization" | "diskless" | "filesystem_only_fork" | "shared_filesystem" | "persistent_pty" | "network_policy" | "public_ingress" | "guest_control" | "platform" | "systemd" | "restore" | "vm_metrics" | "vm_update" | "resize" | "presigned_sync" | "sync_manifest" | "live_run_fork";
+        Feature: "resources_autoscaling" | "durability" | "nested_virtualization" | "diskless" | "filesystem_only_fork" | "shared_filesystem" | "persistent_pty" | "network_policy" | "public_ingress" | "guest_control" | "platform" | "systemd" | "restore" | "vm_metrics" | "vm_update" | "resize" | "presigned_sync" | "sync_manifest" | "live_run_fork";
         /** @enum {string} */
         WorkState: "not_started" | "stopped" | "continuing" | "unknown";
         /** @enum {string} */
@@ -3809,7 +3845,7 @@ export interface components {
          * @description What an event records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection; `sign_in` a member's session entering the organization, by signing in or switching to it.
          * @enum {string}
          */
-        EventAction: "run" | "fork" | "sync" | "delete" | "signal" | "vm_update" | "vm_suspend" | "policies_update" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "inbound_request" | "outbound_request" | "ssh_session" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_update" | "member_remove" | "org_rename" | "member_add" | "member_invite" | "member_invite_revoke" | "org_create" | "org_delete" | "sign_in" | "sign_out" | "terms_accept" | "billing_checkout" | "payment_method_update" | "credit_grant" | "quota_update";
+        EventAction: "vm_autoscale" | "run" | "fork" | "sync" | "delete" | "signal" | "vm_update" | "vm_suspend" | "policies_update" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "inbound_request" | "outbound_request" | "ssh_session" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_update" | "member_remove" | "org_rename" | "member_add" | "member_invite" | "member_invite_revoke" | "org_create" | "org_delete" | "sign_in" | "sign_out" | "terms_accept" | "billing_checkout" | "payment_method_update" | "credit_grant" | "quota_update";
         /** @enum {string} */
         EventState: "running" | "completed" | "failed" | "cancelled";
         /** @enum {string} */

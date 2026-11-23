@@ -12,7 +12,15 @@ import httpx2 as httpx
 import pytest
 
 import arker.computer as sdk
-from arker.generated.api_models import PolicyDoc, PolicyEntry, PolicyMatch
+from arker.generated.api_models import (
+    AutoscalingRule,
+    DiskAutoscalingRule,
+    PolicyDoc,
+    PolicyEntry,
+    PolicyMatch,
+    PolicyUpdate,
+    ResourcesAutoscalingUpdate,
+)
 
 UNKNOWN_OUTCOME_ERROR_BODY = {
     "error": {
@@ -436,6 +444,70 @@ def test_vm_fork_uses_its_id_and_attached_endpoint() -> None:
     assert json.loads(t.calls[0]["body"]) == {
         "resources": {"vcpu": 4},
         "source_vm_id": "vm_source",
+    }
+
+
+CPU_AUTOSCALING_RULE = {"min": 2, "max": 8, "target_utilization": 0.6, "window_seconds": 5}
+SPARSE_AUTOSCALING = {"vcpu": CPU_AUTOSCALING_RULE, "memory_mib": None}
+POLICY_REMOVALS = {"rules": {"access": None}, "secrets": {"OLD_TOKEN": None}}
+DISK_AUTOSCALING_RULE = {"max": 32768, "target_utilization": 0.7, "window_seconds": 15}
+
+
+@pytest.fixture(params=[True, False], ids=["typed", "mapping"])
+def sparse_updates(request: pytest.FixtureRequest) -> dict[str, Any]:
+    if request.param:
+        return {
+            "resources_autoscaling": ResourcesAutoscalingUpdate(
+                vcpu=AutoscalingRule(**CPU_AUTOSCALING_RULE), memory_mib=None
+            ),
+            "policies": PolicyUpdate(rules={"access": None}, secrets={"OLD_TOKEN": None}),
+        }
+    return {
+        "resources_autoscaling": {"vcpu": dict(CPU_AUTOSCALING_RULE), "memory_mib": None},
+        "policies": {"rules": {"access": None}, "secrets": {"OLD_TOKEN": None}},
+    }
+
+
+@pytest.fixture
+def fork_transport() -> FakeTransport:
+    transport = FakeTransport()
+    transport.add_json(
+        lambda method, url: method == "POST" and url == "https://test.invalid/api/v1/fork",
+        200,
+        _fork_response("vm_child"),
+    )
+    return transport
+
+
+def test_vm_fork_sends_sparse_updates(fork_transport, sparse_updates) -> None:
+    with use_transport(fork_transport):
+        client().vm("vm_source").fork(**sparse_updates)
+
+    assert json.loads(fork_transport.calls[0]["body"]) == {
+        "source_vm_id": "vm_source",
+        "resources_autoscaling": SPARSE_AUTOSCALING,
+        "policies": POLICY_REMOVALS,
+    }
+
+
+@pytest.mark.parametrize(
+    ("rules", "expected"),
+    [
+        (ResourcesAutoscalingUpdate(), {}),
+        (
+            ResourcesAutoscalingUpdate(disk_mib=DiskAutoscalingRule(**DISK_AUTOSCALING_RULE)),
+            {"disk_mib": DISK_AUTOSCALING_RULE},
+        ),
+    ],
+    ids=["empty", "disk-only"],
+)
+def test_dockerfile_fork_sends_sparse_autoscaling(fork_transport, rules, expected) -> None:
+    with use_transport(fork_transport):
+        client().fork(dockerfile="FROM ubuntu:24.04\n", resources_autoscaling=rules)
+
+    assert json.loads(fork_transport.calls[0]["body"]) == {
+        "image": "ubuntu:24.04",
+        "resources_autoscaling": expected,
     }
 
 
@@ -1233,6 +1305,21 @@ def _patched_vm() -> dict[str, Any]:
 
 def _is_patch_vm(method: str, url: str) -> bool:
     return method == "PATCH" and url.endswith("/v1/vms/vm_1")
+
+
+def test_update_sends_sparse_updates(sparse_updates) -> None:
+    transport = FakeTransport()
+    transport.add_json(_is_patch_vm, 200, _patched_vm())
+
+    with use_transport(transport):
+        client().vm("vm_1").update(vcpu=4, description=None, **sparse_updates)
+
+    assert json.loads(transport.calls[0]["body"]) == {
+        "resources": {"vcpu": 4},
+        "description": None,
+        "resources_autoscaling": SPARSE_AUTOSCALING,
+        "policies": POLICY_REMOVALS,
+    }
 
 
 def test_update_replaces_policies_via_patch() -> None:
