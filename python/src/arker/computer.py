@@ -41,6 +41,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from pydantic import TypeAdapter, ValidationError
 
+from ._unset import UNSET, Unset
 from .generated.api_models import (
     ApiKeyScope,
     BackgroundRunResponse,
@@ -82,6 +83,8 @@ from .generated.api_models import (
     Pool,
     PoolCommitment,
     PtyTicketResponse,
+    ResourcesAutoscaling,
+    ResourcesAutoscalingUpdate,
     ResourcesInput,
     Run,
     RunRequest,
@@ -109,15 +112,10 @@ from .generated.api_models import (
 Model = TypeVar("Model")
 
 
-class _UnsetType:
-    pass
-
-
 class _ExplicitNullType:
     pass
 
 
-_UNSET = _UnsetType()
 _EXPLICIT_NULL = _ExplicitNullType()
 
 CHUNK_SIZE = 4 * 1024 * 1024
@@ -408,6 +406,12 @@ class Arker:
         # Headers, not contract fields: pop both before the body is built, or
         # the server's validator rejects the unknown keys and every fork 400s.
         idempotency_key = _fork_idempotency_key(options.pop("idempotency_key", None), options.pop("idempotency", None))
+        autoscaling = options.get("resources_autoscaling")
+        if isinstance(autoscaling, (ResourcesAutoscalingUpdate, dict)):
+            options["resources_autoscaling"] = _autoscaling_update(autoscaling)
+        policies = options.get("policies")
+        if isinstance(policies, (PolicyUpdate, PolicyDoc)):
+            options["policies"] = _drop_none(_policy_update(policies))
         info = _vm_info(
             self._request(
                 "POST",
@@ -708,6 +712,7 @@ class VM:
     provider: str | None
     network: VmNetwork | None
     resources: VmResources | None
+    resources_autoscaling: ResourcesAutoscaling | None
     max_vcpus: int | None
     max_memory_mib: int | None
     min_memory_mib: int | None
@@ -916,14 +921,18 @@ class VM:
         memory_mib: int | None = None,
         disk_mib: int | None = None,
         vgpu: float | None = None,
-        description: str | _UnsetType | None = _UNSET,
+        description: str | Unset | None = UNSET,
         ssh_public_keys: list[str] | None = None,
         policies: PolicyUpdate | PolicyDoc | dict[str, Any] | None = None,
         immutable: bool | None = None,
+        resources_autoscaling: ResourcesAutoscalingUpdate | dict[str, Any] | None = None,
     ) -> Vm:
         """Update this VM's description, resources, SSH keys, or network
         policy, or make it immutable, via ``PATCH /v1/vms/{id}``. A VM's pool
         is set when it is forked and never changes.
+
+        In ``resources_autoscaling``, omit a resource to keep its rule or
+        pass ``None`` for that resource to clear it.
 
         Pass an empty ``ssh_public_keys`` list to remove all authorized keys.
 
@@ -957,23 +966,19 @@ class VM:
                 disk_mib=disk_mib,
                 vgpu=vgpu,
             )
-        body: PatchVmRequest | dict[str, Any]
-        if description is _UNSET:
-            body = PatchVmRequest(
+        body = _drop_none(
+            PatchVmRequest(
                 resources=resources,
                 ssh_public_keys=ssh_public_keys,
                 policies=_policy_update(policies),
                 immutable=immutable,
             )
-        else:
-            body = {
-                "description": _EXPLICIT_NULL if description is None else description,
-                "resources": resources,
-                "ssh_public_keys": ssh_public_keys,
-                "policies": _policy_update(policies),
-                "immutable": immutable,
-            }
-        payload = self._client._request("PATCH", _vm_path(self.id), body, base_url=self.base_url)
+        )
+        if description is not UNSET:
+            body["description"] = description
+        if resources_autoscaling is not None:
+            body["resources_autoscaling"] = _autoscaling_update(resources_autoscaling)
+        payload = self._client._request("PATCH", _vm_path(self.id), body, base_url=self.base_url, preserve_nulls=True)
         return _vm_info(payload)
 
     def delete(self) -> DeleteVmResponse:
@@ -1927,6 +1932,15 @@ def _policy_update(policies: Any) -> Any:
         else value
         for key, value in policies.items()
         if key not in _READ_ONLY_POLICY_FIELDS
+    }
+
+
+def _autoscaling_update(update: ResourcesAutoscalingUpdate | dict[str, Any]) -> dict[str, Any]:
+    rules = vars(update) if isinstance(update, ResourcesAutoscalingUpdate) else update
+    return {
+        name: dataclasses.asdict(rule) if dataclasses.is_dataclass(rule) and not isinstance(rule, type) else rule
+        for name, rule in rules.items()
+        if rule is not UNSET
     }
 
 
