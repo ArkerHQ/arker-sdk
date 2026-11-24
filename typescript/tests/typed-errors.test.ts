@@ -41,18 +41,15 @@ test('a known error keeps its typed body when the server adds fields', async () 
   });
 });
 
-for (const [hint, expectedMs] of [[{retry_after: 1, retry_after_seconds: 30}, 1000], [{retry_after_seconds: 1}, 1000]] as const) {
+for (const [hint, expectedMs] of [[{retry_after: 1, retry_after_seconds: 30}, 1000], [{retry_after_seconds: 30}, 30_000]] as const) {
   test(`retry waits for ${Object.keys(hint).join(' over ')}`, async () => {
     const unavailable = {...raw, code: 'unavailable', details: undefined, recovery: {work: 'not_started'}, ...hint};
-    let calls = 0;
-    const started = Date.now();
-    const client = new Arker({apiKey: 'k', baseUrl: 'https://test.invalid', retry: {attempts: 2, jitterMs: 0},
-      fetch: (async () => calls++ === 0
-        ? Response.json({error: unavailable}, {status: 503})
-        : Response.json({vm_id: 'vm', deleted: true})) as typeof fetch});
-    await client.vm('vm').delete();
-    const waited = Date.now() - started;
-    assert.ok(waited >= expectedMs - 50 && waited < 10_000, `waited ${waited}ms`);
+    const reader = new Arker({apiKey: 'k', baseUrl: 'https://test.invalid', retry: false,
+      fetch: (async () => Response.json({error: unavailable}, {status: 503})) as typeof fetch});
+    const error = await reader.vm('vm').delete().then(() => undefined, (caught: unknown) => caught);
+    assert.ok(error instanceof ArkerError);
+    const retrying = new Arker({apiKey: 'k', baseUrl: 'https://test.invalid', retry: {attempts: 2, jitterMs: 0}});
+    assert.equal(retrying._retryDelay(0, error), expectedMs);
   });
 }
 

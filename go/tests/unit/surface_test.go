@@ -1012,3 +1012,19 @@ func TestConnectPTYRefusesIdleTimeoutWithItsAlias(t *testing.T) {
 		t.Fatal("IdleTimeout and CancelTTLSecs together must be refused")
 	}
 }
+
+func TestConnectPTYSendsIdleTimeoutAsCancelTTLSecs(t *testing.T) {
+	var query string
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.RawQuery
+		w.WriteHeader(http.StatusTeapot)
+	}, reject(t, "control"))
+
+	opts := arker.PTYOptions{SessionID: "s1", UseTicket: arker.Ptr(false), IdleTimeout: arker.Ptr(600)}
+	if _, err := c.VM("vm_1").ConnectPTY(context.Background(), opts); err == nil {
+		t.Fatal("the test server refuses the upgrade; ConnectPTY must report it")
+	}
+	if query != "cancel_ttl_secs=600" {
+		t.Fatalf("attach query %q, want the idle timeout as cancel_ttl_secs", query)
+	}
+}

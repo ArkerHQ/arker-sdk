@@ -410,8 +410,6 @@ class Arker:
         # Headers, not contract fields: pop both before the body is built, or
         # the server's validator rejects the unknown keys and every fork 400s.
         idempotency_key = _fork_idempotency_key(options.pop("idempotency_key", None), options.pop("idempotency", None))
-        if options.get("resources_autoscaling") is not None:
-            options["resources_autoscaling"] = _without_autoscaling_window(options["resources_autoscaling"])
         info = _vm_info(
             self._request(
                 "POST",
@@ -1410,10 +1408,12 @@ class VM:
         timeout_secs: int | None = None,
     ) -> PatchSessionResponse:
         """Update a session via ``PATCH /v1/vms/{id}/sessions/{sid}``: resize its
-        PTY (``cols``/``rows``) and/or set the idle ``timeout_secs``. Works whether
-        or not a PTY is currently attached - the REST equivalent of
-        :meth:`Pty.resize` (which sends an in-band control frame on the live
-        WebSocket).
+        PTY (``cols``/``rows``). Works whether or not a PTY is currently
+        attached - the REST equivalent of :meth:`Pty.resize` (which sends an
+        in-band control frame on the live WebSocket).
+
+        ``timeout_secs`` has no effect; set a terminal's idle limit with
+        ``idle_timeout`` on :meth:`connect_pty`.
         """
         request = PatchSessionRequest(cols=cols, rows=rows, timeout_secs=timeout_secs)
         payload = self._client._request(
@@ -1487,7 +1487,7 @@ class VM:
             "rows": _clamp_pty_dimension(rows) if rows is not None else None,
             "command": command,
             "persist": persist,
-            # The older wire name: the API still accepts it, and every region understands it.
+            # The older wire name, which every API version accepts.
             "cancel_ttl_secs": int(idle_timeout) if idle_timeout and idle_timeout > 0 else None,
         }
 
@@ -1965,25 +1965,6 @@ def _policy_update(policies: Any) -> Any:
     }
 
 
-def _without_autoscaling_window(rules: Any) -> Any:
-    """Autoscaling rules without ``window_seconds``, which the API ignores:
-    Arker chooses how long it measures each resource."""
-    if dataclasses.is_dataclass(rules) and not isinstance(rules, type):
-        rules = {field.name: getattr(rules, field.name) for field in dataclasses.fields(rules)}
-    if not isinstance(rules, dict):
-        return rules
-    return {
-        resource: (
-            dataclasses.replace(rule, window_seconds=None)
-            if dataclasses.is_dataclass(rule) and not isinstance(rule, type)
-            else {key: value for key, value in rule.items() if key != "window_seconds"}
-            if isinstance(rule, dict)
-            else rule
-        )
-        for resource, rule in rules.items()
-    }
-
-
 def _drop_none(value: Any) -> Any:
     if value is _EXPLICIT_NULL:
         return None
@@ -2239,8 +2220,8 @@ def _mount(payload: dict[str, Any]) -> Mount:
 
 
 def _vm_info(payload: dict[str, Any]) -> Vm:
-    # A VM without autoscaling rules reports `{}`; a region that does not
-    # report the field at all has none either.
+    # A VM without autoscaling rules reports `{}`; an API version that omits
+    # the field has none either.
     return _decode_model(Vm, {"resources_autoscaling": {}, **payload})
 
 

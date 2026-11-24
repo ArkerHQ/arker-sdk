@@ -210,7 +210,7 @@ const VM_METRICS_OPTIONS: OptionSpecs = {
   ...GLOBAL_OPTIONS,
   "started-at-gte": { type: "string" },
   "started-at-lt": { type: "string" },
-  step: { type: "number", min: 0, max: 3600, values: [60, 300, 3600] },
+  step: { type: "string", values: ["60", "300", "3600"] },
 };
 
 const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
@@ -822,7 +822,7 @@ async function cmdVms(args: ParsedArgs, client: Arker): Promise<void> {
       out(await client.vm(id).metrics({
         started_at_gte: args.flags["started-at-gte"] as string | undefined,
         started_at_lt: args.flags["started-at-lt"] as string | undefined,
-        step: numFlag(args, "step") as 60 | 300 | 3600 | undefined,
+        step: args.flags.step === undefined ? undefined : (Number(args.flags.step) as 60 | 300 | 3600),
       }));
       return;
     }
@@ -1673,6 +1673,9 @@ function poolRequestFromArgs(args: ParsedArgs): CreatePoolRequest {
 }
 
 async function cmdShell(args: ParsedArgs, client: Arker): Promise<void> {
+  // Optional auto-cancel: the server destroys the shell after this many seconds
+  // with no terminal I/O - `arker shell <vm> --idle-timeout 600`.
+  const idleTimeout = aliasedNumFlag(args, "idle-timeout", "cancel-ttl");
   // Attach to an explicit VM by id (--vm-id or a positional vm id), otherwise
   // fork a fresh one from an explicit source name.
   let computer: VM;
@@ -1729,9 +1732,6 @@ async function cmdShell(args: ParsedArgs, client: Arker): Promise<void> {
   const rowsFlag = numFlag(args, "rows");
   const cols = colsFlag ?? output.columns ?? 80;
   const rows = rowsFlag ?? output.rows ?? 24;
-  // Optional auto-cancel: the server destroys the shell after this many seconds
-  // with no terminal I/O - `arker shell <vm> --idle-timeout 600`.
-  const idleTimeout = aliasedNumFlag(args, "idle-timeout", "cancel-ttl");
   const pty = await computer.connectPty({
     sessionId,
     cols,
@@ -1948,6 +1948,7 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   "status-max": { placeholder: "<code>", desc: "maximum organization-wide activity status code" },
   "status-min": { placeholder: "<code>", desc: "minimum organization-wide activity status code" },
   timeout: { placeholder: "<seconds>", desc: "exec/kill bound in seconds (omitted or 0 = unbounded)" },
+  "timeout-secs": { placeholder: "<seconds>", desc: "has no effect; use 'arker shell --idle-timeout'" },
   "time-to-background": { placeholder: "<seconds>", desc: "sync window; 0 returns a run id immediately (default 120)" },
   until: { placeholder: "<epoch-seconds>", desc: "include organization-wide activity before this time" },
   vcpu: { placeholder: "<n>", desc: "vCPU count" },

@@ -33,12 +33,14 @@ type CreateSessionRequest struct {
 	Rows    *int              `json:"rows,omitempty"`
 }
 
-// UpdateSessionRequest resizes a session's PTY and/or sets its idle timeout.
-// It works whether or not a PTY is attached -- the REST equivalent of
-// PTY.Resize, which sends an in-band control frame on the live WebSocket.
+// UpdateSessionRequest resizes a session's PTY. It works whether or not a PTY
+// is attached -- the REST equivalent of PTY.Resize, which sends an in-band
+// control frame on the live WebSocket.
 type UpdateSessionRequest struct {
-	Cols        *int `json:"cols,omitempty"`
-	Rows        *int `json:"rows,omitempty"`
+	Cols *int `json:"cols,omitempty"`
+	Rows *int `json:"rows,omitempty"`
+	// Deprecated: has no effect. Set a terminal's idle limit with
+	// PTYOptions.IdleTimeout when attaching.
 	TimeoutSecs *int `json:"timeout_secs,omitempty"`
 }
 

@@ -951,24 +951,6 @@ async function testForkSendsDurableFlag(): Promise<void> {
   );
 }
 
-async function testForkLeavesOutTheAutoscalingWindow(): Promise<void> {
-  const fetch = new FakeFetch();
-  fetch.addJson(
-    (method, url) => method === "POST" && url === "https://test.invalid/api/v1/fork",
-    200,
-    { vm_id: "vm_child", owner_org_id: "owner", created_at: "now", public: false, state: "idle", sessions: [] },
-  );
-
-  await client(fetch).vm("source-vm-id").fork({
-    resources_autoscaling: { vcpu: { min: 1, max: 4, target_utilization: 0.6, window_seconds: 60 }, memory_mib: null },
-  });
-
-  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), {
-    resources_autoscaling: { vcpu: { min: 1, max: 4, target_utilization: 0.6 }, memory_mib: null },
-    source_vm_id: "source-vm-id",
-  });
-}
-
 async function testVmMetricsQueriesItsWindow(): Promise<void> {
   const fetch = new FakeFetch();
   const body = { vm_id: "vm_1", step: 300, started_at: "2026-11-01T00:00:00Z", ended_at: "2026-11-01T01:00:00Z", buckets: [] };
@@ -1363,7 +1345,6 @@ testExplicitVmHandleUsesPlacementEndpoint();
 await testListRunsUsesControlPlaneAndFilters();
 await testListVmsPreservesForkLimitFields();
 await testForkSendsDurableFlag();
-await testForkLeavesOutTheAutoscalingWindow();
 await testVmMetricsQueriesItsWindow();
 await testRunSendsIdempotencyKeyHeader();
 await testRunStatusReturnsRetryCount();

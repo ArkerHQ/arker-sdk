@@ -107,7 +107,7 @@ func (v *VM) ConnectPTY(ctx context.Context, opts PTYOptions) (*PTY, error) {
 	q.numPtr("rows", clampDim(opts.Rows))
 	q.str("command", opts.Command)
 	q.boolPtr("persist", opts.Persist)
-	// The older wire name: the API still accepts it, and every region understands it.
+	// The older wire name, which every API version accepts.
 	if idle := cmp.Or(opts.IdleTimeout, opts.CancelTTLSecs); idle != nil && *idle > 0 {
 		q.num("cancel_ttl_secs", *idle)
 	}

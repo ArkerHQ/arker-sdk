@@ -1244,6 +1244,31 @@ async function testShellSetupUsesPackagedCli(): Promise<void> {
   wss.close();
 }
 
+async function testShellSendsIdleTimeoutAsCancelTtlSecs(): Promise<void> {
+  for (const flag of ["--idle-timeout", "--cancel-ttl"]) {
+    const wss = new WebSocketServer({ noServer: true });
+    let upgradeUrl: string | undefined;
+    await withServer((_req, res) => jsonResponse(res, { vm_id: "vm_1", state: "idle" }), async (baseUrl, server) => {
+      server.on("upgrade", (req, socket, head) => {
+        upgradeUrl = req.url;
+        wss.handleUpgrade(req, socket, head, () => {});
+      });
+      const result = await runCli(baseUrl, ["shell", "--session-id", "session_1", flag, "600", "vm_1"]);
+      assert.equal(result.code, 0, String(result.stderr));
+    }, { http1: true });
+    const query = new URL(upgradeUrl ?? "/", "http://x").searchParams;
+    assert.equal(query.get("cancel_ttl_secs"), "600", flag);
+    assert.equal(query.has("idle_timeout"), false, flag);
+    wss.close();
+  }
+  await withCapturedServer((_request, res) => jsonResponse(res, {}), async (baseUrl, requests) => {
+    const both = await runCli(baseUrl, ["shell", "--idle-timeout", "1", "--cancel-ttl", "2", "vm_1"]);
+    assert.equal(both.code, 1);
+    assert.match(String(both.stderr), /pass --idle-timeout or --cancel-ttl, not both/);
+    assert.equal(requests.length, 0);
+  });
+}
+
 async function testShellRequiresVmOrSourceBeforeRequest(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, {}), async (baseUrl, requests) => {
     const result = await runCli(baseUrl, ["shell"]);
@@ -1604,6 +1629,7 @@ await testVmsMetricsQueriesTheWindow();
 await testSessionsUpdateRequiresAField();
 await testNoPipeReadsFileBytes();
 await testShellSetupUsesPackagedCli();
+await testShellSendsIdleTimeoutAsCancelTtlSecs();
 await testShellRequiresVmOrSourceBeforeRequest();
 await testRunShowsPartialOutputBeforeCompletion();
 await testStructuredErrorsDoNotRepeatCode();

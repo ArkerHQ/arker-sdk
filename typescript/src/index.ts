@@ -731,9 +731,6 @@ export class Arker {
     // on, unnamed and billable. The header object is bound once, before the
     // retry loop, so every attempt of one call presents the same key.
     const { idempotencyKey, idempotency, ...request } = options;
-    if (request.resources_autoscaling) {
-      request.resources_autoscaling = withoutAutoscalingWindow(request.resources_autoscaling);
-    }
     const key = forkIdempotencyKey(idempotencyKey, idempotency);
     const wire = await this._request<Vm>(
       "POST",
@@ -1788,9 +1785,12 @@ export class VM {
 
   /**
    * Update a session via `PATCH /v1/vms/{id}/sessions/{sid}`: resize its PTY
-   * (`cols`/`rows`) and/or set the idle `timeoutSecs`. Works whether or not a
-   * PTY is currently attached - the REST equivalent of {@link PtyConnection.resize}
-   * (which sends an in-band control frame on the live WebSocket).
+   * (`cols`/`rows`). Works whether or not a PTY is currently attached - the
+   * REST equivalent of {@link PtyConnection.resize} (which sends an in-band
+   * control frame on the live WebSocket).
+   *
+   * `timeoutSecs` has no effect; set a terminal's idle limit with
+   * `idleTimeout` on {@link VM.connectPty}.
    */
   async updateSession(
     sessionId: string,
@@ -1823,7 +1823,7 @@ export class VM {
       rows: options.rows,
       command: options.command,
       persist: options.persist,
-      // The older wire name: the API still accepts it, and every region understands it.
+      // The older wire name, which every API version accepts.
       cancel_ttl_secs: idleTimeout && idleTimeout > 0 ? Math.floor(idleTimeout) : undefined,
     };
     let ticket: string | undefined;
@@ -1844,16 +1844,6 @@ export class VM {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
-
-/** Autoscaling rules without `window_seconds`, which the API ignores: Arker
- * chooses how long it measures each resource. */
-function withoutAutoscalingWindow<T extends Record<string, unknown>>(rules: T): T {
-  return Object.fromEntries(Object.entries(rules).map(([resource, rule]) => {
-    if (!isObject(rule)) return [resource, rule];
-    const { window_seconds: _window, ...rest } = rule;
-    return [resource, rest];
-  })) as T;
-}
 
 function oneOf<T>(name: string, value: T | undefined, aliasName: string, alias: T | undefined): T | undefined {
   if (value !== undefined && alias !== undefined) throw new Error(`pass ${name} or ${aliasName}, not both`);
