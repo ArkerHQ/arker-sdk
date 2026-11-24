@@ -335,7 +335,7 @@
               "type": "string",
               "format": "uuid"
             },
-            "description": "Filter the caller organization’s VMs by pool membership."
+            "description": "Filter the caller organization\u2019s VMs by pool membership."
           }
         ],
         "responses": {
@@ -1640,7 +1640,7 @@
             "type": "boolean",
             "default": true
           },
-          "description": "When true (default), disconnecting keeps the shell running so the same session_id can reconnect to it and receive recent scrollback. When false, the shell is terminated on disconnect. A kill control message or the configured idle TTL terminates a persistent shell."
+          "description": "When true (default), disconnecting keeps the shell running so the same session_id can reconnect to it and receive recent scrollback. When false, the shell is terminated on disconnect. A kill control message or `idle_timeout` terminates a persistent shell."
         },
         {
           "name": "idle_timeout",
@@ -2759,30 +2759,20 @@
     },
     "/v1/pools/{pool_id}/workers/{worker_id}/vms/reconcile": {
       "parameters": [
-        {
-          "$ref": "#/components/parameters/PoolId"
-        },
-        {
-          "$ref": "#/components/parameters/WorkerId"
-        },
-        {
-          "$ref": "#/components/parameters/WorkerIncarnation"
-        }
+        { "$ref": "#/components/parameters/PoolId" },
+        { "$ref": "#/components/parameters/WorkerId" },
+        { "$ref": "#/components/parameters/WorkerIncarnation" }
       ],
       "post": {
         "operationId": "reconcileWorkerVms",
-        "tags": [
-          "Pools"
-        ],
+        "tags": ["Pools"],
         "summary": "Reclaim a restarted worker's VMs",
         "description": "Name the VMs a restarted worker process still holds. Each that was handed back for the restart and not yet claimed by another worker is the worker's again, under a new ownership generation, and runs its replaced process left active fail. Answers which named VMs the worker owns now.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkerVmReconciliation"
-              }
+              "schema": { "$ref": "#/components/schemas/WorkerVmReconciliation" }
             }
           }
         },
@@ -2791,39 +2781,19 @@
             "description": "The named VMs the worker owns.",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerVmReconciliationResult"
-                }
+                "schema": { "$ref": "#/components/schemas/WorkerVmReconciliationResult" }
               }
             }
           },
-          "400": {
-            "$ref": "#/components/responses/BadRequestError"
-          },
-          "401": {
-            "$ref": "#/components/responses/UnauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/ForbiddenError"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFoundError"
-          },
-          "409": {
-            "$ref": "#/components/responses/InvalidStateError"
-          },
-          "410": {
-            "$ref": "#/components/responses/ExpiredError"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimitedError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "503": {
-            "$ref": "#/components/responses/UnavailableError"
-          }
+          "400": { "$ref": "#/components/responses/BadRequestError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" },
+          "409": { "$ref": "#/components/responses/InvalidStateError" },
+          "410": { "$ref": "#/components/responses/ExpiredError" },
+          "429": { "$ref": "#/components/responses/RateLimitedError" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/UnavailableError" }
         }
       }
     },
@@ -2941,24 +2911,14 @@
     },
     "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}/snapshots": {
       "parameters": [
-        {
-          "$ref": "#/components/parameters/PoolId"
-        },
-        {
-          "$ref": "#/components/parameters/WorkerId"
-        },
-        {
-          "$ref": "#/components/parameters/WorkerVmId"
-        },
-        {
-          "$ref": "#/components/parameters/WorkerIncarnation"
-        }
+        { "$ref": "#/components/parameters/PoolId" },
+        { "$ref": "#/components/parameters/WorkerId" },
+        { "$ref": "#/components/parameters/WorkerVmId" },
+        { "$ref": "#/components/parameters/WorkerIncarnation" }
       ],
       "post": {
         "operationId": "reserveWorkerVmSnapshot",
-        "tags": [
-          "Pools"
-        ],
+        "tags": ["Pools"],
         "summary": "Reserve a VM snapshot generation",
         "description": "Reserve an immutable snapshot identifier tied to the worker's current VM ownership generation. The reservation's upload lease runs out unless renewed; a snapshot whose lease ran out uncommitted is deleted. Only a pool whose snapshots Arker stores reserves one.",
         "responses": {
@@ -2966,160 +2926,78 @@
             "description": "The snapshot generation is reserved.",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerSnapshotReservation"
-                }
+                "schema": { "$ref": "#/components/schemas/WorkerSnapshotReservation" }
               }
             }
           },
-          "400": {
-            "$ref": "#/components/responses/BadRequestError"
-          },
-          "401": {
-            "$ref": "#/components/responses/UnauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/ForbiddenError"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFoundError"
-          },
-          "409": {
-            "$ref": "#/components/responses/InvalidStateError"
-          },
-          "410": {
-            "$ref": "#/components/responses/ExpiredError"
-          },
-          "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimitedError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "503": {
-            "$ref": "#/components/responses/UnavailableError"
-          }
+          "400": { "$ref": "#/components/responses/BadRequestError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" },
+          "409": { "$ref": "#/components/responses/InvalidStateError" },
+          "410": { "$ref": "#/components/responses/ExpiredError" },
+          "422": { "$ref": "#/components/responses/UnsupportedOperationError" },
+          "429": { "$ref": "#/components/responses/RateLimitedError" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/UnavailableError" }
         }
       }
     },
     "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}/snapshots/{snapshot_id}": {
       "parameters": [
-        {
-          "$ref": "#/components/parameters/PoolId"
-        },
-        {
-          "$ref": "#/components/parameters/WorkerId"
-        },
-        {
-          "$ref": "#/components/parameters/WorkerVmId"
-        },
+        { "$ref": "#/components/parameters/PoolId" },
+        { "$ref": "#/components/parameters/WorkerId" },
+        { "$ref": "#/components/parameters/WorkerVmId" },
         {
           "name": "snapshot_id",
           "in": "path",
           "required": true,
           "description": "Immutable snapshot generation identifier returned by the reservation.",
-          "schema": {
-            "type": "string",
-            "minLength": 26,
-            "maxLength": 26
-          }
+          "schema": { "type": "string", "minLength": 26, "maxLength": 26 }
         },
         {
           "name": "vm_generation",
           "in": "query",
           "required": true,
           "description": "VM ownership generation returned by the reservation.",
-          "schema": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 1
-          }
+          "schema": { "type": "integer", "format": "int64", "minimum": 1 }
         },
-        {
-          "$ref": "#/components/parameters/WorkerIncarnation"
-        }
+        { "$ref": "#/components/parameters/WorkerIncarnation" }
       ],
       "put": {
         "operationId": "commitWorkerVmSnapshot",
-        "tags": [
-          "Pools"
-        ],
+        "tags": ["Pools"],
         "summary": "Commit a VM snapshot generation",
         "description": "Publish an uploaded snapshot only while the worker incarnation still owns the same VM generation.",
         "responses": {
-          "204": {
-            "description": "The snapshot generation is committed."
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequestError"
-          },
-          "401": {
-            "$ref": "#/components/responses/UnauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/ForbiddenError"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFoundError"
-          },
-          "409": {
-            "$ref": "#/components/responses/InvalidStateError"
-          },
-          "410": {
-            "$ref": "#/components/responses/ExpiredError"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimitedError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "503": {
-            "$ref": "#/components/responses/UnavailableError"
-          }
+          "204": { "description": "The snapshot generation is committed." },
+          "400": { "$ref": "#/components/responses/BadRequestError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" },
+          "409": { "$ref": "#/components/responses/InvalidStateError" },
+          "410": { "$ref": "#/components/responses/ExpiredError" },
+          "429": { "$ref": "#/components/responses/RateLimitedError" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/UnavailableError" }
         }
       },
       "patch": {
         "operationId": "renewWorkerVmSnapshot",
-        "tags": [
-          "Pools"
-        ],
+        "tags": ["Pools"],
         "summary": "Renew a VM snapshot reservation",
         "description": "Extend a reservation's upload lease while the worker process still owns the same VM generation and the lease has not run out.",
         "responses": {
-          "204": {
-            "description": "The upload lease is renewed."
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequestError"
-          },
-          "401": {
-            "$ref": "#/components/responses/UnauthorizedError"
-          },
-          "403": {
-            "$ref": "#/components/responses/ForbiddenError"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFoundError"
-          },
-          "409": {
-            "$ref": "#/components/responses/InvalidStateError"
-          },
-          "410": {
-            "$ref": "#/components/responses/ExpiredError"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimitedError"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "503": {
-            "$ref": "#/components/responses/UnavailableError"
-          }
+          "204": { "description": "The upload lease is renewed." },
+          "400": { "$ref": "#/components/responses/BadRequestError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" },
+          "409": { "$ref": "#/components/responses/InvalidStateError" },
+          "410": { "$ref": "#/components/responses/ExpiredError" },
+          "429": { "$ref": "#/components/responses/RateLimitedError" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/UnavailableError" }
         }
       }
     },
@@ -4548,7 +4426,7 @@
         }
       },
       "RateLimitedError": {
-        "description": "HTTP 429: A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service’s quota or credentials.",
+        "description": "HTTP 429: A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service\u2019s quota or credentials.",
         "x-http-status": 429,
         "headers": {
           "Retry-After": {
@@ -5518,7 +5396,7 @@
           "action"
         ],
         "additionalProperties": false,
-        "description": "One policy rule. `match` AND's its present fields (absent ⇒ catch-all).",
+        "description": "One policy rule. `match` AND's its present fields (absent \u21d2 catch-all).",
         "properties": {
           "type": {
             "type": "string",
@@ -5616,7 +5494,7 @@
                 "type": "string"
               }
             },
-            "description": "Header name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, `\"authorization\": [\"Bearer $arker_api_key\"]` or `\"x-api-key\": [\"$arker_api_key\"]` matches an API key of the VM's organization."
+            "description": "Header name \u2192 any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, `\"authorization\": [\"Bearer $arker_api_key\"]` or `\"x-api-key\": [\"$arker_api_key\"]` matches an API key of the VM's organization."
           },
           "query_params": {
             "type": "object",
@@ -5626,7 +5504,7 @@
                 "type": "string"
               }
             },
-            "description": "Query parameter name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, parameters named `arker_*` are removed from a `GET` request's URL by a redirect that keeps them in a cookie, so the rest of a browsing session carries them without the URL showing them."
+            "description": "Query parameter name \u2192 any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, parameters named `arker_*` are removed from a `GET` request's URL by a redirect that keeps them in a cookie, so the rest of a browsing session carries them without the URL showing them."
           },
           "body_contains": {
             "description": "Substrings that must appear in the request body.",
@@ -5735,7 +5613,7 @@
       "Rewrite": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${…}`-braced), `${header:NAME}` (the request's header NAME, on inbound rules), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged.",
+        "description": "Mutate-and-forward. Host/path/header/body values support request-time `$`-token interpolation: `$domain`, `$path`, `$method`, `$vm_id`, `$body` (the request body as received, also `${\u2026}`-braced), `${header:NAME}` (the request's header NAME, on inbound rules), and `$$` for a literal `$`. Unknown/unresolved tokens pass through unchanged.",
         "properties": {
           "host": {
             "description": "Replacement request host.",
@@ -6572,8 +6450,8 @@
           "timeout_secs": {
             "type": "integer",
             "minimum": 0,
-            "description": "Deprecated and ignored: the attach's `idle_timeout` sets a terminal's idle limit.",
-            "deprecated": true
+            "deprecated": true,
+            "description": "Deprecated and ignored: the attach's `idle_timeout` sets a terminal's idle limit."
           }
         }
       },
@@ -8373,7 +8251,9 @@
             "description": "Desired fraction of the allocated resource in use, greater than zero and at most one."
           },
           "window_seconds": {
-            "description": "Ignored: Arker chooses how long it measures each resource.",
+            "type": "integer",
+            "writeOnly": true,
+            "description": "Ignored: Arker chooses how long it measures each resource. Never returned.",
             "deprecated": true
           }
         },
@@ -8399,7 +8279,9 @@
             "description": "Desired fraction of the allocated resource in use, greater than zero and at most one."
           },
           "window_seconds": {
-            "description": "Ignored: Arker chooses how long it measures each resource.",
+            "type": "integer",
+            "writeOnly": true,
+            "description": "Ignored: Arker chooses how long it measures each resource. Never returned.",
             "deprecated": true
           }
         },
@@ -9236,17 +9118,16 @@
           "request": {
             "$ref": "#/components/schemas/RequestContext"
           },
-          "retry_after_seconds": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "Deprecated: use `retry_after` when present. Scheduling hint in seconds, mirrored by Retry-After. Does not establish that replay is safe.",
-            "maximum": 4294967295,
-            "deprecated": true
-          },
           "retry_after": {
             "type": "integer",
             "minimum": 0,
-            "description": "Scheduling hint in seconds, mirrored by Retry-After. Does not establish that replay is safe. Not sent yet; read it when present, else `retry_after_seconds`.",
+            "description": "Scheduling hint in seconds, mirrored by Retry-After. Does not establish that replay is safe.",
+            "maximum": 4294967295
+          },
+          "retry_after_seconds": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Scheduling hint in seconds, mirrored by Retry-After. Does not establish that replay is safe.",
             "maximum": 4294967295
           }
         },
@@ -10712,7 +10593,7 @@
         "unevaluatedProperties": false
       },
       "RateLimited": {
-        "description": "A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service’s quota or credentials.",
+        "description": "A request-rate limiter rejects the operation. For Arker limits, reduce request rate; for upstream limits, address that service\u2019s quota or credentials.",
         "x-http-status": 429,
         "allOf": [
           {
@@ -12002,7 +11883,7 @@
           "action"
         ],
         "additionalProperties": false,
-        "description": "One network policy rule, keyed by its id in a policy's `rules`. `match` ANDs its present fields (absent ⇒ catch-all). Rules are evaluated highest `priority` first, and the first rule that matches decides.",
+        "description": "One network policy rule, keyed by its id in a policy's `rules`. `match` ANDs its present fields (absent \u21d2 catch-all). Rules are evaluated highest `priority` first, and the first rule that matches decides.",
         "properties": {
           "type": {
             "type": "string",
@@ -12654,7 +12535,7 @@
           },
           "resources_provisioned": {
             "$ref": "#/components/schemas/PoolResources",
-            "description": "What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers."
+            "description": "What is allocated to the pool's VMs: for `byoc` and `self_hosted`, those on its `running` and `draining` workers."
           },
           "commitments": {
             "type": "array",
@@ -12736,7 +12617,7 @@
           },
           "resources_provisioned": {
             "$ref": "#/components/schemas/PoolResources",
-            "description": "What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers."
+            "description": "What is allocated to the pool's VMs: for `byoc` and `self_hosted`, those on its `running` and `draining` workers."
           },
           "isolation": {
             "type": "array",
@@ -12823,7 +12704,7 @@
           },
           "resources_provisioned": {
             "$ref": "#/components/schemas/PoolResources",
-            "description": "What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers."
+            "description": "What is allocated to the pool's VMs: for `byoc` and `self_hosted`, those on its `running` and `draining` workers."
           }
         }
       },
@@ -13113,7 +12994,7 @@
           },
           "resources_provisioned": {
             "$ref": "#/components/schemas/PoolResources",
-            "description": "What the worker's VMs use right now; nothing unless the worker is `running` or `draining`."
+            "description": "What is allocated to the worker's VMs; nothing unless the worker is `running` or `draining`."
           },
           "resources_reserved": {
             "$ref": "#/components/schemas/PoolResources",
@@ -13414,11 +13295,7 @@
       "WorkerSnapshotReservation": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "vm_generation",
-          "snapshot_id",
-          "lease_renew_after_secs"
-        ],
+        "required": ["vm_generation", "snapshot_id", "lease_renew_after_secs"],
         "properties": {
           "vm_generation": {
             "type": "integer",
@@ -13443,18 +13320,12 @@
       "WorkerVmReconciliation": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "vm_ids"
-        ],
+        "required": ["vm_ids"],
         "properties": {
           "vm_ids": {
             "type": "array",
             "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 64
-            },
+            "items": { "type": "string", "minLength": 1, "maxLength": 64 },
             "description": "The VMs the worker process holds."
           }
         }
@@ -13462,15 +13333,11 @@
       "WorkerVmReconciliationResult": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "retained_vm_ids"
-        ],
+        "required": ["retained_vm_ids"],
         "properties": {
           "retained_vm_ids": {
             "type": "array",
-            "items": {
-              "type": "string"
-            },
+            "items": { "type": "string" },
             "description": "Which of the named VMs the worker owns, in the order named."
           }
         }
@@ -13873,11 +13740,6 @@
             "description": "VM ID.",
             "type": "string"
           },
-          "step": {
-            "description": "Bucket width in seconds.",
-            "type": "integer",
-            "minimum": 1
-          },
           "started_at": {
             "description": "Window start.",
             "type": "string",
@@ -13888,6 +13750,11 @@
             "type": "string",
             "format": "date-time"
           },
+          "step": {
+            "description": "Bucket width in seconds.",
+            "type": "integer",
+            "minimum": 1
+          },
           "buckets": {
             "description": "Buckets, oldest first.",
             "type": "array",
@@ -13896,271 +13763,6 @@
             }
           }
         }
-      },
-      "EventAction": {
-        "type": "string",
-        "enum": [
-          "vm_fork",
-          "vm_run",
-          "vm_sync",
-          "vm_update",
-          "vm_suspend",
-          "vm_delete",
-          "vm_running",
-          "vm_terminal_session",
-          "run_signal",
-          "run_cancel",
-          "session_create",
-          "session_update",
-          "session_delete",
-          "mount_create",
-          "mount_delete",
-          "filesystem_create",
-          "filesystem_delete",
-          "pool_create",
-          "pool_update",
-          "pool_delete",
-          "ssh_key_delete",
-          "api_key_create",
-          "api_key_revoke",
-          "member_add",
-          "member_invite",
-          "member_invite_revoke",
-          "member_update",
-          "member_remove",
-          "member_sign_in",
-          "member_sign_out",
-          "member_terms_accept",
-          "org_create",
-          "org_update",
-          "org_quota_update",
-          "org_delete",
-          "billing_checkout",
-          "billing_payment_method_update",
-          "billing_credit_grant"
-        ],
-        "description": "What happened, as `<resource>_<verb>`. `vm_running` is a stretch a VM ran, as metered by billing; `vm_terminal_session` an SSH connection or attached terminal."
-      },
-      "EventState": {
-        "type": "string",
-        "enum": [
-          "running",
-          "completed",
-          "failed",
-          "cancelled"
-        ]
-      },
-      "EventOrderBy": {
-        "type": "string",
-        "enum": [
-          "requested_at",
-          "started_at",
-          "ended_at",
-          "duration_ms"
-        ]
-      },
-      "Event": {
-        "type": "object",
-        "required": [
-          "id",
-          "action",
-          "category",
-          "state",
-          "vm_id",
-          "requested_at",
-          "started_at",
-          "ended_at",
-          "duration_ms",
-          "actor",
-          "via",
-          "region",
-          "request_id",
-          "error_code",
-          "resources_provisioned",
-          "resources_reserved",
-          "attributes"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "The event's id."
-          },
-          "action": {
-            "$ref": "#/components/schemas/EventAction"
-          },
-          "category": {
-            "$ref": "#/components/schemas/EventCategory"
-          },
-          "state": {
-            "$ref": "#/components/schemas/EventState"
-          },
-          "vm_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The VM acted on; for `vm_fork`, the new VM."
-          },
-          "requested_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When the action was requested."
-          },
-          "started_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When the action started."
-          },
-          "ended_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When the action ended."
-          },
-          "duration_ms": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "minimum": 0,
-            "description": "How long the action took."
-          },
-          "actor": {
-            "description": "Who acted.",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/EventActor"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "region": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The region that handled the action."
-          },
-          "request_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The request's `x-request-id`."
-          },
-          "error_code": {
-            "description": "Why the action failed.",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ErrorCode"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "attributes": {
-            "type": "object",
-            "additionalProperties": {
-              "type": [
-                "string",
-                "integer",
-                "boolean",
-                "null"
-              ]
-            },
-            "description": "Details specific to the action, such as `run_id`, `exit_code`, `fields` or `reason` (`autoscaling`, `schedule`, `idle`, `lifecycle`) when Arker acted."
-          },
-          "via": {
-            "description": "Where the action came from. Null when Arker acted.",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/EventChannel"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "resources_provisioned": {
-            "description": "The VM's size, on `vm_fork`, `vm_update`, `vm_delete` and `vm_running`.",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/EventResources"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "resources_reserved": {
-            "description": "A managed pool's reservation, on `pool_create` and `pool_update`.",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/PoolResources"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        }
-      },
-      "EventActor": {
-        "type": "object",
-        "required": [
-          "type"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "A member's email, an API key's id or an SSH key's id. Absent for Arker."
-          },
-          "type": {
-            "$ref": "#/components/schemas/EventActorType"
-          }
-        }
-      },
-      "ListEventsResponse": {
-        "type": "object",
-        "required": [
-          "events",
-          "next_cursor"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "events": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Event"
-            },
-            "description": "Events, in the requested order."
-          },
-          "next_cursor": {
-            "description": "The next page's cursor, or null.",
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        }
-      },
-      "EventCategory": {
-        "type": "string",
-        "description": "`organization` for member, organization and billing actions, readable by admins only; `compute` otherwise.",
-        "enum": [
-          "compute",
-          "organization"
-        ]
       },
       "VmMetricsBucket": {
         "type": "object",
@@ -14366,6 +13968,223 @@
           }
         }
       },
+      "EventAction": {
+        "type": "string",
+        "enum": [
+          "vm_fork",
+          "vm_run",
+          "vm_sync",
+          "vm_update",
+          "vm_suspend",
+          "vm_delete",
+          "vm_running",
+          "vm_terminal_session",
+          "run_signal",
+          "run_cancel",
+          "session_create",
+          "session_update",
+          "session_delete",
+          "mount_create",
+          "mount_delete",
+          "filesystem_create",
+          "filesystem_delete",
+          "pool_create",
+          "pool_update",
+          "pool_delete",
+          "ssh_key_delete",
+          "api_key_create",
+          "api_key_revoke",
+          "member_add",
+          "member_invite",
+          "member_invite_revoke",
+          "member_update",
+          "member_remove",
+          "member_sign_in",
+          "member_sign_out",
+          "member_terms_accept",
+          "org_create",
+          "org_update",
+          "org_quota_update",
+          "org_delete",
+          "billing_checkout",
+          "billing_payment_method_update",
+          "billing_credit_grant"
+        ],
+        "description": "What happened, as `<resource>_<verb>`. `vm_running` is a stretch a VM ran, as metered by billing; `vm_terminal_session` an SSH connection or attached terminal."
+      },
+      "EventState": {
+        "type": "string",
+        "enum": [
+          "running",
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "EventOrderBy": {
+        "type": "string",
+        "enum": [
+          "requested_at",
+          "started_at",
+          "ended_at",
+          "duration_ms"
+        ]
+      },
+      "Event": {
+        "type": "object",
+        "required": [
+          "id",
+          "action",
+          "category",
+          "state",
+          "vm_id",
+          "requested_at",
+          "started_at",
+          "ended_at",
+          "duration_ms",
+          "actor",
+          "via",
+          "region",
+          "request_id",
+          "error_code",
+          "resources_provisioned",
+          "resources_reserved",
+          "attributes"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The event's id."
+          },
+          "action": {
+            "$ref": "#/components/schemas/EventAction"
+          },
+          "category": {
+            "$ref": "#/components/schemas/EventCategory"
+          },
+          "state": {
+            "$ref": "#/components/schemas/EventState"
+          },
+          "vm_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The VM acted on; for `vm_fork`, the new VM."
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the action was requested."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the action started."
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the action ended."
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "How long the action took."
+          },
+          "actor": {
+            "description": "Who acted.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EventActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "via": {
+            "description": "Where the action came from. Null when Arker acted.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EventChannel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The region that handled the action."
+          },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The request's `x-request-id`."
+          },
+          "error_code": {
+            "description": "Why the action failed.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resources_provisioned": {
+            "description": "The VM's size, on `vm_fork`, `vm_update`, `vm_delete` and `vm_running`.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EventResources"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resources_reserved": {
+            "description": "A managed pool's reservation, on `pool_create` and `pool_update`.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PoolResources"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "integer",
+                "boolean",
+                "null"
+              ]
+            },
+            "description": "Details specific to the action, such as `run_id`, `exit_code`, `fields` or `reason` (`autoscaling`, `schedule`, `idle`, `lifecycle`) when Arker acted."
+          }
+        }
+      },
       "EventResources": {
         "type": "object",
         "additionalProperties": false,
@@ -14403,6 +14222,22 @@
           }
         }
       },
+      "EventActor": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/EventActorType"
+          },
+          "id": {
+            "type": "string",
+            "description": "A member's email, an API key's id or an SSH key's id. Absent for Arker."
+          }
+        }
+      },
       "EventActorType": {
         "type": "string",
         "enum": [
@@ -14421,6 +14256,38 @@
           "ssh"
         ],
         "description": "The console, the API, or SSH."
+      },
+      "ListEventsResponse": {
+        "type": "object",
+        "required": [
+          "events",
+          "next_cursor"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "description": "Events, in the requested order."
+          },
+          "next_cursor": {
+            "description": "The next page's cursor, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "EventCategory": {
+        "type": "string",
+        "description": "`organization` for member, organization and billing actions, readable by admins only; `compute` otherwise.",
+        "enum": [
+          "compute",
+          "organization"
+        ]
       }
     }
   }

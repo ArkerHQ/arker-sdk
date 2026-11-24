@@ -452,14 +452,14 @@ class AutoscalingRule:
     min: int
     max: int
     target_utilization: float
-    window_seconds: Any | None = None
+    window_seconds: int | None = None
 
 
 @dataclass(frozen=True)
 class DiskAutoscalingRule:
     max: int
     target_utilization: float
-    window_seconds: Any | None = None
+    window_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -715,8 +715,8 @@ class ErrorMetadata(ErrorExecutionContext):
     timestamp: str = field(kw_only=True)
     request_id: str = field(kw_only=True)
     request: RequestContext = field(kw_only=True)
-    retry_after_seconds: int | None = None
     retry_after: int | None = None
+    retry_after_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1784,6 +1784,40 @@ class ApiKeyPoolScope:
     pool_id: str
 
 
+@dataclass(frozen=True)
+class VmMetricsProvisionedAvg:
+    vcpu: float
+    memory_mib: int
+    disk_mib: int
+
+
+@dataclass(frozen=True)
+class VmMetricsProvisioned:
+    vcpu: int
+    memory_mib: int
+    disk_mib: int
+
+
+@dataclass(frozen=True)
+class VmMetricsUtilized:
+    vcpu: float | None
+    memory_mib: int | None
+    disk_mib: int | None
+
+
+@dataclass(frozen=True)
+class VmMetricsPressure:
+    vcpu: float | None
+    memory_mib: float | None
+
+
+@dataclass(frozen=True)
+class VmMetricsIo:
+    network_received_bytes: int | None
+    network_transmitted_bytes: int | None
+    disk_written_bytes: int | None
+
+
 EventAction: TypeAlias = Literal[
     'vm_fork',
     'vm_run',
@@ -1834,43 +1868,6 @@ EventOrderBy: TypeAlias = Literal[
 ]
 
 
-EventCategory: TypeAlias = Literal['compute', 'organization']
-
-
-@dataclass(frozen=True)
-class VmMetricsProvisionedAvg:
-    vcpu: float
-    memory_mib: int
-    disk_mib: int
-
-
-@dataclass(frozen=True)
-class VmMetricsProvisioned:
-    vcpu: int
-    memory_mib: int
-    disk_mib: int
-
-
-@dataclass(frozen=True)
-class VmMetricsUtilized:
-    vcpu: float | None
-    memory_mib: int | None
-    disk_mib: int | None
-
-
-@dataclass(frozen=True)
-class VmMetricsPressure:
-    vcpu: float | None
-    memory_mib: float | None
-
-
-@dataclass(frozen=True)
-class VmMetricsIo:
-    network_received_bytes: int | None
-    network_transmitted_bytes: int | None
-    disk_written_bytes: int | None
-
-
 @dataclass(frozen=True)
 class EventResources:
     vcpu: int
@@ -1884,6 +1881,9 @@ EventActorType: TypeAlias = Literal['member', 'api_key', 'ssh_key', 'arker']
 
 
 EventChannel: TypeAlias = Literal['console', 'api', 'ssh']
+
+
+EventCategory: TypeAlias = Literal['compute', 'organization']
 
 
 @dataclass(frozen=True)
@@ -2376,12 +2376,6 @@ class ListApiKeysResponse:
 
 
 @dataclass(frozen=True)
-class EventActor:
-    type: EventActorType
-    id: str | None = None
-
-
-@dataclass(frozen=True)
 class VmMetricsBucket:
     started_at: str
     ended_at: str
@@ -2392,6 +2386,12 @@ class VmMetricsBucket:
     resources_pressure_avg: VmMetricsPressure
     resources_pressure_max: VmMetricsPressure
     resources_io: VmMetricsIo
+
+
+@dataclass(frozen=True)
+class EventActor:
+    type: EventActorType
+    id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2473,9 +2473,9 @@ PolicyRules: TypeAlias = dict[str, PolicyRule | ScheduleRule | LifecycleRule]
 @dataclass(frozen=True)
 class VmMetrics:
     vm_id: str
-    step: int
     started_at: str
     ended_at: str
+    step: int
     buckets: list[VmMetricsBucket]
 
 
@@ -2491,13 +2491,13 @@ class Event:
     ended_at: str | None
     duration_ms: int | None
     actor: EventActor | None
+    via: EventChannel | None
     region: str | None
     request_id: str | None
     error_code: ErrorCode | None
-    attributes: dict[str, str | int | bool | None]
-    via: EventChannel | None
     resources_provisioned: EventResources | None
     resources_reserved: PoolResources | None
+    attributes: dict[str, str | int | bool | None]
 
 
 @dataclass(frozen=True)

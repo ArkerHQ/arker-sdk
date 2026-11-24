@@ -330,7 +330,7 @@ export interface paths {
                 rows?: number;
                 /** @description Single executable path to launch (no shell-splitting). Defaults to the login shell. */
                 command?: string;
-                /** @description When true (default), disconnecting keeps the shell running so the same session_id can reconnect to it and receive recent scrollback. When false, the shell is terminated on disconnect. A kill control message or the configured idle TTL terminates a persistent shell. */
+                /** @description When true (default), disconnecting keeps the shell running so the same session_id can reconnect to it and receive recent scrollback. When false, the shell is terminated on disconnect. A kill control message or `idle_timeout` terminates a persistent shell. */
                 persist?: boolean;
                 /** @description Destroy the PTY after this many seconds without terminal input or output. Omit or set to zero to disable this PTY-specific idle limit. Not with `cancel_ttl_secs`. */
                 idle_timeout?: number;
@@ -1911,9 +1911,9 @@ export interface components {
             target_utilization: number;
             /**
              * @deprecated
-             * @description Ignored: Arker chooses how long it measures each resource.
+             * @description Ignored: Arker chooses how long it measures each resource. Never returned.
              */
-            window_seconds?: unknown;
+            window_seconds?: number;
         };
         /** @description Adjusts resource allocation to try to maintain the target utilization. */
         DiskAutoscalingRule: {
@@ -1923,9 +1923,9 @@ export interface components {
             target_utilization: number;
             /**
              * @deprecated
-             * @description Ignored: Arker chooses how long it measures each resource.
+             * @description Ignored: Arker chooses how long it measures each resource. Never returned.
              */
-            window_seconds?: unknown;
+            window_seconds?: number;
         };
         /** @description Autoscaling rules for CPU, memory and disk. A fork inherits the source VM’s rule for each resource omitted from the request. `{}` when the VM has none. */
         ResourcesAutoscaling: {
@@ -2126,13 +2126,10 @@ export interface components {
             /** @description Correlation identifier safe to give to support. */
             request_id: string;
             request: components["schemas"]["RequestContext"];
-            /**
-             * @deprecated
-             * @description Deprecated: use `retry_after` when present. Scheduling hint in seconds, mirrored by Retry-After. Does not establish that replay is safe.
-             */
-            retry_after_seconds?: number;
-            /** @description Scheduling hint in seconds, mirrored by Retry-After. Does not establish that replay is safe. Not sent yet; read it when present, else `retry_after_seconds`. */
+            /** @description Scheduling hint in seconds, mirrored by Retry-After. Does not establish that replay is safe. */
             retry_after?: number;
+            /** @description Scheduling hint in seconds, mirrored by Retry-After. Does not establish that replay is safe. */
+            retry_after_seconds?: number;
         } & components["schemas"]["ErrorExecutionContext"];
         ByteAmount: {
             /**
@@ -3376,7 +3373,7 @@ export interface components {
             resources: components["schemas"]["PoolResources"];
             /** @description Resources set aside for the pool: `resources`. */
             resources_reserved: components["schemas"]["PoolResources"];
-            /** @description What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers. */
+            /** @description What is allocated to the pool's VMs: for `byoc` and `self_hosted`, those on its `running` and `draining` workers. */
             resources_provisioned: components["schemas"]["PoolResources"];
             /** @description Commitments, each {starts_at, ends_at}, oldest first. Commitments may be unavailable in a region; a pool's commitments, where it has any, discount its reserved size, otherwise billed at on-demand rates. */
             commitments: components["schemas"]["PoolCommitment"][];
@@ -3410,7 +3407,7 @@ export interface components {
             resources: components["schemas"]["PoolResources"];
             /** @description What the pool's `running` and `draining` workers contribute, at most `resources`. */
             resources_reserved: components["schemas"]["PoolResources"];
-            /** @description What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers. */
+            /** @description What is allocated to the pool's VMs: for `byoc` and `self_hosted`, those on its `running` and `draining` workers. */
             resources_provisioned: components["schemas"]["PoolResources"];
             /** @description What the pool keeps in your cloud account instead of Arker's regional store. */
             isolation: components["schemas"]["PoolIsolation"][];
@@ -3445,7 +3442,7 @@ export interface components {
             resources?: components["schemas"]["PoolResources"];
             /** @description What the pool's `running` and `draining` workers contribute, at most `resources` when present. */
             resources_reserved: components["schemas"]["PoolResources"];
-            /** @description What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers. */
+            /** @description What is allocated to the pool's VMs: for `byoc` and `self_hosted`, those on its `running` and `draining` workers. */
             resources_provisioned: components["schemas"]["PoolResources"];
         };
         /** @description A regional pool. Run on multi-cloud managed compute, BYOC in an arbitrary cloud account, or self-hosted using BLAST. If BYOC or self-hosted, a significant discount is applied against on-demand rates and organization limits are not applied. */
@@ -3536,7 +3533,7 @@ export interface components {
             /** @description Worker identifier. */
             worker_id: string;
             state: components["schemas"]["WorkerState"];
-            /** @description What the worker's VMs use right now; nothing unless the worker is `running` or `draining`. */
+            /** @description What is allocated to the worker's VMs; nothing unless the worker is `running` or `draining`. */
             resources_provisioned: components["schemas"]["PoolResources"];
             /** @description What the worker adds to the pool's `resources_reserved`; nothing unless it is `running` or `draining`. */
             resources_reserved: components["schemas"]["PoolResources"];
@@ -3845,8 +3842,6 @@ export interface components {
         VmMetrics: {
             /** @description VM ID. */
             vm_id: string;
-            /** @description Bucket width in seconds. */
-            step: number;
             /**
              * Format: date-time
              * @description Window start.
@@ -3857,78 +3852,11 @@ export interface components {
              * @description Window end.
              */
             ended_at: string;
+            /** @description Bucket width in seconds. */
+            step: number;
             /** @description Buckets, oldest first. */
             buckets: components["schemas"]["VmMetricsBucket"][];
         };
-        /**
-         * @description What happened, as `<resource>_<verb>`. `vm_running` is a stretch a VM ran, as metered by billing; `vm_terminal_session` an SSH connection or attached terminal.
-         * @enum {string}
-         */
-        EventAction: "vm_fork" | "vm_run" | "vm_sync" | "vm_update" | "vm_suspend" | "vm_delete" | "vm_running" | "vm_terminal_session" | "run_signal" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_add" | "member_invite" | "member_invite_revoke" | "member_update" | "member_remove" | "member_sign_in" | "member_sign_out" | "member_terms_accept" | "org_create" | "org_update" | "org_quota_update" | "org_delete" | "billing_checkout" | "billing_payment_method_update" | "billing_credit_grant";
-        /** @enum {string} */
-        EventState: "running" | "completed" | "failed" | "cancelled";
-        /** @enum {string} */
-        EventOrderBy: "requested_at" | "started_at" | "ended_at" | "duration_ms";
-        Event: {
-            /** @description The event's id. */
-            id: string;
-            action: components["schemas"]["EventAction"];
-            category: components["schemas"]["EventCategory"];
-            state: components["schemas"]["EventState"];
-            /** @description The VM acted on; for `vm_fork`, the new VM. */
-            vm_id: string | null;
-            /**
-             * Format: date-time
-             * @description When the action was requested.
-             */
-            requested_at: string;
-            /**
-             * Format: date-time
-             * @description When the action started.
-             */
-            started_at: string | null;
-            /**
-             * Format: date-time
-             * @description When the action ended.
-             */
-            ended_at: string | null;
-            /** @description How long the action took. */
-            duration_ms: number | null;
-            /** @description Who acted. */
-            actor: components["schemas"]["EventActor"] | null;
-            /** @description The region that handled the action. */
-            region: string | null;
-            /** @description The request's `x-request-id`. */
-            request_id: string | null;
-            /** @description Why the action failed. */
-            error_code: components["schemas"]["ErrorCode"] | null;
-            /** @description Details specific to the action, such as `run_id`, `exit_code`, `fields` or `reason` (`autoscaling`, `schedule`, `idle`, `lifecycle`) when Arker acted. */
-            attributes: {
-                [key: string]: string | number | boolean | null;
-            };
-            /** @description Where the action came from. Null when Arker acted. */
-            via: components["schemas"]["EventChannel"] | null;
-            /** @description The VM's size, on `vm_fork`, `vm_update`, `vm_delete` and `vm_running`. */
-            resources_provisioned: components["schemas"]["EventResources"] | null;
-            /** @description A managed pool's reservation, on `pool_create` and `pool_update`. */
-            resources_reserved: components["schemas"]["PoolResources"] | null;
-        };
-        EventActor: {
-            /** @description A member's email, an API key's id or an SSH key's id. Absent for Arker. */
-            id?: string;
-            type: components["schemas"]["EventActorType"];
-        };
-        ListEventsResponse: {
-            /** @description Events, in the requested order. */
-            events: components["schemas"]["Event"][];
-            /** @description The next page's cursor, or null. */
-            next_cursor: string | null;
-        };
-        /**
-         * @description `organization` for member, organization and billing actions, readable by admins only; `compute` otherwise.
-         * @enum {string}
-         */
-        EventCategory: "compute" | "organization";
         /** @description Metrics for one bucket. Null where not reported. */
         VmMetricsBucket: {
             /**
@@ -3992,6 +3920,59 @@ export interface components {
             /** @description Bytes written to disk. */
             disk_written_bytes: number | null;
         };
+        /**
+         * @description What happened, as `<resource>_<verb>`. `vm_running` is a stretch a VM ran, as metered by billing; `vm_terminal_session` an SSH connection or attached terminal.
+         * @enum {string}
+         */
+        EventAction: "vm_fork" | "vm_run" | "vm_sync" | "vm_update" | "vm_suspend" | "vm_delete" | "vm_running" | "vm_terminal_session" | "run_signal" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_add" | "member_invite" | "member_invite_revoke" | "member_update" | "member_remove" | "member_sign_in" | "member_sign_out" | "member_terms_accept" | "org_create" | "org_update" | "org_quota_update" | "org_delete" | "billing_checkout" | "billing_payment_method_update" | "billing_credit_grant";
+        /** @enum {string} */
+        EventState: "running" | "completed" | "failed" | "cancelled";
+        /** @enum {string} */
+        EventOrderBy: "requested_at" | "started_at" | "ended_at" | "duration_ms";
+        Event: {
+            /** @description The event's id. */
+            id: string;
+            action: components["schemas"]["EventAction"];
+            category: components["schemas"]["EventCategory"];
+            state: components["schemas"]["EventState"];
+            /** @description The VM acted on; for `vm_fork`, the new VM. */
+            vm_id: string | null;
+            /**
+             * Format: date-time
+             * @description When the action was requested.
+             */
+            requested_at: string;
+            /**
+             * Format: date-time
+             * @description When the action started.
+             */
+            started_at: string | null;
+            /**
+             * Format: date-time
+             * @description When the action ended.
+             */
+            ended_at: string | null;
+            /** @description How long the action took. */
+            duration_ms: number | null;
+            /** @description Who acted. */
+            actor: components["schemas"]["EventActor"] | null;
+            /** @description Where the action came from. Null when Arker acted. */
+            via: components["schemas"]["EventChannel"] | null;
+            /** @description The region that handled the action. */
+            region: string | null;
+            /** @description The request's `x-request-id`. */
+            request_id: string | null;
+            /** @description Why the action failed. */
+            error_code: components["schemas"]["ErrorCode"] | null;
+            /** @description The VM's size, on `vm_fork`, `vm_update`, `vm_delete` and `vm_running`. */
+            resources_provisioned: components["schemas"]["EventResources"] | null;
+            /** @description A managed pool's reservation, on `pool_create` and `pool_update`. */
+            resources_reserved: components["schemas"]["PoolResources"] | null;
+            /** @description Details specific to the action, such as `run_id`, `exit_code`, `fields` or `reason` (`autoscaling`, `schedule`, `idle`, `lifecycle`) when Arker acted. */
+            attributes: {
+                [key: string]: string | number | boolean | null;
+            };
+        };
         /** @description A VM's resources. GPU totals appear only on `vm_running`. */
         EventResources: {
             /** @description vCPUs. */
@@ -4005,6 +3986,11 @@ export interface components {
             /** @description GPU memory in MiB, across the VM's GPUs. */
             gpu_vram_mib?: number;
         };
+        EventActor: {
+            type: components["schemas"]["EventActorType"];
+            /** @description A member's email, an API key's id or an SSH key's id. Absent for Arker. */
+            id?: string;
+        };
         /**
          * @description A member, an API key, an SSH key, or Arker.
          * @enum {string}
@@ -4015,6 +4001,17 @@ export interface components {
          * @enum {string}
          */
         EventChannel: "console" | "api" | "ssh";
+        ListEventsResponse: {
+            /** @description Events, in the requested order. */
+            events: components["schemas"]["Event"][];
+            /** @description The next page's cursor, or null. */
+            next_cursor: string | null;
+        };
+        /**
+         * @description `organization` for member, organization and billing actions, readable by admins only; `compute` otherwise.
+         * @enum {string}
+         */
+        EventCategory: "compute" | "organization";
     };
     responses: {
         Conflict: {
@@ -5276,7 +5273,7 @@ export interface operations {
                 rows?: number;
                 /** @description Single executable path to launch (no shell-splitting). Defaults to the login shell. */
                 command?: string;
-                /** @description When true (default), disconnecting keeps the shell running so the same session_id can reconnect to it and receive recent scrollback. When false, the shell is terminated on disconnect. A kill control message or the configured idle TTL terminates a persistent shell. */
+                /** @description When true (default), disconnecting keeps the shell running so the same session_id can reconnect to it and receive recent scrollback. When false, the shell is terminated on disconnect. A kill control message or `idle_timeout` terminates a persistent shell. */
                 persist?: boolean;
                 /** @description Destroy the PTY after this many seconds without terminal input or output. Omit or set to zero to disable this PTY-specific idle limit. Not with `cancel_ttl_secs`. */
                 idle_timeout?: number;
