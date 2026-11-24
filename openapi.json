@@ -3213,7 +3213,7 @@
           "Events"
         ],
         "summary": "List events",
-        "description": "A complete record of the organization's activity, across every region.",
+        "description": "A complete record of compute and administrative operations.",
         "parameters": [
           {
             "name": "search",
@@ -3238,7 +3238,7 @@
             "name": "actions",
             "in": "query",
             "required": false,
-            "description": "Only these actions.",
+            "description": "Only these actions. Repeat for more values (`actions=vm_run&actions=vm_fork`).",
             "schema": {
               "type": "array",
               "items": {
@@ -3250,7 +3250,7 @@
             "name": "states",
             "in": "query",
             "required": false,
-            "description": "Only these states.",
+            "description": "Only these states. Repeat for more values.",
             "schema": {
               "type": "array",
               "items": {
@@ -3262,7 +3262,7 @@
             "name": "regions",
             "in": "query",
             "required": false,
-            "description": "Only these regions.",
+            "description": "Only these regions. Repeat for more values.",
             "schema": {
               "type": "array",
               "items": {
@@ -3274,7 +3274,7 @@
             "name": "vm_ids",
             "in": "query",
             "required": false,
-            "description": "Only these VMs.",
+            "description": "Only these VMs. Repeat for more values.",
             "schema": {
               "type": "array",
               "items": {
@@ -3286,7 +3286,7 @@
             "name": "actors",
             "in": "query",
             "required": false,
-            "description": "Members by email or `me`, keys by id.",
+            "description": "Members by email or `me`, keys by id. Repeat for more values.",
             "schema": {
               "type": "array",
               "items": {
@@ -3298,7 +3298,7 @@
             "name": "actor_types",
             "in": "query",
             "required": false,
-            "description": "Only events by these kinds of actor.",
+            "description": "Only events by these kinds of actor. Repeat for more values.",
             "schema": {
               "type": "array",
               "items": {
@@ -3307,22 +3307,10 @@
             }
           },
           {
-            "name": "via",
-            "in": "query",
-            "required": false,
-            "description": "Only events from these sources.",
-            "schema": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/EventChannel"
-              }
-            }
-          },
-          {
             "name": "request_ids",
             "in": "query",
             "required": false,
-            "description": "Only these requests.",
+            "description": "Only these requests. Repeat for more values.",
             "schema": {
               "type": "array",
               "items": {
@@ -3334,7 +3322,7 @@
             "name": "error_codes",
             "in": "query",
             "required": false,
-            "description": "Only these error codes.",
+            "description": "Only these error codes. Repeat for more values.",
             "schema": {
               "type": "array",
               "items": {
@@ -3471,7 +3459,7 @@
             "name": "cursor",
             "in": "query",
             "required": false,
-            "description": "The previous page's `next_cursor`.",
+            "description": "The previous page's `next_cursor`; send it with only `limit`.",
             "schema": {
               "type": "string"
             }
@@ -5484,7 +5472,7 @@
             "items": {
               "type": "string"
             },
-            "description": "`/v1` exact; `/v1/*` everything below. Until exact paths reach your organization, `/v1` also matches below it."
+            "description": "`/v1` exact; `/v1/*` everything below."
           },
           "headers": {
             "type": "object",
@@ -13908,7 +13896,7 @@
         "description": "Share of time (0–1) spent waiting for a resource.",
         "required": [
           "vcpu",
-          "memory_mib"
+          "memory"
         ],
         "additionalProperties": false,
         "properties": {
@@ -13921,7 +13909,7 @@
             "minimum": 0,
             "maximum": 1
           },
-          "memory_mib": {
+          "memory": {
             "description": "Waiting for memory.",
             "type": [
               "number",
@@ -14043,7 +14031,6 @@
           "ended_at",
           "duration_ms",
           "actor",
-          "via",
           "region",
           "request_id",
           "error_code",
@@ -14113,17 +14100,6 @@
               }
             ]
           },
-          "via": {
-            "description": "Where the action came from. Null when Arker acted.",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/EventChannel"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "region": {
             "type": [
               "string",
@@ -14181,7 +14157,7 @@
                 "null"
               ]
             },
-            "description": "Details specific to the action, such as `run_id`, `exit_code`, `fields` or `reason` (`autoscaling`, `schedule`, `idle`, `lifecycle`) when Arker acted."
+            "description": "Details specific to the action, such as `run_id`, `exit_code`, `fields` or `reason` (`autoscaling`, `schedule`) when Arker acted."
           }
         }
       },
@@ -14232,9 +14208,17 @@
           "type": {
             "$ref": "#/components/schemas/EventActorType"
           },
-          "id": {
+          "member_email": {
             "type": "string",
-            "description": "A member's email, an API key's id or an SSH key's id. Absent for Arker."
+            "description": "The member's email, when `type` is `member`."
+          },
+          "api_key_id": {
+            "type": "string",
+            "description": "The API key's id, when `type` is `api_key`."
+          },
+          "ssh_key_id": {
+            "type": "string",
+            "description": "The account SSH key's id, when `type` is `ssh_key`."
           }
         }
       },
@@ -14247,15 +14231,6 @@
           "arker"
         ],
         "description": "A member, an API key, an SSH key, or Arker."
-      },
-      "EventChannel": {
-        "type": "string",
-        "enum": [
-          "console",
-          "api",
-          "ssh"
-        ],
-        "description": "The console, the API, or SSH."
       },
       "ListEventsResponse": {
         "type": "object",

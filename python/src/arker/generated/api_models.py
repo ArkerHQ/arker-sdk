@@ -1808,7 +1808,7 @@ class VmMetricsUtilized:
 @dataclass(frozen=True)
 class VmMetricsPressure:
     vcpu: float | None
-    memory_mib: float | None
+    memory: float | None
 
 
 @dataclass(frozen=True)
@@ -1878,9 +1878,6 @@ class EventResources:
 
 
 EventActorType: TypeAlias = Literal['member', 'api_key', 'ssh_key', 'arker']
-
-
-EventChannel: TypeAlias = Literal['console', 'api', 'ssh']
 
 
 EventCategory: TypeAlias = Literal['compute', 'organization']
@@ -2191,7 +2188,6 @@ class ListEventsParameters:
     vm_ids: list[str] | None = None
     actors: list[str] | None = None
     actor_types: list[EventActorType] | None = None
-    via: list[EventChannel] | None = None
     request_ids: list[str] | None = None
     error_codes: list[ErrorCode] | None = None
     exit_code: int | None = None
@@ -2391,7 +2387,9 @@ class VmMetricsBucket:
 @dataclass(frozen=True)
 class EventActor:
     type: EventActorType
-    id: str | None = None
+    member_email: str | None = None
+    api_key_id: str | None = None
+    ssh_key_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2491,7 +2489,6 @@ class Event:
     ended_at: str | None
     duration_ms: int | None
     actor: EventActor | None
-    via: EventChannel | None
     region: str | None
     request_id: str | None
     error_code: ErrorCode | None

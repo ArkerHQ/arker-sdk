@@ -871,7 +871,7 @@ export interface paths {
         };
         /**
          * List events
-         * @description A complete record of the organization's activity, across every region.
+         * @description A complete record of compute and administrative operations.
          */
         get: operations["listEvents"];
         put?: never;
@@ -1001,7 +1001,7 @@ export interface components {
             hosts?: string[];
             /** @description HTTP methods matched by this rule. */
             methods?: string[];
-            /** @description `/v1` exact; `/v1/*` everything below. Until exact paths reach your organization, `/v1` also matches below it. */
+            /** @description `/v1` exact; `/v1/*` everything below. */
             paths?: string[];
             /** @description Header name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, `"authorization": ["Bearer $arker_api_key"]` or `"x-api-key": ["$arker_api_key"]` matches an API key of the VM's organization. */
             headers?: {
@@ -3909,7 +3909,7 @@ export interface components {
             /** @description Waiting for CPU. */
             vcpu: number | null;
             /** @description Waiting for memory. */
-            memory_mib: number | null;
+            memory: number | null;
         };
         /** @description Bytes moved in the bucket. */
         VmMetricsIo: {
@@ -3956,8 +3956,6 @@ export interface components {
             duration_ms: number | null;
             /** @description Who acted. */
             actor: components["schemas"]["EventActor"] | null;
-            /** @description Where the action came from. Null when Arker acted. */
-            via: components["schemas"]["EventChannel"] | null;
             /** @description The region that handled the action. */
             region: string | null;
             /** @description The request's `x-request-id`. */
@@ -3968,7 +3966,7 @@ export interface components {
             resources_provisioned: components["schemas"]["EventResources"] | null;
             /** @description A managed pool's reservation, on `pool_create` and `pool_update`. */
             resources_reserved: components["schemas"]["PoolResources"] | null;
-            /** @description Details specific to the action, such as `run_id`, `exit_code`, `fields` or `reason` (`autoscaling`, `schedule`, `idle`, `lifecycle`) when Arker acted. */
+            /** @description Details specific to the action, such as `run_id`, `exit_code`, `fields` or `reason` (`autoscaling`, `schedule`) when Arker acted. */
             attributes: {
                 [key: string]: string | number | boolean | null;
             };
@@ -3988,19 +3986,18 @@ export interface components {
         };
         EventActor: {
             type: components["schemas"]["EventActorType"];
-            /** @description A member's email, an API key's id or an SSH key's id. Absent for Arker. */
-            id?: string;
+            /** @description The member's email, when `type` is `member`. */
+            member_email?: string;
+            /** @description The API key's id, when `type` is `api_key`. */
+            api_key_id?: string;
+            /** @description The account SSH key's id, when `type` is `ssh_key`. */
+            ssh_key_id?: string;
         };
         /**
          * @description A member, an API key, an SSH key, or Arker.
          * @enum {string}
          */
         EventActorType: "member" | "api_key" | "ssh_key" | "arker";
-        /**
-         * @description The console, the API, or SSH.
-         * @enum {string}
-         */
-        EventChannel: "console" | "api" | "ssh";
         ListEventsResponse: {
             /** @description Events, in the requested order. */
             events: components["schemas"]["Event"][];
@@ -6294,23 +6291,21 @@ export interface operations {
                 search?: string;
                 /** @description Only events of this category. */
                 category?: components["schemas"]["EventCategory"];
-                /** @description Only these actions. */
+                /** @description Only these actions. Repeat for more values (`actions=vm_run&actions=vm_fork`). */
                 actions?: components["schemas"]["EventAction"][];
-                /** @description Only these states. */
+                /** @description Only these states. Repeat for more values. */
                 states?: components["schemas"]["EventState"][];
-                /** @description Only these regions. */
+                /** @description Only these regions. Repeat for more values. */
                 regions?: string[];
-                /** @description Only these VMs. */
+                /** @description Only these VMs. Repeat for more values. */
                 vm_ids?: string[];
-                /** @description Members by email or `me`, keys by id. */
+                /** @description Members by email or `me`, keys by id. Repeat for more values. */
                 actors?: string[];
-                /** @description Only events by these kinds of actor. */
+                /** @description Only events by these kinds of actor. Repeat for more values. */
                 actor_types?: components["schemas"]["EventActorType"][];
-                /** @description Only events from these sources. */
-                via?: components["schemas"]["EventChannel"][];
-                /** @description Only these requests. */
+                /** @description Only these requests. Repeat for more values. */
                 request_ids?: string[];
-                /** @description Only these error codes. */
+                /** @description Only these error codes. Repeat for more values. */
                 error_codes?: components["schemas"]["ErrorCode"][];
                 /** @description Only runs that exited with this code. */
                 exit_code?: number;
@@ -6336,7 +6331,7 @@ export interface operations {
                 order?: "asc" | "desc";
                 /** @description Events per page. */
                 limit?: number;
-                /** @description The previous page's `next_cursor`. */
+                /** @description The previous page's `next_cursor`; send it with only `limit`. */
                 cursor?: string;
             };
             header?: never;
