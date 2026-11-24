@@ -160,7 +160,6 @@ class PatchSessionRequest:
     cols: int | None = None
     rows: int | None = None
     timeout_secs: int | None = None
-    timeout: int | None = None
 
 
 @dataclass(frozen=True)
@@ -2025,7 +2024,7 @@ class AttachSessionPtyParameters:
     rows: int | None = 24
     command: str | None = None
     persist: bool | None = True
-    timeout: int | None = None
+    idle_timeout: int | None = None
     cancel_ttl_secs: int | None = None
     ticket: str | None = None
 

@@ -165,7 +165,7 @@ export interface paths {
         };
         /**
          * Get VM metrics
-         * @description Return a VM's size, use, pressure and I/O over time, in buckets. Only buckets in which the VM ran are returned. Regions without VM metrics, and pool VMs whose workers record none, answer 422 `unsupported_operation` with feature `vm_metrics`.
+         * @description Get a VM's key metrics including resource usage.
          */
         get: operations["getVmMetrics"];
         put?: never;
@@ -315,8 +315,8 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Update a session (resize PTY / set timeout)
-         * @description Resize the session's PTY (cols/rows) and/or update its idle timeout. A resize applies at once to the session's open terminal, attached or detached, and is the size the next attach opens at. REST equivalent of the WebSocket {"type":"resize"} control frame - usable from any client, attached or not.
+         * Update a session (resize PTY)
+         * @description Resize the session's PTY (cols/rows). A resize applies at once to the session's open terminal, attached or detached, and is the size the next attach opens at. REST equivalent of the WebSocket {"type":"resize"} control frame - usable from any client, attached or not.
          */
         patch: operations["patchSession"];
         trace?: never;
@@ -333,10 +333,10 @@ export interface paths {
                 /** @description When true (default), disconnecting keeps the shell running so the same session_id can reconnect to it and receive recent scrollback. When false, the shell is terminated on disconnect. A kill control message or the configured idle TTL terminates a persistent shell. */
                 persist?: boolean;
                 /** @description Destroy the PTY after this many seconds without terminal input or output. Omit or set to zero to disable this PTY-specific idle limit. Not with `cancel_ttl_secs`. */
-                timeout?: number;
+                idle_timeout?: number;
                 /**
                  * @deprecated
-                 * @description Deprecated: use `timeout`. Not with `timeout`.
+                 * @description Deprecated: use `idle_timeout`. Not with `idle_timeout`.
                  */
                 cancel_ttl_secs?: number;
                 /** @description Browser auth: a short-lived ticket from POST .../pty-ticket, used in place of the Authorization header (which a browser WebSocket cannot set). */
@@ -871,7 +871,7 @@ export interface paths {
         };
         /**
          * List events
-         * @description Lists the organization's activity, one event per action: API requests, runs, network and SSH traffic, automatic actions and account changes, across every region, within the retained history window. Only the organization's own actions are listed: what its members and keys did, what its configuration did, and credit or quota changes Arker made to it; never how Arker places, moves, suspends or restores a VM on its own. Every value is one documented here; search matches only what is published. Filters combine with AND; the values of one filter with OR. Newly recorded actions appear within seconds.
+         * @description A complete record of the organization's activity, across every region.
          */
         get: operations["listEvents"];
         put?: never;
@@ -997,11 +997,11 @@ export interface components {
             ports?: (number | number[])[];
             /** @description IPs or CIDRs. Outbound rules match destination IPs; inbound rules match the caller source IP. */
             ips?: string[];
-            /** @description `github.com` matches only `github.com`; `*.github.com` matches every name under it, not `github.com` itself. Other wildcards, addresses, ports and URLs are rejected. */
+            /** @description `github.com` exact; `*.github.com` any subdomain. Matched by name on HTTP and TLS, by address otherwise. A `deny` also blocks other sites sharing its addresses. */
             hosts?: string[];
             /** @description HTTP methods matched by this rule. */
             methods?: string[];
-            /** @description `/v1` matches only `/v1`; `/v1/*` matches every path below it, not `/v1` itself. Other `*`, `?`, `#`, `{` and `}` are rejected. Until exact paths reach the organization, `/v1` also matches the paths below it. */
+            /** @description `/v1` exact; `/v1/*` everything below. Until exact paths reach your organization, `/v1` also matches below it. */
             paths?: string[];
             /** @description Header name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, `"authorization": ["Bearer $arker_api_key"]` or `"x-api-key": ["$arker_api_key"]` matches an API key of the VM's organization. */
             headers?: {
@@ -1314,11 +1314,9 @@ export interface components {
             rows?: number;
             /**
              * @deprecated
-             * @description Deprecated: use `timeout`. Not with `timeout`.
+             * @description Deprecated and ignored: the attach's `idle_timeout` sets a terminal's idle limit.
              */
             timeout_secs?: number;
-            /** @description Idle auto-cancel window for the PTY, in seconds; applies on the next attach. Not with `timeout_secs`. */
-            timeout?: number;
         };
         PatchSessionResponse: {
             /** @description True when the operation succeeded. */
@@ -3843,27 +3841,27 @@ export interface components {
             /** @description Unrevoked API keys, newest first. */
             api_keys: components["schemas"]["ApiKey"][];
         };
-        /** @description A VM's usage over a time window. */
+        /** @description A VM's metrics over a time window. */
         VmMetrics: {
-            /** @description Unique VM identifier. */
+            /** @description VM ID. */
             vm_id: string;
             /** @description Bucket width in seconds. */
             step: number;
             /**
              * Format: date-time
-             * @description Start of the window's first bucket.
+             * @description Window start.
              */
             started_at: string;
             /**
              * Format: date-time
-             * @description End of the window's last bucket.
+             * @description Window end.
              */
             ended_at: string;
-            /** @description Buckets in which the VM ran, oldest first. */
+            /** @description Buckets, oldest first. */
             buckets: components["schemas"]["VmMetricsBucket"][];
         };
         /**
-         * @description What an event records, as `<resource>_<verb>`. `vm_run` is a command run on the VM; `vm_running` one stretch the VM ran (what billing meters); `vm_terminal_session` one interactive terminal on the VM, an SSH connection or a terminal attached to a session; `vm_update` any change to a VM, its policies and an automatic resize included; `member_sign_in` a member's session entering the organization, by signing in or switching to it. Requests to a VM's ports and its refused outbound requests are not events.
+         * @description What happened, as `<resource>_<verb>`. `vm_running` is a stretch a VM ran, as metered by billing; `vm_terminal_session` an SSH connection or attached terminal.
          * @enum {string}
          */
         EventAction: "vm_fork" | "vm_run" | "vm_sync" | "vm_update" | "vm_suspend" | "vm_delete" | "vm_running" | "vm_terminal_session" | "run_signal" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_add" | "member_invite" | "member_invite_revoke" | "member_update" | "member_remove" | "member_sign_in" | "member_sign_out" | "member_terms_accept" | "org_create" | "org_update" | "org_quota_update" | "org_delete" | "billing_checkout" | "billing_payment_method_update" | "billing_credit_grant";
@@ -3872,75 +3870,75 @@ export interface components {
         /** @enum {string} */
         EventOrderBy: "requested_at" | "started_at" | "ended_at" | "duration_ms";
         Event: {
-            /** @description The action's id, the same while it is running and once it ends. */
+            /** @description The event's id. */
             id: string;
             action: components["schemas"]["EventAction"];
             category: components["schemas"]["EventCategory"];
             state: components["schemas"]["EventState"];
-            /** @description The VM the action used; a fork's new VM. Null for an action on no VM. */
+            /** @description The VM acted on; for `vm_fork`, the new VM. */
             vm_id: string | null;
             /**
              * Format: date-time
-             * @description When the request arrived, or an automatic action was triggered.
+             * @description When the action was requested.
              */
             requested_at: string;
             /**
              * Format: date-time
-             * @description When the action began executing; null before it does and for an action with no separate start.
+             * @description When the action started.
              */
             started_at: string | null;
             /**
              * Format: date-time
-             * @description When the action ended; null while it is running.
+             * @description When the action ended.
              */
             ended_at: string | null;
-            /** @description From `started_at`, or `requested_at` when there is none, to `ended_at`; null while running. */
+            /** @description How long the action took. */
             duration_ms: number | null;
-            /** @description Who initiated the action: a member, an API key, an SSH key, or Arker acting by itself. Null when Arker does not know who acted, such as for an anonymous request to a VM's port. */
+            /** @description Who acted. */
             actor: components["schemas"]["EventActor"] | null;
-            /** @description The region of the Arker service that handled the action; null for one the console served, such as an API key's. */
+            /** @description The region that handled the action. */
             region: string | null;
-            /** @description The `x-request-id` of the request that made the action. */
+            /** @description The request's `x-request-id`. */
             request_id: string | null;
-            /** @description Why the action failed or was refused: the code its request was answered with, or `internal` when Arker failed it itself. */
+            /** @description Why the action failed. */
             error_code: components["schemas"]["ErrorCode"] | null;
-            /** @description Facts only some actions have, and no others: `run_id`, `session_id`, `exit_code` (a run command's own), `source_vm_id`, `vm_name`, `filesystem_id`, `mount_id`, `pool_id`, `fields` (what a `vm_update` or `org_update` changed: `resources`, `policies`, `name`), `ssh_key_fingerprint`, `caller_ip`, `ssh_key_id`, `api_key_id`, `email`, `role`, `org_name`, `tos_version`, `privacy_policy_version`, `amount_cents`, `region`, `resource`, `limit` and `reason` (why Arker acted by itself: `autoscaling` on a `vm_update` that resized a VM automatically; on a lifecycle rule's `vm_suspend`, `schedule` for a rule that fires at a fixed time (`at`, `after_created`) and `idle` for one counted from the VM's last running start (`after_last_running_start`); `lifecycle` on a `vm_delete` a lifecycle rule made). The Events docs list which attributes each action carries. */
+            /** @description Details specific to the action, such as `run_id`, `exit_code`, `fields` or `reason` (`autoscaling`, `schedule`, `idle`, `lifecycle`) when Arker acted. */
             attributes: {
                 [key: string]: string | number | boolean | null;
             };
-            /** @description How the request that made the action arrived: `console`, `api` or `ssh`. Null when Arker acted by itself or does not know. */
+            /** @description Where the action came from. Null when Arker acted. */
             via: components["schemas"]["EventChannel"] | null;
-            /** @description The VM's resources: what a `vm_fork` created, a resizing `vm_update` (an automatic resize included) left, a `vm_delete` freed, and a `vm_running` ran with. Null on other actions, and where Arker did not record the size. */
+            /** @description The VM's size, on `vm_fork`, `vm_update`, `vm_delete` and `vm_running`. */
             resources_provisioned: components["schemas"]["EventResources"] | null;
-            /** @description A managed pool's reserved resources, as a `pool_create` or `pool_update` set them; the pool is billed on them. Null on other actions, for a pool that reserves none, and where Arker did not record them. */
+            /** @description A managed pool's reservation, on `pool_create` and `pool_update`. */
             resources_reserved: components["schemas"]["PoolResources"] | null;
         };
         EventActor: {
-            /** @description Who: a member's email; one of the organization's API keys' `api_key_id`; an SSH key's id, or its fingerprint when it is no account key. None for Arker, or for a member or key the organization no longer has. */
+            /** @description A member's email, an API key's id or an SSH key's id. Absent for Arker. */
             id?: string;
             type: components["schemas"]["EventActorType"];
         };
         ListEventsResponse: {
             /** @description Events, in the requested order. */
             events: components["schemas"]["Event"][];
-            /** @description Cursor for the next page, or null when there is none. */
+            /** @description The next page's cursor, or null. */
             next_cursor: string | null;
         };
         /**
-         * @description Which side of the organization an event is about. `compute`: its VMs, runs, sessions, mounts, filesystems, pools, network and SSH traffic, and API and SSH keys. `organization`: its members, invitations, sign-ins, terms, billing, and credit and quota changes. Every member can read `compute`; `organization` needs an admin.
+         * @description `organization` for member, organization and billing actions, readable by admins only; `compute` otherwise.
          * @enum {string}
          */
         EventCategory: "compute" | "organization";
-        /** @description The VM's resources in one bucket. Averages are over the time the VM ran in it, and a value the VM could not report is null. */
+        /** @description Metrics for one bucket. Null where not reported. */
         VmMetricsBucket: {
             /**
              * Format: date-time
-             * @description Start of the bucket.
+             * @description Bucket start.
              */
             started_at: string;
             /**
              * Format: date-time
-             * @description End of the bucket: `started_at` plus `step`.
+             * @description Bucket end.
              */
             ended_at: string;
             resources_provisioned_avg: components["schemas"]["VmMetricsProvisionedAvg"];
@@ -3951,16 +3949,16 @@ export interface components {
             resources_pressure_max: components["schemas"]["VmMetricsPressure"];
             resources_io: components["schemas"]["VmMetricsIo"];
         };
-        /** @description The VM's size averaged over the time it ran in the bucket, so a resize inside the bucket gives a value between the sizes before and after it. */
+        /** @description Average size. */
         VmMetricsProvisionedAvg: {
-            /** @description vCPUs; fractional when a resize falls inside the bucket. */
+            /** @description vCPUs. */
             vcpu: number;
             /** @description Memory, in MiB. */
             memory_mib: number;
             /** @description Disk, in MiB. */
             disk_mib: number;
         };
-        /** @description The largest size the VM had while it ran in the bucket. */
+        /** @description Largest size. */
         VmMetricsProvisioned: {
             /** @description vCPUs. */
             vcpu: number;
@@ -3969,32 +3967,32 @@ export interface components {
             /** @description Disk, in MiB. */
             disk_mib: number;
         };
-        /** @description Resources in use: the average over the time the VM ran, or the highest reading of about 10 s. */
+        /** @description Resources in use. */
         VmMetricsUtilized: {
             /** @description vCPUs in use. */
             vcpu: number | null;
-            /** @description Guest memory in use, in MiB, as `free` counts it. */
+            /** @description Memory in use, in MiB. */
             memory_mib: number | null;
-            /** @description Guest root filesystem in use, in MiB, as `df /` counts it. */
+            /** @description Disk in use, in MiB. */
             disk_mib: number | null;
         };
-        /** @description The share (0–1) of running time in which at least one task in the guest waited for the resource: the average over the bucket, or the highest reading of about 10 s. Sustained pressure means the VM's work needs more of it than the VM has. */
+        /** @description Share of time (0–1) spent waiting for a resource. */
         VmMetricsPressure: {
-            /** @description Share of running time some task waited for a CPU. */
+            /** @description Waiting for CPU. */
             vcpu: number | null;
-            /** @description Share of running time some task was stalled reclaiming or waiting for memory. */
+            /** @description Waiting for memory. */
             memory_mib: number | null;
         };
-        /** @description Bytes the VM moved in the bucket. */
+        /** @description Bytes moved in the bucket. */
         VmMetricsIo: {
-            /** @description Bytes received over the network. */
+            /** @description Bytes received. */
             network_received_bytes: number | null;
-            /** @description Bytes sent over the network. */
+            /** @description Bytes sent. */
             network_transmitted_bytes: number | null;
             /** @description Bytes written to disk. */
             disk_written_bytes: number | null;
         };
-        /** @description A VM's resources, in the same units as VM resources. The GPU fields are present only on a `vm_running` of a VM with a GPU, and are the VM's totals across its GPUs, as billing meters them: a VM's per-GPU `gpu_sms` and `gpu_vram_mib` times its `gpu_count`. */
+        /** @description A VM's resources. GPU totals appear only on `vm_running`. */
         EventResources: {
             /** @description vCPUs. */
             vcpu: number;
@@ -4002,18 +4000,18 @@ export interface components {
             memory_mib: number;
             /** @description Disk in MiB. */
             disk_mib: number;
-            /** @description GPU streaming multiprocessors, across all the VM's GPUs. */
+            /** @description GPU streaming multiprocessors, across the VM's GPUs. */
             gpu_sm?: number;
-            /** @description GPU memory in MiB, across all the VM's GPUs. */
+            /** @description GPU memory in MiB, across the VM's GPUs. */
             gpu_vram_mib?: number;
         };
         /**
-         * @description Who initiated an action: a member of the organization, one of its API keys, an SSH key, or Arker acting by itself, such as an automatic resize, a lifecycle rule's suspend or delete, or a credit or quota change.
+         * @description A member, an API key, an SSH key, or Arker.
          * @enum {string}
          */
         EventActorType: "member" | "api_key" | "ssh_key" | "arker";
         /**
-         * @description How the request that made an action arrived: from a member in the console, through the API with an API key, or over SSH.
+         * @description The console, the API, or SSH.
          * @enum {string}
          */
         EventChannel: "console" | "api" | "ssh";
@@ -4802,11 +4800,11 @@ export interface operations {
     getVmMetrics: {
         parameters: {
             query?: {
-                /** @description The first bucket starts at or after this instant. Defaults to one hour before `started_at_lt`. History is kept for 30 days: an instant before the start of the UTC day 30 days ago is refused with 400 `bad_request`. */
+                /** @description Window start, within the last 30 days. Defaults to an hour before `started_at_lt`. */
                 started_at_gte?: string;
-                /** @description The last bucket starts before this instant. Defaults to now. */
+                /** @description Window end. Defaults to now. */
                 started_at_lt?: string;
-                /** @description Bucket width in seconds. Defaults to the smallest width that keeps the window to at most 1,440 buckets. A window of more than 1,440 buckets is refused with 400 `bad_request`. */
+                /** @description Bucket width in seconds. */
                 step?: 60 | 300 | 3600;
             };
             header?: never;
@@ -4818,7 +4816,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The VM's usage over the window. */
+            /** @description The VM's metrics. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5281,10 +5279,10 @@ export interface operations {
                 /** @description When true (default), disconnecting keeps the shell running so the same session_id can reconnect to it and receive recent scrollback. When false, the shell is terminated on disconnect. A kill control message or the configured idle TTL terminates a persistent shell. */
                 persist?: boolean;
                 /** @description Destroy the PTY after this many seconds without terminal input or output. Omit or set to zero to disable this PTY-specific idle limit. Not with `cancel_ttl_secs`. */
-                timeout?: number;
+                idle_timeout?: number;
                 /**
                  * @deprecated
-                 * @description Deprecated: use `timeout`. Not with `timeout`.
+                 * @description Deprecated: use `idle_timeout`. Not with `idle_timeout`.
                  */
                 cancel_ttl_secs?: number;
                 /** @description Browser auth: a short-lived ticket from POST .../pty-ticket, used in place of the Authorization header (which a browser WebSocket cannot set). */
@@ -6295,53 +6293,53 @@ export interface operations {
     listEvents: {
         parameters: {
             query?: {
-                /** @description Only events with this text, ignoring case, in their action, ids, error code, attribute values or member's email. */
+                /** @description Text to match. */
                 search?: string;
-                /** @description Only events of this category. Without it, every event the caller can read: both categories for an admin, `compute` for anyone else. Reading `organization` needs an admin, or an API key with the admin role. */
+                /** @description Only events of this category. */
                 category?: components["schemas"]["EventCategory"];
-                /** @description Only these actions. Repeat the parameter for more than one. */
+                /** @description Only these actions. */
                 actions?: components["schemas"]["EventAction"][];
-                /** @description Only events in these states. */
+                /** @description Only these states. */
                 states?: components["schemas"]["EventState"][];
-                /** @description Only actions these regions served. */
+                /** @description Only these regions. */
                 regions?: string[];
-                /** @description Only actions on these VMs. */
+                /** @description Only these VMs. */
                 vm_ids?: string[];
-                /** @description Only actions these actors initiated: members by email, or `me` for the member calling, and API keys and SSH keys by id. */
+                /** @description Members by email or `me`, keys by id. */
                 actors?: string[];
-                /** @description Only actions these kinds of actor initiated. */
+                /** @description Only events by these kinds of actor. */
                 actor_types?: components["schemas"]["EventActorType"][];
-                /** @description Only actions whose request arrived this way. Arker's own actions have none; find them with `actor_types=arker`. */
+                /** @description Only events from these sources. */
                 via?: components["schemas"]["EventChannel"][];
-                /** @description Only actions these requests made. */
+                /** @description Only these requests. */
                 request_ids?: string[];
-                /** @description Only actions that failed with these codes. */
+                /** @description Only these error codes. */
                 error_codes?: components["schemas"]["ErrorCode"][];
                 /** @description Only runs that exited with this code. */
                 exit_code?: number;
-                /** @description Only events whose `requested_at` is at or after this time. Events without one do not match. */
+                /** @description `requested_at` at or after this. */
                 requested_at_gte?: string;
-                /** @description Only events whose `requested_at` is before this time. Events without one do not match. */
+                /** @description `requested_at` before this. */
                 requested_at_lt?: string;
-                /** @description Only events whose `started_at` is at or after this time. Events without one do not match. */
+                /** @description `started_at` at or after this. */
                 started_at_gte?: string;
-                /** @description Only events whose `started_at` is before this time. Events without one do not match. */
+                /** @description `started_at` before this. */
                 started_at_lt?: string;
-                /** @description Only events whose `ended_at` is at or after this time. Events without one do not match. */
+                /** @description `ended_at` at or after this. */
                 ended_at_gte?: string;
-                /** @description Only events whose `ended_at` is before this time. Events without one do not match. */
+                /** @description `ended_at` before this. */
                 ended_at_lt?: string;
-                /** @description Only events whose `duration_ms` is at or after this many milliseconds. Events without one do not match. */
+                /** @description `duration_ms` at or after this. */
                 duration_ms_gte?: number;
-                /** @description Only events whose `duration_ms` is before this many milliseconds. Events without one do not match. */
+                /** @description `duration_ms` before this. */
                 duration_ms_lt?: number;
-                /** @description What events are ordered by; events without it come last, and `id` breaks ties. */
+                /** @description Sort field. */
                 order_by?: components["schemas"]["EventOrderBy"];
-                /** @description The direction of `order_by`. */
+                /** @description Sort direction. */
                 order?: "asc" | "desc";
                 /** @description Events per page. */
                 limit?: number;
-                /** @description The previous page's `next_cursor`. It keeps that query's filters and order, so only `limit` may accompany it. */
+                /** @description The previous page's `next_cursor`. */
                 cursor?: string;
             };
             header?: never;
