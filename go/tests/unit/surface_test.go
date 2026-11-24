@@ -989,8 +989,8 @@ func TestMetricsQueriesTheVMsWindow(t *testing.T) {
 			"resources_provisioned_max":{"vcpu":2,"memory_mib":2048,"disk_mib":10240},
 			"resources_utilized_avg":{"vcpu":0.4,"memory_mib":512,"disk_mib":null},
 			"resources_utilized_max":{"vcpu":1.9,"memory_mib":900,"disk_mib":null},
-			"resources_pressure_avg":{"vcpu":0.01,"memory_mib":0},
-			"resources_pressure_max":{"vcpu":0.2,"memory_mib":null},
+			"resources_pressure_avg":{"vcpu":0.01,"memory":0},
+			"resources_pressure_max":{"vcpu":0.2,"memory":0.3},
 			"resources_io":{"network_received_bytes":10,"network_transmitted_bytes":20,"disk_written_bytes":null}}]}`)
 	}, reject(t, "control"))
 
@@ -1000,7 +1000,8 @@ func TestMetricsQueriesTheVMsWindow(t *testing.T) {
 	}
 	b := m.Buckets[0]
 	if m.Step != 300 || b.ResourcesProvisionedAvg.VCPU != 1.5 || *b.ResourcesUtilizedMax.VCPU != 1.9 ||
-		b.ResourcesUtilizedAvg.DiskMiB != nil || *b.ResourcesIO.NetworkTransmittedBytes != 20 {
+		b.ResourcesUtilizedAvg.DiskMiB != nil || *b.ResourcesIO.NetworkTransmittedBytes != 20 ||
+		*b.ResourcesPressureMax.Memory != 0.3 {
 		t.Fatalf("metrics did not decode: %+v", m)
 	}
 }

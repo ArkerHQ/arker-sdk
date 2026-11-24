@@ -55,8 +55,8 @@ type VMMetricsUtilized struct {
 // VMMetricsPressure is the share (0-1) of running time in which some task in
 // the guest waited for the resource.
 type VMMetricsPressure struct {
-	VCPU      *float64 `json:"vcpu"`
-	MemoryMiB *float64 `json:"memory_mib"`
+	VCPU   *float64 `json:"vcpu"`
+	Memory *float64 `json:"memory"`
 }
 
 // VMMetricsIO is the bytes the VM moved in the bucket.
