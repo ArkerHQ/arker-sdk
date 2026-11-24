@@ -447,10 +447,10 @@ def test_vm_fork_uses_its_id_and_attached_endpoint() -> None:
     }
 
 
-CPU_AUTOSCALING_RULE = {"min": 2, "max": 8, "target_utilization": 0.6, "window_seconds": 5}
+CPU_AUTOSCALING_RULE = {"min": 2, "max": 8, "target_utilization": 0.6}
 SPARSE_AUTOSCALING = {"vcpu": CPU_AUTOSCALING_RULE, "memory_mib": None}
 POLICY_REMOVALS = {"rules": {"access": None}, "secrets": {"OLD_TOKEN": None}}
-DISK_AUTOSCALING_RULE = {"max": 32768, "target_utilization": 0.7, "window_seconds": 15}
+DISK_AUTOSCALING_RULE = {"max": 32768, "target_utilization": 0.7}
 
 
 @pytest.fixture(params=[True, False], ids=["typed", "mapping"])

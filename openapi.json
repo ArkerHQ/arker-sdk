@@ -8215,8 +8215,7 @@
         "required": [
           "min",
           "max",
-          "target_utilization",
-          "window_seconds"
+          "target_utilization"
         ],
         "properties": {
           "min": {
@@ -8234,22 +8233,16 @@
             "exclusiveMinimum": 0,
             "maximum": 1,
             "description": "Desired fraction of the allocated resource in use, greater than zero and at most one."
-          },
-          "window_seconds": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 86400,
-            "description": "Seconds of measured running time used to evaluate the rule."
           }
-        }
+        },
+        "description": "Adjusts resource allocation to try to maintain the target utilization."
       },
       "DiskAutoscalingRule": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "max",
-          "target_utilization",
-          "window_seconds"
+          "target_utilization"
         ],
         "properties": {
           "max": {
@@ -8262,14 +8255,9 @@
             "exclusiveMinimum": 0,
             "maximum": 1,
             "description": "Desired fraction of the allocated resource in use, greater than zero and at most one."
-          },
-          "window_seconds": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 86400,
-            "description": "Seconds of measured running time used to evaluate the rule."
           }
-        }
+        },
+        "description": "Adjusts resource allocation to try to maintain the target utilization."
       },
       "ResourcesAutoscaling": {
         "description": "Autoscaling rules for CPU, memory and disk. A fork inherits the source VM’s rule for each resource omitted from the request.",
@@ -13801,7 +13789,6 @@
       "EventAction": {
         "type": "string",
         "enum": [
-          "vm_autoscale",
           "run",
           "fork",
           "sync",
