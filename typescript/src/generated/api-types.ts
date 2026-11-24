@@ -3971,7 +3971,7 @@ export interface components {
                 [key: string]: string | number | boolean | null;
             };
         };
-        /** @description A VM's resources. GPU totals appear only on `vm_running`. */
+        /** @description A VM's resources. */
         EventResources: {
             /** @description vCPUs. */
             vcpu: number;
@@ -3979,10 +3979,6 @@ export interface components {
             memory_mib: number;
             /** @description Disk in MiB. */
             disk_mib: number;
-            /** @description GPU streaming multiprocessors, across the VM's GPUs. */
-            gpu_sm?: number;
-            /** @description GPU memory in MiB, across the VM's GPUs. */
-            gpu_vram_mib?: number;
         };
         EventActor: {
             type: components["schemas"]["EventActorType"];

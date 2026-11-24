@@ -1873,8 +1873,6 @@ class EventResources:
     vcpu: int
     memory_mib: int
     disk_mib: int
-    gpu_sm: int | None = None
-    gpu_vram_mib: int | None = None
 
 
 EventActorType: TypeAlias = Literal['member', 'api_key', 'ssh_key', 'arker']
