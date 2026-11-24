@@ -113,7 +113,8 @@ export interface paths {
         };
         /**
          * List organization runs
-         * @description Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
+         * @deprecated
+         * @description Deprecated: use `GET /v1/events`, which lists every action across regions. Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
          */
         get: operations["listOrgRuns"];
         put?: never;
@@ -129,7 +130,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -155,12 +156,32 @@ export interface paths {
         patch: operations["patchVm"];
         trace?: never;
     };
+    "/v1/vms/{id}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get VM metrics
+         * @description Return a VM's size, use, pressure and I/O over time, in buckets. Only buckets in which the VM ran are returned. Regions without VM metrics, and pool VMs whose workers record none, answer 422 `unsupported_operation` with feature `vm_metrics`.
+         */
+        get: operations["getVmMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/vms/{id}/policies": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -189,7 +210,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -216,7 +237,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Run identifier. */
                 run_id: components["parameters"]["RunId"];
@@ -245,7 +266,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -272,7 +293,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Session identifier. */
                 sid: components["parameters"]["SessionId"];
@@ -311,14 +332,19 @@ export interface paths {
                 command?: string;
                 /** @description When true (default), disconnecting keeps the shell running so the same session_id can reconnect to it and receive recent scrollback. When false, the shell is terminated on disconnect. A kill control message or the configured idle TTL terminates a persistent shell. */
                 persist?: boolean;
-                /** @description Destroy the PTY after this many seconds without terminal input or output. Omit or set to zero to disable this PTY-specific idle limit. */
+                /** @description Destroy the PTY after this many seconds without terminal input or output. Omit or set to zero to disable this PTY-specific idle limit. Not with `cancel_ttl_secs`. */
+                timeout?: number;
+                /**
+                 * @deprecated
+                 * @description Deprecated: use `timeout`. Not with `timeout`.
+                 */
                 cancel_ttl_secs?: number;
                 /** @description Browser auth: a short-lived ticket from POST .../pty-ticket, used in place of the Authorization header (which a browser WebSocket cannot set). */
                 ticket?: string;
             };
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Session identifier. */
                 sid: components["parameters"]["SessionId"];
@@ -343,7 +369,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Session identifier. */
                 sid: components["parameters"]["SessionId"];
@@ -368,7 +394,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -395,7 +421,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Filesystem mount identifier. */
                 mount_id: components["parameters"]["MountId"];
@@ -420,7 +446,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -573,7 +599,10 @@ export interface paths {
     };
     "/v1/pools/{pool_id}/workers/{worker_id}": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
             header?: never;
             path: {
                 /** @description Pool identifier returned as `pool_id`. */
@@ -586,7 +615,7 @@ export interface paths {
         get?: never;
         /**
          * Join a pool or heartbeat
-         * @description Join the pool, or keep the worker in it. The first worker of a `self_hosted` pool sets its platform; the heartbeat's `platform` must be the pool's and its `kind` one the pool takes; a retired worker id is refused. Authenticate with an API key limited to this pool. A worker id the pool has not seen gets 429 `quota_exceeded` while the pool has as many workers as its `pool_workers` quota allows; it joins once another leaves.
+         * @description Join the pool, or keep the worker in it. The first worker of a `self_hosted` pool sets its platform; the heartbeat's `platform` must be the pool's and its `kind` one the pool takes; a worker id that has left the pool is refused with 410 `expired`, and the machine joins again under a new worker id. Authenticate with an API key limited to this pool. A worker id the pool has not seen gets 429 `quota_exceeded` while the pool has as many workers as its `pool_workers` quota allows; it joins once another leaves.
          */
         put: operations["heartbeatWorker"];
         post?: never;
@@ -598,7 +627,10 @@ export interface paths {
     };
     "/v1/pools/{pool_id}/workers/{worker_id}/tunnel": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
             header?: never;
             path: {
                 /** @description Pool identifier returned as `pool_id`. */
@@ -621,9 +653,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pools/{pool_id}/workers/{worker_id}/vms/reconcile": {
+        parameters: {
+            query?: {
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reclaim a restarted worker's VMs
+         * @description Name the VMs a restarted worker process still holds. Each that was handed back for the restart and not yet claimed by another worker is the worker's again, under a new ownership generation, and runs its replaced process left active fail. Answers which named VMs the worker owns now.
+         */
+        post: operations["reconcileWorkerVms"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
             header?: never;
             path: {
                 /** @description Pool identifier returned as `pool_id`. */
@@ -644,7 +707,7 @@ export interface paths {
         post?: never;
         /**
          * Forget a worker's VM
-         * @description Record that the VM is gone. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with an API key limited to this pool.
+         * @description Record that the VM is gone. A VM the pool does not hold, or holds deleted, is already gone; one the worker no longer owns, or was handed back, is refused with 409. Authenticate with an API key limited to this pool.
          */
         delete: operations["deleteWorkerVm"];
         options?: never;
@@ -652,9 +715,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}/snapshots": {
+        parameters: {
+            query?: {
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: components["parameters"]["WorkerVmId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reserve a VM snapshot generation
+         * @description Reserve an immutable snapshot identifier tied to the worker's current VM ownership generation. The reservation's upload lease runs out unless renewed; a snapshot whose lease ran out uncommitted is deleted. Only a pool whose snapshots Arker stores reserves one.
+         */
+        post: operations["reserveWorkerVmSnapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}/snapshots/{snapshot_id}": {
+        parameters: {
+            query: {
+                /** @description VM ownership generation returned by the reservation. */
+                vm_generation: number;
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: components["parameters"]["WorkerVmId"];
+                /** @description Immutable snapshot generation identifier returned by the reservation. */
+                snapshot_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Commit a VM snapshot generation
+         * @description Publish an uploaded snapshot only while the worker incarnation still owns the same VM generation.
+         */
+        put: operations["commitWorkerVmSnapshot"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Renew a VM snapshot reservation
+         * @description Extend a reservation's upload lease while the worker process still owns the same VM generation and the lease has not run out.
+         */
+        patch: operations["renewWorkerVmSnapshot"];
+        trace?: never;
+    };
     "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}/runs/{run_id}": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
             header?: never;
             path: {
                 /** @description Pool identifier returned as `pool_id`. */
@@ -728,6 +862,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List events
+         * @description Lists the organization's activity, one event per action: API requests, runs, network and SSH traffic, automatic actions and account changes, across every region, within the retained history window. Only the organization's own actions are listed: what its members and keys did, what its configuration did, and credit or quota changes Arker made to it; never how Arker places, moves, suspends or restores a VM on its own. Every value is one documented here; search matches only what is published. Filters combine with AND; the values of one filter with OR. Newly recorded actions appear within seconds.
+         */
+        get: operations["listEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -768,9 +922,9 @@ export interface components {
          * @description Stable public error codes. ErrorBody selects the required details for each code; clients must not parse message text.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "insufficient_resources" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "resource_busy" | "invalid_state" | "already_exists" | "idempotency_conflict" | "expired" | "payload_too_large" | "method_not_allowed" | "unsupported_operation" | "unrecoverable" | "capacity_unavailable" | "unavailable" | "internal" | "rate_limited" | "quota_exceeded" | "payment_required" | "action_required" | "operation_failed" | "gateway_timeout";
+        ErrorCode: "bad_request" | "insufficient_resources" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "resource_busy" | "invalid_state" | "already_exists" | "idempotency_conflict" | "expired" | "payload_too_large" | "request_timeout" | "method_not_allowed" | "unsupported_operation" | "unrecoverable" | "capacity_unavailable" | "unavailable" | "internal" | "rate_limited" | "quota_exceeded" | "payment_required" | "action_required" | "operation_failed" | "gateway_timeout" | "port_not_listening";
         /** @description Typed HTTP error body. The code selects its required details. Endpoint responses must narrow this union to their permitted codes. */
-        ErrorBody: components["schemas"]["BadRequest"] | components["schemas"]["InsufficientResources"] | components["schemas"]["Unauthorized"] | components["schemas"]["Forbidden"] | components["schemas"]["NotFound"] | components["schemas"]["Conflict"] | components["schemas"]["ResourceBusy"] | components["schemas"]["InvalidState"] | components["schemas"]["AlreadyExists"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["Expired"] | components["schemas"]["PayloadTooLarge"] | components["schemas"]["MethodNotAllowed"] | components["schemas"]["UnsupportedOperation"] | components["schemas"]["Unrecoverable"] | components["schemas"]["CapacityUnavailable"] | components["schemas"]["Unavailable"] | components["schemas"]["Internal"] | components["schemas"]["RateLimited"] | components["schemas"]["QuotaExceeded"] | components["schemas"]["PaymentRequired"] | components["schemas"]["ActionRequired"] | components["schemas"]["OperationFailed"] | components["schemas"]["GatewayTimeout"];
+        ErrorBody: components["schemas"]["BadRequest"] | components["schemas"]["InsufficientResources"] | components["schemas"]["Unauthorized"] | components["schemas"]["Forbidden"] | components["schemas"]["NotFound"] | components["schemas"]["Conflict"] | components["schemas"]["ResourceBusy"] | components["schemas"]["InvalidState"] | components["schemas"]["AlreadyExists"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["Expired"] | components["schemas"]["PayloadTooLarge"] | components["schemas"]["RequestTimeout"] | components["schemas"]["MethodNotAllowed"] | components["schemas"]["UnsupportedOperation"] | components["schemas"]["Unrecoverable"] | components["schemas"]["CapacityUnavailable"] | components["schemas"]["Unavailable"] | components["schemas"]["Internal"] | components["schemas"]["RateLimited"] | components["schemas"]["QuotaExceeded"] | components["schemas"]["PaymentRequired"] | components["schemas"]["ActionRequired"] | components["schemas"]["OperationFailed"] | components["schemas"]["GatewayTimeout"] | components["schemas"]["PortNotListening"];
         /** @description Public HTTP error envelope. Every code has one HTTP status, documented on its body schema. Code/status matching is enforced at the response boundary. */
         ErrorResponse: {
             error: components["schemas"]["ErrorBody"];
@@ -843,11 +997,11 @@ export interface components {
             ports?: (number | number[])[];
             /** @description IPs or CIDRs. Outbound rules match destination IPs; inbound rules match the caller source IP. */
             ips?: string[];
-            /** @description Label-boundary suffix match on the request host: `github.com` matches `api.github.com`, not `evilgithub.com`. */
+            /** @description `github.com` matches only `github.com`; `*.github.com` matches every name under it, not `github.com` itself. Other wildcards, addresses, ports and URLs are rejected. */
             hosts?: string[];
             /** @description HTTP methods matched by this rule. */
             methods?: string[];
-            /** @description Full-segment path prefixes. */
+            /** @description `/v1` matches only `/v1`; `/v1/*` matches every path below it, not `/v1` itself. Other `*`, `?`, `#`, `{` and `}` are rejected. Until exact paths reach the organization, `/v1` also matches the paths below it. */
             paths?: string[];
             /** @description Header name → any-of values (names AND'd, a name's values OR'd). A value may use `${secret:NAME}`. On an inbound rule, `"authorization": ["Bearer $arker_api_key"]` or `"x-api-key": ["$arker_api_key"]` matches an API key of the VM's organization. */
             headers?: {
@@ -952,7 +1106,7 @@ export interface components {
             image?: string | null;
             /** @description Dockerfile source. Accepted by the schema and ALWAYS REFUSED with a 400: the API does not build Dockerfiles, the SDKs do. Use arker.fork(dockerfile="./Dockerfile") from the Python or TypeScript SDK, or pass `image` to fork a prebuilt image here. COPY is why it works that way: it reads files on the caller's machine, and this field carries text while the caller waits for the fork response, so the server can never be handed those files. The field is kept rather than removed so this refusal can point at the SDK instead of answering with a bare `unknown field`. */
             dockerfile?: string | null;
-            /** @description Request nested virtualization for a VM forked from `image`, including access to `/dev/kvm` inside the guest. Omit this field or pass `false` to disable it. The request returns 400 when the selected placement cannot provide nested virtualization. */
+            /** @description Request nested virtualization for a VM forked from `image`, including access to `/dev/kvm` inside the guest. Omit this field or pass `false` to disable it. The request fails with 422 `unsupported_operation` (reason `feature_not_supported`, feature `nested_virtualization`) when the selected placement cannot provide nested virtualization, and always for a fork of a VM. */
             nestedvirt?: boolean | null;
             /**
              * @deprecated
@@ -973,13 +1127,13 @@ export interface components {
             disk?: boolean | null;
             /** @description Whether the VM should preserve recoverable state across compute interruptions. */
             durable?: boolean | null;
-            /** @description Preferred compute platforms for a public template, such as `["graviton3"]`. Supply multiple values to allow any listed platform. Omit or pass an empty list for automatic selection. A fork of an existing VM inherits its source platform. */
+            /** @description Preferred compute platforms for a public template, such as `["graviton3"]`. Supply multiple values to allow any listed platform. Omit or pass an empty list for automatic selection, except on an `image` fork with a non-zero `resources.vgpu`, which must name a GPU platform. A fork of an existing VM inherits its source platform. */
             platforms?: string[] | null;
             /** @description State to inherit from the source VM. Omit this field or pass `["disk", "memory"]` for a warm fork that resumes the source's filesystem and running processes. Pass `["disk"]` for a filesystem-only fork that cold-boots without the source's running processes. The list must include `disk`; supported values are `disk` and `memory`. */
             layers?: ("disk" | "memory")[] | null;
             /** @description Maximum time in seconds this request may wait for capacity before failing with `capacity_unavailable`. Omit this field or pass `0` to fail immediately when capacity is unavailable. */
             queueing_timeout?: number | null;
-            /** @description Network policy for the new VM, stored and enforced before it first runs. The new VM inherits the source VM's policy with this change applied: rules and secrets named here are written or removed, the rest are inherited. Omit it to inherit the policy unchanged. A policy with rules denies unmatched outbound traffic, so include outbound rules needed during setup. Network topology is inherited from the source. Set SSH keys through `ssh_public_keys`. */
+            /** @description Network policy for the new VM, stored and enforced before it first runs. The new VM inherits the source VM's policy with this change applied: rules and secrets named here are written or removed, the rest are inherited. Omit it to inherit the policy unchanged. Once the policy has an outbound `allow` rule, unmatched outbound traffic is denied, so include outbound rules needed during setup; `rewrite`, `gate`, `deny` and `suspend` rules alone leave it open. Network topology is inherited from the source. Set SSH keys through `ssh_public_keys`. */
             policies?: components["schemas"]["PolicyUpdate"] | null;
             /** @description Resource shape for the new VM. */
             resources?: components["schemas"]["ResourcesInput"] | null;
@@ -994,6 +1148,7 @@ export interface components {
             pool_name?: string;
             /** @description A command to start on the new VM once it is forked, as a background run on its default session: the response is the VM, and the run is listed with `GET /v1/vms/{id}/runs`. */
             command?: string;
+            resources_autoscaling?: components["schemas"]["ResourcesAutoscalingUpdate"];
         } & ({
             source_vm_id: string;
             source_vm_name?: null;
@@ -1130,6 +1285,7 @@ export interface components {
              * @description The pool the VM belongs to, set when the VM is created and never changed. Absent when the VM is in no pool.
              */
             pool_id?: string;
+            resources_autoscaling: components["schemas"]["ResourcesAutoscaling"];
         };
         ListVmsResponse: {
             /** @description VMs visible to the authenticated caller. */
@@ -1156,8 +1312,13 @@ export interface components {
              * @description New terminal height in rows. Provide together with cols.
              */
             rows?: number;
-            /** @description Idle auto-cancel window for the PTY; applies on the next attach. */
+            /**
+             * @deprecated
+             * @description Deprecated: use `timeout`. Not with `timeout`.
+             */
             timeout_secs?: number;
+            /** @description Idle auto-cancel window for the PTY, in seconds; applies on the next attach. Not with `timeout_secs`. */
+            timeout?: number;
         };
         PatchSessionResponse: {
             /** @description True when the operation succeeded. */
@@ -1231,7 +1392,7 @@ export interface components {
             session_id?: string | null;
             /** @description Unique run identifier. */
             run_id: string;
-            /** @description Lifecycle state - "running" for a backgrounded run. */
+            /** @description Lifecycle state - "pending" for a run still queued behind another run of its session, an attached terminal, or capacity; "running" for one executing. */
             state?: string;
         };
         Run: {
@@ -1263,6 +1424,8 @@ export interface components {
              * @default 0
              */
             retry_count?: number;
+            /** @description For a run a fork carried over from its source VM, the source's run id: a warm fork resumes the source's running processes, so a run in progress continues in the new VM from its output at the fork, and a run still queued starts there. Null for a run started on this VM. */
+            inherited_from?: string | null;
             /** @description Unique VM identifier. */
             vm_id?: string | null;
             /** @description Customer-defined VM name. */
@@ -1658,7 +1821,7 @@ export interface components {
             end: number;
         };
         /** @description Per-file error union for successful batch responses. It does not change the enclosing HTTP status. Checksum mismatches use bad_request. */
-        SyncFileError: components["schemas"]["SyncBadRequestError"] | components["schemas"]["SyncNotFoundError"] | components["schemas"]["SyncConflictError"] | components["schemas"]["SyncPayloadTooLargeError"] | components["schemas"]["SyncUnsupportedOperationError"] | components["schemas"]["SyncUnavailableError"] | components["schemas"]["SyncInternalError"] | components["schemas"]["SyncExpiredError"];
+        SyncFileError: components["schemas"]["SyncBadRequestError"] | components["schemas"]["SyncForbiddenError"] | components["schemas"]["SyncNotFoundError"] | components["schemas"]["SyncConflictError"] | components["schemas"]["SyncPayloadTooLargeError"] | components["schemas"]["SyncInsufficientResourcesError"] | components["schemas"]["SyncUnsupportedOperationError"] | components["schemas"]["SyncUnavailableError"] | components["schemas"]["SyncInternalError"] | components["schemas"]["SyncExpiredError"];
         Filesystem: {
             /** @description Unique filesystem identifier. */
             filesystem_id: string;
@@ -1720,7 +1883,7 @@ export interface components {
             memory_mib?: number | null;
             /** @description Disk allocation in mebibytes. */
             disk_mib?: number | null;
-            /** @description Fraction of one physical GPU to allocate, in eighths of a card: 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, or 1. Resolved against the serving platform's GPU (`vgpu: 0.25` on `x86_64-l40s` is 35 SMs and 11517 MiB), so the same fraction is a different amount of silicon on a different card - see the per-platform table in the docs. Mutually exclusive with `gpu_sms` and `gpu_vram_mib`. Request-only: responses report the resolved `gpu_sms`/`gpu_vram_mib` and never this field. */
+            /** @description Fraction of one physical GPU to allocate, in eighths of a card: 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, or 1. Resolved against the serving platform's GPU (`vgpu: 0.25` on `x86_64-l40s` is 35 SMs and 11517 MiB), so the same fraction is a different amount of silicon on a different card - see the per-platform table in the docs. Mutually exclusive with `gpu_sms` and `gpu_vram_mib`. On an `image` fork a non-zero `vgpu` needs `platforms` naming a GPU platform, or the fork is refused with 400. Request-only: responses report the resolved `gpu_sms`/`gpu_vram_mib` and never this field. */
             vgpu?: components["schemas"]["Vgpu"] | null;
         };
         SshPublicKeyInfo: {
@@ -1740,6 +1903,47 @@ export interface components {
             /** @description Authorized SSH keys with fingerprints. Returned by GET /v1/vms/{id}; omitted from list responses when empty. */
             ssh_public_keys?: components["schemas"]["SshPublicKeyInfo"][];
         };
+        /** @description Adjusts resource allocation to try to maintain the target utilization. */
+        AutoscalingRule: {
+            /** @description Smallest permitted allocation, in vCPUs or MiB for the selected resource. */
+            min: number;
+            /** @description Largest permitted allocation, in vCPUs or MiB for the selected resource. */
+            max: number;
+            /** @description Desired fraction of the allocated resource in use, greater than zero and at most one. */
+            target_utilization: number;
+            /**
+             * @deprecated
+             * @description Ignored: Arker chooses how long it measures each resource.
+             */
+            window_seconds?: unknown;
+        };
+        /** @description Adjusts resource allocation to try to maintain the target utilization. */
+        DiskAutoscalingRule: {
+            /** @description Largest permitted root disk size in MiB. */
+            max: number;
+            /** @description Desired fraction of the allocated resource in use, greater than zero and at most one. */
+            target_utilization: number;
+            /**
+             * @deprecated
+             * @description Ignored: Arker chooses how long it measures each resource.
+             */
+            window_seconds?: unknown;
+        };
+        /** @description Autoscaling rules for CPU, memory and disk. A fork inherits the source VM’s rule for each resource omitted from the request. `{}` when the VM has none. */
+        ResourcesAutoscaling: {
+            vcpu?: components["schemas"]["AutoscalingRule"];
+            memory_mib?: components["schemas"]["AutoscalingRule"];
+            disk_mib?: components["schemas"]["DiskAutoscalingRule"];
+        };
+        /** @description Update named resource rules. Null removes a rule and omitted dimensions retain their settings. Returns 422 `unsupported_operation` where autoscaling is not available. */
+        ResourcesAutoscalingUpdate: {
+            /** @description Replacement vCPU rule. Set to null to disable it or omit it to keep the current rule. */
+            vcpu?: components["schemas"]["AutoscalingRule"] | null;
+            /** @description Replacement memory rule. Set to null to disable it or omit it to keep the current rule. */
+            memory_mib?: components["schemas"]["AutoscalingRule"] | null;
+            /** @description Replacement root disk rule. Set to null to disable it or omit it to keep the current rule. */
+            disk_mib?: components["schemas"]["DiskAutoscalingRule"] | null;
+        };
         PatchVmRequest: {
             /** @description Replace the VM description. Null or a blank string clears it; omit this field to leave it unchanged. */
             description?: string | null;
@@ -1751,6 +1955,7 @@ export interface components {
             ssh_public_keys?: components["schemas"]["SshKeysUpdate"] | string[];
             /** @description A change to the VM's network policy. Rules and secrets named are written or removed; the rest are kept, so concurrent changes to different rules do not overwrite each other. Omit it to leave the policy unchanged. If the policy cannot be stored and applied, the request fails. Changing only `policies` is allowed while the organization's billing is restricted. */
             policies?: components["schemas"]["PolicyUpdate"] | null;
+            resources_autoscaling?: components["schemas"]["ResourcesAutoscalingUpdate"];
         };
         /** @description One platform this source can be forked onto, with the resource limits that apply there. This is the authoritative per-platform record: when an entry carries bounds they win over the flat `min_*`/`max_*` fields on the VM, which are a single-platform convenience projection of the same data. CPU, memory, and disk limits come from the source VM; GPU limits come from the platform catalog. */
         CompatiblePlatform: {
@@ -1823,7 +2028,7 @@ export interface components {
          * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
          * @enum {string}
          */
-        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey";
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmMetrics" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "reconcileWorkerVms" | "putWorkerVm" | "reserveWorkerVmSnapshot" | "commitWorkerVmSnapshot" | "renewWorkerVmSnapshot" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey" | "listEvents";
         /** @enum {string} */
         HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
         /**
@@ -1851,7 +2056,7 @@ export interface components {
         /** @enum {string} */
         OperationFailureReason: "image_pull_failed" | "image_conversion_failed" | "command_failed" | "unexpected_interpreter" | "deadline_exceeded";
         /** @enum {string} */
-        Feature: "durability" | "nested_virtualization" | "diskless" | "filesystem_only_fork" | "shared_filesystem" | "persistent_pty" | "network_policy" | "public_ingress" | "guest_control" | "platform" | "systemd" | "restore";
+        Feature: "resources_autoscaling" | "durability" | "nested_virtualization" | "diskless" | "filesystem_only_fork" | "shared_filesystem" | "persistent_pty" | "network_policy" | "public_ingress" | "guest_control" | "platform" | "systemd" | "restore" | "vm_metrics" | "vm_update" | "resize" | "presigned_sync" | "sync_manifest" | "live_run_fork";
         /** @enum {string} */
         WorkState: "not_started" | "stopped" | "continuing" | "unknown";
         /** @enum {string} */
@@ -1923,8 +2128,13 @@ export interface components {
             /** @description Correlation identifier safe to give to support. */
             request_id: string;
             request: components["schemas"]["RequestContext"];
-            /** @description Scheduling hint in seconds, mirrored by Retry-After. Does not establish that replay is safe. */
+            /**
+             * @deprecated
+             * @description Deprecated: use `retry_after` when present. Scheduling hint in seconds, mirrored by Retry-After. Does not establish that replay is safe.
+             */
             retry_after_seconds?: number;
+            /** @description Scheduling hint in seconds, mirrored by Retry-After. Does not establish that replay is safe. Not sent yet; read it when present, else `retry_after_seconds`. */
+            retry_after?: number;
         } & components["schemas"]["ErrorExecutionContext"];
         ByteAmount: {
             /**
@@ -2343,7 +2553,7 @@ export interface components {
              */
             code: "resource_busy";
         };
-        /** @description The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses unavailable. */
+        /** @description The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses resource_busy. */
         InvalidState: components["schemas"]["ErrorMetadata"] & {
             /** @constant */
             code: "invalid_state";
@@ -2401,6 +2611,17 @@ export interface components {
              * @enum {string}
              */
             code: "payload_too_large";
+        };
+        /** @description The request body was not received before the server's read deadline. Send the body promptly; the request did not start. */
+        RequestTimeout: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "request_timeout";
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "request_timeout";
         };
         /** @description The route does not support this HTTP method. Use an allowed method. */
         MethodNotAllowed: components["schemas"]["ErrorMetadata"] & {
@@ -2557,6 +2778,17 @@ export interface components {
              */
             code: "gateway_timeout";
         };
+        /** @description The VM is running, but nothing inside it accepted a connection on the requested port. Start a server listening on that port; a request succeeds once one does. */
+        PortNotListening: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "port_not_listening";
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "port_not_listening";
+        };
         /** @description Known not-ready health result. This is an operation result, not an error envelope. */
         NotReadyHealthResponse: {
             /**
@@ -2592,6 +2824,22 @@ export interface components {
              * @enum {string}
              */
             code: "bad_request";
+        });
+        /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
+        SyncForbiddenError: {
+            /**
+             * @description Identifies this code as `forbidden`.
+             * @constant
+             */
+            code: "forbidden";
+            /** @description Safe explanation of this file-operation failure. */
+            message: string;
+        } & (components["schemas"]["ErrorExecutionContext"] & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "forbidden";
         });
         /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
         SyncNotFoundError: {
@@ -2651,6 +2899,23 @@ export interface components {
              * @enum {string}
              */
             code: "payload_too_large";
+        });
+        /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
+        SyncInsufficientResourcesError: {
+            /**
+             * @description Identifies this code as `insufficient_resources`.
+             * @constant
+             */
+            code: "insufficient_resources";
+            /** @description Safe explanation of this file-operation failure. */
+            message: string;
+            details: components["schemas"]["InsufficientResourcesDetails"];
+        } & (components["schemas"]["ErrorExecutionContext"] & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "insufficient_resources";
         });
         /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
         SyncUnsupportedOperationError: {
@@ -2775,6 +3040,9 @@ export interface components {
         PayloadTooLargeErrorResponse: {
             error: components["schemas"]["PayloadTooLarge"];
         };
+        RequestTimeoutErrorResponse: {
+            error: components["schemas"]["RequestTimeout"];
+        };
         MethodNotAllowedErrorResponse: {
             error: components["schemas"]["MethodNotAllowed"];
         };
@@ -2809,9 +3077,9 @@ export interface components {
             /** @description The error category and its details, request metadata, and recovery context. */
             error: components["schemas"]["BadRequest"] | components["schemas"]["InsufficientResources"];
         };
-        AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse: {
+        AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse: {
             /** @description The error category and its details, request metadata, and recovery context. */
-            error: components["schemas"]["AlreadyExists"] | components["schemas"]["Conflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
+            error: components["schemas"]["AlreadyExists"] | components["schemas"]["Conflict"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
         };
         AlreadyExistsOrInvalidStateOrResourceBusyErrorResponse: {
             /** @description The error category and its details, request metadata, and recovery context. */
@@ -3023,9 +3291,9 @@ export interface components {
          * @description The cloud of your account. It decides the shape of `byoc`.
          * @enum {string}
          */
-        ByocProvider: "aws";
+        ByocProvider: "aws" | "gcp";
         /** @description Where a `byoc` pool's workers run in your cloud account. This shape is for `provider: aws`. */
-        PoolByoc: {
+        AwsPoolByoc: {
             /** @description AWS account # the workers run in: `aws sts get-caller-identity --query Account --output text`. */
             account_id: string;
             /** @description Subnets the workers launch into (https://console.aws.amazon.com/vpcconsole/home#subnets:, or `aws ec2 describe-subnets`). They need outbound internet access only: a route to a NAT gateway, or to an internet gateway with public IPv4 addresses assigned on launch. */
@@ -3041,8 +3309,25 @@ export interface components {
             /** @description CloudFormation quick-create link that creates `role_name` with `external_id`. Open it signed in to the account. */
             readonly setup_url: string;
         };
+        /** @description Where a `byoc` pool's workers run in your cloud account. This shape is for `provider: gcp`. */
+        GcpPoolByoc: {
+            /** @description Google Cloud project ID the workers run in: `gcloud config get-value project`. */
+            project_id: string;
+            /** @description Subnetwork the workers launch into, in the pool's region: its name (https://console.cloud.google.com/networking/networks/list, or `gcloud compute networks subnets list`), or its full `projects/…/regions/…/subnetworks/…` path when it is shared from another project. The workers need outbound internet access only: Cloud NAT on the subnetwork's region. */
+            subnetwork: string;
+            /** @description Compute Engine machine types to launch, in order of preference. Required: the platform's types run from a 4-vCPU VM to a 192-vCPU metal host, so a pool names the ones it means. */
+            instance_types: string[];
+            /** @description The service account Arker impersonates in the project: `arker-pool-` and the first 16 hex digits of `pool_id`, at `project_id`'s `iam.gserviceaccount.com` domain. */
+            readonly service_account: string;
+            /** @description Opens Cloud Shell, where `gcloud` is signed in as you. Run `setup_command` there, or in any shell with `gcloud`. */
+            readonly setup_url: string;
+            /** @description The `gcloud` commands that set this pool up in the project: they create `service_account`, a second account for the pool's bucket and the bucket itself, and let Arker impersonate both accounts. The first may launch and remove only instances named for this pool, and can list the project's instances and machine types, which is how it finds its own; the second may read and write only this bucket, and sign as itself, which is how a worker makes the URLs large files move through. */
+            readonly setup_command: string;
+        };
+        /** @description Where a `byoc` pool's workers run in your cloud account, in the shape of the pool's `provider`. */
+        PoolByoc: components["schemas"]["AwsPoolByoc"] | components["schemas"]["GcpPoolByoc"];
         /** @description Where a `byoc` pool's workers run in your cloud account. This shape is for `provider: aws`. */
-        CreatePoolByoc: {
+        AwsCreatePoolByoc: {
             /** @description AWS account # the workers run in: `aws sts get-caller-identity --query Account --output text`. */
             account_id: string;
             /** @description Subnets the workers launch into (https://console.aws.amazon.com/vpcconsole/home#subnets:, or `aws ec2 describe-subnets`). They need outbound internet access only: a route to a NAT gateway, or to an internet gateway with public IPv4 addresses assigned on launch. */
@@ -3052,6 +3337,17 @@ export interface components {
             /** @description AWS instance types to launch, in order of preference: bare-metal types Arker's fleet runs the pool's platform on (`aws ec2 describe-instance-type-offerings --filters Name=instance-type,Values='*.metal'`). Defaults to the platform's preferred type. */
             instance_types?: string[];
         };
+        /** @description Where a `byoc` pool's workers run in your cloud account. This shape is for `provider: gcp`. */
+        GcpCreatePoolByoc: {
+            /** @description Google Cloud project ID the workers run in: `gcloud config get-value project`. */
+            project_id: string;
+            /** @description Subnetwork the workers launch into, in the pool's region: its name (https://console.cloud.google.com/networking/networks/list, or `gcloud compute networks subnets list`), or its full `projects/…/regions/…/subnetworks/…` path when it is shared from another project. The workers need outbound internet access only: Cloud NAT on the subnetwork's region. */
+            subnetwork: string;
+            /** @description Compute Engine machine types to launch, in order of preference. Required: the platform's types run from a 4-vCPU VM to a 192-vCPU metal host, so a pool names the ones it means. */
+            instance_types: string[];
+        };
+        /** @description Where a `byoc` pool's workers run in your cloud account, in the shape of the request's `provider`. */
+        CreatePoolByoc: components["schemas"]["AwsCreatePoolByoc"] | components["schemas"]["GcpCreatePoolByoc"];
         /** @description A pool on Arker's managed compute. */
         ManagedPool: {
             /**
@@ -3297,7 +3593,7 @@ export interface components {
             missing: string[];
         };
         /** @description Short-lived AWS credentials for `prefix` of `bucket`; every heartbeat answer carries ones that are still fresh. */
-        WorkerStorageCredentials: {
+        AwsWorkerStorageCredentials: {
             /** @description AWS access key id. */
             access_key_id: string;
             /** @description AWS secret access key. */
@@ -3310,22 +3606,46 @@ export interface components {
              */
             expires_at: string;
         };
-        /** @description Storage configuration for VM snapshots. */
-        WorkerStorage: {
+        /** @description Storage configuration for VM snapshots, in Amazon S3. */
+        AwsWorkerStorage: {
             /** @description S3 bucket. */
             bucket: string;
             /** @description The bucket's AWS region. */
             region: string;
             /** @description Key prefix the credentials may read and write under; empty for the whole bucket. */
             prefix: string;
-            credentials: components["schemas"]["WorkerStorageCredentials"];
+            credentials: components["schemas"]["AwsWorkerStorageCredentials"];
         };
+        /** @description A short-lived Google Cloud access token for `prefix` of `bucket`; every heartbeat answer carries one that is still fresh. */
+        GcpWorkerStorageCredentials: {
+            /** @description OAuth 2.0 access token, sent as a bearer token. */
+            access_token: string;
+            /** @description The service account the token is for. It may sign as itself, which is how a worker makes the URLs its VMs' large files move through. */
+            service_account: string;
+            /**
+             * Format: date-time
+             * @description When the token stops working.
+             */
+            expires_at: string;
+        };
+        /** @description Storage configuration for VM snapshots, in Google Cloud Storage. */
+        GcpWorkerStorage: {
+            /** @description Cloud Storage bucket. */
+            bucket: string;
+            /** @description Object name prefix the credentials may read and write under; empty for the whole bucket. */
+            prefix: string;
+            credentials: components["schemas"]["GcpWorkerStorageCredentials"];
+        };
+        /** @description Storage configuration for VM snapshots, in the object store of the region's cloud. */
+        WorkerStorage: components["schemas"]["AwsWorkerStorage"] | components["schemas"]["GcpWorkerStorage"];
         /** @description A worker ignores fields it does not know, so an older worker heartbeats to a newer Arker. */
         WorkerHeartbeatResponse: {
             /** @description The worker identifier from the path. */
             worker_id: string;
             /** @description Send the next heartbeat after this long. */
             heartbeat_interval_ms: number;
+            /** @description The worker must self-fence before this long passes without an accepted heartbeat. */
+            membership_lease_ms?: number;
             /** @description The state Arker wants the worker in. `left` once the pool is deleting. */
             desired_state: components["schemas"]["WorkerHeartbeatState"];
             /** @description WebSocket URL the worker keeps open so Arker can reach it; a path is relative to the endpoint the heartbeat went to. */
@@ -3338,13 +3658,35 @@ export interface components {
                 [key: string]: string;
             };
         };
+        WorkerSnapshotReservation: {
+            /**
+             * Format: int64
+             * @description VM ownership generation that fences the snapshot commit.
+             */
+            vm_generation: number;
+            /** @description Immutable identifier reserved for this snapshot generation. */
+            snapshot_id: string;
+            /**
+             * Format: int64
+             * @description Renew the upload lease this often until the snapshot is committed.
+             */
+            lease_renew_after_secs: number;
+        };
+        WorkerVmReconciliation: {
+            /** @description The VMs the worker process holds. */
+            vm_ids: string[];
+        };
+        WorkerVmReconciliationResult: {
+            /** @description Which of the named VMs the worker owns, in the order named. */
+            retained_vm_ids: string[];
+        };
         /** @description A VM a BLAST worker holds, as it reports it. The VM runs the pool's platform. */
         WorkerVmRecord: {
             /**
-             * @description `running` executes; `paused` keeps its memory but no CPU; `suspended` is a snapshot in storage.
+             * @description `running` has a run or a sync in flight; `idle` is up with none; `paused` keeps its memory but no CPU; `suspended` is a snapshot in storage.
              * @enum {string}
              */
-            state: "running" | "paused" | "suspended";
+            state: "running" | "idle" | "paused" | "suspended";
             resources: components["schemas"]["WorkerResources"];
             /** @description Image the VM was created from, if any. */
             image: string | null;
@@ -3386,6 +3728,24 @@ export interface components {
             stdout: string | null;
             /** @description Standard error. */
             stderr: string | null;
+            /** @description Session the run belongs to. */
+            session_id?: string | null;
+            /** @description How `stdout` is encoded; `utf-8` when absent. */
+            stdout_encoding?: components["schemas"]["OutputEncoding"] | null;
+            /** @description How `stderr` is encoded; `utf-8` when absent. */
+            stderr_encoding?: components["schemas"]["OutputEncoding"] | null;
+            /**
+             * @description True when the command printed more standard output than `stdout` carries.
+             * @default false
+             */
+            stdout_truncated?: boolean;
+            /**
+             * @description True when the command printed more standard error than `stderr` carries.
+             * @default false
+             */
+            stderr_truncated?: boolean;
+            /** @description Why the worker could not run or finish the command; set only when `state` is `failed`. */
+            fail_reason?: string | null;
         };
         /** @description A VM or a pool an API key is limited to. */
         ApiKeyScope: components["schemas"]["ApiKeyVmScope"] | components["schemas"]["ApiKeyPoolScope"];
@@ -3483,6 +3843,180 @@ export interface components {
             /** @description Unrevoked API keys, newest first. */
             api_keys: components["schemas"]["ApiKey"][];
         };
+        /** @description A VM's usage over a time window. */
+        VmMetrics: {
+            /** @description Unique VM identifier. */
+            vm_id: string;
+            /** @description Bucket width in seconds. */
+            step: number;
+            /**
+             * Format: date-time
+             * @description Start of the window's first bucket.
+             */
+            started_at: string;
+            /**
+             * Format: date-time
+             * @description End of the window's last bucket.
+             */
+            ended_at: string;
+            /** @description Buckets in which the VM ran, oldest first. */
+            buckets: components["schemas"]["VmMetricsBucket"][];
+        };
+        /**
+         * @description What an event records, as `<resource>_<verb>`. `vm_run` is a command run on the VM; `vm_running` one stretch the VM ran (what billing meters); `vm_terminal_session` one interactive terminal on the VM, an SSH connection or a terminal attached to a session; `vm_update` any change to a VM, its policies and an automatic resize included; `member_sign_in` a member's session entering the organization, by signing in or switching to it. Requests to a VM's ports and its refused outbound requests are not events.
+         * @enum {string}
+         */
+        EventAction: "vm_fork" | "vm_run" | "vm_sync" | "vm_update" | "vm_suspend" | "vm_delete" | "vm_running" | "vm_terminal_session" | "run_signal" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_add" | "member_invite" | "member_invite_revoke" | "member_update" | "member_remove" | "member_sign_in" | "member_sign_out" | "member_terms_accept" | "org_create" | "org_update" | "org_quota_update" | "org_delete" | "billing_checkout" | "billing_payment_method_update" | "billing_credit_grant";
+        /** @enum {string} */
+        EventState: "running" | "completed" | "failed" | "cancelled";
+        /** @enum {string} */
+        EventOrderBy: "requested_at" | "started_at" | "ended_at" | "duration_ms";
+        Event: {
+            /** @description The action's id, the same while it is running and once it ends. */
+            id: string;
+            action: components["schemas"]["EventAction"];
+            category: components["schemas"]["EventCategory"];
+            state: components["schemas"]["EventState"];
+            /** @description The VM the action used; a fork's new VM. Null for an action on no VM. */
+            vm_id: string | null;
+            /**
+             * Format: date-time
+             * @description When the request arrived, or an automatic action was triggered.
+             */
+            requested_at: string;
+            /**
+             * Format: date-time
+             * @description When the action began executing; null before it does and for an action with no separate start.
+             */
+            started_at: string | null;
+            /**
+             * Format: date-time
+             * @description When the action ended; null while it is running.
+             */
+            ended_at: string | null;
+            /** @description From `started_at`, or `requested_at` when there is none, to `ended_at`; null while running. */
+            duration_ms: number | null;
+            /** @description Who initiated the action: a member, an API key, an SSH key, or Arker acting by itself. Null when Arker does not know who acted, such as for an anonymous request to a VM's port. */
+            actor: components["schemas"]["EventActor"] | null;
+            /** @description The region of the Arker service that handled the action; null for one the console served, such as an API key's. */
+            region: string | null;
+            /** @description The `x-request-id` of the request that made the action. */
+            request_id: string | null;
+            /** @description Why the action failed or was refused: the code its request was answered with, or `internal` when Arker failed it itself. */
+            error_code: components["schemas"]["ErrorCode"] | null;
+            /** @description Facts only some actions have, and no others: `run_id`, `session_id`, `exit_code` (a run command's own), `source_vm_id`, `vm_name`, `filesystem_id`, `mount_id`, `pool_id`, `fields` (what a `vm_update` or `org_update` changed: `resources`, `policies`, `name`), `ssh_key_fingerprint`, `caller_ip`, `ssh_key_id`, `api_key_id`, `email`, `role`, `org_name`, `tos_version`, `privacy_policy_version`, `amount_cents`, `region`, `resource`, `limit` and `reason` (why Arker acted by itself: `autoscaling` on a `vm_update` that resized a VM automatically; on a lifecycle rule's `vm_suspend`, `schedule` for a rule that fires at a fixed time (`at`, `after_created`) and `idle` for one counted from the VM's last running start (`after_last_running_start`); `lifecycle` on a `vm_delete` a lifecycle rule made). The Events docs list which attributes each action carries. */
+            attributes: {
+                [key: string]: string | number | boolean | null;
+            };
+            /** @description How the request that made the action arrived: `console`, `api` or `ssh`. Null when Arker acted by itself or does not know. */
+            via: components["schemas"]["EventChannel"] | null;
+            /** @description The VM's resources: what a `vm_fork` created, a resizing `vm_update` (an automatic resize included) left, a `vm_delete` freed, and a `vm_running` ran with. Null on other actions, and where Arker did not record the size. */
+            resources_provisioned: components["schemas"]["EventResources"] | null;
+            /** @description A managed pool's reserved resources, as a `pool_create` or `pool_update` set them; the pool is billed on them. Null on other actions, for a pool that reserves none, and where Arker did not record them. */
+            resources_reserved: components["schemas"]["PoolResources"] | null;
+        };
+        EventActor: {
+            /** @description Who: a member's email; one of the organization's API keys' `api_key_id`; an SSH key's id, or its fingerprint when it is no account key. None for Arker, or for a member or key the organization no longer has. */
+            id?: string;
+            type: components["schemas"]["EventActorType"];
+        };
+        ListEventsResponse: {
+            /** @description Events, in the requested order. */
+            events: components["schemas"]["Event"][];
+            /** @description Cursor for the next page, or null when there is none. */
+            next_cursor: string | null;
+        };
+        /**
+         * @description Which side of the organization an event is about. `compute`: its VMs, runs, sessions, mounts, filesystems, pools, network and SSH traffic, and API and SSH keys. `organization`: its members, invitations, sign-ins, terms, billing, and credit and quota changes. Every member can read `compute`; `organization` needs an admin.
+         * @enum {string}
+         */
+        EventCategory: "compute" | "organization";
+        /** @description The VM's resources in one bucket. Averages are over the time the VM ran in it, and a value the VM could not report is null. */
+        VmMetricsBucket: {
+            /**
+             * Format: date-time
+             * @description Start of the bucket.
+             */
+            started_at: string;
+            /**
+             * Format: date-time
+             * @description End of the bucket: `started_at` plus `step`.
+             */
+            ended_at: string;
+            resources_provisioned_avg: components["schemas"]["VmMetricsProvisionedAvg"];
+            resources_provisioned_max: components["schemas"]["VmMetricsProvisioned"];
+            resources_utilized_avg: components["schemas"]["VmMetricsUtilized"];
+            resources_utilized_max: components["schemas"]["VmMetricsUtilized"];
+            resources_pressure_avg: components["schemas"]["VmMetricsPressure"];
+            resources_pressure_max: components["schemas"]["VmMetricsPressure"];
+            resources_io: components["schemas"]["VmMetricsIo"];
+        };
+        /** @description The VM's size averaged over the time it ran in the bucket, so a resize inside the bucket gives a value between the sizes before and after it. */
+        VmMetricsProvisionedAvg: {
+            /** @description vCPUs; fractional when a resize falls inside the bucket. */
+            vcpu: number;
+            /** @description Memory, in MiB. */
+            memory_mib: number;
+            /** @description Disk, in MiB. */
+            disk_mib: number;
+        };
+        /** @description The largest size the VM had while it ran in the bucket. */
+        VmMetricsProvisioned: {
+            /** @description vCPUs. */
+            vcpu: number;
+            /** @description Memory, in MiB. */
+            memory_mib: number;
+            /** @description Disk, in MiB. */
+            disk_mib: number;
+        };
+        /** @description Resources in use: the average over the time the VM ran, or the highest reading of about 10 s. */
+        VmMetricsUtilized: {
+            /** @description vCPUs in use. */
+            vcpu: number | null;
+            /** @description Guest memory in use, in MiB, as `free` counts it. */
+            memory_mib: number | null;
+            /** @description Guest root filesystem in use, in MiB, as `df /` counts it. */
+            disk_mib: number | null;
+        };
+        /** @description The share (0–1) of running time in which at least one task in the guest waited for the resource: the average over the bucket, or the highest reading of about 10 s. Sustained pressure means the VM's work needs more of it than the VM has. */
+        VmMetricsPressure: {
+            /** @description Share of running time some task waited for a CPU. */
+            vcpu: number | null;
+            /** @description Share of running time some task was stalled reclaiming or waiting for memory. */
+            memory_mib: number | null;
+        };
+        /** @description Bytes the VM moved in the bucket. */
+        VmMetricsIo: {
+            /** @description Bytes received over the network. */
+            network_received_bytes: number | null;
+            /** @description Bytes sent over the network. */
+            network_transmitted_bytes: number | null;
+            /** @description Bytes written to disk. */
+            disk_written_bytes: number | null;
+        };
+        /** @description A VM's resources, in the same units as VM resources. The GPU fields are present only on a `vm_running` of a VM with a GPU, and are the VM's totals across its GPUs, as billing meters them: a VM's per-GPU `gpu_sms` and `gpu_vram_mib` times its `gpu_count`. */
+        EventResources: {
+            /** @description vCPUs. */
+            vcpu: number;
+            /** @description Memory in MiB. */
+            memory_mib: number;
+            /** @description Disk in MiB. */
+            disk_mib: number;
+            /** @description GPU streaming multiprocessors, across all the VM's GPUs. */
+            gpu_sm?: number;
+            /** @description GPU memory in MiB, across all the VM's GPUs. */
+            gpu_vram_mib?: number;
+        };
+        /**
+         * @description Who initiated an action: a member of the organization, one of its API keys, an SSH key, or Arker acting by itself, such as an automatic resize, a lifecycle rule's suspend or delete, or a credit or quota change.
+         * @enum {string}
+         */
+        EventActorType: "member" | "api_key" | "ssh_key" | "arker";
+        /**
+         * @description How the request that made an action arrived: from a member in the console, through the API with an API key, or over SSH.
+         * @enum {string}
+         */
+        EventChannel: "console" | "api" | "ssh";
     };
     responses: {
         Conflict: {
@@ -3584,7 +4118,7 @@ export interface components {
                 "application/json": components["schemas"]["ResourceBusyErrorResponse"];
             };
         };
-        /** @description HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses unavailable. */
+        /** @description HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses resource_busy. */
         InvalidStateError: {
             headers: {
                 "Retry-After": components["headers"]["RetryAfter"];
@@ -3632,6 +4166,16 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["PayloadTooLargeErrorResponse"];
+            };
+        };
+        /** @description HTTP 408: The request body was not received before the server's read deadline. Send the body promptly; the request did not start. */
+        RequestTimeoutError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["RequestTimeoutErrorResponse"];
             };
         };
         /** @description HTTP 405: The route does not support this HTTP method. Use an allowed method. */
@@ -3765,14 +4309,14 @@ export interface components {
                 "application/json": components["schemas"]["BadRequestOrInsufficientResourcesErrorResponse"];
             };
         };
-        /** @description HTTP 409: already_exists, conflict, invalid_state, resource_busy. The code selects the required details. */
-        AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError: {
+        /** @description HTTP 409: already_exists, conflict, idempotency_conflict, invalid_state, resource_busy. The code selects the required details. */
+        AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError: {
             headers: {
                 "Retry-After": components["headers"]["RetryAfter"];
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse"];
+                "application/json": components["schemas"]["AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse"];
             };
         };
         /** @description HTTP 409: already_exists, invalid_state, resource_busy. The code selects the required details. */
@@ -3887,9 +4431,9 @@ export interface components {
         };
     };
     parameters: {
-        /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
+        /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A key runs its command at most once: once the run it started has failed, a retry with the key answers 409 conflict naming that run in `recovery`; a new key runs the command again. A fork retried while the original is still running may wait for it and returns the same VM; when it cannot wait, it answers 409 resource_busy with Retry-After and the VM id. */
         IdempotencyKey: string;
-        /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+        /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
         VmId: string;
         /** @description Run identifier. */
         RunId: string;
@@ -3909,6 +4453,8 @@ export interface components {
         WorkerId: string;
         /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
         WorkerVmId: string;
+        /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+        WorkerIncarnation: string;
         /** @description API key identifier returned as `api_key_id`. */
         ApiKeyId: string;
     };
@@ -4004,7 +4550,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
+                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A key runs its command at most once: once the run it started has failed, a retry with the key answers 409 conflict naming that run in `recovery`; a new key runs the command again. A fork retried while the original is still running may wait for it and returns the same VM; when it cannot wait, it answers 409 resource_busy with Retry-After and the VM id. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -4030,7 +4576,8 @@ export interface operations {
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
-            409: components["responses"]["AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError"];
+            408: components["responses"]["RequestTimeoutError"];
+            409: components["responses"]["AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError"];
             413: components["responses"]["PayloadTooLargeError"];
             422: components["responses"]["OperationFailedOrUnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
@@ -4152,7 +4699,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -4172,6 +4719,7 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4183,7 +4731,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -4204,6 +4752,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateOrResourceBusyError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4215,7 +4764,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -4240,12 +4789,52 @@ export interface operations {
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["AlreadyExistsOrInvalidStateOrResourceBusyError"];
             413: components["responses"]["PayloadTooLargeError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["CapacityUnavailableOrUnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
+        };
+    };
+    getVmMetrics: {
+        parameters: {
+            query?: {
+                /** @description The first bucket starts at or after this instant. Defaults to one hour before `started_at_lt`. History is kept for 30 days: an instant before the start of the UTC day 30 days ago is refused with 400 `bad_request`. */
+                started_at_gte?: string;
+                /** @description The last bucket starts before this instant. Defaults to now. */
+                started_at_lt?: string;
+                /** @description Bucket width in seconds. Defaults to the smallest width that keeps the window to at most 1,440 buckets. A window of more than 1,440 buckets is refused with 400 `bad_request`. */
+                step?: 60 | 300 | 3600;
+            };
+            header?: never;
+            path: {
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                id: components["parameters"]["VmId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The VM's usage over the window. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VmMetrics"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
             504: components["responses"]["GatewayTimeoutError"];
         };
     };
@@ -4254,7 +4843,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -4275,7 +4864,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4287,7 +4876,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -4311,9 +4900,10 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["InvalidStateError"];
             413: components["responses"]["PayloadTooLargeError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4338,7 +4928,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -4359,6 +4949,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4369,11 +4960,11 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
+                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A key runs its command at most once: once the run it started has failed, a retry with the key answers 409 conflict naming that run in `recovery`; a new key runs the command again. A fork retried while the original is still running may wait for it and returns the same VM; when it cannot wait, it answers 409 resource_busy with Retry-After and the VM id. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -4393,7 +4984,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunResponse"];
                 };
             };
-            /** @description Accepted - the run is still executing. The body carries `run_id` and `state: "running"`, not output; poll `GET /v1/vms/{id}/runs/{run_id}` for the result. Returned for `time_to_background: 0` and whenever the command outstays `time_to_background`. A 2xx here means the request was accepted, not that the work is done. */
+            /** @description Accepted - the run has not finished. The body carries `run_id` and `state`, not output: `"pending"` while the run waits behind another run of its session, an attached terminal, or capacity, and `"running"` once it executes; poll `GET /v1/vms/{id}/runs/{run_id}` for the result. Returned for `time_to_background: 0` and whenever the command outstays `time_to_background`. A 2xx here means the request was accepted, not that the work is done. */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -4407,6 +4998,7 @@ export interface operations {
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError"];
             413: components["responses"]["PayloadTooLargeError"];
             422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
@@ -4421,7 +5013,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Run identifier. */
                 run_id: components["parameters"]["RunId"];
@@ -4444,6 +5036,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4455,7 +5048,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Run identifier. */
                 run_id: components["parameters"]["RunId"];
@@ -4477,11 +5070,11 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
-            409: components["responses"]["InvalidStateError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            409: components["responses"]["InvalidStateOrResourceBusyError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
-            503: components["responses"]["UnavailableError"];
+            503: components["responses"]["CapacityUnavailableOrUnavailableError"];
             504: components["responses"]["GatewayTimeoutError"];
         };
     };
@@ -4497,7 +5090,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -4518,6 +5111,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4529,7 +5123,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -4554,8 +5148,10 @@ export interface operations {
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["ConflictOrInvalidStateError"];
             413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4567,7 +5163,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Session identifier. */
                 sid: components["parameters"]["SessionId"];
@@ -4590,6 +5186,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4601,7 +5198,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Session identifier. */
                 sid: components["parameters"]["SessionId"];
@@ -4623,10 +5220,11 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
-            409: components["responses"]["InvalidStateError"];
+            409: components["responses"]["InvalidStateOrResourceBusyError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
-            503: components["responses"]["UnavailableError"];
+            503: components["responses"]["CapacityUnavailableOrUnavailableError"];
             504: components["responses"]["GatewayTimeoutError"];
         };
     };
@@ -4635,7 +5233,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Session identifier. */
                 sid: components["parameters"]["SessionId"];
@@ -4661,8 +5259,10 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["InvalidStateError"];
             413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4680,14 +5280,19 @@ export interface operations {
                 command?: string;
                 /** @description When true (default), disconnecting keeps the shell running so the same session_id can reconnect to it and receive recent scrollback. When false, the shell is terminated on disconnect. A kill control message or the configured idle TTL terminates a persistent shell. */
                 persist?: boolean;
-                /** @description Destroy the PTY after this many seconds without terminal input or output. Omit or set to zero to disable this PTY-specific idle limit. */
+                /** @description Destroy the PTY after this many seconds without terminal input or output. Omit or set to zero to disable this PTY-specific idle limit. Not with `cancel_ttl_secs`. */
+                timeout?: number;
+                /**
+                 * @deprecated
+                 * @description Deprecated: use `timeout`. Not with `timeout`.
+                 */
                 cancel_ttl_secs?: number;
                 /** @description Browser auth: a short-lived ticket from POST .../pty-ticket, used in place of the Authorization header (which a browser WebSocket cannot set). */
                 ticket?: string;
             };
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Session identifier. */
                 sid: components["parameters"]["SessionId"];
@@ -4709,7 +5314,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateOrResourceBusyError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4721,7 +5326,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Session identifier. */
                 sid: components["parameters"]["SessionId"];
@@ -4744,8 +5349,10 @@ export interface operations {
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["InvalidStateError"];
             413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4764,7 +5371,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -4785,7 +5392,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4797,7 +5404,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -4822,9 +5429,10 @@ export interface operations {
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["ConflictOrInvalidStateError"];
             413: components["responses"]["PayloadTooLargeError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4836,7 +5444,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
                 /** @description Filesystem mount identifier. */
                 mount_id: components["parameters"]["MountId"];
@@ -4859,7 +5467,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4871,7 +5479,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
+                /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
                 id: components["parameters"]["VmId"];
             };
             cookie?: never;
@@ -4891,14 +5499,15 @@ export interface operations {
                     "application/json": components["schemas"]["SyncResponse"];
                 };
             };
-            400: components["responses"]["BadRequestError"];
+            400: components["responses"]["BadRequestOrInsufficientResourcesError"];
             401: components["responses"]["UnauthorizedError"];
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["ConflictOrInvalidStateOrResourceBusyError"];
             413: components["responses"]["PayloadTooLargeError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["CapacityUnavailableOrUnavailableError"];
@@ -4965,6 +5574,7 @@ export interface operations {
             400: components["responses"]["BadRequestError"];
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["AlreadyExistsError"];
             413: components["responses"]["PayloadTooLargeError"];
             422: components["responses"]["UnsupportedOperationError"];
@@ -5068,6 +5678,7 @@ export interface operations {
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     createPool: {
@@ -5101,6 +5712,7 @@ export interface operations {
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     getPool: {
@@ -5130,6 +5742,7 @@ export interface operations {
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     deletePool: {
@@ -5160,6 +5773,7 @@ export interface operations {
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     updatePool: {
@@ -5196,6 +5810,7 @@ export interface operations {
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     listPoolWorkers: {
@@ -5226,11 +5841,15 @@ export interface operations {
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     heartbeatWorker: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
             header?: never;
             path: {
                 /** @description Pool identifier returned as `pool_id`. */
@@ -5260,6 +5879,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["ConflictError"];
+            410: components["responses"]["ExpiredError"];
             422: components["responses"]["UnsupportedOperationError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
@@ -5268,7 +5888,10 @@ export interface operations {
     };
     openWorkerTunnel: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
             header?: never;
             path: {
                 /** @description Pool identifier returned as `pool_id`. */
@@ -5292,7 +5915,49 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
+            410: components["responses"]["ExpiredError"];
             422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    reconcileWorkerVms: {
+        parameters: {
+            query?: {
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkerVmReconciliation"];
+            };
+        };
+        responses: {
+            /** @description The named VMs the worker owns. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerVmReconciliationResult"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            410: components["responses"]["ExpiredError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -5300,7 +5965,10 @@ export interface operations {
     };
     putWorkerVm: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
             header?: never;
             path: {
                 /** @description Pool identifier returned as `pool_id`. */
@@ -5330,6 +5998,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
+            410: components["responses"]["ExpiredError"];
             422: components["responses"]["UnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
@@ -5338,7 +6007,10 @@ export interface operations {
     };
     deleteWorkerVm: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
             header?: never;
             path: {
                 /** @description Pool identifier returned as `pool_id`. */
@@ -5359,10 +6031,135 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["BadRequestError"];
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            410: components["responses"]["ExpiredError"];
             422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    reserveWorkerVmSnapshot: {
+        parameters: {
+            query?: {
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: components["parameters"]["WorkerVmId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The snapshot generation is reserved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerSnapshotReservation"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            410: components["responses"]["ExpiredError"];
+            422: components["responses"]["UnsupportedOperationError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    commitWorkerVmSnapshot: {
+        parameters: {
+            query: {
+                /** @description VM ownership generation returned by the reservation. */
+                vm_generation: number;
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: components["parameters"]["WorkerVmId"];
+                /** @description Immutable snapshot generation identifier returned by the reservation. */
+                snapshot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The snapshot generation is committed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            410: components["responses"]["ExpiredError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    renewWorkerVmSnapshot: {
+        parameters: {
+            query: {
+                /** @description VM ownership generation returned by the reservation. */
+                vm_generation: number;
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
+            header?: never;
+            path: {
+                /** @description Pool identifier returned as `pool_id`. */
+                pool_id: components["parameters"]["PoolId"];
+                /** @description Worker identifier: a ULID the worker generates once and keeps. */
+                worker_id: components["parameters"]["WorkerId"];
+                /** @description VM identifier Arker handed the worker with the fork (`x-vm-id`). */
+                vm_id: components["parameters"]["WorkerVmId"];
+                /** @description Immutable snapshot generation identifier returned by the reservation. */
+                snapshot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The upload lease is renewed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            404: components["responses"]["NotFoundError"];
+            409: components["responses"]["InvalidStateError"];
+            410: components["responses"]["ExpiredError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -5370,7 +6167,10 @@ export interface operations {
     };
     putWorkerRun: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored. */
+                incarnation?: components["parameters"]["WorkerIncarnation"];
+            };
             header?: never;
             path: {
                 /** @description Pool identifier returned as `pool_id`. */
@@ -5402,6 +6202,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
+            410: components["responses"]["ExpiredError"];
             422: components["responses"]["UnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
@@ -5486,6 +6287,81 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
+    listEvents: {
+        parameters: {
+            query?: {
+                /** @description Only events with this text, ignoring case, in their action, ids, error code, attribute values or member's email. */
+                search?: string;
+                /** @description Only events of this category. Without it, every event the caller can read: both categories for an admin, `compute` for anyone else. Reading `organization` needs an admin, or an API key with the admin role. */
+                category?: components["schemas"]["EventCategory"];
+                /** @description Only these actions. Repeat the parameter for more than one. */
+                actions?: components["schemas"]["EventAction"][];
+                /** @description Only events in these states. */
+                states?: components["schemas"]["EventState"][];
+                /** @description Only actions these regions served. */
+                regions?: string[];
+                /** @description Only actions on these VMs. */
+                vm_ids?: string[];
+                /** @description Only actions these actors initiated: members by email, or `me` for the member calling, and API keys and SSH keys by id. */
+                actors?: string[];
+                /** @description Only actions these kinds of actor initiated. */
+                actor_types?: components["schemas"]["EventActorType"][];
+                /** @description Only actions whose request arrived this way. Arker's own actions have none; find them with `actor_types=arker`. */
+                via?: components["schemas"]["EventChannel"][];
+                /** @description Only actions these requests made. */
+                request_ids?: string[];
+                /** @description Only actions that failed with these codes. */
+                error_codes?: components["schemas"]["ErrorCode"][];
+                /** @description Only runs that exited with this code. */
+                exit_code?: number;
+                /** @description Only events whose `requested_at` is at or after this time. Events without one do not match. */
+                requested_at_gte?: string;
+                /** @description Only events whose `requested_at` is before this time. Events without one do not match. */
+                requested_at_lt?: string;
+                /** @description Only events whose `started_at` is at or after this time. Events without one do not match. */
+                started_at_gte?: string;
+                /** @description Only events whose `started_at` is before this time. Events without one do not match. */
+                started_at_lt?: string;
+                /** @description Only events whose `ended_at` is at or after this time. Events without one do not match. */
+                ended_at_gte?: string;
+                /** @description Only events whose `ended_at` is before this time. Events without one do not match. */
+                ended_at_lt?: string;
+                /** @description Only events whose `duration_ms` is at or after this many milliseconds. Events without one do not match. */
+                duration_ms_gte?: number;
+                /** @description Only events whose `duration_ms` is before this many milliseconds. Events without one do not match. */
+                duration_ms_lt?: number;
+                /** @description What events are ordered by; events without it come last, and `id` breaks ties. */
+                order_by?: components["schemas"]["EventOrderBy"];
+                /** @description The direction of `order_by`. */
+                order?: "asc" | "desc";
+                /** @description Events per page. */
+                limit?: number;
+                /** @description The previous page's `next_cursor`. It keeps that query's filters and order, so only `limit` may accompany it. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListEventsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];

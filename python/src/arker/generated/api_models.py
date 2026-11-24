@@ -48,6 +48,7 @@ ErrorCode: TypeAlias = Literal[
     'idempotency_conflict',
     'expired',
     'payload_too_large',
+    'request_timeout',
     'method_not_allowed',
     'unsupported_operation',
     'unrecoverable',
@@ -60,6 +61,7 @@ ErrorCode: TypeAlias = Literal[
     'action_required',
     'operation_failed',
     'gateway_timeout',
+    'port_not_listening',
 ]
 
 
@@ -158,6 +160,7 @@ class PatchSessionRequest:
     cols: int | None = None
     rows: int | None = None
     timeout_secs: int | None = None
+    timeout: int | None = None
 
 
 @dataclass(frozen=True)
@@ -446,6 +449,35 @@ class VmNetwork:
 
 
 @dataclass(frozen=True)
+class AutoscalingRule:
+    min: int
+    max: int
+    target_utilization: float
+    window_seconds: Any | None = None
+
+
+@dataclass(frozen=True)
+class DiskAutoscalingRule:
+    max: int
+    target_utilization: float
+    window_seconds: Any | None = None
+
+
+@dataclass(frozen=True)
+class ResourcesAutoscaling:
+    vcpu: AutoscalingRule | None = None
+    memory_mib: AutoscalingRule | None = None
+    disk_mib: DiskAutoscalingRule | None = None
+
+
+@dataclass(frozen=True)
+class ResourcesAutoscalingUpdate:
+    vcpu: AutoscalingRule | None = None
+    memory_mib: AutoscalingRule | None = None
+    disk_mib: DiskAutoscalingRule | None = None
+
+
+@dataclass(frozen=True)
 class GpuResourceBand:
     min: int
     max: int
@@ -483,6 +515,7 @@ OpenApiOperationId: TypeAlias = Literal[
     'getVm',
     'deleteVm',
     'patchVm',
+    'getVmMetrics',
     'getVmPolicies',
     'putVmPolicies',
     'createRun',
@@ -512,12 +545,17 @@ OpenApiOperationId: TypeAlias = Literal[
     'listPoolWorkers',
     'heartbeatWorker',
     'openWorkerTunnel',
+    'reconcileWorkerVms',
     'putWorkerVm',
+    'reserveWorkerVmSnapshot',
+    'commitWorkerVmSnapshot',
+    'renewWorkerVmSnapshot',
     'deleteWorkerVm',
     'putWorkerRun',
     'listApiKeys',
     'createApiKey',
     'revokeApiKey',
+    'listEvents',
 ]
 
 
@@ -595,6 +633,7 @@ OperationFailureReason: TypeAlias = Literal[
 
 
 Feature: TypeAlias = Literal[
+    'resources_autoscaling',
     'durability',
     'nested_virtualization',
     'diskless',
@@ -607,6 +646,12 @@ Feature: TypeAlias = Literal[
     'platform',
     'systemd',
     'restore',
+    'vm_metrics',
+    'vm_update',
+    'resize',
+    'presigned_sync',
+    'sync_manifest',
+    'live_run_fork',
 ]
 
 
@@ -672,6 +717,7 @@ class ErrorMetadata(ErrorExecutionContext):
     request_id: str = field(kw_only=True)
     request: RequestContext = field(kw_only=True)
     retry_after_seconds: int | None = None
+    retry_after: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1030,6 +1076,11 @@ class PayloadTooLarge(ErrorMetadata):
 
 
 @dataclass(frozen=True)
+class RequestTimeout(ErrorMetadata):
+    code: Literal['request_timeout'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
 class MethodNotAllowed(ErrorMetadata):
     code: Literal['method_not_allowed'] = field(kw_only=True)
     details: MethodNotAllowedDetails = field(kw_only=True)
@@ -1102,6 +1153,11 @@ class GatewayTimeout(ErrorMetadata):
 
 
 @dataclass(frozen=True)
+class PortNotListening(ErrorMetadata):
+    code: Literal['port_not_listening'] = field(kw_only=True)
+
+
+@dataclass(frozen=True)
 class NotReadyHealthResponse:
     status: Literal['unavailable']
     timestamp: str
@@ -1117,6 +1173,12 @@ class SyncBadRequestError(ErrorExecutionContext):
     code: Literal['bad_request'] = field(kw_only=True)
     message: str = field(kw_only=True)
     details: BadRequestDetails | None = None
+
+
+@dataclass(frozen=True)
+class SyncForbiddenError(ErrorExecutionContext):
+    code: Literal['forbidden'] = field(kw_only=True)
+    message: str = field(kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -1143,6 +1205,13 @@ class SyncPayloadTooLargeError(ErrorExecutionContext):
     code: Literal['payload_too_large'] = field(kw_only=True)
     message: str = field(kw_only=True)
     details: PayloadTooLargeDetails | None = None
+
+
+@dataclass(frozen=True)
+class SyncInsufficientResourcesError(ErrorExecutionContext):
+    code: Literal['insufficient_resources'] = field(kw_only=True)
+    message: str = field(kw_only=True)
+    details: InsufficientResourcesDetails = field(kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -1255,6 +1324,11 @@ class PayloadTooLargeErrorResponse:
 
 
 @dataclass(frozen=True)
+class RequestTimeoutErrorResponse:
+    error: RequestTimeout
+
+
+@dataclass(frozen=True)
 class MethodNotAllowedErrorResponse:
     error: MethodNotAllowed
 
@@ -1310,8 +1384,8 @@ class BadRequestOrInsufficientResourcesErrorResponse:
 
 
 @dataclass(frozen=True)
-class AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse:
-    error: AlreadyExists | Conflict | InvalidState | ResourceBusy
+class AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse:
+    error: AlreadyExists | Conflict | IdempotencyConflict | InvalidState | ResourceBusy
 
 
 @dataclass(frozen=True)
@@ -1422,11 +1496,11 @@ PoolPlatform: TypeAlias = str
 PoolName: TypeAlias = str | None
 
 
-ByocProvider: TypeAlias = Literal['aws']
+ByocProvider: TypeAlias = Literal['aws', 'gcp']
 
 
 @dataclass(frozen=True)
-class PoolByoc:
+class AwsPoolByoc:
     account_id: str
     subnet_ids: list[str]
     security_group_ids: list[str]
@@ -1437,11 +1511,34 @@ class PoolByoc:
 
 
 @dataclass(frozen=True)
-class CreatePoolByoc:
+class GcpPoolByoc:
+    project_id: str
+    subnetwork: str
+    instance_types: list[str]
+    service_account: str
+    setup_url: str
+    setup_command: str
+
+
+PoolByoc: TypeAlias = AwsPoolByoc | GcpPoolByoc
+
+
+@dataclass(frozen=True)
+class AwsCreatePoolByoc:
     account_id: str
     subnet_ids: list[str]
     security_group_ids: list[str] | None = None
     instance_types: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class GcpCreatePoolByoc:
+    project_id: str
+    subnetwork: str
+    instance_types: list[str]
+
+
+CreatePoolByoc: TypeAlias = AwsCreatePoolByoc | GcpCreatePoolByoc
 
 
 @dataclass(frozen=True)
@@ -1587,7 +1684,7 @@ class WorkerGoldens:
 
 
 @dataclass(frozen=True)
-class WorkerStorageCredentials:
+class AwsWorkerStorageCredentials:
     access_key_id: str
     secret_access_key: str
     session_token: str
@@ -1595,11 +1692,28 @@ class WorkerStorageCredentials:
 
 
 @dataclass(frozen=True)
-class WorkerStorage:
+class AwsWorkerStorage:
     bucket: str
     region: str
     prefix: str
-    credentials: WorkerStorageCredentials
+    credentials: AwsWorkerStorageCredentials
+
+
+@dataclass(frozen=True)
+class GcpWorkerStorageCredentials:
+    access_token: str
+    service_account: str
+    expires_at: str
+
+
+@dataclass(frozen=True)
+class GcpWorkerStorage:
+    bucket: str
+    prefix: str
+    credentials: GcpWorkerStorageCredentials
+
+
+WorkerStorage: TypeAlias = AwsWorkerStorage | GcpWorkerStorage
 
 
 @dataclass(frozen=True)
@@ -1609,13 +1723,34 @@ class WorkerHeartbeatResponse:
     desired_state: WorkerHeartbeatState
     tunnel_url: str
     storage: WorkerStorage
+    membership_lease_ms: int | None = None
     upgrade_release_id: str | None = None
     golden_env: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
+class WorkerSnapshotReservation:
+    vm_generation: int
+    snapshot_id: str
+    lease_renew_after_secs: int
+
+
+VmId: TypeAlias = str
+
+
+@dataclass(frozen=True)
+class WorkerVmReconciliation:
+    vm_ids: list[VmId]
+
+
+@dataclass(frozen=True)
+class WorkerVmReconciliationResult:
+    retained_vm_ids: list[str]
+
+
+@dataclass(frozen=True)
 class WorkerVmRecord:
-    state: Literal['running', 'paused', 'suspended']
+    state: Literal['running', 'idle', 'paused', 'suspended']
     resources: WorkerResources
     image: str | None
     parent_vm_id: str | None
@@ -1632,6 +1767,12 @@ class WorkerRunRecord:
     finished_at: str | None
     stdout: str | None
     stderr: str | None
+    session_id: str | None = None
+    stdout_encoding: OutputEncoding | None = None
+    stderr_encoding: OutputEncoding | None = None
+    stdout_truncated: bool | None = False
+    stderr_truncated: bool | None = False
+    fail_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1642,6 +1783,108 @@ class ApiKeyVmScope:
 @dataclass(frozen=True)
 class ApiKeyPoolScope:
     pool_id: str
+
+
+EventAction: TypeAlias = Literal[
+    'vm_fork',
+    'vm_run',
+    'vm_sync',
+    'vm_update',
+    'vm_suspend',
+    'vm_delete',
+    'vm_running',
+    'vm_terminal_session',
+    'run_signal',
+    'run_cancel',
+    'session_create',
+    'session_update',
+    'session_delete',
+    'mount_create',
+    'mount_delete',
+    'filesystem_create',
+    'filesystem_delete',
+    'pool_create',
+    'pool_update',
+    'pool_delete',
+    'ssh_key_delete',
+    'api_key_create',
+    'api_key_revoke',
+    'member_add',
+    'member_invite',
+    'member_invite_revoke',
+    'member_update',
+    'member_remove',
+    'member_sign_in',
+    'member_sign_out',
+    'member_terms_accept',
+    'org_create',
+    'org_update',
+    'org_quota_update',
+    'org_delete',
+    'billing_checkout',
+    'billing_payment_method_update',
+    'billing_credit_grant',
+]
+
+
+EventState: TypeAlias = Literal['running', 'completed', 'failed', 'cancelled']
+
+
+EventOrderBy: TypeAlias = Literal[
+    'requested_at', 'started_at', 'ended_at', 'duration_ms'
+]
+
+
+EventCategory: TypeAlias = Literal['compute', 'organization']
+
+
+@dataclass(frozen=True)
+class VmMetricsProvisionedAvg:
+    vcpu: float
+    memory_mib: int
+    disk_mib: int
+
+
+@dataclass(frozen=True)
+class VmMetricsProvisioned:
+    vcpu: int
+    memory_mib: int
+    disk_mib: int
+
+
+@dataclass(frozen=True)
+class VmMetricsUtilized:
+    vcpu: float | None
+    memory_mib: int | None
+    disk_mib: int | None
+
+
+@dataclass(frozen=True)
+class VmMetricsPressure:
+    vcpu: float | None
+    memory_mib: float | None
+
+
+@dataclass(frozen=True)
+class VmMetricsIo:
+    network_received_bytes: int | None
+    network_transmitted_bytes: int | None
+    disk_written_bytes: int | None
+
+
+@dataclass(frozen=True)
+class EventResources:
+    vcpu: int
+    memory_mib: int
+    disk_mib: int
+    gpu_sm: int | None = None
+    gpu_vram_mib: int | None = None
+
+
+EventActorType: TypeAlias = Literal['member', 'api_key', 'ssh_key', 'arker']
+
+
+EventChannel: TypeAlias = Literal['console', 'api', 'ssh']
 
 
 @dataclass(frozen=True)
@@ -1695,6 +1938,14 @@ class DeleteVmParameters:
 @dataclass(frozen=True)
 class PatchVmParameters:
     id: str
+
+
+@dataclass(frozen=True)
+class GetVmMetricsParameters:
+    id: str
+    started_at_gte: str | None = None
+    started_at_lt: str | None = None
+    step: Literal[60, 300, 3600] | None = None
 
 
 @dataclass(frozen=True)
@@ -1774,6 +2025,7 @@ class AttachSessionPtyParameters:
     rows: int | None = 24
     command: str | None = None
     persist: bool | None = True
+    timeout: int | None = None
     cancel_ttl_secs: int | None = None
     ticket: str | None = None
 
@@ -1855,12 +2107,21 @@ class ListPoolWorkersParameters:
 class HeartbeatWorkerParameters:
     pool_id: str
     worker_id: str
+    incarnation: str | None = None
 
 
 @dataclass(frozen=True)
 class OpenWorkerTunnelParameters:
     pool_id: str
     worker_id: str
+    incarnation: str | None = None
+
+
+@dataclass(frozen=True)
+class ReconcileWorkerVmsParameters:
+    pool_id: str
+    worker_id: str
+    incarnation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1868,6 +2129,7 @@ class PutWorkerVmParameters:
     pool_id: str
     worker_id: str
     vm_id: str
+    incarnation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1875,6 +2137,35 @@ class DeleteWorkerVmParameters:
     pool_id: str
     worker_id: str
     vm_id: str
+    incarnation: str | None = None
+
+
+@dataclass(frozen=True)
+class ReserveWorkerVmSnapshotParameters:
+    pool_id: str
+    worker_id: str
+    vm_id: str
+    incarnation: str | None = None
+
+
+@dataclass(frozen=True)
+class CommitWorkerVmSnapshotParameters:
+    pool_id: str
+    worker_id: str
+    vm_id: str
+    snapshot_id: str
+    vm_generation: int
+    incarnation: str | None = None
+
+
+@dataclass(frozen=True)
+class RenewWorkerVmSnapshotParameters:
+    pool_id: str
+    worker_id: str
+    vm_id: str
+    snapshot_id: str
+    vm_generation: int
+    incarnation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1883,11 +2174,40 @@ class PutWorkerRunParameters:
     worker_id: str
     vm_id: str
     run_id: str
+    incarnation: str | None = None
 
 
 @dataclass(frozen=True)
 class RevokeApiKeyParameters:
     api_key_id: str
+
+
+@dataclass(frozen=True)
+class ListEventsParameters:
+    search: str | None = None
+    category: EventCategory | None = None
+    actions: list[EventAction] | None = None
+    states: list[EventState] | None = None
+    regions: list[str] | None = None
+    vm_ids: list[str] | None = None
+    actors: list[str] | None = None
+    actor_types: list[EventActorType] | None = None
+    via: list[EventChannel] | None = None
+    request_ids: list[str] | None = None
+    error_codes: list[ErrorCode] | None = None
+    exit_code: int | None = None
+    requested_at_gte: str | None = None
+    requested_at_lt: str | None = None
+    started_at_gte: str | None = None
+    started_at_lt: str | None = None
+    ended_at_gte: str | None = None
+    ended_at_lt: str | None = None
+    duration_ms_gte: int | None = None
+    duration_ms_lt: int | None = None
+    order_by: EventOrderBy | None = 'requested_at'
+    order: Literal['asc', 'desc'] | None = 'desc'
+    limit: int | None = 50
+    cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1928,6 +2248,7 @@ class Run:
     completed_at: str | None = None
     fail_reason: str | None = None
     retry_count: int | None = 0
+    inherited_from: str | None = None
     vm_id: str | None = None
     vm_name: str | None = None
     source_org_id: str | None = None
@@ -1945,9 +2266,11 @@ SyncReadResponse: TypeAlias = SyncReadInlineResponse | SyncReadPresignedResponse
 
 SyncFileError: TypeAlias = (
     SyncBadRequestError
+    | SyncForbiddenError
     | SyncNotFoundError
     | SyncConflictError
     | SyncPayloadTooLargeError
+    | SyncInsufficientResourcesError
     | SyncUnsupportedOperationError
     | SyncUnavailableError
     | SyncInternalError
@@ -2054,6 +2377,25 @@ class ListApiKeysResponse:
 
 
 @dataclass(frozen=True)
+class EventActor:
+    type: EventActorType
+    id: str | None = None
+
+
+@dataclass(frozen=True)
+class VmMetricsBucket:
+    started_at: str
+    ended_at: str
+    resources_provisioned_avg: VmMetricsProvisionedAvg
+    resources_provisioned_max: VmMetricsProvisioned
+    resources_utilized_avg: VmMetricsUtilized
+    resources_utilized_max: VmMetricsUtilized
+    resources_pressure_avg: VmMetricsPressure
+    resources_pressure_max: VmMetricsPressure
+    resources_io: VmMetricsIo
+
+
+@dataclass(frozen=True)
 class PolicyEntry:
     type: Literal['outbound', 'inbound']
     action: PolicyAction
@@ -2129,6 +2471,42 @@ class PolicyUpdate:
 PolicyRules: TypeAlias = dict[str, PolicyRule | ScheduleRule | LifecycleRule]
 
 
+@dataclass(frozen=True)
+class VmMetrics:
+    vm_id: str
+    step: int
+    started_at: str
+    ended_at: str
+    buckets: list[VmMetricsBucket]
+
+
+@dataclass(frozen=True)
+class Event:
+    id: str
+    action: EventAction
+    category: EventCategory
+    state: EventState
+    vm_id: str | None
+    requested_at: str
+    started_at: str | None
+    ended_at: str | None
+    duration_ms: int | None
+    actor: EventActor | None
+    region: str | None
+    request_id: str | None
+    error_code: ErrorCode | None
+    attributes: dict[str, str | int | bool | None]
+    via: EventChannel | None
+    resources_provisioned: EventResources | None
+    resources_reserved: PoolResources | None
+
+
+@dataclass(frozen=True)
+class ListEventsResponse:
+    events: list[Event]
+    next_cursor: str | None
+
+
 ErrorBody: TypeAlias = (
     BadRequest
     | InsufficientResources
@@ -2142,6 +2520,7 @@ ErrorBody: TypeAlias = (
     | IdempotencyConflict
     | Expired
     | PayloadTooLarge
+    | RequestTimeout
     | MethodNotAllowed
     | UnsupportedOperation
     | Unrecoverable
@@ -2154,6 +2533,7 @@ ErrorBody: TypeAlias = (
     | ActionRequired
     | OperationFailed
     | GatewayTimeout
+    | PortNotListening
 )
 
 
@@ -2204,6 +2584,7 @@ class ForkRequest1:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    resources_autoscaling: ResourcesAutoscalingUpdate | None = None
 
 
 @dataclass(frozen=True)
@@ -2230,6 +2611,7 @@ class ForkRequest2:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    resources_autoscaling: ResourcesAutoscalingUpdate | None = None
 
 
 @dataclass(frozen=True)
@@ -2256,6 +2638,7 @@ class ForkRequest3:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    resources_autoscaling: ResourcesAutoscalingUpdate | None = None
 
 
 @dataclass(frozen=True)
@@ -2282,6 +2665,7 @@ class ForkRequest4:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    resources_autoscaling: ResourcesAutoscalingUpdate | None = None
 
 
 @dataclass(frozen=True)
@@ -2308,6 +2692,7 @@ class ForkRequest5:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    resources_autoscaling: ResourcesAutoscalingUpdate | None = None
 
 
 @dataclass(frozen=True)
@@ -2334,6 +2719,7 @@ class ForkRequest6:
     pool_id: str | None = None
     pool_name: str | None = None
     command: str | None = None
+    resources_autoscaling: ResourcesAutoscalingUpdate | None = None
 
 
 ForkRequest: TypeAlias = (
@@ -2373,6 +2759,7 @@ class PatchVmRequest:
     resources: ResourcesInput | None = None
     ssh_public_keys: SshKeysUpdate | list[str] | None = None
     policies: PolicyUpdate | None = None
+    resources_autoscaling: ResourcesAutoscalingUpdate | None = None
 
 
 @dataclass(frozen=True)
@@ -2394,6 +2781,7 @@ class Vm:
     network: VmNetwork
     sessions: list[Session]
     resources: VmResources
+    resources_autoscaling: ResourcesAutoscaling
     name: str | None = None
     hostname: str | None = None
     immutable: bool | None = None
