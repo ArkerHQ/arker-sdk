@@ -1173,19 +1173,11 @@ async function testSignalOnAStoppedVmShowsInvalidState(): Promise<void> {
 
 async function testSessionsUpdateForwardsPatch(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, { ok: true, session_id: "s_1" }), async (baseUrl, requests) => {
-    for (const flag of ["--timeout", "--timeout-secs"]) {
-      const result = await runCli(baseUrl, ["sessions", "update", "vm_1", "s_1", "--cols", "120", flag, "600"]);
-      assert.equal(result.code, 0, result.stderr);
-    }
-    for (const request of requests) {
-      assert.equal(request.method, "PATCH");
-      assert.equal(request.url, "/api/v1/vms/vm_1/sessions/s_1");
-      assert.deepEqual(request.body, { cols: 120, timeout_secs: 600 });
-    }
-    const both = await runCli(baseUrl, ["sessions", "update", "vm_1", "s_1", "--timeout", "1", "--timeout-secs", "2"]);
-    assert.equal(both.code, 1);
-    assert.match(both.stderr, /pass --timeout or --timeout-secs, not both/);
-    assert.equal(requests.length, 2);
+    const result = await runCli(baseUrl, ["sessions", "update", "vm_1", "s_1", "--cols", "120", "--timeout-secs", "600"]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(requests[0]?.method, "PATCH");
+    assert.equal(requests[0]?.url, "/api/v1/vms/vm_1/sessions/s_1");
+    assert.deepEqual(requests[0]?.body, { cols: 120, timeout_secs: 600 });
   });
 }
 
@@ -1207,7 +1199,7 @@ async function testSessionsUpdateRequiresAField(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, {}), async (baseUrl, requests) => {
     const result = await runCli(baseUrl, ["sessions", "update", "vm_1", "s_1"]);
     assert.equal(result.code, 1);
-    assert.match(result.stderr, /at least one of --cols, --rows, --timeout/);
+    assert.match(result.stderr, /at least one of --cols, --rows, --timeout-secs/);
     assert.equal(requests.length, 0, "must fail before touching the network");
   });
 }

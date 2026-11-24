@@ -541,8 +541,8 @@ export interface PtyConnectOptions {
    * shell (not just a detach) - a reconnect to the same `sessionId` starts
    * fresh. Unset (default) means no auto-cancel.
    */
-  timeout?: number;
-  /** The same as `timeout`; pass one of them. */
+  idleTimeout?: number;
+  /** The same as `idleTimeout`; pass one of them. */
   cancelTtlSecs?: number;
   /** @internal Test/runtime override for browser-ticket vs Node-header auth. */
   useTicket?: boolean;
@@ -1788,8 +1788,7 @@ export class VM {
 
   /**
    * Update a session via `PATCH /v1/vms/{id}/sessions/{sid}`: resize its PTY
-   * (`cols`/`rows`) and/or set the idle `timeout` in seconds, which applies on
-   * the next attach. Works whether or not a
+   * (`cols`/`rows`) and/or set the idle `timeoutSecs`. Works whether or not a
    * PTY is currently attached - the REST equivalent of {@link PtyConnection.resize}
    * (which sends an in-band control frame on the live WebSocket).
    */
@@ -1798,16 +1797,13 @@ export class VM {
     update: {
       cols?: PatchSessionRequest["cols"];
       rows?: PatchSessionRequest["rows"];
-      timeout?: PatchSessionRequest["timeout"];
-      /** The same as `timeout`; pass one of them. */
       timeoutSecs?: PatchSessionRequest["timeout_secs"];
     },
   ): Promise<PatchSessionResponse> {
     const request: PatchSessionRequest = {
       cols: update.cols,
       rows: update.rows,
-      // The older wire name: the API still accepts it, and every region understands it.
-      timeout_secs: oneOf("timeout", update.timeout, "timeoutSecs", update.timeoutSecs),
+      timeout_secs: update.timeoutSecs,
     };
     return this._client._request<PatchSessionResponse>(
       "PATCH",
@@ -1819,16 +1815,16 @@ export class VM {
 
   async connectPty(options: PtyConnectOptions = {}): Promise<PtyConnection> {
     if (this.pool_id) throw new Error("Pool VMs do not support interactive shells; use run instead.");
+    const idleTimeout = oneOf("idleTimeout", options.idleTimeout, "cancelTtlSecs", options.cancelTtlSecs);
     const sessionId = options.sessionId ?? sessionIdFrom(await this.createSession());
     const useTicket = options.useTicket ?? !isNodeRuntime();
-    const timeout = oneOf("timeout", options.timeout, "cancelTtlSecs", options.cancelTtlSecs);
     const params = {
       cols: options.cols,
       rows: options.rows,
       command: options.command,
       persist: options.persist,
       // The older wire name: the API still accepts it, and every region understands it.
-      cancel_ttl_secs: timeout && timeout > 0 ? Math.floor(timeout) : undefined,
+      cancel_ttl_secs: idleTimeout && idleTimeout > 0 ? Math.floor(idleTimeout) : undefined,
     };
     let ticket: string | undefined;
     if (useTicket) {

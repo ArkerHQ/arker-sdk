@@ -3080,17 +3080,6 @@ def test_pool_shell_is_refused_before_creating_session() -> None:
     assert t.calls == []
 
 
-def test_update_session_sends_timeout() -> None:
-    t = FakeTransport()
-    t.add_json(lambda method, _url: method == "PATCH", 200, {"ok": True, "session_id": "sess_1"})
-    with use_transport(t):
-        vm = client().vm("vm_1")
-        vm.update_session("sess_1", timeout=600)
-        with pytest.raises(ValueError, match="pass timeout or timeout_secs, not both"):
-            vm.update_session("sess_1", timeout=1, timeout_secs=2)
-    assert json.loads(t.calls[0]["body"]) == {"timeout_secs": 600}
-
-
 def test_vm_metrics_queries_its_window() -> None:
     body = {
         "vm_id": "vm_1",
@@ -3118,3 +3107,10 @@ def test_fork_leaves_out_the_autoscaling_window() -> None:
     assert json.loads(t.calls[0]["body"])["resources_autoscaling"] == {
         "vcpu": {"min": 1, "max": 4, "target_utilization": 0.6}
     }
+
+
+def test_connect_pty_refuses_idle_timeout_with_its_alias_before_creating_a_session() -> None:
+    t = FakeTransport()
+    with use_transport(t), pytest.raises(ValueError, match="pass idle_timeout or cancel_ttl_secs, not both"):
+        client().vm("vm-1").connect_pty(idle_timeout=1, cancel_ttl_secs=2)
+    assert t.calls == []

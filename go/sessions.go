@@ -1,9 +1,7 @@
 package arker
 
 import (
-	"cmp"
 	"context"
-	"errors"
 	"net/http"
 )
 
@@ -39,12 +37,8 @@ type CreateSessionRequest struct {
 // It works whether or not a PTY is attached -- the REST equivalent of
 // PTY.Resize, which sends an in-band control frame on the live WebSocket.
 type UpdateSessionRequest struct {
-	Cols *int `json:"cols,omitempty"`
-	Rows *int `json:"rows,omitempty"`
-	// Timeout is the PTY's idle auto-cancel window in seconds; it applies on
-	// the next attach.
-	Timeout *int `json:"-"`
-	// Deprecated: use Timeout. Not with Timeout.
+	Cols        *int `json:"cols,omitempty"`
+	Rows        *int `json:"rows,omitempty"`
 	TimeoutSecs *int `json:"timeout_secs,omitempty"`
 }
 
@@ -91,11 +85,6 @@ func (v *VM) GetSession(ctx context.Context, sessionID string) (*Session, error)
 
 // UpdateSession resizes a session and/or sets its idle timeout.
 func (v *VM) UpdateSession(ctx context.Context, sessionID string, req UpdateSessionRequest) error {
-	if req.Timeout != nil && req.TimeoutSecs != nil {
-		return errors.New("arker: set Timeout or TimeoutSecs, not both")
-	}
-	// The older wire name: the API still accepts it, and every region understands it.
-	req.TimeoutSecs = cmp.Or(req.Timeout, req.TimeoutSecs)
 	_, err := v.do(ctx, http.MethodPatch, v.path("/sessions/"+segment(sessionID)), req, nil)
 	return err
 }

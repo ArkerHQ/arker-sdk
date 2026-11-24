@@ -959,7 +959,7 @@ func syncDirectoryServer(t *testing.T, manifest string, archive func([]byte)) *a
 	}, reject(t, "control"))
 }
 
-// ── Retry hints, session timeouts and metrics ───────────────────────────
+// ── Retry hints and metrics ───────────────────────────
 
 func TestErrorPrefersRetryAfterOverRetryAfterSeconds(t *testing.T) {
 	for body, want := range map[string]float64{
@@ -975,28 +975,6 @@ func TestErrorPrefersRetryAfterOverRetryAfterSeconds(t *testing.T) {
 		if !errors.As(err, &apiErr) || apiErr.RetryAfter == nil || *apiErr.RetryAfter != want {
 			t.Fatalf("%s: err=%v, want retry after %v", body, err, want)
 		}
-	}
-}
-
-func TestUpdateSessionSendsTimeout(t *testing.T) {
-	var sent map[string]any
-	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
-			t.Errorf("decode: %v", err)
-		}
-		fmt.Fprint(w, `{"ok":true,"session_id":"s1"}`)
-	}, reject(t, "control"))
-
-	vm := c.VM("vm_1")
-	if err := vm.UpdateSession(context.Background(), "s1", arker.UpdateSessionRequest{Timeout: arker.Ptr(600)}); err != nil {
-		t.Fatalf("update: %v", err)
-	}
-	if len(sent) != 1 || sent["timeout_secs"] != float64(600) {
-		t.Fatalf("sent %v, want the timeout under the name every region accepts", sent)
-	}
-	both := arker.UpdateSessionRequest{Timeout: arker.Ptr(1), TimeoutSecs: arker.Ptr(2)}
-	if err := vm.UpdateSession(context.Background(), "s1", both); err == nil {
-		t.Fatal("Timeout and TimeoutSecs together must be refused")
 	}
 }
 
@@ -1024,5 +1002,13 @@ func TestMetricsQueriesTheVMsWindow(t *testing.T) {
 	if m.Step != 300 || b.ResourcesProvisionedAvg.VCPU != 1.5 || *b.ResourcesUtilizedMax.VCPU != 1.9 ||
 		b.ResourcesUtilizedAvg.DiskMiB != nil || *b.ResourcesIO.NetworkTransmittedBytes != 20 {
 		t.Fatalf("metrics did not decode: %+v", m)
+	}
+}
+
+func TestConnectPTYRefusesIdleTimeoutWithItsAlias(t *testing.T) {
+	c := twoPlane(t, reject(t, "regional"), reject(t, "control"))
+	opts := arker.PTYOptions{IdleTimeout: arker.Ptr(1), CancelTTLSecs: arker.Ptr(2)}
+	if _, err := c.VM("vm_1").ConnectPTY(context.Background(), opts); err == nil {
+		t.Fatal("IdleTimeout and CancelTTLSecs together must be refused")
 	}
 }

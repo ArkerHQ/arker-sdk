@@ -1407,21 +1407,15 @@ class VM:
         *,
         cols: int | None = None,
         rows: int | None = None,
-        timeout: int | None = None,
         timeout_secs: int | None = None,
     ) -> PatchSessionResponse:
         """Update a session via ``PATCH /v1/vms/{id}/sessions/{sid}``: resize its
-        PTY (``cols``/``rows``) and/or set its idle ``timeout`` in seconds, which
-        applies on the next attach. Works whether or not a PTY is currently
-        attached - the REST equivalent of :meth:`Pty.resize` (which sends an
-        in-band control frame on the live WebSocket).
-
-        ``timeout_secs`` is the same as ``timeout``; pass one of them.
+        PTY (``cols``/``rows``) and/or set the idle ``timeout_secs``. Works whether
+        or not a PTY is currently attached - the REST equivalent of
+        :meth:`Pty.resize` (which sends an in-band control frame on the live
+        WebSocket).
         """
-        # The older wire name: the API still accepts it, and every region understands it.
-        request = PatchSessionRequest(
-            cols=cols, rows=rows, timeout_secs=_one_of("timeout", timeout, "timeout_secs", timeout_secs)
-        )
+        request = PatchSessionRequest(cols=cols, rows=rows, timeout_secs=timeout_secs)
         payload = self._client._request(
             "PATCH",
             f"{_vm_path(self.id)}/sessions/{_segment(session_id)}",
@@ -1440,7 +1434,7 @@ class VM:
         rows: int | None = None,
         command: str | None = None,
         persist: bool | None = None,
-        timeout: int | None = None,
+        idle_timeout: int | None = None,
         cancel_ttl_secs: int | None = None,
         on_close: Callable[[Pty.CloseEvent], None] | None = None,
         on_error: Callable[[Exception], None] | None = None,
@@ -1460,13 +1454,15 @@ class VM:
         ``persist=True`` (the default backend behavior) to reattach to a
         running shell (scrollback is replayed).
 
-        ``timeout`` destroys the PTY after that many seconds without terminal
-        input or output. ``cancel_ttl_secs`` is the same; pass one of them.
+        ``idle_timeout`` destroys the PTY after that many seconds without
+        terminal input or output. ``cancel_ttl_secs`` is the same; pass one of
+        them.
 
         Requires the ``websocket-client`` package - ``pip install 'arker[pty]'``.
         """
         if getattr(self, "pool_id", None):
             raise ValueError("Pool VMs do not support interactive shells; use run instead.")
+        idle_timeout = _one_of("idle_timeout", idle_timeout, "cancel_ttl_secs", cancel_ttl_secs)
         # Plain-text by default. A PTY inherits its session's environment, so
         # this is set when the session is created - no per-command prefixing and
         # no server-side change. An explicit `env` wins over the plain defaults,
@@ -1486,14 +1482,13 @@ class VM:
         else:
             sid = self.create_session(env=session_env or None).session_id
 
-        timeout = _one_of("timeout", timeout, "cancel_ttl_secs", cancel_ttl_secs)
         params: dict[str, Any] = {
             "cols": _clamp_pty_dimension(cols) if cols is not None else None,
             "rows": _clamp_pty_dimension(rows) if rows is not None else None,
             "command": command,
             "persist": persist,
             # The older wire name: the API still accepts it, and every region understands it.
-            "cancel_ttl_secs": int(timeout) if timeout and timeout > 0 else None,
+            "cancel_ttl_secs": int(idle_timeout) if idle_timeout and idle_timeout > 0 else None,
         }
 
         ticket: str | None = None

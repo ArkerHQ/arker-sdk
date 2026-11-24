@@ -243,7 +243,6 @@ const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
     pty: { type: "boolean" },
     rows: { type: "integer", min: 1 },
     state: { type: "string", values: ["idle", "pending", "running"] },
-    timeout: { type: "integer", min: 0 },
     "timeout-secs": { type: "integer", min: 0 },
   },
   shell: {
@@ -252,6 +251,7 @@ const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
     cols: { type: "integer", min: 1 },
     command: { type: "string" },
     cwd: { type: "string" },
+    "idle-timeout": { type: "integer", min: 0 },
     "no-persist": { type: "boolean" },
     persist: { type: "boolean" },
     rows: { type: "integer", min: 1 },
@@ -259,7 +259,6 @@ const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
     "source-org-id": { type: "string" },
     "source-org-name": { type: "string" },
     "source-vm-name": { type: "string" },
-    timeout: { type: "integer", min: 0 },
     "vm-id": { type: "string" },
   },
   policies: {
@@ -396,7 +395,6 @@ function invocationOptions(command: string, positional: string[]): { options: Op
               ...GLOBAL_OPTIONS,
               cols: { type: "integer", min: 1 },
               rows: { type: "integer", min: 1 },
-              timeout: { type: "integer", min: 0 },
               "timeout-secs": { type: "integer", min: 0 },
             }
           : GLOBAL_OPTIONS;
@@ -1276,19 +1274,19 @@ async function cmdSessions(args: ParsedArgs, client: Arker): Promise<void> {
       return;
     }
     case "update": {
-      if (!vm) die("usage: arker sessions update <vm_id> <session_id> [--cols N] [--rows N] [--timeout N]");
+      if (!vm) die("usage: arker sessions update <vm_id> <session_id> [--cols N] [--rows N] [--timeout-secs N]");
       const sid = rest[1] ?? die("missing session_id");
       const cols = numFlag(args, "cols");
       const rows = numFlag(args, "rows");
-      const timeout = aliasedNumFlag(args, "timeout", "timeout-secs");
-      if (cols === undefined && rows === undefined && timeout === undefined) {
-        die("sessions update: pass at least one of --cols, --rows, --timeout");
+      const timeoutSecs = numFlag(args, "timeout-secs");
+      if (cols === undefined && rows === undefined && timeoutSecs === undefined) {
+        die("sessions update: pass at least one of --cols, --rows, --timeout-secs");
       }
       out(
         await client.vm(vm).updateSession(sid, {
           ...(cols !== undefined ? { cols } : {}),
           ...(rows !== undefined ? { rows } : {}),
-          ...(timeout !== undefined ? { timeout } : {}),
+          ...(timeoutSecs !== undefined ? { timeoutSecs } : {}),
         }),
       );
       return;
@@ -1732,15 +1730,15 @@ async function cmdShell(args: ParsedArgs, client: Arker): Promise<void> {
   const cols = colsFlag ?? output.columns ?? 80;
   const rows = rowsFlag ?? output.rows ?? 24;
   // Optional auto-cancel: the server destroys the shell after this many seconds
-  // with no terminal I/O - `arker shell <vm> --timeout 600`.
-  const timeout = aliasedNumFlag(args, "timeout", "cancel-ttl");
+  // with no terminal I/O - `arker shell <vm> --idle-timeout 600`.
+  const idleTimeout = aliasedNumFlag(args, "idle-timeout", "cancel-ttl");
   const pty = await computer.connectPty({
     sessionId,
     cols,
     rows,
     command: args.flags.command as string | undefined,
     persist,
-    timeout,
+    idleTimeout,
   });
 
   err(`connected ${computer.id} session ${sessionId}`);
@@ -1865,7 +1863,7 @@ async function readAllStdinWithFirstByteDeadline(ms: number): Promise<Uint8Array
 const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   actions: { placeholder: "<action[,action...]>", desc: "filter organization-wide activity by action" },
   "assume-empty": { desc: "skip the remote manifest; treat the destination as empty" },
-  "cancel-ttl": { placeholder: "<seconds>", desc: "same as --timeout" },
+  "cancel-ttl": { placeholder: "<seconds>", desc: "same as --idle-timeout" },
   "completed-after": { placeholder: "<timestamp>", desc: "include per-VM runs completed at or after this RFC 3339 time" },
   context: { placeholder: "<directory>", desc: "local build context for --dockerfile" },
   cols: { placeholder: "<n>", desc: "initial terminal width" },
@@ -1889,6 +1887,7 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   "gpu-sms": { placeholder: "<n>", desc: "GPU SM count, in hardware units" },
   "gpu-vram-mib": { placeholder: "<n>", desc: "GPU VRAM in MiB, in hardware units" },
   help: { desc: "show help without connecting" },
+  "idle-timeout": { placeholder: "<seconds>", desc: "destroy the shell after this many seconds without terminal I/O" },
   image: { placeholder: "<reference>", desc: "fork from an OCI image" },
   "idempotency-key": { placeholder: "<key>", desc: "deduplicate retries of this run request" },
   "account-id": { placeholder: "<id>", desc: "AWS account in which the pool launches workers" },
@@ -1948,8 +1947,7 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   status: { placeholder: "<status[,status...]>", desc: "filter organization-wide activity by status class" },
   "status-max": { placeholder: "<code>", desc: "maximum organization-wide activity status code" },
   "status-min": { placeholder: "<code>", desc: "minimum organization-wide activity status code" },
-  timeout: { placeholder: "<seconds>", desc: "a run's exec/kill bound, or a PTY's idle limit (omitted or 0 = none)" },
-  "timeout-secs": { placeholder: "<seconds>", desc: "same as --timeout" },
+  timeout: { placeholder: "<seconds>", desc: "exec/kill bound in seconds (omitted or 0 = unbounded)" },
   "time-to-background": { placeholder: "<seconds>", desc: "sync window; 0 returns a run id immediately (default 120)" },
   until: { placeholder: "<epoch-seconds>", desc: "include organization-wide activity before this time" },
   vcpu: { placeholder: "<n>", desc: "vCPU count" },
