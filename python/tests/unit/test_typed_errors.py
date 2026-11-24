@@ -129,3 +129,24 @@ def test_invalid_contract_metadata_is_not_exposed_as_typed(changes):
     error = caught.value
     assert error.body is None
     assert error.raw == raw
+
+
+def test_known_error_keeps_its_typed_body_when_the_server_adds_fields():
+    payload = example("rate_limited")
+    payload["error"]["future_field"] = {"nested": True}
+    payload["error"]["details"]["future_detail"] = 1
+    error = sdk._extract_error(payload, 429)
+    assert error.body.code == "rate_limited"
+    assert error.raw == payload["error"]
+
+
+@pytest.mark.parametrize(
+    ("hints", "expected"),
+    [({"retry_after": 7, "retry_after_seconds": 3}, 7.0), ({"retry_after_seconds": 3}, 3.0)],
+)
+def test_retry_after_wins_over_retry_after_seconds(hints, expected):
+    payload = example("rate_limited")
+    payload["error"].pop("retry_after_seconds", None)
+    payload["error"].update(hints)
+    retry = sdk.RetryOptions(attempts=2, jitter_s=0.0)
+    assert sdk._retry_delay(retry, 0, sdk._extract_error(payload, 429)) == expected

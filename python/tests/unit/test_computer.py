@@ -3078,3 +3078,43 @@ def test_pool_shell_is_refused_before_creating_session() -> None:
         with pytest.raises(ValueError, match="interactive shells"):
             vm.connect_pty()
     assert t.calls == []
+
+
+def test_update_session_sends_timeout() -> None:
+    t = FakeTransport()
+    t.add_json(lambda method, _url: method == "PATCH", 200, {"ok": True, "session_id": "sess_1"})
+    with use_transport(t):
+        vm = client().vm("vm_1")
+        vm.update_session("sess_1", timeout=600)
+        with pytest.raises(ValueError, match="pass timeout or timeout_secs, not both"):
+            vm.update_session("sess_1", timeout=1, timeout_secs=2)
+    assert json.loads(t.calls[0]["body"]) == {"timeout_secs": 600}
+
+
+def test_vm_metrics_queries_its_window() -> None:
+    body = {
+        "vm_id": "vm_1",
+        "step": 300,
+        "started_at": "2026-11-01T00:00:00Z",
+        "ended_at": "2026-11-01T01:00:00Z",
+        "buckets": [],
+    }
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "GET" and "/v1/vms/vm_1/metrics" in url, 200, body)
+    with use_transport(t):
+        metrics = client().vm("vm_1").metrics(started_at_gte="2026-11-01T00:00:00Z", step=300)
+    assert metrics.step == 300
+    assert t.calls[0]["url"] == (
+        "https://test.invalid/api/v1/vms/vm_1/metrics?started_at_gte=2026-11-01T00%3A00%3A00Z&step=300"
+    )
+
+
+def test_fork_leaves_out_the_autoscaling_window() -> None:
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "POST" and url.endswith("/v1/fork"), 200, _fork_response("vm_child"))
+    rule = {"min": 1, "max": 4, "target_utilization": 0.6, "window_seconds": 60}
+    with use_transport(t):
+        client().vm("vm_source").fork(resources_autoscaling={"vcpu": rule})
+    assert json.loads(t.calls[0]["body"])["resources_autoscaling"] == {
+        "vcpu": {"min": 1, "max": 4, "target_utilization": 0.6}
+    }

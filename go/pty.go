@@ -1,6 +1,7 @@
 package arker
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,10 +22,14 @@ const ptyConnectTimeout = 30 * time.Second
 type PTYOptions struct {
 	// SessionID reattaches to an existing session, replaying its scrollback.
 	// Empty creates one.
-	SessionID     string
-	Cols, Rows    *int
-	Command       string
-	Persist       *bool
+	SessionID  string
+	Cols, Rows *int
+	Command    string
+	Persist    *bool
+	// Timeout destroys the PTY after this many seconds without terminal input
+	// or output. Nil or zero disables this PTY-specific idle limit.
+	Timeout *int
+	// Deprecated: use Timeout. Not with Timeout.
 	CancelTTLSecs *int
 
 	// Env is applied when a session is created; it wins over the plain
@@ -99,8 +104,12 @@ func (v *VM) ConnectPTY(ctx context.Context, opts PTYOptions) (*PTY, error) {
 	q.numPtr("rows", clampDim(opts.Rows))
 	q.str("command", opts.Command)
 	q.boolPtr("persist", opts.Persist)
-	if opts.CancelTTLSecs != nil && *opts.CancelTTLSecs > 0 {
-		q.num("cancel_ttl_secs", *opts.CancelTTLSecs)
+	if opts.Timeout != nil && opts.CancelTTLSecs != nil {
+		return nil, errors.New("arker: set Timeout or CancelTTLSecs, not both")
+	}
+	// The older wire name: the API still accepts it, and every region understands it.
+	if timeout := cmp.Or(opts.Timeout, opts.CancelTTLSecs); timeout != nil && *timeout > 0 {
+		q.num("cancel_ttl_secs", *timeout)
 	}
 
 	header := http.Header{}

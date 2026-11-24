@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -956,4 +957,72 @@ func syncDirectoryServer(t *testing.T, manifest string, archive func([]byte)) *a
 		data = append(data, chunk...)
 		fmt.Fprintf(w, `{"ok":true,"op":"write","results":[{"complete":%t,"written":%t}]}`, entry.End == entry.Size, entry.End == entry.Size)
 	}, reject(t, "control"))
+}
+
+// ── Retry hints, session timeouts and metrics ───────────────────────────
+
+func TestErrorPrefersRetryAfterOverRetryAfterSeconds(t *testing.T) {
+	for body, want := range map[string]float64{
+		`{"error":{"code":"bad_request","message":"no","retry_after":7,"retry_after_seconds":3,"future":{}}}`: 7,
+		`{"error":{"code":"bad_request","message":"no","retry_after_seconds":3}}`:                             3,
+	} {
+		c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, body)
+		}, reject(t, "control"))
+		_, err := c.VM("vm_1").GetSession(context.Background(), "s1")
+		var apiErr *arker.Error
+		if !errors.As(err, &apiErr) || apiErr.RetryAfter == nil || *apiErr.RetryAfter != want {
+			t.Fatalf("%s: err=%v, want retry after %v", body, err, want)
+		}
+	}
+}
+
+func TestUpdateSessionSendsTimeout(t *testing.T) {
+	var sent map[string]any
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		fmt.Fprint(w, `{"ok":true,"session_id":"s1"}`)
+	}, reject(t, "control"))
+
+	vm := c.VM("vm_1")
+	if err := vm.UpdateSession(context.Background(), "s1", arker.UpdateSessionRequest{Timeout: arker.Ptr(600)}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if len(sent) != 1 || sent["timeout_secs"] != float64(600) {
+		t.Fatalf("sent %v, want the timeout under the name every region accepts", sent)
+	}
+	both := arker.UpdateSessionRequest{Timeout: arker.Ptr(1), TimeoutSecs: arker.Ptr(2)}
+	if err := vm.UpdateSession(context.Background(), "s1", both); err == nil {
+		t.Fatal("Timeout and TimeoutSecs together must be refused")
+	}
+}
+
+func TestMetricsQueriesTheVMsWindow(t *testing.T) {
+	c := twoPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/vms/vm_1/metrics" || r.URL.RawQuery != "started_at_gte=2026-11-01T00%3A00%3A00Z&step=300" {
+			t.Errorf("metrics hit %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		fmt.Fprint(w, `{"vm_id":"vm_1","step":300,"started_at":"2026-11-01T00:00:00Z","ended_at":"2026-11-01T00:05:00Z",
+			"buckets":[{"started_at":"2026-11-01T00:00:00Z","ended_at":"2026-11-01T00:05:00Z",
+			"resources_provisioned_avg":{"vcpu":1.5,"memory_mib":2048,"disk_mib":10240},
+			"resources_provisioned_max":{"vcpu":2,"memory_mib":2048,"disk_mib":10240},
+			"resources_utilized_avg":{"vcpu":0.4,"memory_mib":512,"disk_mib":null},
+			"resources_utilized_max":{"vcpu":1.9,"memory_mib":900,"disk_mib":null},
+			"resources_pressure_avg":{"vcpu":0.01,"memory_mib":0},
+			"resources_pressure_max":{"vcpu":0.2,"memory_mib":null},
+			"resources_io":{"network_received_bytes":10,"network_transmitted_bytes":20,"disk_written_bytes":null}}]}`)
+	}, reject(t, "control"))
+
+	m, err := c.VM("vm_1").Metrics(context.Background(), arker.VMMetricsOptions{StartedAtGTE: "2026-11-01T00:00:00Z", Step: 300})
+	if err != nil {
+		t.Fatalf("metrics: %v", err)
+	}
+	b := m.Buckets[0]
+	if m.Step != 300 || b.ResourcesProvisionedAvg.VCPU != 1.5 || *b.ResourcesUtilizedMax.VCPU != 1.9 ||
+		b.ResourcesUtilizedAvg.DiskMiB != nil || *b.ResourcesIO.NetworkTransmittedBytes != 20 {
+		t.Fatalf("metrics did not decode: %+v", m)
+	}
 }

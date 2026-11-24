@@ -309,6 +309,8 @@ export type VmNetwork = ApiSchema<"VmNetwork">;
 export type Session = ApiSchema<"Session">;
 export type Vm = ApiSchema<"Vm">;
 export type ListVmsResponse = ApiSchema<"ListVmsResponse">;
+export type VmMetrics = ApiSchema<"VmMetrics">;
+export type VmMetricsBucket = ApiSchema<"VmMetricsBucket">;
 export type ListSessionsResponse = ApiSchema<"ListSessionsResponse">;
 export type DeleteVmResponse = ApiSchema<"DeleteVmResponse">;
 export type DeleteSessionResponse = ApiSchema<"DeleteSessionResponse">;
@@ -440,6 +442,7 @@ export type ListFilesystemsParameters = ApiQuery<"listFilesystems">;
 export type ListPoolsParameters = ApiQuery<"listPools">;
 export type ListMountsParameters = ApiQuery<"listMounts">;
 export type ListRunsParameters = ApiQuery<"listRuns">;
+export type VmMetricsParameters = ApiQuery<"getVmMetrics">;
 export type ListSessionsParameters = ApiQuery<"listSessions">;
 
 // ── VM resize (PATCH /v1/vms/{id}) ─────────────────────────────────
@@ -538,6 +541,8 @@ export interface PtyConnectOptions {
    * shell (not just a detach) - a reconnect to the same `sessionId` starts
    * fresh. Unset (default) means no auto-cancel.
    */
+  timeout?: number;
+  /** The same as `timeout`; pass one of them. */
   cancelTtlSecs?: number;
   /** @internal Test/runtime override for browser-ticket vs Node-header auth. */
   useTicket?: boolean;
@@ -726,6 +731,9 @@ export class Arker {
     // on, unnamed and billable. The header object is bound once, before the
     // retry loop, so every attempt of one call presents the same key.
     const { idempotencyKey, idempotency, ...request } = options;
+    if (request.resources_autoscaling) {
+      request.resources_autoscaling = withoutAutoscalingWindow(request.resources_autoscaling);
+    }
     const key = forkIdempotencyKey(idempotencyKey, idempotency);
     const wire = await this._request<Vm>(
       "POST",
@@ -1720,6 +1728,16 @@ export class VM {
     return this._client._request("DELETE", `${vmPath(this.id)}/mounts/${pathSegment(mountId)}`, undefined, this.baseUrl);
   }
 
+  /**
+   * This VM's size, use, pressure and I/O over time, in buckets of `step`
+   * seconds. The window is `[started_at_gte, started_at_lt)` in RFC 3339 and
+   * defaults to the last hour. Only buckets in which the VM ran are returned,
+   * and history is kept for 30 days.
+   */
+  async metrics(query: VmMetricsParameters = {}): Promise<VmMetrics> {
+    return this._client._request("GET", buildQuery(`${vmPath(this.id)}/metrics`, query), undefined, this.baseUrl);
+  }
+
   // ── Runs ──────────────────────────────────────────────────────────
   async listRuns(opts: ListRunsOptions = {}): Promise<ListRunsResponse> {
     const query: ListRunsParameters = {
@@ -1770,7 +1788,8 @@ export class VM {
 
   /**
    * Update a session via `PATCH /v1/vms/{id}/sessions/{sid}`: resize its PTY
-   * (`cols`/`rows`) and/or set the idle `timeoutSecs`. Works whether or not a
+   * (`cols`/`rows`) and/or set the idle `timeout` in seconds, which applies on
+   * the next attach. Works whether or not a
    * PTY is currently attached - the REST equivalent of {@link PtyConnection.resize}
    * (which sends an in-band control frame on the live WebSocket).
    */
@@ -1779,13 +1798,16 @@ export class VM {
     update: {
       cols?: PatchSessionRequest["cols"];
       rows?: PatchSessionRequest["rows"];
+      timeout?: PatchSessionRequest["timeout"];
+      /** The same as `timeout`; pass one of them. */
       timeoutSecs?: PatchSessionRequest["timeout_secs"];
     },
   ): Promise<PatchSessionResponse> {
     const request: PatchSessionRequest = {
       cols: update.cols,
       rows: update.rows,
-      timeout_secs: update.timeoutSecs,
+      // The older wire name: the API still accepts it, and every region understands it.
+      timeout_secs: oneOf("timeout", update.timeout, "timeoutSecs", update.timeoutSecs),
     };
     return this._client._request<PatchSessionResponse>(
       "PATCH",
@@ -1799,15 +1821,14 @@ export class VM {
     if (this.pool_id) throw new Error("Pool VMs do not support interactive shells; use run instead.");
     const sessionId = options.sessionId ?? sessionIdFrom(await this.createSession());
     const useTicket = options.useTicket ?? !isNodeRuntime();
+    const timeout = oneOf("timeout", options.timeout, "cancelTtlSecs", options.cancelTtlSecs);
     const params = {
       cols: options.cols,
       rows: options.rows,
       command: options.command,
       persist: options.persist,
-      cancel_ttl_secs:
-        options.cancelTtlSecs && options.cancelTtlSecs > 0
-          ? Math.floor(options.cancelTtlSecs)
-          : undefined,
+      // The older wire name: the API still accepts it, and every region understands it.
+      cancel_ttl_secs: timeout && timeout > 0 ? Math.floor(timeout) : undefined,
     };
     let ticket: string | undefined;
     if (useTicket) {
@@ -1827,6 +1848,21 @@ export class VM {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
+
+/** Autoscaling rules without `window_seconds`, which the API ignores: Arker
+ * chooses how long it measures each resource. */
+function withoutAutoscalingWindow<T extends Record<string, unknown>>(rules: T): T {
+  return Object.fromEntries(Object.entries(rules).map(([resource, rule]) => {
+    if (!isObject(rule)) return [resource, rule];
+    const { window_seconds: _window, ...rest } = rule;
+    return [resource, rest];
+  })) as T;
+}
+
+function oneOf<T>(name: string, value: T | undefined, aliasName: string, alias: T | undefined): T | undefined {
+  if (value !== undefined && alias !== undefined) throw new Error(`pass ${name} or ${aliasName}, not both`);
+  return value ?? alias;
+}
 
 function buildQuery(path: string, params: Record<string, unknown>): string {
   const usp = new URLSearchParams();
@@ -2356,8 +2392,8 @@ function retryDelay(retry: RetryConfig, attempt: number, error?: ArkerError): nu
   // The server's hint beats backoff, bounded by an explicitly configured
   // maxDelayMs - the caller's latency budget outranks the server. The DEFAULT
   // max only shapes backoff; applying it here would neuter real capacity waits.
-  const hint = error?.body && "retry_after_seconds" in error.body
-    ? wireRetryAfter(error.body.retry_after_seconds) : undefined;
+  const body: Record<string, unknown> = { ...error?.body };
+  const hint = wireRetryAfter(body.retry_after) ?? wireRetryAfter(body.retry_after_seconds);
   if (hint !== undefined) {
     return Math.min(hint * 1000, retry.hintCapMs ?? Number.POSITIVE_INFINITY) + jitter(retry.jitterMs);
   }

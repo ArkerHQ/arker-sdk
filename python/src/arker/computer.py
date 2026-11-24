@@ -56,6 +56,7 @@ from .generated.api_models import (
     ErrorBody,
     Filesystem,
     FilesystemCreateRequest,
+    GetVmMetricsParameters,
     ListApiKeysResponse,
     ListFilesystemsParameters,
     ListFilesystemsResponse,
@@ -101,6 +102,7 @@ from .generated.api_models import (
     SyncWriteResult,
     UpdatePoolRequest,
     Vm,
+    VmMetrics,
     VmNetwork,
     VmResources,
     WhoamiResponse,
@@ -408,6 +410,8 @@ class Arker:
         # Headers, not contract fields: pop both before the body is built, or
         # the server's validator rejects the unknown keys and every fork 400s.
         idempotency_key = _fork_idempotency_key(options.pop("idempotency_key", None), options.pop("idempotency", None))
+        if options.get("resources_autoscaling") is not None:
+            options["resources_autoscaling"] = _without_autoscaling_window(options["resources_autoscaling"])
         info = _vm_info(
             self._request(
                 "POST",
@@ -1315,6 +1319,30 @@ class VM:
         payload = self._client._request("GET", path, base_url=self.base_url)
         return _decode_model(ListRunsResponse, payload)
 
+    def metrics(
+        self,
+        *,
+        started_at_gte: str | None = None,
+        started_at_lt: str | None = None,
+        step: Literal[60, 300, 3600] | None = None,
+    ) -> VmMetrics:
+        """This VM's size, use, pressure and I/O over time, in buckets of
+        ``step`` seconds, via ``GET /v1/vms/{id}/metrics``.
+
+        The window is ``[started_at_gte, started_at_lt)`` in RFC 3339; it
+        defaults to the last hour. Only buckets in which the VM ran are
+        returned, and history is kept for 30 days.
+        """
+        parameters = GetVmMetricsParameters(
+            id=self.id,
+            started_at_gte=started_at_gte,
+            started_at_lt=started_at_lt,
+            step=step,
+        )
+        path = _build_query(f"{_vm_path(self.id)}/metrics", parameters, path_fields={"id"})
+        payload = self._client._request("GET", path, base_url=self.base_url)
+        return _decode_model(VmMetrics, payload)
+
     def get_run(self, run_id: str) -> RunRecord:
         """Fetch a past run.
 
@@ -1379,15 +1407,21 @@ class VM:
         *,
         cols: int | None = None,
         rows: int | None = None,
+        timeout: int | None = None,
         timeout_secs: int | None = None,
     ) -> PatchSessionResponse:
         """Update a session via ``PATCH /v1/vms/{id}/sessions/{sid}``: resize its
-        PTY (``cols``/``rows``) and/or set the idle ``timeout_secs``. Works whether
-        or not a PTY is currently attached - the REST equivalent of
-        :meth:`Pty.resize` (which sends an in-band control frame on the live
-        WebSocket).
+        PTY (``cols``/``rows``) and/or set its idle ``timeout`` in seconds, which
+        applies on the next attach. Works whether or not a PTY is currently
+        attached - the REST equivalent of :meth:`Pty.resize` (which sends an
+        in-band control frame on the live WebSocket).
+
+        ``timeout_secs`` is the same as ``timeout``; pass one of them.
         """
-        request = PatchSessionRequest(cols=cols, rows=rows, timeout_secs=timeout_secs)
+        # The older wire name: the API still accepts it, and every region understands it.
+        request = PatchSessionRequest(
+            cols=cols, rows=rows, timeout_secs=_one_of("timeout", timeout, "timeout_secs", timeout_secs)
+        )
         payload = self._client._request(
             "PATCH",
             f"{_vm_path(self.id)}/sessions/{_segment(session_id)}",
@@ -1406,6 +1440,7 @@ class VM:
         rows: int | None = None,
         command: str | None = None,
         persist: bool | None = None,
+        timeout: int | None = None,
         cancel_ttl_secs: int | None = None,
         on_close: Callable[[Pty.CloseEvent], None] | None = None,
         on_error: Callable[[Exception], None] | None = None,
@@ -1424,6 +1459,9 @@ class VM:
         Reconnect/persist: pass an existing ``session_id`` with
         ``persist=True`` (the default backend behavior) to reattach to a
         running shell (scrollback is replayed).
+
+        ``timeout`` destroys the PTY after that many seconds without terminal
+        input or output. ``cancel_ttl_secs`` is the same; pass one of them.
 
         Requires the ``websocket-client`` package - ``pip install 'arker[pty]'``.
         """
@@ -1448,12 +1486,14 @@ class VM:
         else:
             sid = self.create_session(env=session_env or None).session_id
 
+        timeout = _one_of("timeout", timeout, "cancel_ttl_secs", cancel_ttl_secs)
         params: dict[str, Any] = {
             "cols": _clamp_pty_dimension(cols) if cols is not None else None,
             "rows": _clamp_pty_dimension(rows) if rows is not None else None,
             "command": command,
             "persist": persist,
-            "cancel_ttl_secs": int(cancel_ttl_secs) if cancel_ttl_secs and cancel_ttl_secs > 0 else None,
+            # The older wire name: the API still accepts it, and every region understands it.
+            "cancel_ttl_secs": int(timeout) if timeout and timeout > 0 else None,
         }
 
         ticket: str | None = None
@@ -1760,7 +1800,7 @@ def _retry_delay(retry: RetryOptions, attempt: int, error: ArkerError | None = N
     """
     jitter_range = max(1, int(retry.jitter_s * 1000) + 1)
     jitter = secrets.randbelow(jitter_range) / 1000.0
-    hint = _wire_retry_after((error.raw or {}).get("retry_after_seconds")) if error else None
+    hint = _error_retry_after(error) if error else None
     if hint is not None:
         if retry.max_delay_s is not None:
             hint = min(float(hint), retry.max_delay_s)
@@ -1930,6 +1970,25 @@ def _policy_update(policies: Any) -> Any:
     }
 
 
+def _without_autoscaling_window(rules: Any) -> Any:
+    """Autoscaling rules without ``window_seconds``, which the API ignores:
+    Arker chooses how long it measures each resource."""
+    if dataclasses.is_dataclass(rules) and not isinstance(rules, type):
+        rules = {field.name: getattr(rules, field.name) for field in dataclasses.fields(rules)}
+    if not isinstance(rules, dict):
+        return rules
+    return {
+        resource: (
+            dataclasses.replace(rule, window_seconds=None)
+            if dataclasses.is_dataclass(rule) and not isinstance(rule, type)
+            else {key: value for key, value in rule.items() if key != "window_seconds"}
+            if isinstance(rule, dict)
+            else rule
+        )
+        for resource, rule in rules.items()
+    }
+
+
 def _drop_none(value: Any) -> Any:
     if value is _EXPLICIT_NULL:
         return None
@@ -2023,7 +2082,26 @@ def _parse_json(text: str) -> Any:
 
 _HTTP_ERROR_ADAPTER = TypeAdapter(ErrorBody)
 _FILE_ERROR_ADAPTER = TypeAdapter(SyncFileError)
-_ERROR_SCHEMA = json.loads(package_files("arker").joinpath("_openapi.json").read_text())
+
+
+def _open_objects(schema: Any) -> Any:
+    """The schema with every object open to properties it does not name.
+
+    Errors gain fields over time; an SDK that refused them would lose the
+    typed body (and its recovery and retry hints) the day the server adds one.
+    """
+    if isinstance(schema, dict):
+        return {
+            key: _open_objects(value)
+            for key, value in schema.items()
+            if not (key in ("additionalProperties", "unevaluatedProperties") and value is False)
+        }
+    if isinstance(schema, list):
+        return [_open_objects(item) for item in schema]
+    return schema
+
+
+_ERROR_SCHEMA = _open_objects(json.loads(package_files("arker").joinpath("_openapi.json").read_text()))
 _ERROR_VALIDATORS = {
     file: Draft202012Validator(
         {**_ERROR_SCHEMA, "$ref": f"#/components/schemas/{name}"}, format_checker=FormatChecker()
@@ -2050,6 +2128,18 @@ def _extract_error(payload: Any, status: int = 0) -> ArkerError | None:
     if not isinstance(raw, dict) or not isinstance(raw.get("code"), str) or not isinstance(raw.get("message"), str):
         return None
     return _server_error(raw, status)
+
+
+def _one_of(name: str, value: Any, alias_name: str, alias: Any) -> Any:
+    if value is not None and alias is not None:
+        raise ValueError(f"pass {name} or {alias_name}, not both")
+    return alias if value is None else value
+
+
+def _error_retry_after(error: ArkerError) -> float | None:
+    raw = error.raw if isinstance(error.raw, dict) else {}
+    hint = _wire_retry_after(raw.get("retry_after"))
+    return hint if hint is not None else _wire_retry_after(raw.get("retry_after_seconds"))
 
 
 def _wire_retry_after(value: Any) -> float | None:
@@ -2154,7 +2244,9 @@ def _mount(payload: dict[str, Any]) -> Mount:
 
 
 def _vm_info(payload: dict[str, Any]) -> Vm:
-    return _decode_model(Vm, payload)
+    # A VM without autoscaling rules reports `{}`; a region that does not
+    # report the field at all has none either.
+    return _decode_model(Vm, {"resources_autoscaling": {}, **payload})
 
 
 def _terminal_state(state: str | None, exit_code: int | None) -> str:

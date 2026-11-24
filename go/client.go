@@ -2,6 +2,7 @@ package arker
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -260,7 +261,7 @@ func retryable(err *Error) bool {
 	return false
 }
 
-// backoff waits, preferring the server's retry_after_seconds hint -- it knows about
+// backoff waits, preferring the server's retry_after hint -- it knows about
 // capacity, the client does not. False if the context ended first.
 func (c *Client) backoff(ctx context.Context, attempt int, err *Error) bool {
 	delay := min(time.Duration(float64(c.retry.BaseDelay)*math.Pow(2, float64(attempt))), c.retry.MaxDelay)
@@ -282,11 +283,12 @@ func decodeError(status int, raw []byte) *Error {
 	out := &Error{StatusCode: status, Code: "internal"}
 	var envelope struct {
 		Error struct {
-			Details    json.RawMessage `json:"details"`
-			Code       string          `json:"code"`
-			Message    string          `json:"message"`
-			Retryable  *bool           `json:"retryable"`
-			RetryAfter *float64        `json:"retry_after_seconds"`
+			Details           json.RawMessage `json:"details"`
+			Code              string          `json:"code"`
+			Message           string          `json:"message"`
+			Retryable         *bool           `json:"retryable"`
+			RetryAfter        *float64        `json:"retry_after"`
+			RetryAfterSeconds *float64        `json:"retry_after_seconds"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(raw, &envelope) == nil && envelope.Error.Code != "" {
@@ -294,7 +296,7 @@ func decodeError(status int, raw []byte) *Error {
 		out.Code = envelope.Error.Code
 		out.Message = envelope.Error.Message
 		out.Retryable = envelope.Error.Retryable
-		out.RetryAfter = envelope.Error.RetryAfter
+		out.RetryAfter = cmp.Or(envelope.Error.RetryAfter, envelope.Error.RetryAfterSeconds)
 	}
 	if out.Message == "" {
 		out.Message = strings.TrimSpace(string(raw))

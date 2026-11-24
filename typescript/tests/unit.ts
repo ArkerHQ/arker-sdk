@@ -951,6 +951,49 @@ async function testForkSendsDurableFlag(): Promise<void> {
   );
 }
 
+async function testForkLeavesOutTheAutoscalingWindow(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson(
+    (method, url) => method === "POST" && url === "https://test.invalid/api/v1/fork",
+    200,
+    { vm_id: "vm_child", owner_org_id: "owner", created_at: "now", public: false, state: "idle", sessions: [] },
+  );
+
+  await client(fetch).vm("source-vm-id").fork({
+    resources_autoscaling: { vcpu: { min: 1, max: 4, target_utilization: 0.6, window_seconds: 60 }, memory_mib: null },
+  });
+
+  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), {
+    resources_autoscaling: { vcpu: { min: 1, max: 4, target_utilization: 0.6 }, memory_mib: null },
+    source_vm_id: "source-vm-id",
+  });
+}
+
+async function testVmMetricsQueriesItsWindow(): Promise<void> {
+  const fetch = new FakeFetch();
+  const body = { vm_id: "vm_1", step: 300, started_at: "2026-11-01T00:00:00Z", ended_at: "2026-11-01T01:00:00Z", buckets: [] };
+  fetch.addJson((method, url) => method === "GET" && url.includes("/v1/vms/vm_1/metrics"), 200, body);
+
+  const metrics = await client(fetch).vm("vm_1").metrics({ started_at_gte: "2026-11-01T00:00:00Z", step: 300 });
+
+  assert.deepEqual(metrics, body);
+  assert.equal(
+    fetch.calls[0]!.url,
+    "https://test.invalid/api/v1/vms/vm_1/metrics?started_at_gte=2026-11-01T00%3A00%3A00Z&step=300",
+  );
+}
+
+async function testUpdateSessionSendsTimeout(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson((method) => method === "PATCH", 200, { session_id: "sess_1" });
+  await client(fetch).vm("vm_1").updateSession("sess_1", { timeout: 600 });
+  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { timeout_secs: 600 });
+  await assert.rejects(
+    client(fetch).vm("vm_1").updateSession("sess_1", { timeout: 1, timeoutSecs: 2 }),
+    /pass timeout or timeoutSecs, not both/,
+  );
+}
+
 async function testRunSendsIdempotencyKeyHeader(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(
@@ -1331,11 +1374,15 @@ testExplicitVmHandleUsesPlacementEndpoint();
 await testListRunsUsesControlPlaneAndFilters();
 await testListVmsPreservesForkLimitFields();
 await testForkSendsDurableFlag();
+await testForkLeavesOutTheAutoscalingWindow();
+await testVmMetricsQueriesItsWindow();
+await testUpdateSessionSendsTimeout();
 await testRunSendsIdempotencyKeyHeader();
 await testRunStatusReturnsRetryCount();
-async function testConnectPtyPassesCancelTtlSecs(): Promise<void> {
-  // cancelTtlSecs must surface as the `cancel_ttl_secs` query param so
-  // the server auto-cancels (destroys) the PTY run after that idle window.
+async function testConnectPtyPassesTimeout(): Promise<void> {
+  // timeout must surface as the `cancel_ttl_secs` query param, the name every
+  // region understands, so the server auto-cancels (destroys) the PTY run
+  // after that idle window.
   const fetch = new FakeFetch();
   fetch.addJson(
     (method, url) => method === "POST" && url === "https://test.invalid/api/v1/vms/vm_1/sessions",
@@ -1350,7 +1397,7 @@ async function testConnectPtyPassesCancelTtlSecs(): Promise<void> {
   await client(fetch).vm("vm_1").connectPty({
     cols: 80,
     rows: 24,
-    cancelTtlSecs: 600,
+    timeout: 600,
     useTicket: false,
     webSocketFactory: factory,
   });
@@ -1598,7 +1645,7 @@ async function testUtf8WireStillYieldsBothForms(): Promise<void> {
 
 await testConnectPtyCreatesSessionAndUsesBearerHeader();
 await testConnectPtyUsesTicketForBrowserWebSocket();
-await testConnectPtyPassesCancelTtlSecs();
+await testConnectPtyPassesTimeout();
 await testConnectPtyDeliversDataAndCloseEvents();
 testSurfaceStubClassificationUsesStructuredErrorCodes();
 await testRetryOnRetryableStatusThenSucceeds();

@@ -65,6 +65,8 @@ from .generated.api_models import (
     SyncPresignedWriteRequest,
     SyncPresignedWriteRequestResult,
     UpdatePoolRequest,
+    VmMetrics,
+    VmMetricsBucket,
     Worker,
 )
 
@@ -129,6 +131,8 @@ __all__ = [
     "UpdatePoolRequest",
     "Vm",
     "VmList",
+    "VmMetrics",
+    "VmMetricsBucket",
     "WhoamiResponse",
     "Worker",
     "daytona",
