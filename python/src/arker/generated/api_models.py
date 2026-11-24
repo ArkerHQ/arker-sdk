@@ -453,14 +453,12 @@ class AutoscalingRule:
     min: int
     max: int
     target_utilization: float
-    window_seconds: int
 
 
 @dataclass(frozen=True)
 class DiskAutoscalingRule:
     max: int
     target_utilization: float
-    window_seconds: int
 
 
 @dataclass(frozen=True)
@@ -1763,7 +1761,6 @@ class VmMetricsPoint:
 
 
 EventAction: TypeAlias = Literal[
-    'vm_autoscale',
     'run',
     'fork',
     'sync',

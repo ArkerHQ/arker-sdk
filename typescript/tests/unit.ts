@@ -378,8 +378,8 @@ async function testUpdateSendsResourceAutoscaling(): Promise<void> {
   const isPatch = (method: string, url: string) =>
     method === "PATCH" && url === "https://test.invalid/api/v1/vms/vm_1";
   const vm = client(fetch).vm("vm_1");
-  const cpuRule = { min: 2, max: 8, target_utilization: 0.6, window_seconds: 5 };
-  const diskRule = { max: 32768, target_utilization: 0.7, window_seconds: 15 };
+  const cpuRule = { min: 2, max: 8, target_utilization: 0.6 };
+  const diskRule = { max: 32768, target_utilization: 0.7 };
 
   fetch.addJson(isPatch, 200, { vm_id: "vm_1" });
   await vm.update({

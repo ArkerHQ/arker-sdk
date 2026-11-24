@@ -1893,6 +1893,7 @@ export interface components {
             /** @description Authorized SSH keys with fingerprints. Returned by GET /v1/vms/{id}; omitted from list responses when empty. */
             ssh_public_keys?: components["schemas"]["SshPublicKeyInfo"][];
         };
+        /** @description Adjusts resource allocation to try to maintain the target utilization. */
         AutoscalingRule: {
             /** @description Smallest permitted allocation, in vCPUs or MiB for the selected resource. */
             min: number;
@@ -1900,16 +1901,13 @@ export interface components {
             max: number;
             /** @description Desired fraction of the allocated resource in use, greater than zero and at most one. */
             target_utilization: number;
-            /** @description Seconds of measured running time used to evaluate the rule. */
-            window_seconds: number;
         };
+        /** @description Adjusts resource allocation to try to maintain the target utilization. */
         DiskAutoscalingRule: {
             /** @description Largest permitted root disk size in MiB. */
             max: number;
             /** @description Desired fraction of the allocated resource in use, greater than zero and at most one. */
             target_utilization: number;
-            /** @description Seconds of measured running time used to evaluate the rule. */
-            window_seconds: number;
         };
         /** @description Autoscaling rules for CPU, memory and disk. A fork inherits the source VM’s rule for each resource omitted from the request. */
         ResourcesAutoscaling: {
@@ -3845,7 +3843,7 @@ export interface components {
          * @description What an event records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection; `sign_in` a member's session entering the organization, by signing in or switching to it.
          * @enum {string}
          */
-        EventAction: "vm_autoscale" | "run" | "fork" | "sync" | "delete" | "signal" | "vm_update" | "vm_suspend" | "policies_update" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "inbound_request" | "outbound_request" | "ssh_session" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_update" | "member_remove" | "org_rename" | "member_add" | "member_invite" | "member_invite_revoke" | "org_create" | "org_delete" | "sign_in" | "sign_out" | "terms_accept" | "billing_checkout" | "payment_method_update" | "credit_grant" | "quota_update";
+        EventAction: "run" | "fork" | "sync" | "delete" | "signal" | "vm_update" | "vm_suspend" | "policies_update" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "inbound_request" | "outbound_request" | "ssh_session" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_update" | "member_remove" | "org_rename" | "member_add" | "member_invite" | "member_invite_revoke" | "org_create" | "org_delete" | "sign_in" | "sign_out" | "terms_accept" | "billing_checkout" | "payment_method_update" | "credit_grant" | "quota_update";
         /** @enum {string} */
         EventState: "running" | "completed" | "failed" | "cancelled";
         /** @enum {string} */
