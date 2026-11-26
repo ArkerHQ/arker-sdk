@@ -1915,7 +1915,7 @@ export interface components {
             memory_mib?: components["schemas"]["AutoscalingRule"];
             disk_mib?: components["schemas"]["DiskAutoscalingRule"];
         };
-        /** @description Update named resource rules. Null removes a rule and omitted dimensions retain their settings. */
+        /** @description Update named resource rules. Null removes a rule and omitted dimensions retain their settings. New bounds must fall within 50% of the allocation at the time of the request. */
         ResourcesAutoscalingUpdate: {
             /** @description Replacement vCPU rule. Set to null to disable it or omit it to keep the current rule. */
             vcpu?: components["schemas"]["AutoscalingRule"] | null;

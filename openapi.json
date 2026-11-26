@@ -8276,7 +8276,7 @@
         }
       },
       "ResourcesAutoscalingUpdate": {
-        "description": "Update named resource rules. Null removes a rule and omitted dimensions retain their settings.",
+        "description": "Update named resource rules. Null removes a rule and omitted dimensions retain their settings. New bounds must fall within 50% of the allocation at the time of the request.",
         "type": "object",
         "additionalProperties": false,
         "properties": {
