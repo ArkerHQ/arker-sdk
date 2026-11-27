@@ -8,6 +8,7 @@ import nodePath from "node:path";
 
 import type { Step } from "./buildSpec.js";
 import { loadDockerignore } from "./dockerignore.js";
+import { trimTrailingSlashes } from "./internal/slashes.js";
 
 /** A Dockerfile that parsed but cannot be built, with the reason named. */
 export class BuildError extends Error {
@@ -106,7 +107,7 @@ function resolveSources(source: string, contextRoot: string): string[] {
  */
 function destinationFor(dest: string, sourcePath: string, multiple: boolean): string {
   if (dest.endsWith("/") || multiple) {
-    return `${dest.replace(/\/+$/, "")}/${nodePath.basename(sourcePath)}`;
+    return `${trimTrailingSlashes(dest)}/${nodePath.basename(sourcePath)}`;
   }
   return dest;
 }
@@ -267,7 +268,7 @@ async function applyCopy(
       // A directory source copies its CONTENTS into the destination, which is
       // what syncDir does: `COPY src /app/src` puts src's files at /app/src,
       // not at /app/src/src.
-      const target = step.dest.replace(/\/+$/, "");
+      const target = trimTrailingSlashes(step.dest);
       // `.dockerignore` patterns are context-relative but syncDir reports
       // paths relative to the directory being synced, so re-anchor them.
       const prefix = relTo(path) === "" ? "" : `${relTo(path)}/`;

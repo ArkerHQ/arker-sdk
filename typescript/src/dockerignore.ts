@@ -8,6 +8,7 @@
 
 import fs from "node:fs";
 import nodePath from "node:path";
+import { trimSlashes } from "./internal/slashes.js";
 
 export type DockerIgnore = { ignores(relPath: string): boolean };
 
@@ -55,7 +56,7 @@ export function loadDockerignore(contextRoot: string): DockerIgnore {
     if (!line || line.startsWith("#")) continue;
     const negated = line.startsWith("!");
     if (negated) line = line.slice(1).trim();
-    line = line.replace(/^\/+/, "").replace(/\/+$/, "");
+    line = trimSlashes(line);
     if (!line) continue;
     rules.push({ regex: patternToRegex(line), negated });
   }

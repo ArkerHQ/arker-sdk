@@ -7,6 +7,7 @@ import { validateHttpError, validateFileError } from "./generated/error-validato
  */
 
 import { runPollBudgetMs } from "./internal/run-poll.js";
+import { trimSlashes, trimTrailingSlashes } from "./internal/slashes.js";
 import type { components, operations } from "./generated/api-types.js";
 
 type ApiSchema<Name extends keyof components["schemas"]> = components["schemas"][Name];
@@ -1293,7 +1294,7 @@ export class VM {
     const fsp = fs.promises;
 
     const localRoot = nodePath.resolve(localDir);
-    const remoteRoot = "/" + remoteDir.replace(/^\/+/, "").replace(/\/+$/, "");
+    const remoteRoot = "/" + trimSlashes(remoteDir);
 
     // 1. Authoritative remote manifest: relative path -> content hash and mode. A directory that
     //    doesn't exist yet (or an empty VM) yields {} -> everything is sent.
@@ -2036,7 +2037,7 @@ function clampPtyDimension(value: number): number {
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  const trimmed = trimTrailingSlashes(baseUrl.trim());
   if (!trimmed) throw new Error("baseUrl must not be empty");
   return trimmed;
 }
