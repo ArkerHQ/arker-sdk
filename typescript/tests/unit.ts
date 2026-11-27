@@ -951,6 +951,20 @@ async function testForkSendsDurableFlag(): Promise<void> {
   );
 }
 
+async function testVmMetricsQueriesItsWindow(): Promise<void> {
+  const fetch = new FakeFetch();
+  const body = { vm_id: "vm_1", step: 300, started_at: "2026-11-01T00:00:00Z", ended_at: "2026-11-01T01:00:00Z", buckets: [] };
+  fetch.addJson((method, url) => method === "GET" && url.includes("/v1/vms/vm_1/metrics"), 200, body);
+
+  const metrics = await client(fetch).vm("vm_1").metrics({ started_at_gte: "2026-11-01T00:00:00Z", step: 300 });
+
+  assert.deepEqual(metrics, body);
+  assert.equal(
+    fetch.calls[0]!.url,
+    "https://test.invalid/api/v1/vms/vm_1/metrics?started_at_gte=2026-11-01T00%3A00%3A00Z&step=300",
+  );
+}
+
 async function testRunSendsIdempotencyKeyHeader(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(
@@ -1331,11 +1345,13 @@ testExplicitVmHandleUsesPlacementEndpoint();
 await testListRunsUsesControlPlaneAndFilters();
 await testListVmsPreservesForkLimitFields();
 await testForkSendsDurableFlag();
+await testVmMetricsQueriesItsWindow();
 await testRunSendsIdempotencyKeyHeader();
 await testRunStatusReturnsRetryCount();
-async function testConnectPtyPassesCancelTtlSecs(): Promise<void> {
-  // cancelTtlSecs must surface as the `cancel_ttl_secs` query param so
-  // the server auto-cancels (destroys) the PTY run after that idle window.
+async function testConnectPtyPassesIdleTimeout(): Promise<void> {
+  // idleTimeout must surface as the `cancel_ttl_secs` query param, the name every
+  // region understands, so the server auto-cancels (destroys) the PTY run
+  // after that idle window.
   const fetch = new FakeFetch();
   fetch.addJson(
     (method, url) => method === "POST" && url === "https://test.invalid/api/v1/vms/vm_1/sessions",
@@ -1350,7 +1366,7 @@ async function testConnectPtyPassesCancelTtlSecs(): Promise<void> {
   await client(fetch).vm("vm_1").connectPty({
     cols: 80,
     rows: 24,
-    cancelTtlSecs: 600,
+    idleTimeout: 600,
     useTicket: false,
     webSocketFactory: factory,
   });
@@ -1374,6 +1390,12 @@ async function testConnectPtyPassesCancelTtlSecs(): Promise<void> {
     !openedUrl2.includes("cancel_ttl_secs"),
     `cancel_ttl_secs must be omitted when <= 0, got: ${openedUrl2}`,
   );
+  const calls = fetch.calls.length;
+  await assert.rejects(
+    client(fetch).vm("vm_1").connectPty({ idleTimeout: 1, cancelTtlSecs: 2, useTicket: false, webSocketFactory: factory }),
+    /pass idleTimeout or cancelTtlSecs, not both/,
+  );
+  assert.equal(fetch.calls.length, calls, "both names must fail before creating a session");
 }
 
 async function testConnectPtyDeliversDataAndCloseEvents(): Promise<void> {
@@ -1598,7 +1620,7 @@ async function testUtf8WireStillYieldsBothForms(): Promise<void> {
 
 await testConnectPtyCreatesSessionAndUsesBearerHeader();
 await testConnectPtyUsesTicketForBrowserWebSocket();
-await testConnectPtyPassesCancelTtlSecs();
+await testConnectPtyPassesIdleTimeout();
 await testConnectPtyDeliversDataAndCloseEvents();
 testSurfaceStubClassificationUsesStructuredErrorCodes();
 await testRetryOnRetryableStatusThenSucceeds();

@@ -1181,6 +1181,20 @@ async function testSessionsUpdateForwardsPatch(): Promise<void> {
   });
 }
 
+async function testVmsMetricsQueriesTheWindow(): Promise<void> {
+  const body = { vm_id: "vm_1", step: 60, started_at: "2026-11-01T00:00:00Z", ended_at: "2026-11-01T00:01:00Z", buckets: [] };
+  await withCapturedServer((_request, res) => jsonResponse(res, body), async (baseUrl, requests) => {
+    const result = await runCli(baseUrl, ["vms", "metrics", "vm_1", "--started-at-gte", "2026-11-01T00:00:00Z", "--step", "60"]);
+    assert.equal(result.code, 0, String(result.stderr));
+    assert.equal(requests[0]?.method, "GET");
+    assert.equal(requests[0]?.url, "/api/v1/vms/vm_1/metrics?started_at_gte=2026-11-01T00%3A00%3A00Z&step=60");
+    assert.deepEqual(JSON.parse(String(result.stdout)), body);
+    const badStep = await runCli(baseUrl, ["vms", "metrics", "vm_1", "--step", "61"]);
+    assert.equal(badStep.code, 1);
+    assert.equal(requests.length, 1, "an invalid step must fail before touching the network");
+  });
+}
+
 async function testSessionsUpdateRequiresAField(): Promise<void> {
   await withCapturedServer((_request, res) => jsonResponse(res, {}), async (baseUrl, requests) => {
     const result = await runCli(baseUrl, ["sessions", "update", "vm_1", "s_1"]);
@@ -1228,6 +1242,31 @@ async function testShellSetupUsesPackagedCli(): Promise<void> {
   assert.match(upgradeUrl ?? "", /^\/api\/v1\/vms\/vm_1\/sessions\/session_1\/pty\?/);
   assert.equal(upgradeAuthorization, "Bearer ark_live_test");
   wss.close();
+}
+
+async function testShellSendsIdleTimeoutAsCancelTtlSecs(): Promise<void> {
+  for (const flag of ["--idle-timeout", "--cancel-ttl"]) {
+    const wss = new WebSocketServer({ noServer: true });
+    let upgradeUrl: string | undefined;
+    await withServer((_req, res) => jsonResponse(res, { vm_id: "vm_1", state: "idle" }), async (baseUrl, server) => {
+      server.on("upgrade", (req, socket, head) => {
+        upgradeUrl = req.url;
+        wss.handleUpgrade(req, socket, head, () => {});
+      });
+      const result = await runCli(baseUrl, ["shell", "--session-id", "session_1", flag, "600", "vm_1"]);
+      assert.equal(result.code, 0, String(result.stderr));
+    }, { http1: true });
+    const query = new URL(upgradeUrl ?? "/", "http://x").searchParams;
+    assert.equal(query.get("cancel_ttl_secs"), "600", flag);
+    assert.equal(query.has("idle_timeout"), false, flag);
+    wss.close();
+  }
+  await withCapturedServer((_request, res) => jsonResponse(res, {}), async (baseUrl, requests) => {
+    const both = await runCli(baseUrl, ["shell", "--idle-timeout", "1", "--cancel-ttl", "2", "vm_1"]);
+    assert.equal(both.code, 1);
+    assert.match(String(both.stderr), /pass --idle-timeout or --cancel-ttl, not both/);
+    assert.equal(requests.length, 0);
+  });
 }
 
 async function testShellRequiresVmOrSourceBeforeRequest(): Promise<void> {
@@ -1586,9 +1625,11 @@ await testSignalForwardsSignalAndSession();
 await testStateFiltersMatchTheContract();
 await testSignalOnAStoppedVmShowsInvalidState();
 await testSessionsUpdateForwardsPatch();
+await testVmsMetricsQueriesTheWindow();
 await testSessionsUpdateRequiresAField();
 await testNoPipeReadsFileBytes();
 await testShellSetupUsesPackagedCli();
+await testShellSendsIdleTimeoutAsCancelTtlSecs();
 await testShellRequiresVmOrSourceBeforeRequest();
 await testRunShowsPartialOutputBeforeCompletion();
 await testStructuredErrorsDoNotRepeatCode();

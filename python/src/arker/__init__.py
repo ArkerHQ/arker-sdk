@@ -41,20 +41,22 @@ from .generated.api_models import (
     ApiKeyPoolScope,
     ApiKeyScope,
     ApiKeyVmScope,
+    AwsCreatePoolByoc,
+    AwsPoolByoc,
     ByocPool,
     CreateByocPoolRequest,
     CreatedApiKey,
     CreateManagedPoolRequest,
-    CreatePoolByoc,
     CreatePoolRequest,
     CreateSelfHostedPoolRequest,
     ErrorBody,
+    GcpCreatePoolByoc,
+    GcpPoolByoc,
     ListApiKeysResponse,
     ListPoolWorkersResponse,
     ListVmsResponse,
     ManagedPool,
     OrgRunListRow,
-    PoolByoc,
     PoolCommitment,
     PoolResources,
     RegionPlacement,
@@ -65,6 +67,8 @@ from .generated.api_models import (
     SyncPresignedWriteRequest,
     SyncPresignedWriteRequestResult,
     UpdatePoolRequest,
+    VmMetrics,
+    VmMetricsBucket,
     Worker,
 )
 
@@ -77,6 +81,8 @@ __all__ = [
     "ApiKeyVmScope",
     "Arker",
     "ArkerError",
+    "AwsCreatePoolByoc",
+    "AwsPoolByoc",
     "BackgroundRunResult",
     "ByocPool",
     "CancelRunResponse",
@@ -94,6 +100,8 @@ __all__ = [
     "DeleteVmResponse",
     "ErrorBody",
     "Filesystem",
+    "GcpCreatePoolByoc",
+    "GcpPoolByoc",
     "ListApiKeysResponse",
     "ListFilesystemsResponse",
     "ListMountsResponse",
@@ -129,6 +137,8 @@ __all__ = [
     "UpdatePoolRequest",
     "Vm",
     "VmList",
+    "VmMetrics",
+    "VmMetricsBucket",
     "WhoamiResponse",
     "Worker",
     "daytona",
@@ -150,3 +160,8 @@ except _PackageNotFoundError:  # source tree, not installed
 
 # Former name of SyncFileError, kept for existing callers.
 SyncEntryError = SyncFileError
+
+# The AWS shapes kept their names from before GCP pools; the generated names
+# are unions of both providers and cannot be constructed.
+CreatePoolByoc = AwsCreatePoolByoc
+PoolByoc = AwsPoolByoc

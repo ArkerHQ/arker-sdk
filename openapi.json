@@ -56,6 +56,10 @@
     {
       "name": "API keys",
       "description": "Create, list and revoke API keys, optionally limited to one VM or pool and one action."
+    },
+    {
+      "name": "Events",
+      "description": "Your organization's activity history."
     }
   ],
   "paths": {
@@ -206,8 +210,11 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
-            "$ref": "#/components/responses/AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError"
+            "$ref": "#/components/responses/AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLargeError"
@@ -370,6 +377,7 @@
           "Runs"
         ],
         "summary": "List organization runs",
+        "deprecated": true,
         "parameters": [
           {
             "in": "query",
@@ -569,7 +577,7 @@
             "$ref": "#/components/responses/UnavailableError"
           }
         },
-        "description": "Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.",
+        "description": "Deprecated: use `GET /v1/events`, which lists every action across regions. Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.",
         "servers": [
           {
             "url": "https://{regionalHost}/api",
@@ -620,6 +628,9 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -666,6 +677,9 @@
           },
           "409": {
             "$ref": "#/components/responses/InvalidStateOrResourceBusyError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -724,6 +738,9 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/AlreadyExistsOrInvalidStateOrResourceBusyError"
           },
@@ -731,7 +748,7 @@
             "$ref": "#/components/responses/PayloadTooLargeError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -741,6 +758,94 @@
           },
           "503": {
             "$ref": "#/components/responses/CapacityUnavailableOrUnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
+          }
+        }
+      }
+    },
+    "/v1/vms/{id}/metrics": {
+      "get": {
+        "operationId": "getVmMetrics",
+        "tags": [
+          "VMs"
+        ],
+        "summary": "Get VM metrics",
+        "description": "Get a VM's key metrics including resource usage.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/VmId"
+          },
+          {
+            "in": "query",
+            "name": "started_at_gte",
+            "required": false,
+            "description": "Window start, within the last 30 days. Defaults to an hour before `started_at_lt`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "started_at_lt",
+            "required": false,
+            "description": "Window end. Defaults to now.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "step",
+            "required": false,
+            "description": "Bucket width in seconds.",
+            "schema": {
+              "type": "integer",
+              "enum": [
+                60,
+                300,
+                3600
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The VM's metrics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VmMetrics"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnsupportedOperationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
           },
           "504": {
             "$ref": "#/components/responses/GatewayTimeoutError"
@@ -788,7 +893,7 @@
             "$ref": "#/components/responses/InvalidStateError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -845,6 +950,9 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
@@ -852,7 +960,7 @@
             "$ref": "#/components/responses/PayloadTooLargeError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -909,7 +1017,7 @@
             }
           },
           "202": {
-            "description": "Accepted - the run is still executing. The body carries `run_id` and `state: \"running\"`, not output; poll `GET /v1/vms/{id}/runs/{run_id}` for the result. Returned for `time_to_background: 0` and whenever the command outstays `time_to_background`. A 2xx here means the request was accepted, not that the work is done.",
+            "description": "Accepted - the run has not finished. The body carries `run_id` and `state`, not output: `\"pending\"` while the run waits behind another run of its session, an attached terminal, or capacity, and `\"running\"` once it executes; poll `GET /v1/vms/{id}/runs/{run_id}` for the result. Returned for `time_to_background: 0` and whenever the command outstays `time_to_background`. A 2xx here means the request was accepted, not that the work is done.",
             "content": {
               "application/json": {
                 "schema": {
@@ -932,6 +1040,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFoundError"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
           },
           "409": {
             "$ref": "#/components/responses/ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError"
@@ -1037,6 +1148,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -1094,6 +1208,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -1139,10 +1256,10 @@
             "$ref": "#/components/responses/NotFoundError"
           },
           "409": {
-            "$ref": "#/components/responses/InvalidStateError"
+            "$ref": "#/components/responses/InvalidStateOrResourceBusyError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1151,7 +1268,7 @@
             "$ref": "#/components/responses/InternalError"
           },
           "503": {
-            "$ref": "#/components/responses/UnavailableError"
+            "$ref": "#/components/responses/CapacityUnavailableOrUnavailableError"
           },
           "504": {
             "$ref": "#/components/responses/GatewayTimeoutError"
@@ -1215,6 +1332,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -1272,11 +1392,17 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/ConflictOrInvalidStateError"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -1335,6 +1461,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
           },
@@ -1354,8 +1483,8 @@
         "tags": [
           "Sessions"
         ],
-        "summary": "Update a session (resize PTY / set timeout)",
-        "description": "Resize the session's PTY (cols/rows) and/or update its idle timeout. A resize applies at once to the session's open terminal, attached or detached, and is the size the next attach opens at. REST equivalent of the WebSocket {\"type\":\"resize\"} control frame - usable from any client, attached or not.",
+        "summary": "Update a session (resize PTY)",
+        "description": "Resize the session's PTY (cols/rows). A resize applies at once to the session's open terminal, attached or detached, and is the size the next attach opens at. REST equivalent of the WebSocket {\"type\":\"resize\"} control frame - usable from any client, attached or not.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1389,11 +1518,17 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1440,7 +1575,10 @@
             "$ref": "#/components/responses/NotFoundError"
           },
           "409": {
-            "$ref": "#/components/responses/InvalidStateError"
+            "$ref": "#/components/responses/InvalidStateOrResourceBusyError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1449,7 +1587,7 @@
             "$ref": "#/components/responses/InternalError"
           },
           "503": {
-            "$ref": "#/components/responses/UnavailableError"
+            "$ref": "#/components/responses/CapacityUnavailableOrUnavailableError"
           },
           "504": {
             "$ref": "#/components/responses/GatewayTimeoutError"
@@ -1502,17 +1640,28 @@
             "type": "boolean",
             "default": true
           },
-          "description": "When true (default), disconnecting keeps the shell running so the same session_id can reconnect to it and receive recent scrollback. When false, the shell is terminated on disconnect. A kill control message or the configured idle TTL terminates a persistent shell."
+          "description": "When true (default), disconnecting keeps the shell running so the same session_id can reconnect to it and receive recent scrollback. When false, the shell is terminated on disconnect. A kill control message or `idle_timeout` terminates a persistent shell."
         },
         {
-          "name": "cancel_ttl_secs",
+          "name": "idle_timeout",
           "in": "query",
           "required": false,
           "schema": {
             "type": "integer",
             "minimum": 0
           },
-          "description": "Destroy the PTY after this many seconds without terminal input or output. Omit or set to zero to disable this PTY-specific idle limit."
+          "description": "Destroy the PTY after this many seconds without terminal input or output. Omit or set to zero to disable this PTY-specific idle limit. Not with `cancel_ttl_secs`."
+        },
+        {
+          "name": "cancel_ttl_secs",
+          "in": "query",
+          "required": false,
+          "deprecated": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "Deprecated: use `idle_timeout`. Not with `idle_timeout`."
         },
         {
           "name": "ticket",
@@ -1562,7 +1711,7 @@
             "$ref": "#/components/responses/InvalidStateOrResourceBusyError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -1621,11 +1770,17 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnrecoverableError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -1690,6 +1845,9 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/ConflictOrInvalidStateError"
           },
@@ -1697,7 +1855,7 @@
             "$ref": "#/components/responses/PayloadTooLargeError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1765,7 +1923,7 @@
             "$ref": "#/components/responses/InvalidStateError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1825,7 +1983,7 @@
             "$ref": "#/components/responses/InvalidStateError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/RateLimitedError"
@@ -1876,7 +2034,7 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/BadRequestError"
+            "$ref": "#/components/responses/BadRequestOrInsufficientResourcesError"
           },
           "401": {
             "$ref": "#/components/responses/UnauthorizedError"
@@ -1890,6 +2048,9 @@
           "404": {
             "$ref": "#/components/responses/NotFoundError"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
+          },
           "409": {
             "$ref": "#/components/responses/ConflictOrInvalidStateOrResourceBusyError"
           },
@@ -1897,7 +2058,7 @@
             "$ref": "#/components/responses/PayloadTooLargeError"
           },
           "422": {
-            "$ref": "#/components/responses/UnsupportedOperationError"
+            "$ref": "#/components/responses/UnrecoverableOrUnsupportedOperationError"
           },
           "429": {
             "$ref": "#/components/responses/QuotaExceededOrRateLimitedError"
@@ -2013,6 +2174,9 @@
           },
           "403": {
             "$ref": "#/components/responses/ForbiddenError"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeoutError"
           },
           "409": {
             "$ref": "#/components/responses/AlreadyExistsError"
@@ -2194,6 +2358,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       },
@@ -2251,6 +2418,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       }
@@ -2296,6 +2466,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       },
@@ -2353,6 +2526,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       },
@@ -2394,6 +2570,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       }
@@ -2442,6 +2621,9 @@
           },
           "503": {
             "$ref": "#/components/responses/UnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
           }
         }
       }
@@ -2453,6 +2635,9 @@
         },
         {
           "$ref": "#/components/parameters/WorkerId"
+        },
+        {
+          "$ref": "#/components/parameters/WorkerIncarnation"
         }
       ],
       "put": {
@@ -2461,7 +2646,7 @@
           "Pools"
         ],
         "summary": "Join a pool or heartbeat",
-        "description": "Join the pool, or keep the worker in it. The first worker of a `self_hosted` pool sets its platform; the heartbeat's `platform` must be the pool's and its `kind` one the pool takes; a retired worker id is refused. Authenticate with an API key limited to this pool. A worker id the pool has not seen gets 429 `quota_exceeded` while the pool has as many workers as its `pool_workers` quota allows; it joins once another leaves.",
+        "description": "Join the pool, or keep the worker in it. The first worker of a `self_hosted` pool sets its platform; the heartbeat's `platform` must be the pool's and its `kind` one the pool takes; a worker id that has left the pool is refused with 410 `expired`, and the machine joins again under a new worker id. Authenticate with an API key limited to this pool. A worker id the pool has not seen gets 429 `quota_exceeded` while the pool has as many workers as its `pool_workers` quota allows; it joins once another leaves.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2498,6 +2683,9 @@
           "409": {
             "$ref": "#/components/responses/ConflictError"
           },
+          "410": {
+            "$ref": "#/components/responses/ExpiredError"
+          },
           "422": {
             "$ref": "#/components/responses/UnsupportedOperationError"
           },
@@ -2520,6 +2708,9 @@
         },
         {
           "$ref": "#/components/parameters/WorkerId"
+        },
+        {
+          "$ref": "#/components/parameters/WorkerIncarnation"
         }
       ],
       "get": {
@@ -2548,6 +2739,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "410": {
+            "$ref": "#/components/responses/ExpiredError"
+          },
           "422": {
             "$ref": "#/components/responses/UnsupportedOperationError"
           },
@@ -2563,6 +2757,46 @@
         }
       }
     },
+    "/v1/pools/{pool_id}/workers/{worker_id}/vms/reconcile": {
+      "parameters": [
+        { "$ref": "#/components/parameters/PoolId" },
+        { "$ref": "#/components/parameters/WorkerId" },
+        { "$ref": "#/components/parameters/WorkerIncarnation" }
+      ],
+      "post": {
+        "operationId": "reconcileWorkerVms",
+        "tags": ["Pools"],
+        "summary": "Reclaim a restarted worker's VMs",
+        "description": "Name the VMs a restarted worker process still holds. Each that was handed back for the restart and not yet claimed by another worker is the worker's again, under a new ownership generation, and runs its replaced process left active fail. Answers which named VMs the worker owns now.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/WorkerVmReconciliation" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The named VMs the worker owns.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WorkerVmReconciliationResult" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequestError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" },
+          "409": { "$ref": "#/components/responses/InvalidStateError" },
+          "410": { "$ref": "#/components/responses/ExpiredError" },
+          "429": { "$ref": "#/components/responses/RateLimitedError" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/UnavailableError" }
+        }
+      }
+    },
     "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}": {
       "parameters": [
         {
@@ -2573,6 +2807,9 @@
         },
         {
           "$ref": "#/components/parameters/WorkerVmId"
+        },
+        {
+          "$ref": "#/components/parameters/WorkerIncarnation"
         }
       ],
       "put": {
@@ -2611,6 +2848,9 @@
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
           },
+          "410": {
+            "$ref": "#/components/responses/ExpiredError"
+          },
           "422": {
             "$ref": "#/components/responses/UnsupportedOperationError"
           },
@@ -2631,10 +2871,13 @@
           "Pools"
         ],
         "summary": "Forget a worker's VM",
-        "description": "Record that the VM is gone. Only a VM Arker forked onto this worker; any other VM is not found. Authenticate with an API key limited to this pool.",
+        "description": "Record that the VM is gone. A VM the pool does not hold, or holds deleted, is already gone; one the worker no longer owns, or was handed back, is refused with 409. Authenticate with an API key limited to this pool.",
         "responses": {
           "204": {
             "description": "The VM is recorded as deleted."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
           },
           "401": {
             "$ref": "#/components/responses/UnauthorizedError"
@@ -2644,6 +2887,12 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFoundError"
+          },
+          "409": {
+            "$ref": "#/components/responses/InvalidStateError"
+          },
+          "410": {
+            "$ref": "#/components/responses/ExpiredError"
           },
           "422": {
             "$ref": "#/components/responses/UnsupportedOperationError"
@@ -2657,6 +2906,98 @@
           "503": {
             "$ref": "#/components/responses/UnavailableError"
           }
+        }
+      }
+    },
+    "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}/snapshots": {
+      "parameters": [
+        { "$ref": "#/components/parameters/PoolId" },
+        { "$ref": "#/components/parameters/WorkerId" },
+        { "$ref": "#/components/parameters/WorkerVmId" },
+        { "$ref": "#/components/parameters/WorkerIncarnation" }
+      ],
+      "post": {
+        "operationId": "reserveWorkerVmSnapshot",
+        "tags": ["Pools"],
+        "summary": "Reserve a VM snapshot generation",
+        "description": "Reserve an immutable snapshot identifier tied to the worker's current VM ownership generation. The reservation's upload lease runs out unless renewed; a snapshot whose lease ran out uncommitted is deleted. Only a pool whose snapshots Arker stores reserves one.",
+        "responses": {
+          "200": {
+            "description": "The snapshot generation is reserved.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WorkerSnapshotReservation" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequestError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" },
+          "409": { "$ref": "#/components/responses/InvalidStateError" },
+          "410": { "$ref": "#/components/responses/ExpiredError" },
+          "422": { "$ref": "#/components/responses/UnsupportedOperationError" },
+          "429": { "$ref": "#/components/responses/RateLimitedError" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/UnavailableError" }
+        }
+      }
+    },
+    "/v1/pools/{pool_id}/workers/{worker_id}/vms/{vm_id}/snapshots/{snapshot_id}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/PoolId" },
+        { "$ref": "#/components/parameters/WorkerId" },
+        { "$ref": "#/components/parameters/WorkerVmId" },
+        {
+          "name": "snapshot_id",
+          "in": "path",
+          "required": true,
+          "description": "Immutable snapshot generation identifier returned by the reservation.",
+          "schema": { "type": "string", "minLength": 26, "maxLength": 26 }
+        },
+        {
+          "name": "vm_generation",
+          "in": "query",
+          "required": true,
+          "description": "VM ownership generation returned by the reservation.",
+          "schema": { "type": "integer", "format": "int64", "minimum": 1 }
+        },
+        { "$ref": "#/components/parameters/WorkerIncarnation" }
+      ],
+      "put": {
+        "operationId": "commitWorkerVmSnapshot",
+        "tags": ["Pools"],
+        "summary": "Commit a VM snapshot generation",
+        "description": "Publish an uploaded snapshot only while the worker incarnation still owns the same VM generation.",
+        "responses": {
+          "204": { "description": "The snapshot generation is committed." },
+          "400": { "$ref": "#/components/responses/BadRequestError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" },
+          "409": { "$ref": "#/components/responses/InvalidStateError" },
+          "410": { "$ref": "#/components/responses/ExpiredError" },
+          "429": { "$ref": "#/components/responses/RateLimitedError" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/UnavailableError" }
+        }
+      },
+      "patch": {
+        "operationId": "renewWorkerVmSnapshot",
+        "tags": ["Pools"],
+        "summary": "Renew a VM snapshot reservation",
+        "description": "Extend a reservation's upload lease while the worker process still owns the same VM generation and the lease has not run out.",
+        "responses": {
+          "204": { "description": "The upload lease is renewed." },
+          "400": { "$ref": "#/components/responses/BadRequestError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" },
+          "409": { "$ref": "#/components/responses/InvalidStateError" },
+          "410": { "$ref": "#/components/responses/ExpiredError" },
+          "429": { "$ref": "#/components/responses/RateLimitedError" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/UnavailableError" }
         }
       }
     },
@@ -2680,6 +3021,9 @@
             "type": "string",
             "maxLength": 64
           }
+        },
+        {
+          "$ref": "#/components/parameters/WorkerIncarnation"
         }
       ],
       "put": {
@@ -2717,6 +3061,9 @@
           },
           "409": {
             "$ref": "#/components/responses/InvalidStateError"
+          },
+          "410": {
+            "$ref": "#/components/responses/ExpiredError"
           },
           "422": {
             "$ref": "#/components/responses/UnsupportedOperationError"
@@ -2858,6 +3205,297 @@
           }
         }
       }
+    },
+    "/v1/events": {
+      "get": {
+        "operationId": "listEvents",
+        "tags": [
+          "Events"
+        ],
+        "summary": "List events",
+        "description": "A complete record of compute and administrative operations.",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "description": "Text to match.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "description": "Only events of this category.",
+            "schema": {
+              "$ref": "#/components/schemas/EventCategory"
+            }
+          },
+          {
+            "name": "actions",
+            "in": "query",
+            "required": false,
+            "description": "Only these actions. Repeat for more values (`actions=vm_run&actions=vm_fork`).",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/EventAction"
+              }
+            }
+          },
+          {
+            "name": "states",
+            "in": "query",
+            "required": false,
+            "description": "Only these states. Repeat for more values.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/EventState"
+              }
+            }
+          },
+          {
+            "name": "regions",
+            "in": "query",
+            "required": false,
+            "description": "Only these regions. Repeat for more values.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "vm_ids",
+            "in": "query",
+            "required": false,
+            "description": "Only these VMs. Repeat for more values.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "actors",
+            "in": "query",
+            "required": false,
+            "description": "Members by email or `me`, keys by id. Repeat for more values.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "actor_types",
+            "in": "query",
+            "required": false,
+            "description": "Only events by these kinds of actor. Repeat for more values.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/EventActorType"
+              }
+            }
+          },
+          {
+            "name": "request_ids",
+            "in": "query",
+            "required": false,
+            "description": "Only these requests. Repeat for more values.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "error_codes",
+            "in": "query",
+            "required": false,
+            "description": "Only these error codes. Repeat for more values.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/ErrorCode"
+              }
+            }
+          },
+          {
+            "name": "exit_code",
+            "in": "query",
+            "required": false,
+            "description": "Only runs that exited with this code.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "requested_at_gte",
+            "in": "query",
+            "required": false,
+            "description": "`requested_at` at or after this.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "requested_at_lt",
+            "in": "query",
+            "required": false,
+            "description": "`requested_at` before this.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "started_at_gte",
+            "in": "query",
+            "required": false,
+            "description": "`started_at` at or after this.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "started_at_lt",
+            "in": "query",
+            "required": false,
+            "description": "`started_at` before this.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "ended_at_gte",
+            "in": "query",
+            "required": false,
+            "description": "`ended_at` at or after this.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "ended_at_lt",
+            "in": "query",
+            "required": false,
+            "description": "`ended_at` before this.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "duration_ms_gte",
+            "in": "query",
+            "required": false,
+            "description": "`duration_ms` at or after this.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "duration_ms_lt",
+            "in": "query",
+            "required": false,
+            "description": "`duration_ms` before this.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "order_by",
+            "in": "query",
+            "required": false,
+            "description": "Sort field.",
+            "schema": {
+              "$ref": "#/components/schemas/EventOrderBy",
+              "default": "requested_at"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Sort direction.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Events per page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "The previous page's `next_cursor`; send it with only `limit`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListEventsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitedError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/UnavailableError"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2879,7 +3517,7 @@
         "name": "Idempotency-Key",
         "in": "header",
         "required": false,
-        "description": "Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet.",
+        "description": "Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A key runs its command at most once: once the run it started has failed, a retry with the key answers 409 conflict naming that run in `recovery`; a new key runs the command again. A fork retried while the original is still running may wait for it and returns the same VM; when it cannot wait, it answers 409 resource_busy with Retry-After and the VM id.",
         "schema": {
           "type": "string",
           "minLength": 1,
@@ -2891,7 +3529,7 @@
         "name": "id",
         "in": "path",
         "required": true,
-        "description": "VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id.",
+        "description": "VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-coding), then among the calling organization's own named VMs. Names never have the shape of a VM id.",
         "schema": {
           "type": "string"
         }
@@ -2983,6 +3621,16 @@
         "schema": {
           "type": "string",
           "maxLength": 64
+        }
+      },
+      "WorkerIncarnation": {
+        "name": "incarnation",
+        "in": "query",
+        "required": false,
+        "description": "The calling worker process: a ULID it generates each time it starts. A `self_hosted` pool's worker must send it, and a process whose worker id a newer process holds is refused. A `byoc` host's id alone identifies it, so there it is ignored.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         }
       },
       "ApiKeyId": {
@@ -3319,7 +3967,7 @@
         }
       },
       "InvalidStateError": {
-        "description": "HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses unavailable.",
+        "description": "HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses resource_busy.",
         "x-http-status": 409,
         "headers": {
           "Retry-After": {
@@ -3490,6 +4138,39 @@
                     },
                     "details": {
                       "maximum_bytes": 1048576
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "RequestTimeoutError": {
+        "description": "HTTP 408: The request body was not received before the server's read deadline. Send the body promptly; the request did not start.",
+        "x-http-status": 408,
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RequestTimeoutErrorResponse"
+            },
+            "examples": {
+              "request_timeout": {
+                "summary": "RequestTimeout",
+                "value": {
+                  "error": {
+                    "code": "request_timeout",
+                    "message": "The request body was not received before its read deadline.",
+                    "timestamp": "2026-09-11T12:00:00Z",
+                    "request_id": "example-request-id",
+                    "request": {
+                      "kind": "matched",
+                      "operation_id": "fork"
                     }
                   }
                 }
@@ -4002,8 +4683,8 @@
           }
         }
       },
-      "AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError": {
-        "description": "HTTP 409: already_exists, conflict, invalid_state, resource_busy. The code selects the required details.",
+      "AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError": {
+        "description": "HTTP 409: already_exists, conflict, idempotency_conflict, invalid_state, resource_busy. The code selects the required details.",
         "x-http-status": 409,
         "headers": {
           "Retry-After": {
@@ -4013,7 +4694,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse"
+              "$ref": "#/components/schemas/AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse"
             },
             "examples": {
               "already_exists": {
@@ -4021,6 +4702,9 @@
               },
               "conflict": {
                 "$ref": "#/components/responses/ConflictError/content/application~1json/examples/conflict"
+              },
+              "idempotency_conflict": {
+                "$ref": "#/components/responses/IdempotencyConflictError/content/application~1json/examples/idempotency_conflict"
               },
               "invalid_state": {
                 "$ref": "#/components/responses/InvalidStateError/content/application~1json/examples/invalid_state"
@@ -4427,6 +5111,7 @@
           "idempotency_conflict",
           "expired",
           "payload_too_large",
+          "request_timeout",
           "method_not_allowed",
           "unsupported_operation",
           "unrecoverable",
@@ -4438,7 +5123,8 @@
           "payment_required",
           "action_required",
           "operation_failed",
-          "gateway_timeout"
+          "gateway_timeout",
+          "port_not_listening"
         ],
         "description": "Stable public error codes. ErrorBody selects the required details for each code; clients must not parse message text."
       },
@@ -4481,6 +5167,9 @@
             "$ref": "#/components/schemas/PayloadTooLarge"
           },
           {
+            "$ref": "#/components/schemas/RequestTimeout"
+          },
+          {
             "$ref": "#/components/schemas/MethodNotAllowed"
           },
           {
@@ -4515,6 +5204,9 @@
           },
           {
             "$ref": "#/components/schemas/GatewayTimeout"
+          },
+          {
+            "$ref": "#/components/schemas/PortNotListening"
           }
         ],
         "description": "Typed HTTP error body. The code selects its required details. Endpoint responses must narrow this union to their permitted codes.",
@@ -4533,6 +5225,7 @@
             "idempotency_conflict": "#/components/schemas/IdempotencyConflict",
             "expired": "#/components/schemas/Expired",
             "payload_too_large": "#/components/schemas/PayloadTooLarge",
+            "request_timeout": "#/components/schemas/RequestTimeout",
             "method_not_allowed": "#/components/schemas/MethodNotAllowed",
             "unsupported_operation": "#/components/schemas/UnsupportedOperation",
             "unrecoverable": "#/components/schemas/Unrecoverable",
@@ -4544,7 +5237,8 @@
             "payment_required": "#/components/schemas/PaymentRequired",
             "action_required": "#/components/schemas/ActionRequired",
             "operation_failed": "#/components/schemas/OperationFailed",
-            "gateway_timeout": "#/components/schemas/GatewayTimeout"
+            "gateway_timeout": "#/components/schemas/GatewayTimeout",
+            "port_not_listening": "#/components/schemas/PortNotListening"
           }
         }
       },
@@ -4762,7 +5456,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Label-boundary suffix match on the request host: `github.com` matches `api.github.com`, not `evilgithub.com`."
+            "description": "`github.com` exact; `*.github.com` any subdomain. Matched by name on HTTP and TLS, by address otherwise. A `deny` also blocks other sites sharing its addresses."
           },
           "methods": {
             "description": "HTTP methods matched by this rule.",
@@ -4778,7 +5472,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Full-segment path prefixes."
+            "description": "`/v1` exact; `/v1/*` everything below."
           },
           "headers": {
             "type": "object",
@@ -5190,7 +5884,7 @@
               "boolean",
               "null"
             ],
-            "description": "Request nested virtualization for a VM forked from `image`, including access to `/dev/kvm` inside the guest. Omit this field or pass `false` to disable it. The request returns 400 when the selected placement cannot provide nested virtualization."
+            "description": "Request nested virtualization for a VM forked from `image`, including access to `/dev/kvm` inside the guest. Omit this field or pass `false` to disable it. The request fails with 422 `unsupported_operation` (reason `feature_not_supported`, feature `nested_virtualization`) when the selected placement cannot provide nested virtualization, and always for a fork of a VM."
           },
           "source_org_id": {
             "type": [
@@ -5212,6 +5906,7 @@
               "string",
               "null"
             ],
+            "maxLength": 255,
             "description": "Optional name for the new VM, scoped to the caller's org."
           },
           "description": {
@@ -5260,7 +5955,7 @@
             ]
           },
           "platforms": {
-            "description": "Preferred compute platforms for a public template, such as `[\"graviton3\"]`. Supply multiple values to allow any listed platform. Omit or pass an empty list for automatic selection. A fork of an existing VM inherits its source platform.",
+            "description": "Preferred compute platforms for a public template, such as `[\"graviton3\"]`. Supply multiple values to allow any listed platform. Omit or pass an empty list for automatic selection, except on an `image` fork with a non-zero `resources.vgpu`, which must name a GPU platform. A fork of an existing VM inherits its source platform.",
             "type": [
               "array",
               "null"
@@ -5293,7 +5988,7 @@
             "minimum": 0
           },
           "policies": {
-            "description": "Network policy for the new VM, stored and enforced before it first runs. The new VM inherits the source VM's policy with this change applied: rules and secrets named here are written or removed, the rest are inherited. Omit it to inherit the policy unchanged. A policy with rules denies unmatched outbound traffic, so include outbound rules needed during setup. Network topology is inherited from the source. Set SSH keys through `ssh_public_keys`.",
+            "description": "Network policy for the new VM, stored and enforced before it first runs. The new VM inherits the source VM's policy with this change applied: rules and secrets named here are written or removed, the rest are inherited. Omit it to inherit the policy unchanged. Once the policy has an outbound `allow` rule, unmatched outbound traffic is denied, so include outbound rules needed during setup; `rewrite`, `gate`, `deny` and `suspend` rules alone leave it open. Network topology is inherited from the source. Set SSH keys through `ssh_public_keys`.",
             "anyOf": [
               {
                 "$ref": "#/components/schemas/PolicyUpdate"
@@ -5336,6 +6031,9 @@
             "type": "string",
             "minLength": 1,
             "description": "A command to start on the new VM once it is forked, as a background run on its default session: the response is the VM, and the run is listed with `GET /v1/vms/{id}/runs`."
+          },
+          "resources_autoscaling": {
+            "$ref": "#/components/schemas/ResourcesAutoscalingUpdate"
           }
         },
         "not": {
@@ -5467,7 +6165,8 @@
           "state",
           "sessions",
           "resources",
-          "network"
+          "network",
+          "resources_autoscaling"
         ],
         "additionalProperties": false,
         "properties": {
@@ -5663,6 +6362,9 @@
             "type": "string",
             "format": "uuid",
             "description": "The pool the VM belongs to, set when the VM is created and never changed. Absent when the VM is in no pool."
+          },
+          "resources_autoscaling": {
+            "$ref": "#/components/schemas/ResourcesAutoscaling"
           }
         }
       },
@@ -5736,7 +6438,8 @@
           "timeout_secs": {
             "type": "integer",
             "minimum": 0,
-            "description": "Idle auto-cancel window for the PTY; applies on the next attach."
+            "deprecated": true,
+            "description": "Deprecated and ignored: the attach's `idle_timeout` sets a terminal's idle limit."
           }
         }
       },
@@ -5939,7 +6642,7 @@
             "type": "string"
           },
           "state": {
-            "description": "Lifecycle state - \"running\" for a backgrounded run.",
+            "description": "Lifecycle state - \"pending\" for a run still queued behind another run of its session, an attached terminal, or capacity; \"running\" for one executing.",
             "type": "string"
           }
         }
@@ -6025,6 +6728,13 @@
             "type": "integer",
             "minimum": 0,
             "default": 0
+          },
+          "inherited_from": {
+            "description": "For a run a fork carried over from its source VM, the source's run id: a warm fork resumes the source's running processes, so a run in progress continues in the new VM from its output at the fork, and a run still queued starts there. Null for a run started on this VM.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "vm_id": {
             "description": "Unique VM identifier.",
@@ -7192,6 +7902,9 @@
             "$ref": "#/components/schemas/SyncBadRequestError"
           },
           {
+            "$ref": "#/components/schemas/SyncForbiddenError"
+          },
+          {
             "$ref": "#/components/schemas/SyncNotFoundError"
           },
           {
@@ -7199,6 +7912,9 @@
           },
           {
             "$ref": "#/components/schemas/SyncPayloadTooLargeError"
+          },
+          {
+            "$ref": "#/components/schemas/SyncInsufficientResourcesError"
           },
           {
             "$ref": "#/components/schemas/SyncUnsupportedOperationError"
@@ -7218,9 +7934,11 @@
           "propertyName": "code",
           "mapping": {
             "bad_request": "#/components/schemas/SyncBadRequestError",
+            "forbidden": "#/components/schemas/SyncForbiddenError",
             "not_found": "#/components/schemas/SyncNotFoundError",
             "conflict": "#/components/schemas/SyncConflictError",
             "payload_too_large": "#/components/schemas/SyncPayloadTooLargeError",
+            "insufficient_resources": "#/components/schemas/SyncInsufficientResourcesError",
             "unsupported_operation": "#/components/schemas/SyncUnsupportedOperationError",
             "unavailable": "#/components/schemas/SyncUnavailableError",
             "internal": "#/components/schemas/SyncInternalError",
@@ -7445,7 +8163,7 @@
                 "type": "null"
               }
             ],
-            "description": "Fraction of one physical GPU to allocate, in eighths of a card: 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, or 1. Resolved against the serving platform's GPU (`vgpu: 0.25` on `x86_64-l40s` is 35 SMs and 11517 MiB), so the same fraction is a different amount of silicon on a different card - see the per-platform table in the docs. Mutually exclusive with `gpu_sms` and `gpu_vram_mib`. Request-only: responses report the resolved `gpu_sms`/`gpu_vram_mib` and never this field."
+            "description": "Fraction of one physical GPU to allocate, in eighths of a card: 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, or 1. Resolved against the serving platform's GPU (`vgpu: 0.25` on `x86_64-l40s` is 35 SMs and 11517 MiB), so the same fraction is a different amount of silicon on a different card - see the per-platform table in the docs. Mutually exclusive with `gpu_sms` and `gpu_vram_mib`. On an `image` fork a non-zero `vgpu` needs `platforms` naming a GPU platform, or the fork is refused with 400. Request-only: responses report the resolved `gpu_sms`/`gpu_vram_mib` and never this field."
           }
         },
         "description": "Resource shape a caller asks for. GPU size is set with `vgpu`, in eighths of one card; the resolved per-GPU `gpu_sms`/`gpu_vram_mib` are reported back on the machine."
@@ -7492,6 +8210,124 @@
               "$ref": "#/components/schemas/SshPublicKeyInfo"
             },
             "description": "Authorized SSH keys with fingerprints. Returned by GET /v1/vms/{id}; omitted from list responses when empty."
+          }
+        }
+      },
+      "AutoscalingRule": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "min",
+          "max",
+          "target_utilization"
+        ],
+        "properties": {
+          "min": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Smallest permitted allocation, in vCPUs or MiB for the selected resource."
+          },
+          "max": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Largest permitted allocation, in vCPUs or MiB for the selected resource."
+          },
+          "target_utilization": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "description": "Desired fraction of the allocated resource in use, greater than zero and at most one."
+          },
+          "window_seconds": {
+            "type": "integer",
+            "writeOnly": true,
+            "description": "Ignored: Arker chooses how long it measures each resource. Never returned.",
+            "deprecated": true
+          }
+        },
+        "description": "Adjusts resource allocation to try to maintain the target utilization."
+      },
+      "DiskAutoscalingRule": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "max",
+          "target_utilization"
+        ],
+        "properties": {
+          "max": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Largest permitted root disk size in MiB."
+          },
+          "target_utilization": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "description": "Desired fraction of the allocated resource in use, greater than zero and at most one."
+          },
+          "window_seconds": {
+            "type": "integer",
+            "writeOnly": true,
+            "description": "Ignored: Arker chooses how long it measures each resource. Never returned.",
+            "deprecated": true
+          }
+        },
+        "description": "Adjusts resource allocation to try to maintain the target utilization."
+      },
+      "ResourcesAutoscaling": {
+        "description": "Autoscaling rules for CPU, memory and disk. A fork inherits the source VM’s rule for each resource omitted from the request. `{}` when the VM has none.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "vcpu": {
+            "$ref": "#/components/schemas/AutoscalingRule"
+          },
+          "memory_mib": {
+            "$ref": "#/components/schemas/AutoscalingRule"
+          },
+          "disk_mib": {
+            "$ref": "#/components/schemas/DiskAutoscalingRule"
+          }
+        }
+      },
+      "ResourcesAutoscalingUpdate": {
+        "description": "Update named resource rules. Null removes a rule and omitted dimensions retain their settings. Returns 422 `unsupported_operation` where autoscaling is not available.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "vcpu": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AutoscalingRule"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replacement vCPU rule. Set to null to disable it or omit it to keep the current rule."
+          },
+          "memory_mib": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AutoscalingRule"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replacement memory rule. Set to null to disable it or omit it to keep the current rule."
+          },
+          "disk_mib": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiskAutoscalingRule"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replacement root disk rule. Set to null to disable it or omit it to keep the current rule."
           }
         }
       },
@@ -7548,6 +8384,9 @@
                 "type": "null"
               }
             ]
+          },
+          "resources_autoscaling": {
+            "$ref": "#/components/schemas/ResourcesAutoscalingUpdate"
           }
         }
       },
@@ -7734,6 +8573,7 @@
           "getVm",
           "deleteVm",
           "patchVm",
+          "getVmMetrics",
           "getVmPolicies",
           "putVmPolicies",
           "createRun",
@@ -7763,12 +8603,17 @@
           "listPoolWorkers",
           "heartbeatWorker",
           "openWorkerTunnel",
+          "reconcileWorkerVms",
           "putWorkerVm",
+          "reserveWorkerVmSnapshot",
+          "commitWorkerVmSnapshot",
+          "renewWorkerVmSnapshot",
           "deleteWorkerVm",
           "putWorkerRun",
           "listApiKeys",
           "createApiKey",
-          "revokeApiKey"
+          "revokeApiKey",
+          "listEvents"
         ],
         "description": "Exact operationId values declared by this API. Refresh this enum when operations are added or removed."
       },
@@ -7888,6 +8733,7 @@
       "Feature": {
         "type": "string",
         "enum": [
+          "resources_autoscaling",
           "durability",
           "nested_virtualization",
           "diskless",
@@ -7899,7 +8745,13 @@
           "guest_control",
           "platform",
           "systemd",
-          "restore"
+          "restore",
+          "vm_metrics",
+          "vm_update",
+          "resize",
+          "presigned_sync",
+          "sync_manifest",
+          "live_run_fork"
         ]
       },
       "WorkState": {
@@ -8253,6 +9105,12 @@
           },
           "request": {
             "$ref": "#/components/schemas/RequestContext"
+          },
+          "retry_after": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Scheduling hint in seconds, mirrored by Retry-After. Does not establish that replay is safe.",
+            "maximum": 4294967295
           },
           "retry_after_seconds": {
             "type": "integer",
@@ -9397,7 +10255,7 @@
         "unevaluatedProperties": false
       },
       "InvalidState": {
-        "description": "The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses unavailable.",
+        "description": "The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses resource_busy.",
         "x-http-status": 409,
         "allOf": [
           {
@@ -9512,6 +10370,28 @@
               },
               "details": {
                 "$ref": "#/components/schemas/PayloadTooLargeDetails"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "RequestTimeout": {
+        "description": "The request body was not received before the server's read deadline. Send the body promptly; the request did not start.",
+        "x-http-status": 408,
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ErrorMetadata"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "request_timeout"
               }
             },
             "required": [
@@ -9882,6 +10762,28 @@
         ],
         "unevaluatedProperties": false
       },
+      "PortNotListening": {
+        "description": "The VM is running, but nothing inside it accepted a connection on the requested port. Start a server listening on that port; a request succeeds once one does.",
+        "x-http-status": 502,
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ErrorMetadata"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "port_not_listening"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          }
+        ],
+        "unevaluatedProperties": false
+      },
       "NotReadyHealthResponse": {
         "type": "object",
         "required": [
@@ -9944,6 +10846,32 @@
           },
           "details": {
             "$ref": "#/components/schemas/BadRequestDetails"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "description": "Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ErrorExecutionContext"
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "SyncForbiddenError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "forbidden",
+            "description": "Identifies this code as `forbidden`."
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Safe explanation of this file-operation failure."
           }
         },
         "required": [
@@ -10068,6 +10996,36 @@
         "required": [
           "code",
           "message"
+        ],
+        "description": "Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ErrorExecutionContext"
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "SyncInsufficientResourcesError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "insufficient_resources",
+            "description": "Identifies this code as `insufficient_resources`."
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Safe explanation of this file-operation failure."
+          },
+          "details": {
+            "$ref": "#/components/schemas/InsufficientResourcesDetails"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "details"
         ],
         "description": "Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope.",
         "allOf": [
@@ -10409,6 +11367,18 @@
           }
         }
       },
+      "RequestTimeoutErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/RequestTimeout"
+          }
+        }
+      },
       "MethodNotAllowedErrorResponse": {
         "type": "object",
         "required": [
@@ -10556,7 +11526,7 @@
           }
         }
       },
-      "AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse": {
+      "AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse": {
         "type": "object",
         "required": [
           "error"
@@ -10572,6 +11542,9 @@
                 "$ref": "#/components/schemas/Conflict"
               },
               {
+                "$ref": "#/components/schemas/IdempotencyConflict"
+              },
+              {
                 "$ref": "#/components/schemas/InvalidState"
               },
               {
@@ -10583,6 +11556,7 @@
               "mapping": {
                 "already_exists": "#/components/schemas/AlreadyExists",
                 "conflict": "#/components/schemas/Conflict",
+                "idempotency_conflict": "#/components/schemas/IdempotencyConflict",
                 "invalid_state": "#/components/schemas/InvalidState",
                 "resource_busy": "#/components/schemas/ResourceBusy"
               }
@@ -11275,11 +12249,12 @@
       "ByocProvider": {
         "type": "string",
         "enum": [
-          "aws"
+          "aws",
+          "gcp"
         ],
         "description": "The cloud of your account. It decides the shape of `byoc`."
       },
-      "PoolByoc": {
+      "AwsPoolByoc": {
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -11338,7 +12313,66 @@
           }
         }
       },
-      "CreatePoolByoc": {
+      "GcpPoolByoc": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project_id",
+          "subnetwork",
+          "instance_types",
+          "service_account",
+          "setup_url",
+          "setup_command"
+        ],
+        "description": "Where a `byoc` pool's workers run in your cloud account. This shape is for `provider: gcp`.",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$",
+            "description": "Google Cloud project ID the workers run in: `gcloud config get-value project`."
+          },
+          "subnetwork": {
+            "type": "string",
+            "pattern": "^(projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/regions/[a-z0-9-]{1,30}/subnetworks/)?[a-z]([a-z0-9-]{0,61}[a-z0-9])?$",
+            "description": "Subnetwork the workers launch into, in the pool's region: its name (https://console.cloud.google.com/networking/networks/list, or `gcloud compute networks subnets list`), or its full `projects/…/regions/…/subnetworks/…` path when it is shared from another project. The workers need outbound internet access only: Cloud NAT on the subnetwork's region."
+          },
+          "instance_types": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "Compute Engine machine types to launch, in order of preference. Required: the platform's types run from a 4-vCPU VM to a 192-vCPU metal host, so a pool names the ones it means."
+          },
+          "service_account": {
+            "type": "string",
+            "readOnly": true,
+            "description": "The service account Arker impersonates in the project: `arker-pool-` and the first 16 hex digits of `pool_id`, at `project_id`'s `iam.gserviceaccount.com` domain."
+          },
+          "setup_url": {
+            "type": "string",
+            "readOnly": true,
+            "description": "Opens Cloud Shell, where `gcloud` is signed in as you. Run `setup_command` there, or in any shell with `gcloud`."
+          },
+          "setup_command": {
+            "type": "string",
+            "readOnly": true,
+            "description": "The `gcloud` commands that set this pool up in the project: they create `service_account`, a second account for the pool's bucket and the bucket itself, and let Arker impersonate both accounts. The first may launch and remove only instances named for this pool, and can list the project's instances and machine types, which is how it finds its own; the second may read and write only this bucket, and sign as itself, which is how a worker makes the URLs large files move through."
+          }
+        }
+      },
+      "PoolByoc": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AwsPoolByoc"
+          },
+          {
+            "$ref": "#/components/schemas/GcpPoolByoc"
+          }
+        ],
+        "description": "Where a `byoc` pool's workers run in your cloud account, in the shape of the pool's `provider`."
+      },
+      "AwsCreatePoolByoc": {
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -11376,6 +12410,47 @@
             "description": "AWS instance types to launch, in order of preference: bare-metal types Arker's fleet runs the pool's platform on (`aws ec2 describe-instance-type-offerings --filters Name=instance-type,Values='*.metal'`). Defaults to the platform's preferred type."
           }
         }
+      },
+      "GcpCreatePoolByoc": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project_id",
+          "subnetwork",
+          "instance_types"
+        ],
+        "description": "Where a `byoc` pool's workers run in your cloud account. This shape is for `provider: gcp`.",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$",
+            "description": "Google Cloud project ID the workers run in: `gcloud config get-value project`."
+          },
+          "subnetwork": {
+            "type": "string",
+            "pattern": "^(projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/regions/[a-z0-9-]{1,30}/subnetworks/)?[a-z]([a-z0-9-]{0,61}[a-z0-9])?$",
+            "description": "Subnetwork the workers launch into, in the pool's region: its name (https://console.cloud.google.com/networking/networks/list, or `gcloud compute networks subnets list`), or its full `projects/…/regions/…/subnetworks/…` path when it is shared from another project. The workers need outbound internet access only: Cloud NAT on the subnetwork's region."
+          },
+          "instance_types": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "Compute Engine machine types to launch, in order of preference. Required: the platform's types run from a 4-vCPU VM to a 192-vCPU metal host, so a pool names the ones it means."
+          }
+        }
+      },
+      "CreatePoolByoc": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AwsCreatePoolByoc"
+          },
+          {
+            "$ref": "#/components/schemas/GcpCreatePoolByoc"
+          }
+        ],
+        "description": "Where a `byoc` pool's workers run in your cloud account, in the shape of the request's `provider`."
       },
       "ManagedPool": {
         "type": "object",
@@ -11448,7 +12523,7 @@
           },
           "resources_provisioned": {
             "$ref": "#/components/schemas/PoolResources",
-            "description": "What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers."
+            "description": "What is allocated to the pool's VMs: for `byoc` and `self_hosted`, those on its `running` and `draining` workers."
           },
           "commitments": {
             "type": "array",
@@ -11530,7 +12605,7 @@
           },
           "resources_provisioned": {
             "$ref": "#/components/schemas/PoolResources",
-            "description": "What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers."
+            "description": "What is allocated to the pool's VMs: for `byoc` and `self_hosted`, those on its `running` and `draining` workers."
           },
           "isolation": {
             "type": "array",
@@ -11617,7 +12692,7 @@
           },
           "resources_provisioned": {
             "$ref": "#/components/schemas/PoolResources",
-            "description": "What the pool's VMs use right now: for `byoc` and `self_hosted`, those on its `running` and `draining` workers."
+            "description": "What is allocated to the pool's VMs: for `byoc` and `self_hosted`, those on its `running` and `draining` workers."
           }
         }
       },
@@ -11907,7 +12982,7 @@
           },
           "resources_provisioned": {
             "$ref": "#/components/schemas/PoolResources",
-            "description": "What the worker's VMs use right now; nothing unless the worker is `running` or `draining`."
+            "description": "What is allocated to the worker's VMs; nothing unless the worker is `running` or `draining`."
           },
           "resources_reserved": {
             "$ref": "#/components/schemas/PoolResources",
@@ -12039,7 +13114,7 @@
           }
         }
       },
-      "WorkerStorageCredentials": {
+      "AwsWorkerStorageCredentials": {
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -12069,7 +13144,7 @@
           }
         }
       },
-      "WorkerStorage": {
+      "AwsWorkerStorage": {
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -12078,7 +13153,7 @@
           "prefix",
           "credentials"
         ],
-        "description": "Storage configuration for VM snapshots.",
+        "description": "Storage configuration for VM snapshots, in Amazon S3.",
         "properties": {
           "bucket": {
             "type": "string",
@@ -12093,9 +13168,68 @@
             "description": "Key prefix the credentials may read and write under; empty for the whole bucket."
           },
           "credentials": {
-            "$ref": "#/components/schemas/WorkerStorageCredentials"
+            "$ref": "#/components/schemas/AwsWorkerStorageCredentials"
           }
         }
+      },
+      "GcpWorkerStorageCredentials": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "access_token",
+          "expires_at",
+          "service_account"
+        ],
+        "description": "A short-lived Google Cloud access token for `prefix` of `bucket`; every heartbeat answer carries one that is still fresh.",
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "description": "OAuth 2.0 access token, sent as a bearer token."
+          },
+          "service_account": {
+            "type": "string",
+            "description": "The service account the token is for. It may sign as itself, which is how a worker makes the URLs its VMs' large files move through."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the token stops working."
+          }
+        }
+      },
+      "GcpWorkerStorage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bucket",
+          "prefix",
+          "credentials"
+        ],
+        "description": "Storage configuration for VM snapshots, in Google Cloud Storage.",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "Cloud Storage bucket."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Object name prefix the credentials may read and write under; empty for the whole bucket."
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/GcpWorkerStorageCredentials"
+          }
+        }
+      },
+      "WorkerStorage": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AwsWorkerStorage"
+          },
+          {
+            "$ref": "#/components/schemas/GcpWorkerStorage"
+          }
+        ],
+        "description": "Storage configuration for VM snapshots, in the object store of the region's cloud."
       },
       "WorkerHeartbeatResponse": {
         "type": "object",
@@ -12116,6 +13250,11 @@
             "type": "integer",
             "minimum": 1000,
             "description": "Send the next heartbeat after this long."
+          },
+          "membership_lease_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "description": "The worker must self-fence before this long passes without an accepted heartbeat."
           },
           "desired_state": {
             "$ref": "#/components/schemas/WorkerHeartbeatState",
@@ -12141,6 +13280,56 @@
           }
         }
       },
+      "WorkerSnapshotReservation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vm_generation", "snapshot_id", "lease_renew_after_secs"],
+        "properties": {
+          "vm_generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "VM ownership generation that fences the snapshot commit."
+          },
+          "snapshot_id": {
+            "type": "string",
+            "minLength": 26,
+            "maxLength": 26,
+            "description": "Immutable identifier reserved for this snapshot generation."
+          },
+          "lease_renew_after_secs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "Renew the upload lease this often until the snapshot is committed."
+          }
+        }
+      },
+      "WorkerVmReconciliation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vm_ids"],
+        "properties": {
+          "vm_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "description": "The VMs the worker process holds."
+          }
+        }
+      },
+      "WorkerVmReconciliationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["retained_vm_ids"],
+        "properties": {
+          "retained_vm_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Which of the named VMs the worker owns, in the order named."
+          }
+        }
+      },
       "WorkerVmRecord": {
         "type": "object",
         "additionalProperties": false,
@@ -12158,10 +13347,11 @@
             "type": "string",
             "enum": [
               "running",
+              "idle",
               "paused",
               "suspended"
             ],
-            "description": "`running` executes; `paused` keeps its memory but no CPU; `suspended` is a snapshot in storage."
+            "description": "`running` has a run or a sync in flight; `idle` is up with none; `paused` keeps its memory but no CPU; `suspended` is a snapshot in storage."
           },
           "resources": {
             "$ref": "#/components/schemas/WorkerResources"
@@ -12261,6 +13451,54 @@
             ],
             "maxLength": 65536,
             "description": "Standard error."
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64,
+            "description": "Session the run belongs to."
+          },
+          "stdout_encoding": {
+            "description": "How `stdout` is encoded; `utf-8` when absent.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutputEncoding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stderr_encoding": {
+            "description": "How `stderr` is encoded; `utf-8` when absent.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutputEncoding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stdout_truncated": {
+            "type": "boolean",
+            "default": false,
+            "description": "True when the command printed more standard output than `stdout` carries."
+          },
+          "stderr_truncated": {
+            "type": "boolean",
+            "default": false,
+            "description": "True when the command printed more standard error than `stderr` carries."
+          },
+          "fail_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 4096,
+            "description": "Why the worker could not run or finish the command; set only when `state` is `failed`."
           }
         }
       },
@@ -12473,6 +13711,548 @@
             "description": "Unrevoked API keys, newest first."
           }
         }
+      },
+      "VmMetrics": {
+        "type": "object",
+        "description": "A VM's metrics over a time window.",
+        "required": [
+          "vm_id",
+          "started_at",
+          "ended_at",
+          "step",
+          "buckets"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "vm_id": {
+            "description": "VM ID.",
+            "type": "string"
+          },
+          "started_at": {
+            "description": "Window start.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended_at": {
+            "description": "Window end.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "step": {
+            "description": "Bucket width in seconds.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "buckets": {
+            "description": "Buckets, oldest first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VmMetricsBucket"
+            }
+          }
+        }
+      },
+      "VmMetricsBucket": {
+        "type": "object",
+        "description": "Metrics for one bucket. Null where not reported.",
+        "required": [
+          "started_at",
+          "ended_at",
+          "resources_provisioned_avg",
+          "resources_provisioned_max",
+          "resources_utilized_avg",
+          "resources_utilized_max",
+          "resources_pressure_avg",
+          "resources_pressure_max",
+          "resources_io"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "started_at": {
+            "description": "Bucket start.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended_at": {
+            "description": "Bucket end.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "resources_provisioned_avg": {
+            "$ref": "#/components/schemas/VmMetricsProvisionedAvg"
+          },
+          "resources_provisioned_max": {
+            "$ref": "#/components/schemas/VmMetricsProvisioned"
+          },
+          "resources_utilized_avg": {
+            "$ref": "#/components/schemas/VmMetricsUtilized"
+          },
+          "resources_utilized_max": {
+            "$ref": "#/components/schemas/VmMetricsUtilized"
+          },
+          "resources_pressure_avg": {
+            "$ref": "#/components/schemas/VmMetricsPressure"
+          },
+          "resources_pressure_max": {
+            "$ref": "#/components/schemas/VmMetricsPressure"
+          },
+          "resources_io": {
+            "$ref": "#/components/schemas/VmMetricsIo"
+          }
+        }
+      },
+      "VmMetricsProvisionedAvg": {
+        "type": "object",
+        "description": "Average size.",
+        "required": [
+          "vcpu",
+          "memory_mib",
+          "disk_mib"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "vcpu": {
+            "description": "vCPUs.",
+            "type": "number",
+            "minimum": 0
+          },
+          "memory_mib": {
+            "description": "Memory, in MiB.",
+            "type": "integer",
+            "minimum": 0
+          },
+          "disk_mib": {
+            "description": "Disk, in MiB.",
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "VmMetricsProvisioned": {
+        "type": "object",
+        "description": "Largest size.",
+        "required": [
+          "vcpu",
+          "memory_mib",
+          "disk_mib"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "vcpu": {
+            "description": "vCPUs.",
+            "type": "integer",
+            "minimum": 0
+          },
+          "memory_mib": {
+            "description": "Memory, in MiB.",
+            "type": "integer",
+            "minimum": 0
+          },
+          "disk_mib": {
+            "description": "Disk, in MiB.",
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "VmMetricsUtilized": {
+        "type": "object",
+        "description": "Resources in use.",
+        "required": [
+          "vcpu",
+          "memory_mib",
+          "disk_mib"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "vcpu": {
+            "description": "vCPUs in use.",
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "memory_mib": {
+            "description": "Memory in use, in MiB.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "disk_mib": {
+            "description": "Disk in use, in MiB.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      },
+      "VmMetricsPressure": {
+        "type": "object",
+        "description": "Share of time (0–1) spent waiting for a resource.",
+        "required": [
+          "vcpu",
+          "memory"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "vcpu": {
+            "description": "Waiting for CPU.",
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "memory": {
+            "description": "Waiting for memory.",
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      },
+      "VmMetricsIo": {
+        "type": "object",
+        "description": "Bytes moved in the bucket.",
+        "required": [
+          "network_received_bytes",
+          "network_transmitted_bytes",
+          "disk_written_bytes"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "network_received_bytes": {
+            "description": "Bytes received.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "network_transmitted_bytes": {
+            "description": "Bytes sent.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "disk_written_bytes": {
+            "description": "Bytes written to disk.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      },
+      "EventAction": {
+        "type": "string",
+        "enum": [
+          "vm_fork",
+          "vm_run",
+          "vm_sync",
+          "vm_update",
+          "vm_suspend",
+          "vm_delete",
+          "vm_running",
+          "vm_terminal_session",
+          "run_signal",
+          "run_cancel",
+          "session_create",
+          "session_update",
+          "session_delete",
+          "mount_create",
+          "mount_delete",
+          "filesystem_create",
+          "filesystem_delete",
+          "pool_create",
+          "pool_update",
+          "pool_delete",
+          "ssh_key_delete",
+          "api_key_create",
+          "api_key_revoke",
+          "member_add",
+          "member_invite",
+          "member_invite_revoke",
+          "member_update",
+          "member_remove",
+          "member_sign_in",
+          "member_sign_out",
+          "member_terms_accept",
+          "org_create",
+          "org_update",
+          "org_quota_update",
+          "org_delete",
+          "billing_checkout",
+          "billing_payment_method_update",
+          "billing_credit_grant"
+        ],
+        "description": "What happened, as `<resource>_<verb>`. `vm_running` is a stretch a VM ran, as metered by billing; `vm_terminal_session` an SSH connection or attached terminal."
+      },
+      "EventState": {
+        "type": "string",
+        "enum": [
+          "running",
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "EventOrderBy": {
+        "type": "string",
+        "enum": [
+          "requested_at",
+          "started_at",
+          "ended_at",
+          "duration_ms"
+        ]
+      },
+      "Event": {
+        "type": "object",
+        "required": [
+          "id",
+          "action",
+          "category",
+          "state",
+          "vm_id",
+          "requested_at",
+          "started_at",
+          "ended_at",
+          "duration_ms",
+          "actor",
+          "region",
+          "request_id",
+          "error_code",
+          "resources_provisioned",
+          "resources_reserved",
+          "attributes"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The event's id."
+          },
+          "action": {
+            "$ref": "#/components/schemas/EventAction"
+          },
+          "category": {
+            "$ref": "#/components/schemas/EventCategory"
+          },
+          "state": {
+            "$ref": "#/components/schemas/EventState"
+          },
+          "vm_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The VM acted on; for `vm_fork`, the new VM."
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the action was requested."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the action started."
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the action ended."
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "How long the action took."
+          },
+          "actor": {
+            "description": "Who acted.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EventActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The region that handled the action."
+          },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The request's `x-request-id`."
+          },
+          "error_code": {
+            "description": "Why the action failed.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resources_provisioned": {
+            "description": "The VM's size, on `vm_fork`, `vm_update`, `vm_delete` and `vm_running`.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EventResources"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resources_reserved": {
+            "description": "A managed pool's reservation, on `pool_create` and `pool_update`.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PoolResources"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "integer",
+                "boolean",
+                "null"
+              ]
+            },
+            "description": "Details specific to the action, such as `run_id`, `exit_code`, `fields` or `reason` (`autoscaling`, `schedule`) when Arker acted."
+          }
+        }
+      },
+      "EventResources": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "vcpu",
+          "memory_mib",
+          "disk_mib"
+        ],
+        "description": "A VM's resources.",
+        "properties": {
+          "vcpu": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "vCPUs."
+          },
+          "memory_mib": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Memory in MiB."
+          },
+          "disk_mib": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Disk in MiB."
+          }
+        }
+      },
+      "EventActor": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/EventActorType"
+          },
+          "member_email": {
+            "type": "string",
+            "description": "The member's email, when `type` is `member`."
+          },
+          "api_key_id": {
+            "type": "string",
+            "description": "The API key's id, when `type` is `api_key`."
+          },
+          "ssh_key_id": {
+            "type": "string",
+            "description": "The account SSH key's id, when `type` is `ssh_key`."
+          }
+        }
+      },
+      "EventActorType": {
+        "type": "string",
+        "enum": [
+          "member",
+          "api_key",
+          "ssh_key",
+          "arker"
+        ],
+        "description": "A member, an API key, an SSH key, or Arker."
+      },
+      "ListEventsResponse": {
+        "type": "object",
+        "required": [
+          "events",
+          "next_cursor"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "description": "Events, in the requested order."
+          },
+          "next_cursor": {
+            "description": "The next page's cursor, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "EventCategory": {
+        "type": "string",
+        "description": "`organization` for member, organization and billing actions, readable by admins only; `compute` otherwise.",
+        "enum": [
+          "compute",
+          "organization"
+        ]
       }
     }
   }

@@ -4,7 +4,10 @@ import standaloneCode from 'ajv/dist/standalone/index.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const root = new URL('../../', import.meta.url);
-const contract = JSON.parse(readFileSync(new URL('openapi.json', root), 'utf8'));
+// Errors gain fields over time; a validator that refused them would drop the
+// typed body (and its recovery and retry hints) the day the server adds one.
+const contract = JSON.parse(readFileSync(new URL('openapi.json', root), 'utf8'), (key, value) =>
+  (key === 'additionalProperties' || key === 'unevaluatedProperties') && value === false ? undefined : value);
 const ajv = new Ajv2020({strict: false, inlineRefs: false, code: {source: true, esm: true}});
 addFormats(ajv);
 ajv.addSchema({...contract, $id: 'arker'});

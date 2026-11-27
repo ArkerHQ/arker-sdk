@@ -1,6 +1,7 @@
 package arker
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,10 +22,14 @@ const ptyConnectTimeout = 30 * time.Second
 type PTYOptions struct {
 	// SessionID reattaches to an existing session, replaying its scrollback.
 	// Empty creates one.
-	SessionID     string
-	Cols, Rows    *int
-	Command       string
-	Persist       *bool
+	SessionID  string
+	Cols, Rows *int
+	Command    string
+	Persist    *bool
+	// IdleTimeout destroys the PTY after this many seconds without terminal
+	// input or output. Nil or zero disables this PTY-specific idle limit.
+	IdleTimeout *int
+	// Deprecated: use IdleTimeout. Not with IdleTimeout.
 	CancelTTLSecs *int
 
 	// Env is applied when a session is created; it wins over the plain
@@ -76,6 +81,9 @@ func (v *VM) ConnectPTY(ctx context.Context, opts PTYOptions) (*PTY, error) {
 	if v.Info != nil && v.Info.PoolID != nil && *v.Info.PoolID != "" {
 		return nil, errors.New("arker: pool VMs do not support interactive shells; use Run instead")
 	}
+	if opts.IdleTimeout != nil && opts.CancelTTLSecs != nil {
+		return nil, errors.New("arker: set IdleTimeout or CancelTTLSecs, not both")
+	}
 	sessionID := opts.SessionID
 	if sessionID == "" {
 		env := map[string]string{}
@@ -99,8 +107,9 @@ func (v *VM) ConnectPTY(ctx context.Context, opts PTYOptions) (*PTY, error) {
 	q.numPtr("rows", clampDim(opts.Rows))
 	q.str("command", opts.Command)
 	q.boolPtr("persist", opts.Persist)
-	if opts.CancelTTLSecs != nil && *opts.CancelTTLSecs > 0 {
-		q.num("cancel_ttl_secs", *opts.CancelTTLSecs)
+	// The older wire name, which every API version accepts.
+	if idle := cmp.Or(opts.IdleTimeout, opts.CancelTTLSecs); idle != nil && *idle > 0 {
+		q.num("cancel_ttl_secs", *idle)
 	}
 
 	header := http.Header{}

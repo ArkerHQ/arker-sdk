@@ -30,6 +30,29 @@ test('unknown errors preserve their original fields', async () => {
   }
 });
 
+test('a known error keeps its typed body when the server adds fields', async () => {
+  const newer = {...raw, retry_after: 3, future_field: {nested: true}, details: {resource: 'vm', future_detail: 1}};
+  const client = new Arker({apiKey: 'k', baseUrl: 'https://test.invalid', retry: false,
+    fetch: (async () => Response.json({error: newer}, {status: 404})) as typeof fetch});
+  await assert.rejects(client.vm('vm').delete(), (error: unknown) => {
+    assert.ok(error instanceof ArkerError);
+    assert.deepEqual(error.body, newer);
+    return true;
+  });
+});
+
+for (const [hint, expectedMs] of [[{retry_after: 1, retry_after_seconds: 30}, 1000], [{retry_after_seconds: 30}, 30_000]] as const) {
+  test(`retry waits for ${Object.keys(hint).join(' over ')}`, async () => {
+    const unavailable = {...raw, code: 'unavailable', details: undefined, recovery: {work: 'not_started'}, ...hint};
+    const reader = new Arker({apiKey: 'k', baseUrl: 'https://test.invalid', retry: false,
+      fetch: (async () => Response.json({error: unavailable}, {status: 503})) as typeof fetch});
+    const error = await reader.vm('vm').delete().then(() => undefined, (caught: unknown) => caught);
+    assert.ok(error instanceof ArkerError);
+    const retrying = new Arker({apiKey: 'k', baseUrl: 'https://test.invalid', retry: {attempts: 2, jitterMs: 0}});
+    assert.equal(retrying._retryDelay(0, error), expectedMs);
+  });
+}
+
 for (const work of ['unknown', 'continuing', 'stopped']) {
   test(`partial ${work} work is not replayed`, async () => {
     let calls = 0;

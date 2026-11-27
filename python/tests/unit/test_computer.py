@@ -3078,3 +3078,52 @@ def test_pool_shell_is_refused_before_creating_session() -> None:
         with pytest.raises(ValueError, match="interactive shells"):
             vm.connect_pty()
     assert t.calls == []
+
+
+def test_vm_metrics_queries_its_window() -> None:
+    body = {
+        "vm_id": "vm_1",
+        "step": 300,
+        "started_at": "2026-11-01T00:00:00Z",
+        "ended_at": "2026-11-01T01:00:00Z",
+        "buckets": [],
+    }
+    t = FakeTransport()
+    t.add_json(lambda method, url: method == "GET" and "/v1/vms/vm_1/metrics" in url, 200, body)
+    with use_transport(t):
+        metrics = client().vm("vm_1").metrics(started_at_gte="2026-11-01T00:00:00Z", step=300)
+    assert metrics.step == 300
+    assert t.calls[0]["url"] == (
+        "https://test.invalid/api/v1/vms/vm_1/metrics?started_at_gte=2026-11-01T00%3A00%3A00Z&step=300"
+    )
+
+
+def test_byoc_pool_constructors_keep_their_aws_names() -> None:
+    import arker
+
+    assert arker.CreatePoolByoc is arker.AwsCreatePoolByoc
+    assert arker.PoolByoc is arker.AwsPoolByoc
+    request = arker.CreateByocPoolRequest(
+        type="byoc",
+        provider="aws",
+        platform="firecracker",
+        resources=arker.PoolResources(vcpu=2, memory_mib=4096, disk_mib=10240),
+        byoc=arker.CreatePoolByoc(account_id="123456789012", subnet_ids=["subnet-1"]),
+    )
+    t = FakeTransport()
+    t.add_json(lambda m, u: m == "POST" and u.endswith("/v1/pools"), 200, {**POOL, "commitments": []})
+    with use_transport(t):
+        client().create_pool(request)
+    assert json.loads(t.calls[0]["body"])["byoc"] == {"account_id": "123456789012", "subnet_ids": ["subnet-1"]}
+
+
+def test_connect_pty_sends_idle_timeout_as_cancel_ttl_secs(monkeypatch: pytest.MonkeyPatch) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(sdk, "Pty", lambda *, url, **_: opened.append(url))
+    with use_transport(FakeTransport()):
+        vm = client().vm("vm_1")
+        vm.connect_pty(session_id="s1", use_ticket=False, idle_timeout=600)
+        vm.connect_pty(session_id="s1", use_ticket=False, cancel_ttl_secs=600)
+        vm.connect_pty(session_id="s1", use_ticket=False, idle_timeout=0)
+    assert ["cancel_ttl_secs=600" in url for url in opened] == [True, True, False]
+    assert not any("idle_timeout" in url for url in opened)

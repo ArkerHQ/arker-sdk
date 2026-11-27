@@ -206,6 +206,13 @@ const UPDATE_OPTIONS: OptionSpecs = {
   "ssh-public-keys-file": { type: "string" },
 };
 
+const VM_METRICS_OPTIONS: OptionSpecs = {
+  ...GLOBAL_OPTIONS,
+  "started-at-gte": { type: "string" },
+  "started-at-lt": { type: "string" },
+  step: { type: "string", values: ["60", "300", "3600"] },
+};
+
 const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
   "api-keys": API_KEY_CREATE_OPTIONS,
   config: { help: { type: "boolean" }, json: { type: "boolean" } },
@@ -244,6 +251,7 @@ const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
     cols: { type: "integer", min: 1 },
     command: { type: "string" },
     cwd: { type: "string" },
+    "idle-timeout": { type: "integer", min: 0 },
     "no-persist": { type: "boolean" },
     persist: { type: "boolean" },
     rows: { type: "integer", min: 1 },
@@ -288,6 +296,7 @@ const COMMAND_OPTIONS: Record<string, OptionSpecs> = {
     ...RUN_OPTIONS,
     ...VM_LIST_OPTIONS,
     ...PAGINATION_OPTIONS,
+    ...VM_METRICS_OPTIONS,
     immutable: { type: "boolean" },
   },
 };
@@ -348,6 +357,8 @@ function invocationOptions(command: string, positional: string[]): { options: Op
       allowed = RUN_OPTIONS;
     } else if (subcommand === "update") {
       allowed = UPDATE_OPTIONS;
+    } else if (subcommand === "metrics") {
+      allowed = VM_METRICS_OPTIONS;
     } else {
       allowed = GLOBAL_OPTIONS;
     }
@@ -438,7 +449,7 @@ const POSITIONAL_LIMITS: Record<string, number | Record<string, number>> = {
   "sync-dir": 3,
   mounts: { ls: 1, list: 1, create: 1, rm: 2, delete: 2 },
   update: 1,
-  vms: { ls: 0, list: 0, get: 1, rm: 1, delete: 1, fork: 1, run: Infinity, update: 1 },
+  vms: { ls: 0, list: 0, get: 1, rm: 1, delete: 1, fork: 1, run: Infinity, update: 1, metrics: 1 },
 };
 POSITIONAL_LIMITS.fs = POSITIONAL_LIMITS.filesystems!;
 
@@ -804,6 +815,15 @@ async function cmdVms(args: ParsedArgs, client: Arker): Promise<void> {
       const id = rest[0] ?? die("usage: arker vms rm <vm_id>");
       const r = await client.vm(id).delete();
       printMutationResult(r, "deleted", id, Boolean(args.flags.json));
+      return;
+    }
+    case "metrics": {
+      const id = rest[0] ?? die("usage: arker vms metrics <vm_id> [--started-at-gte <time>] [--started-at-lt <time>] [--step <60|300|3600>]");
+      out(await client.vm(id).metrics({
+        started_at_gte: args.flags["started-at-gte"] as string | undefined,
+        started_at_lt: args.flags["started-at-lt"] as string | undefined,
+        step: args.flags.step === undefined ? undefined : (Number(args.flags.step) as 60 | 300 | 3600),
+      }));
       return;
     }
     case "fork": {
@@ -1608,7 +1628,7 @@ async function cmdPools(args: ParsedArgs, client: Arker): Promise<void> {
     case "create": {
       const pool = await client.createPool(poolRequestFromArgs(args));
       out(pool);
-      if (pool.type === "byoc" && !args.flags.json) {
+      if (pool.type === "byoc" && "account_id" in pool.byoc && !args.flags.json) {
         out(`Open ${pool.byoc.setup_url} signed in to AWS account ${pool.byoc.account_id} and create the stack. Then run arker pools get ${pool.pool_id} until state is active.`);
       }
       return;
@@ -1653,6 +1673,9 @@ function poolRequestFromArgs(args: ParsedArgs): CreatePoolRequest {
 }
 
 async function cmdShell(args: ParsedArgs, client: Arker): Promise<void> {
+  // Optional auto-cancel: the server destroys the shell after this many seconds
+  // with no terminal I/O - `arker shell <vm> --idle-timeout 600`.
+  const idleTimeout = aliasedNumFlag(args, "idle-timeout", "cancel-ttl");
   // Attach to an explicit VM by id (--vm-id or a positional vm id), otherwise
   // fork a fresh one from an explicit source name.
   let computer: VM;
@@ -1709,16 +1732,13 @@ async function cmdShell(args: ParsedArgs, client: Arker): Promise<void> {
   const rowsFlag = numFlag(args, "rows");
   const cols = colsFlag ?? output.columns ?? 80;
   const rows = rowsFlag ?? output.rows ?? 24;
-  // Optional auto-cancel: the server destroys the shell after this many seconds
-  // with no terminal I/O - `arker shell <vm> --cancel-ttl 600`.
-  const cancelTtlSecs = numFlag(args, "cancel-ttl");
   const pty = await computer.connectPty({
     sessionId,
     cols,
     rows,
     command: args.flags.command as string | undefined,
     persist,
-    cancelTtlSecs,
+    idleTimeout,
   });
 
   err(`connected ${computer.id} session ${sessionId}`);
@@ -1735,6 +1755,13 @@ async function cmdShell(args: ParsedArgs, client: Arker): Promise<void> {
 function numFlag(args: ParsedArgs, name: string): number | undefined {
   const v = args.flags[name];
   return typeof v === "number" ? v : undefined;
+}
+
+function aliasedNumFlag(args: ParsedArgs, name: string, alias: string): number | undefined {
+  const value = numFlag(args, name);
+  const aliased = numFlag(args, alias);
+  if (value !== undefined && aliased !== undefined) die(`pass --${name} or --${alias}, not both`);
+  return value ?? aliased;
 }
 
 function boolFlag(args: ParsedArgs, name: string): boolean | undefined {
@@ -1836,7 +1863,7 @@ async function readAllStdinWithFirstByteDeadline(ms: number): Promise<Uint8Array
 const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   actions: { placeholder: "<action[,action...]>", desc: "filter organization-wide activity by action" },
   "assume-empty": { desc: "skip the remote manifest; treat the destination as empty" },
-  "cancel-ttl": { placeholder: "<seconds>", desc: "grace period before a disconnected PTY is reaped" },
+  "cancel-ttl": { placeholder: "<seconds>", desc: "same as --idle-timeout" },
   "completed-after": { placeholder: "<timestamp>", desc: "include per-VM runs completed at or after this RFC 3339 time" },
   context: { placeholder: "<directory>", desc: "local build context for --dockerfile" },
   cols: { placeholder: "<n>", desc: "initial terminal width" },
@@ -1860,6 +1887,7 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   "gpu-sms": { placeholder: "<n>", desc: "GPU SM count, in hardware units" },
   "gpu-vram-mib": { placeholder: "<n>", desc: "GPU VRAM in MiB, in hardware units" },
   help: { desc: "show help without connecting" },
+  "idle-timeout": { placeholder: "<seconds>", desc: "destroy the shell after this many seconds without terminal I/O" },
   image: { placeholder: "<reference>", desc: "fork from an OCI image" },
   "idempotency-key": { placeholder: "<key>", desc: "deduplicate retries of this run request" },
   "account-id": { placeholder: "<id>", desc: "AWS account in which the pool launches workers" },
@@ -1912,11 +1940,15 @@ const OPTION_HELP: Record<string, { placeholder?: string; desc: string }> = {
   "ssh-public-keys-file": { placeholder: "<path>", desc: "read SSH keys; an empty file clears them during update" },
   "started-after": { placeholder: "<timestamp>", desc: "include per-VM runs started at or after this RFC 3339 time" },
   "started-before": { placeholder: "<timestamp>", desc: "include per-VM runs started at or before this RFC 3339 time" },
+  "started-at-gte": { placeholder: "<timestamp>", desc: "first metrics bucket starts at or after this RFC 3339 time" },
+  "started-at-lt": { placeholder: "<timestamp>", desc: "last metrics bucket starts before this RFC 3339 time" },
   state: { desc: "filter by lifecycle state" },
+  step: { placeholder: "<60|300|3600>", desc: "metrics bucket width in seconds" },
   status: { placeholder: "<status[,status...]>", desc: "filter organization-wide activity by status class" },
   "status-max": { placeholder: "<code>", desc: "maximum organization-wide activity status code" },
   "status-min": { placeholder: "<code>", desc: "minimum organization-wide activity status code" },
   timeout: { placeholder: "<seconds>", desc: "exec/kill bound in seconds (omitted or 0 = unbounded)" },
+  "timeout-secs": { placeholder: "<seconds>", desc: "has no effect; use 'arker shell --idle-timeout'" },
   "time-to-background": { placeholder: "<seconds>", desc: "sync window; 0 returns a run id immediately (default 120)" },
   until: { placeholder: "<epoch-seconds>", desc: "include organization-wide activity before this time" },
   vcpu: { placeholder: "<n>", desc: "vCPU count" },
@@ -2082,7 +2114,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     summary: "Update a VM's description, resources, SSH keys, or network policy, or make it immutable.",
   },
   vms: {
-    synopsis: ["arker vms <ls|get|rm|fork|run|update> [args] [flags]"],
+    synopsis: ["arker vms <ls|get|rm|fork|run|update|metrics> [args] [flags]"],
     summary: "Full VM resource surface; the shortcuts (ls, rm, fork, run, update) call into it.",
     subs: {
       ls: "list VMs",
@@ -2091,6 +2123,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       fork: "fork a VM",
       run: "run a command",
       update: "update a VM",
+      metrics: "show a VM's size, use, pressure and I/O over time (default: the last hour)",
     },
   },
 };
