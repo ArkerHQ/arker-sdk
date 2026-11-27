@@ -71,7 +71,7 @@
   },
   "bugs": "https://github.com/ArkerHQ/arker-sdk/issues",
   "devDependencies": {
-    "@computesdk/daytona": "^1.7.30",
+    "@computesdk/daytona": "^1.7.60",
     "@computesdk/e2b": "^1.7.51",
     "@computesdk/modal": "^1.9.3",
     "@types/node": "^25.6.0",
