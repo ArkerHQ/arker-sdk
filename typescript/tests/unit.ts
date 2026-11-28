@@ -145,6 +145,21 @@ function decode(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
 }
 
+async function testRequestsNameTheSdkAndItsPackageVersion(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson((method, url) => method === "GET" && url.endsWith("/v1/whoami"), 200, {
+    org_id: "org_01",
+    org_name: "ArkerHQ",
+  });
+
+  await client(fetch).whoami();
+
+  const { version } = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+    version: string;
+  };
+  assert.equal(fetch.calls[0]!.headers["user-agent"], `arker-ts/${version}`);
+}
+
 async function testForkPostsDirectlyToSourceVm(): Promise<void> {
   const fetch = new FakeFetch();
   // VM.fork() uses the top-level operation and supplies its own ID.
@@ -2935,6 +2950,7 @@ async function testAFailedDockerfileBuildDeletesTheVm(): Promise<void> {
   );
 }
 
+await testRequestsNameTheSdkAndItsPackageVersion();
 testDockerfileParsingBasics();
 testDockerfileRefusalsAreNamed();
 testDockerfileShell();
