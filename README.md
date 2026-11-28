@@ -27,6 +27,20 @@ Read the [Arker documentation](https://arker.ai/docs), or see the package-specif
 - Python SDK: [Python guide](./python/README.md)
 - Go SDK: [Go guide](./go/README.md)
 
+## Background workloads
+
+To let background services progress between commands, pass a named runtime rule
+in `policies` when forking or updating a VM:
+
+```json
+{"rules":{"daemon":{"type":"runtime","action":"keep_running"}}}
+```
+
+This keeps an already-running VM's compute allocated and billed. It does not
+start a stopped VM; explicit suspend/delete operations and schedule rules still
+apply. Remove the rule with `{"rules":{"daemon":null}}` to restore automatic
+idle behavior. Runtime rules do not change network access.
+
 ## Examples
 
 - [Browser](./examples/browser): Open two Wikipedia pages and fork a live checkpoint at each.

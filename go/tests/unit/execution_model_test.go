@@ -52,6 +52,7 @@ const policyRules = `{"rules":{` +
 	`"nap":{"type":"schedule","after_last_running_start":600,"action":"suspend"},` +
 	`"ttl":{"type":"schedule","after_created":86400,"action":"delete"},` +
 	`"end":{"type":"schedule","at":"2030-01-01T00:00:00Z","action":"delete"},` +
+	`"daemon":{"type":"runtime","action":"keep_running"},` +
 	`"now":{"type":"schedule","at":"2020-01-01T00:00:00Z","action":"suspend"}}}`
 
 func TestPolicyRulesRoundTripExactly(t *testing.T) {
@@ -80,6 +81,9 @@ func TestPolicyRulesRoundTripExactly(t *testing.T) {
 	}
 	if *doc.Rules["rest"].Priority != 0 {
 		t.Fatal("priority 0 was lost")
+	}
+	if daemon := doc.Rules["daemon"]; daemon.Type != "runtime" || daemon.Action != "keep_running" || daemon.Priority != nil || daemon.Match != nil {
+		t.Fatalf("runtime rule did not decode: %+v", daemon)
 	}
 
 	out, err := json.Marshal(doc)

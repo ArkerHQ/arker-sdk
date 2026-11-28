@@ -747,6 +747,52 @@ def test_listed_vm_uses_its_placement_endpoint() -> None:
         result.vms[0].run("printf ok")
 
 
+@pytest.mark.parametrize("shared_endpoint", [True, False], ids=["shared-endpoint", "control-only"])
+def test_listed_vm_preserves_a_shared_configured_endpoint(shared_endpoint: bool) -> None:
+    t = FakeTransport()
+    record = {
+        "vm_id": "vm_placed",
+        "owner_org_id": "owner",
+        "created_at": "now",
+        "description": None,
+        "public": False,
+        "state": "idle",
+        "region": "us-west-2",
+        "provider": "aws",
+        "network": {},
+        "sessions": [],
+        "resources": {},
+    }
+    t.add_json(
+        lambda method, url: method == "GET" and url == "https://shared.invalid/api/v1/vms",
+        200,
+        {"vms": [record]},
+    )
+    expected_base = "https://shared.invalid/api" if shared_endpoint else "https://aws-us-west-2.arker.ai/api"
+    t.add_json(
+        lambda method, url: method == "POST" and url == expected_base + "/v1/vms/vm_placed/runs",
+        200,
+        {
+            "state": "completed",
+            "stdout": "ok\\n",
+            "stdout_encoding": "utf-8",
+            "stderr": "",
+            "stderr_encoding": "utf-8",
+            "exit_code": 0,
+        },
+    )
+    arker = sdk.Arker(
+        api_key="ark_live_test",
+        base_url="https://shared.invalid/api/" if shared_endpoint else None,
+        control_base_url="https://shared.invalid/api",
+        retry=False,
+    )
+    with use_transport(t):
+        listed = arker.list_vms()
+        assert listed.vms[0].base_url == expected_base
+        assert listed.vms[0].run("printf ok").exit_code == 0
+
+
 def test_list_runs_uses_control_plane_and_filters() -> None:
     t = FakeTransport()
     t.add_json(

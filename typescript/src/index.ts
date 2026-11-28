@@ -273,6 +273,7 @@ export type PolicyMatch = ApiSchema<"PolicyMatch">;
 export type PolicyAction = ApiSchema<"PolicyAction">;
 export type PolicyRule = ApiSchema<"PolicyRule">;
 export type ScheduleRule = ApiSchema<"ScheduleRule">;
+export type RuntimeRule = ApiSchema<"RuntimeRule">;
 export type PolicyUpdate = ApiSchema<"PolicyUpdate">;
 export type VmPolicies = ApiSchema<"VmPolicies">;
 export type Rewrite = ApiSchema<"Rewrite">;
@@ -797,7 +798,10 @@ export class Arker {
     const resp = await this._request<ListVmsResponse>("GET", buildQuery("/v1/vms", query), undefined, this.controlBaseUrl);
     const vms = (resp.vms ?? []).map((v) => {
       const id = v.vm_id;
-      return new VM(this, id, this._baseUrlFor(id, v), v);
+      const baseUrl = this.computeBaseUrl === this.controlBaseUrl
+        ? this.controlBaseUrl
+        : this._baseUrlFor(id, v);
+      return new VM(this, id, baseUrl, v);
     });
     return { vms, nextCursor: resp.next_cursor ?? null };
   }
@@ -1028,6 +1032,8 @@ export class VM {
   readonly vm_id?: Vm["vm_id"];
   readonly pool_id?: Vm["pool_id"];
   readonly name?: Vm["name"];
+  readonly description?: Vm["description"];
+  readonly immutable?: Vm["immutable"];
   readonly state?: Vm["state"];
   readonly owner_org_id?: Vm["owner_org_id"];
   readonly created_at?: Vm["created_at"];
