@@ -584,6 +584,36 @@ async function testRunSendsEndAfterAllSubprocessesOnlyWhenSet(): Promise<void> {
   }
 }
 
+async function testRunAppliesPoliciesWithUpdateBeforeTheCommand(): Promise<void> {
+  const fetch = new FakeFetch();
+  fetch.addJson(
+    (method, url) => method === "PATCH" && url === "https://test.invalid/api/v1/vms/vm_1",
+    200,
+    {
+      vm_id: "vm_1",
+      owner_org_id: "owner",
+      created_at: "now",
+      public: false,
+      state: "idle",
+      sessions: [],
+      resources: {},
+      network: {},
+    },
+  );
+  fetch.addJson(
+    (method, url) => method === "POST" && url === "https://test.invalid/api/v1/vms/vm_1/runs",
+    200,
+    { stdout: "", stdout_encoding: "utf-8", stderr: "", stderr_encoding: "utf-8", exit_code: 0 },
+  );
+  const policies = { secrets: { TOKEN: "value" } };
+
+  await client(fetch).vm("vm_1").run("true", { policies });
+
+  assert.deepEqual(fetch.calls.map((call) => call.method), ["PATCH", "POST"]);
+  assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { policies });
+  assert.deepEqual(JSON.parse(fetch.calls[1]!.body!), { command: "true" });
+}
+
 async function testConfiguredPlacementRoutesNamedSourcesToMainEndpoint(): Promise<void> {
   const fetch = new FakeFetch();
   fetch.addJson(
@@ -1316,6 +1346,7 @@ await testSyncRunPollsBackgroundedRunToCompletion();
 await testRunPollBudgetIsUnboundedWithoutACallerTimeout();
 await testExplicitZeroReturnsAckWithoutPolling();
 await testRunSendsEndAfterAllSubprocessesOnlyWhenSet();
+await testRunAppliesPoliciesWithUpdateBeforeTheCommand();
 await testConfiguredPlacementRoutesNamedSourcesToMainEndpoint();
 testArbitraryProviderBuildsEndpoint();
 testPlacementRequiresSeparateProviderAndRegion();

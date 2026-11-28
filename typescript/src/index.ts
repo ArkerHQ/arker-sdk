@@ -1099,7 +1099,10 @@ export class VM {
   async run(command: string, options: RunOptions): Promise<RunResult>;
   async run(command: string, options: RunOptions = {}): Promise<RunResult> {
     rejectUnsupportedRunNetworkInputs(options);
-    const { idempotencyKey, onOutput, ...body } = options;
+    const { idempotencyKey, onOutput, policies, ...body } = options;
+    // A run's policies are set with update() first, and the command runs only
+    // once they are applied.
+    if (policies != null) await this.update({ policies });
     const headers = idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined;
     const request: RunRequest = { ...body, command };
     const response = await this._client._request<unknown>(
