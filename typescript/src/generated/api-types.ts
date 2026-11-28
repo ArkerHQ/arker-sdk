@@ -113,9 +113,30 @@ export interface paths {
         };
         /**
          * List organization runs
-         * @description Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
+         * @deprecated
+         * @description Deprecated: use `GET /v1/events`, which lists every action across regions. Lists pending, running, and finished runs plus fork and sync activity in the serving endpoint's region. Runs remain visible after their VM is deleted, within the retained history window. Query regional endpoints separately to list across regions. Placement query parameters are not supported.
          */
         get: operations["listOrgRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List events
+         * @description Lists the organization's activity, one event per action: API requests, runs, network and SSH traffic, automatic actions and account changes, across every region, within the retained history window. Only the organization's own actions are listed: what its members and keys did, what its configuration did, and credit or quota changes Arker made to it; never how Arker places, moves, suspends or restores a VM on its own. Every value is one documented here; search matches only what is published. Filters combine with AND; the values of one filter with OR. Newly recorded actions appear within seconds.
+         */
+        get: operations["listEvents"];
         put?: never;
         post?: never;
         delete?: never;
@@ -768,9 +789,9 @@ export interface components {
          * @description Stable public error codes. ErrorBody selects the required details for each code; clients must not parse message text.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "insufficient_resources" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "resource_busy" | "invalid_state" | "already_exists" | "idempotency_conflict" | "expired" | "payload_too_large" | "method_not_allowed" | "unsupported_operation" | "unrecoverable" | "capacity_unavailable" | "unavailable" | "internal" | "rate_limited" | "quota_exceeded" | "payment_required" | "action_required" | "operation_failed" | "gateway_timeout";
+        ErrorCode: "bad_request" | "insufficient_resources" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "resource_busy" | "invalid_state" | "already_exists" | "idempotency_conflict" | "expired" | "payload_too_large" | "request_timeout" | "method_not_allowed" | "unsupported_operation" | "unrecoverable" | "capacity_unavailable" | "unavailable" | "internal" | "rate_limited" | "quota_exceeded" | "payment_required" | "action_required" | "operation_failed" | "gateway_timeout";
         /** @description Typed HTTP error body. The code selects its required details. Endpoint responses must narrow this union to their permitted codes. */
-        ErrorBody: components["schemas"]["BadRequest"] | components["schemas"]["InsufficientResources"] | components["schemas"]["Unauthorized"] | components["schemas"]["Forbidden"] | components["schemas"]["NotFound"] | components["schemas"]["Conflict"] | components["schemas"]["ResourceBusy"] | components["schemas"]["InvalidState"] | components["schemas"]["AlreadyExists"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["Expired"] | components["schemas"]["PayloadTooLarge"] | components["schemas"]["MethodNotAllowed"] | components["schemas"]["UnsupportedOperation"] | components["schemas"]["Unrecoverable"] | components["schemas"]["CapacityUnavailable"] | components["schemas"]["Unavailable"] | components["schemas"]["Internal"] | components["schemas"]["RateLimited"] | components["schemas"]["QuotaExceeded"] | components["schemas"]["PaymentRequired"] | components["schemas"]["ActionRequired"] | components["schemas"]["OperationFailed"] | components["schemas"]["GatewayTimeout"];
+        ErrorBody: components["schemas"]["BadRequest"] | components["schemas"]["InsufficientResources"] | components["schemas"]["Unauthorized"] | components["schemas"]["Forbidden"] | components["schemas"]["NotFound"] | components["schemas"]["Conflict"] | components["schemas"]["ResourceBusy"] | components["schemas"]["InvalidState"] | components["schemas"]["AlreadyExists"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["Expired"] | components["schemas"]["PayloadTooLarge"] | components["schemas"]["RequestTimeout"] | components["schemas"]["MethodNotAllowed"] | components["schemas"]["UnsupportedOperation"] | components["schemas"]["Unrecoverable"] | components["schemas"]["CapacityUnavailable"] | components["schemas"]["Unavailable"] | components["schemas"]["Internal"] | components["schemas"]["RateLimited"] | components["schemas"]["QuotaExceeded"] | components["schemas"]["PaymentRequired"] | components["schemas"]["ActionRequired"] | components["schemas"]["OperationFailed"] | components["schemas"]["GatewayTimeout"];
         /** @description Public HTTP error envelope. Every code has one HTTP status, documented on its body schema. Code/status matching is enforced at the response boundary. */
         ErrorResponse: {
             error: components["schemas"]["ErrorBody"];
@@ -1658,7 +1679,7 @@ export interface components {
             end: number;
         };
         /** @description Per-file error union for successful batch responses. It does not change the enclosing HTTP status. Checksum mismatches use bad_request. */
-        SyncFileError: components["schemas"]["SyncBadRequestError"] | components["schemas"]["SyncNotFoundError"] | components["schemas"]["SyncConflictError"] | components["schemas"]["SyncPayloadTooLargeError"] | components["schemas"]["SyncUnsupportedOperationError"] | components["schemas"]["SyncUnavailableError"] | components["schemas"]["SyncInternalError"] | components["schemas"]["SyncExpiredError"];
+        SyncFileError: components["schemas"]["SyncBadRequestError"] | components["schemas"]["SyncForbiddenError"] | components["schemas"]["SyncNotFoundError"] | components["schemas"]["SyncConflictError"] | components["schemas"]["SyncPayloadTooLargeError"] | components["schemas"]["SyncInsufficientResourcesError"] | components["schemas"]["SyncUnsupportedOperationError"] | components["schemas"]["SyncUnavailableError"] | components["schemas"]["SyncInternalError"] | components["schemas"]["SyncExpiredError"];
         Filesystem: {
             /** @description Unique filesystem identifier. */
             filesystem_id: string;
@@ -1823,7 +1844,7 @@ export interface components {
          * @description Exact operationId values declared by this API. Refresh this enum when operations are added or removed.
          * @enum {string}
          */
-        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey";
+        OpenApiOperationId: "health" | "listRegions" | "whoami" | "fork" | "listVms" | "listOrgRuns" | "listEvents" | "getVm" | "deleteVm" | "patchVm" | "getVmPolicies" | "putVmPolicies" | "createRun" | "listRuns" | "getRun" | "cancelRun" | "listSessions" | "createSession" | "getSession" | "patchSession" | "deleteSession" | "attachSessionPty" | "mintSessionPtyTicket" | "createMount" | "listMounts" | "deleteMount" | "sync" | "listFilesystems" | "createFilesystem" | "getFilesystem" | "deleteFilesystem" | "listPools" | "createPool" | "getPool" | "updatePool" | "deletePool" | "listPoolWorkers" | "heartbeatWorker" | "openWorkerTunnel" | "putWorkerVm" | "deleteWorkerVm" | "putWorkerRun" | "listApiKeys" | "createApiKey" | "revokeApiKey";
         /** @enum {string} */
         HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE";
         /**
@@ -2343,7 +2364,7 @@ export interface components {
              */
             code: "resource_busy";
         };
-        /** @description The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses unavailable. */
+        /** @description The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses resource_busy. */
         InvalidState: components["schemas"]["ErrorMetadata"] & {
             /** @constant */
             code: "invalid_state";
@@ -2401,6 +2422,17 @@ export interface components {
              * @enum {string}
              */
             code: "payload_too_large";
+        };
+        /** @description The request body was not received before the server's read deadline. Send the body promptly; the request did not start. */
+        RequestTimeout: components["schemas"]["ErrorMetadata"] & {
+            /** @constant */
+            code: "request_timeout";
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "request_timeout";
         };
         /** @description The route does not support this HTTP method. Use an allowed method. */
         MethodNotAllowed: components["schemas"]["ErrorMetadata"] & {
@@ -2594,6 +2626,22 @@ export interface components {
             code: "bad_request";
         });
         /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
+        SyncForbiddenError: {
+            /**
+             * @description Identifies this code as `forbidden`.
+             * @constant
+             */
+            code: "forbidden";
+            /** @description Safe explanation of this file-operation failure. */
+            message: string;
+        } & (components["schemas"]["ErrorExecutionContext"] & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "forbidden";
+        });
+        /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
         SyncNotFoundError: {
             /**
              * @description Identifies this code as `not_found`.
@@ -2651,6 +2699,23 @@ export interface components {
              * @enum {string}
              */
             code: "payload_too_large";
+        });
+        /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
+        SyncInsufficientResourcesError: {
+            /**
+             * @description Identifies this code as `insufficient_resources`.
+             * @constant
+             */
+            code: "insufficient_resources";
+            /** @description Safe explanation of this file-operation failure. */
+            message: string;
+            details: components["schemas"]["InsufficientResourcesDetails"];
+        } & (components["schemas"]["ErrorExecutionContext"] & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "insufficient_resources";
         });
         /** @description Per-file error inside a successful sync result. The containing result supplies file identity; this is not an HTTP error envelope. */
         SyncUnsupportedOperationError: {
@@ -2775,6 +2840,9 @@ export interface components {
         PayloadTooLargeErrorResponse: {
             error: components["schemas"]["PayloadTooLarge"];
         };
+        RequestTimeoutErrorResponse: {
+            error: components["schemas"]["RequestTimeout"];
+        };
         MethodNotAllowedErrorResponse: {
             error: components["schemas"]["MethodNotAllowed"];
         };
@@ -2809,9 +2877,9 @@ export interface components {
             /** @description The error category and its details, request metadata, and recovery context. */
             error: components["schemas"]["BadRequest"] | components["schemas"]["InsufficientResources"];
         };
-        AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse: {
+        AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse: {
             /** @description The error category and its details, request metadata, and recovery context. */
-            error: components["schemas"]["AlreadyExists"] | components["schemas"]["Conflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
+            error: components["schemas"]["AlreadyExists"] | components["schemas"]["Conflict"] | components["schemas"]["IdempotencyConflict"] | components["schemas"]["InvalidState"] | components["schemas"]["ResourceBusy"];
         };
         AlreadyExistsOrInvalidStateOrResourceBusyErrorResponse: {
             /** @description The error category and its details, request metadata, and recovery context. */
@@ -3483,6 +3551,74 @@ export interface components {
             /** @description Unrevoked API keys, newest first. */
             api_keys: components["schemas"]["ApiKey"][];
         };
+        /**
+         * @description Which side of the organization an event is about. `compute`: its VMs, runs, sessions, mounts, filesystems, pools, network and SSH traffic, and API and SSH keys. `organization`: its members, invitations, sign-ins, terms, billing, and credit and quota changes. Every member can read `compute`; `organization` needs an admin.
+         * @enum {string}
+         */
+        EventCategory: "compute" | "organization";
+        /**
+         * @description What an event records. `run` includes a PTY attach; `delete` a VM's deletion; `inbound_request` a request to one of the VM's ports; `outbound_request` a request the VM's network policy refused; `ssh_session` one SSH connection; `sign_in` a member's session entering the organization, by signing in or switching to it.
+         * @enum {string}
+         */
+        EventAction: "run" | "fork" | "sync" | "delete" | "signal" | "vm_update" | "vm_suspend" | "policies_update" | "run_cancel" | "session_create" | "session_update" | "session_delete" | "mount_create" | "mount_delete" | "filesystem_create" | "filesystem_delete" | "pool_create" | "pool_update" | "pool_delete" | "inbound_request" | "outbound_request" | "ssh_session" | "ssh_key_delete" | "api_key_create" | "api_key_revoke" | "member_update" | "member_remove" | "org_rename" | "member_add" | "member_invite" | "member_invite_revoke" | "org_create" | "org_delete" | "sign_in" | "sign_out" | "terms_accept" | "billing_checkout" | "payment_method_update" | "credit_grant" | "quota_update";
+        /** @enum {string} */
+        EventState: "running" | "completed" | "failed" | "cancelled";
+        /** @enum {string} */
+        EventOrderBy: "requested_at" | "started_at" | "ended_at" | "duration_ms";
+        Event: {
+            /** @description The action's id, the same while it is running and once it ends. */
+            id: string;
+            action: components["schemas"]["EventAction"];
+            category: components["schemas"]["EventCategory"];
+            state: components["schemas"]["EventState"];
+            /** @description The VM the action used; a fork's new VM. Null for an action on no VM. */
+            vm_id: string | null;
+            /**
+             * Format: date-time
+             * @description When the request arrived, or an automatic action was triggered.
+             */
+            requested_at: string;
+            /**
+             * Format: date-time
+             * @description When the action began executing; null before it does and for an action with no separate start.
+             */
+            started_at: string | null;
+            /**
+             * Format: date-time
+             * @description When the action ended; null while it is running.
+             */
+            ended_at: string | null;
+            /** @description From `started_at`, or `requested_at` when there is none, to `ended_at`; null while running. */
+            duration_ms: number | null;
+            /** @description Who initiated the action, and how. Null for an automatic action, or when Arker does not know who acted. */
+            actor: components["schemas"]["EventActor"] | null;
+            /** @description The region of the Arker service that handled the action; null for one the console served, such as an API key's. */
+            region: string | null;
+            /** @description The `x-request-id` of the request that made the action. */
+            request_id: string | null;
+            /** @description Why the action failed or was refused: the code its request was answered with, or `internal` when Arker failed it itself. */
+            error_code: components["schemas"]["ErrorCode"] | null;
+            /** @description Facts only some actions have, and no others: `run_id`, `session_id`, `exit_code` (a run command's own), `type`, `source_vm_id`, `vm_name`, `filesystem_id`, `mount_id`, `pool_id`, `fields`, `port`, `method`, `guest_status`, `host`, `fingerprint`, `caller_ip`, `ssh_key_id`, `key_id`, `email`, `role`, `name`, `tos`, `privacy_policy`, `amount_cents`, `region`, `resource` and `cap`. */
+            attributes: {
+                [key: string]: string | number | boolean | null;
+            };
+        };
+        EventActor: {
+            via: components["schemas"]["EventVia"];
+            /** @description Who: a member's email in the console; one of the organization's API keys' `api_key_id`; an SSH key's id, or its fingerprint when it is no account key. None when Arker acted, or for a member or key the organization no longer has. */
+            id?: string;
+        };
+        /**
+         * @description How an action was initiated: by a member in the console, with an API key, over SSH with an SSH key, or by Arker.
+         * @enum {string}
+         */
+        EventVia: "console" | "api" | "ssh" | "arker";
+        ListEventsResponse: {
+            /** @description Events, in the requested order. */
+            events: components["schemas"]["Event"][];
+            /** @description Cursor for the next page, or null when there is none. */
+            next_cursor: string | null;
+        };
     };
     responses: {
         Conflict: {
@@ -3584,7 +3720,7 @@ export interface components {
                 "application/json": components["schemas"]["ResourceBusyErrorResponse"];
             };
         };
-        /** @description HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses unavailable. */
+        /** @description HTTP 409: The operation requires a different resource state. Perform the prerequisite or choose another resource. An inbound policy refusing to start the VM uses running; a start already in progress uses resource_busy. */
         InvalidStateError: {
             headers: {
                 "Retry-After": components["headers"]["RetryAfter"];
@@ -3632,6 +3768,16 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["PayloadTooLargeErrorResponse"];
+            };
+        };
+        /** @description HTTP 408: The request body was not received before the server's read deadline. Send the body promptly; the request did not start. */
+        RequestTimeoutError: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["RequestTimeoutErrorResponse"];
             };
         };
         /** @description HTTP 405: The route does not support this HTTP method. Use an allowed method. */
@@ -3765,14 +3911,14 @@ export interface components {
                 "application/json": components["schemas"]["BadRequestOrInsufficientResourcesErrorResponse"];
             };
         };
-        /** @description HTTP 409: already_exists, conflict, invalid_state, resource_busy. The code selects the required details. */
-        AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError: {
+        /** @description HTTP 409: already_exists, conflict, idempotency_conflict, invalid_state, resource_busy. The code selects the required details. */
+        AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError: {
             headers: {
                 "Retry-After": components["headers"]["RetryAfter"];
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["AlreadyExistsOrConflictOrInvalidStateOrResourceBusyErrorResponse"];
+                "application/json": components["schemas"]["AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyErrorResponse"];
             };
         };
         /** @description HTTP 409: already_exists, invalid_state, resource_busy. The code selects the required details. */
@@ -3887,7 +4033,7 @@ export interface components {
         };
     };
     parameters: {
-        /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
+        /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork retried while the original is still running may wait for it and returns the same VM; when it cannot wait, it answers 409 resource_busy with Retry-After and the VM id. */
         IdempotencyKey: string;
         /** @description VM identifier: a VM id, or a name. Names resolve in the public base-VM registry first (e.g. ubuntu-full), then among the calling organization's own named VMs. Names never have the shape of a VM id. */
         VmId: string;
@@ -4004,7 +4150,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
+                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork retried while the original is still running may wait for it and returns the same VM; when it cannot wait, it answers 409 resource_busy with Retry-After and the VM id. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -4030,7 +4176,8 @@ export interface operations {
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
-            409: components["responses"]["AlreadyExistsOrConflictOrInvalidStateOrResourceBusyError"];
+            408: components["responses"]["RequestTimeoutError"];
+            409: components["responses"]["AlreadyExistsOrConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError"];
             413: components["responses"]["PayloadTooLargeError"];
             422: components["responses"]["OperationFailedOrUnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
@@ -4147,6 +4294,79 @@ export interface operations {
             503: components["responses"]["UnavailableError"];
         };
     };
+    listEvents: {
+        parameters: {
+            query?: {
+                /** @description Only events with this text, ignoring case, in their action, ids, error code, attribute values or member's email. */
+                search?: string;
+                /** @description Only events of this category. Without it, every event the caller can read: both categories for an admin, `compute` for anyone else. Reading `organization` needs an admin, or an API key with the admin role. */
+                category?: components["schemas"]["EventCategory"];
+                /** @description Only these actions. Repeat the parameter for more than one. */
+                actions?: components["schemas"]["EventAction"][];
+                /** @description Only events in these states. */
+                states?: components["schemas"]["EventState"][];
+                /** @description Only actions these regions served. */
+                regions?: string[];
+                /** @description Only actions on these VMs. */
+                vm_ids?: string[];
+                /** @description Only actions these actors initiated: members by email, or `me` for the member calling, and API keys and SSH keys by id. */
+                actors?: string[];
+                /** @description Only actions initiated this way. */
+                via?: components["schemas"]["EventVia"][];
+                /** @description Only actions these requests made. */
+                request_ids?: string[];
+                /** @description Only actions that failed with these codes. */
+                error_codes?: components["schemas"]["ErrorCode"][];
+                /** @description Only runs that exited with this code. */
+                exit_code?: number;
+                /** @description Only events whose `requested_at` is at or after this time. Events without one do not match. */
+                requested_at_gte?: string;
+                /** @description Only events whose `requested_at` is before this time. Events without one do not match. */
+                requested_at_lt?: string;
+                /** @description Only events whose `started_at` is at or after this time. Events without one do not match. */
+                started_at_gte?: string;
+                /** @description Only events whose `started_at` is before this time. Events without one do not match. */
+                started_at_lt?: string;
+                /** @description Only events whose `ended_at` is at or after this time. Events without one do not match. */
+                ended_at_gte?: string;
+                /** @description Only events whose `ended_at` is before this time. Events without one do not match. */
+                ended_at_lt?: string;
+                /** @description Only events whose `duration_ms` is at or after this many milliseconds. Events without one do not match. */
+                duration_ms_gte?: number;
+                /** @description Only events whose `duration_ms` is before this many milliseconds. Events without one do not match. */
+                duration_ms_lt?: number;
+                /** @description What events are ordered by; events without it come last, and `id` breaks ties. */
+                order_by?: components["schemas"]["EventOrderBy"];
+                /** @description The direction of `order_by`. */
+                order?: "asc" | "desc";
+                /** @description Events per page. */
+                limit?: number;
+                /** @description The previous page's `next_cursor`. It keeps that query's filters and order, so only `limit` may accompany it. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListEventsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestError"];
+            401: components["responses"]["UnauthorizedError"];
+            403: components["responses"]["ForbiddenError"];
+            429: components["responses"]["RateLimitedError"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["UnavailableError"];
+        };
+    };
     getVm: {
         parameters: {
             query?: never;
@@ -4172,6 +4392,7 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4204,6 +4425,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateOrResourceBusyError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4240,9 +4462,10 @@ export interface operations {
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["AlreadyExistsOrInvalidStateOrResourceBusyError"];
             413: components["responses"]["PayloadTooLargeError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["CapacityUnavailableOrUnavailableError"];
@@ -4275,7 +4498,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4311,9 +4534,10 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["InvalidStateError"];
             413: components["responses"]["PayloadTooLargeError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4359,6 +4583,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4369,7 +4594,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork whose key is claimed but still running answers 503 with a retry hint, since the VM it would name does not exist yet. */
+                /** @description Makes the request safely retryable. Reusing a key with the same request returns the original result - the same run, or the same VM for a fork - instead of doing the work twice; reusing it with a different request returns a conflict. A fork retried while the original is still running may wait for it and returns the same VM; when it cannot wait, it answers 409 resource_busy with Retry-After and the VM id. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
@@ -4407,6 +4632,7 @@ export interface operations {
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["ConflictOrIdempotencyConflictOrInvalidStateOrResourceBusyError"];
             413: components["responses"]["PayloadTooLargeError"];
             422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
@@ -4444,6 +4670,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4477,11 +4704,11 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
-            409: components["responses"]["InvalidStateError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            409: components["responses"]["InvalidStateOrResourceBusyError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
-            503: components["responses"]["UnavailableError"];
+            503: components["responses"]["CapacityUnavailableOrUnavailableError"];
             504: components["responses"]["GatewayTimeoutError"];
         };
     };
@@ -4518,6 +4745,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4554,8 +4782,10 @@ export interface operations {
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["ConflictOrInvalidStateError"];
             413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4590,6 +4820,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4623,10 +4854,11 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
-            409: components["responses"]["InvalidStateError"];
+            409: components["responses"]["InvalidStateOrResourceBusyError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
-            503: components["responses"]["UnavailableError"];
+            503: components["responses"]["CapacityUnavailableOrUnavailableError"];
             504: components["responses"]["GatewayTimeoutError"];
         };
     };
@@ -4661,8 +4893,10 @@ export interface operations {
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["InvalidStateError"];
             413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4709,7 +4943,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateOrResourceBusyError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4744,8 +4978,10 @@ export interface operations {
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["InvalidStateError"];
             413: components["responses"]["PayloadTooLargeError"];
+            422: components["responses"]["UnrecoverableError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4785,7 +5021,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4822,9 +5058,10 @@ export interface operations {
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["ConflictOrInvalidStateError"];
             413: components["responses"]["PayloadTooLargeError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4859,7 +5096,7 @@ export interface operations {
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
             409: components["responses"]["InvalidStateError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
@@ -4891,14 +5128,15 @@ export interface operations {
                     "application/json": components["schemas"]["SyncResponse"];
                 };
             };
-            400: components["responses"]["BadRequestError"];
+            400: components["responses"]["BadRequestOrInsufficientResourcesError"];
             401: components["responses"]["UnauthorizedError"];
             402: components["responses"]["PaymentRequiredError"];
             403: components["responses"]["ForbiddenError"];
             404: components["responses"]["NotFoundError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["ConflictOrInvalidStateOrResourceBusyError"];
             413: components["responses"]["PayloadTooLargeError"];
-            422: components["responses"]["UnsupportedOperationError"];
+            422: components["responses"]["UnrecoverableOrUnsupportedOperationError"];
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["CapacityUnavailableOrUnavailableError"];
@@ -4965,6 +5203,7 @@ export interface operations {
             400: components["responses"]["BadRequestError"];
             401: components["responses"]["UnauthorizedError"];
             403: components["responses"]["ForbiddenError"];
+            408: components["responses"]["RequestTimeoutError"];
             409: components["responses"]["AlreadyExistsError"];
             413: components["responses"]["PayloadTooLargeError"];
             422: components["responses"]["UnsupportedOperationError"];
@@ -5101,6 +5340,7 @@ export interface operations {
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     getPool: {
@@ -5130,6 +5370,7 @@ export interface operations {
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     deletePool: {
@@ -5160,6 +5401,7 @@ export interface operations {
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     updatePool: {
@@ -5196,6 +5438,7 @@ export interface operations {
             429: components["responses"]["QuotaExceededOrRateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     listPoolWorkers: {
@@ -5226,6 +5469,7 @@ export interface operations {
             429: components["responses"]["RateLimitedError"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["UnavailableError"];
+            504: components["responses"]["GatewayTimeoutError"];
         };
     };
     heartbeatWorker: {

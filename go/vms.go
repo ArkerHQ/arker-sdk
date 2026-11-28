@@ -407,6 +407,12 @@ func (q *query) csv(key string, values []string) {
 	}
 }
 
+func (q *query) each(key string, values []string) {
+	for _, value := range values {
+		q.values.Add(key, value)
+	}
+}
+
 func (q *query) on(path string) string {
 	if encoded := q.values.Encode(); encoded != "" {
 		return path + "?" + encoded
