@@ -168,9 +168,16 @@ func TestListedVMsCarryTheirOwnEndpoint(t *testing.T) {
 	// ListVMs aggregates across regions, so a returned handle must address the
 	// VM's OWN region. Reusing the client's endpoint would send every call for
 	// a remote VM to the wrong worker.
-	c := twoPlane(t, reject(t, "regional"), func(w http.ResponseWriter, r *http.Request) {
+	cs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"vms":[{"vm_id":"vm_far","provider":"gcp","region":"us-central1"}]}`)
+	}))
+	t.Cleanup(cs.Close)
+	c, err := arker.New(arker.Options{
+		APIKey: "k", Provider: "aws", Region: "us-west-2", ControlBaseURL: cs.URL, Retry: fastRetry,
 	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
 	list, err := c.ListVMs(context.Background(), arker.ListVMsOptions{})
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -956,4 +963,57 @@ func syncDirectoryServer(t *testing.T, manifest string, archive func([]byte)) *a
 		data = append(data, chunk...)
 		fmt.Fprintf(w, `{"ok":true,"op":"write","results":[{"complete":%t,"written":%t}]}`, entry.End == entry.Size, entry.End == entry.Size)
 	}, reject(t, "control"))
+}
+
+type vmEndpointCase struct {
+	Name   string `json:"name"`
+	Client struct {
+		BaseURL  string `json:"base_url"`
+		Provider string `json:"provider"`
+		Region   string `json:"region"`
+	} `json:"client"`
+	VM *struct {
+		Provider string `json:"provider"`
+		Region   string `json:"region"`
+	} `json:"vm"`
+	Expected string `json:"expected"`
+}
+
+func TestVMEndpointCasesSharedByEverySDK(t *testing.T) {
+	raw, err := os.ReadFile("../../../tests/vm-endpoint-cases.json")
+	if err != nil {
+		t.Fatalf("read cases: %v", err)
+	}
+	var file struct {
+		Cases []vmEndpointCase `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatalf("parse cases: %v", err)
+	}
+	for _, tc := range file.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			vm := map[string]string{"vm_id": "vm_1"}
+			if tc.VM != nil {
+				vm["provider"], vm["region"] = tc.VM.Provider, tc.VM.Region
+			}
+			cs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{"vms": []any{vm}})
+			}))
+			t.Cleanup(cs.Close)
+			c, err := arker.New(arker.Options{
+				APIKey: "k", BaseURL: tc.Client.BaseURL, Provider: tc.Client.Provider, Region: tc.Client.Region,
+				ControlBaseURL: cs.URL, Retry: fastRetry,
+			})
+			if err != nil {
+				t.Fatalf("new client: %v", err)
+			}
+			list, err := c.ListVMs(context.Background(), arker.ListVMsOptions{})
+			if err != nil {
+				t.Fatalf("list: %v", err)
+			}
+			if got := list.VMs[0].BaseURL(); got != tc.Expected {
+				t.Fatalf("got %q, want %q", got, tc.Expected)
+			}
+		})
+	}
 }

@@ -45,10 +45,13 @@ type Client struct {
 	apiKey     string
 	baseURL    string
 	controlURL string
-	provider   string
-	region     string
-	http       *http.Client
-	retry      Retry
+	// pinned is a base URL other than the public control plane: VMs are never
+	// readdressed away from it.
+	pinned   bool
+	provider string
+	region   string
+	http     *http.Client
+	retry    Retry
 }
 
 // New builds a Client.
@@ -58,6 +61,7 @@ func New(opts Options) (*Client, error) {
 		return nil, errors.New("arker: APIKey is required; pass APIKey or set ARKER_API_KEY")
 	}
 	base := firstNonEmpty(opts.BaseURL, os.Getenv("ARKER_BASE_URL"))
+	pinned := base != "" && trimURL(base) != trimURL(DefaultControlBaseURL)
 	provider, region := opts.Provider, opts.Region
 	if base != "" {
 		provider, region = "", ""
@@ -84,6 +88,7 @@ func New(opts Options) (*Client, error) {
 		apiKey:     key,
 		baseURL:    trimURL(base),
 		controlURL: trimURL(firstNonEmpty(opts.ControlBaseURL, os.Getenv("ARKER_CONTROL_BASE_URL"), DefaultControlBaseURL)),
+		pinned:     pinned,
 		provider:   provider,
 		region:     region,
 		http:       httpClient,

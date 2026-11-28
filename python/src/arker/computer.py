@@ -332,6 +332,9 @@ class Arker:
 
         # base_url fully determines routing, so provider/region are ignored when it is set.
         base_url = base_url or _env("ARKER_BASE_URL")
+        # A base URL other than the public control plane pins the client: its
+        # VMs are never readdressed to a regional endpoint.
+        self._pinned = bool(base_url) and _normalize_base_url(base_url) != _normalize_base_url(DEFAULT_CONTROL_BASE_URL)
         if base_url:
             provider = region = None
         else:
@@ -419,7 +422,7 @@ class Arker:
                 preserve_nulls=True,
             )
         )
-        return VM(self, info.vm_id, base_url, info)
+        return VM(self, info.vm_id, self._vm_base_url(info.provider, info.region, base_url), info)
 
     def _fork_dockerfile(
         self,
@@ -494,9 +497,7 @@ class Arker:
         vms = []
         for item in payload.get("vms", []):
             info = _vm_info(item)
-            placed = info.provider and info.region
-            base_url = _compute_base_url(info.provider, info.region) if placed else self.base_url
-            vms.append(VM(self, info.vm_id, base_url, info))
+            vms.append(VM(self, info.vm_id, self._vm_base_url(info.provider, info.region), info))
         return VmList(vms=vms, next_cursor=_optional_str(payload.get("next_cursor")))
 
     def list_runs(
@@ -555,7 +556,7 @@ class Arker:
     def get_vm(self, vm_id: str) -> VM:
         base_url = self.base_url
         info = _vm_info(self._request("GET", _vm_path(vm_id), base_url=base_url))
-        return VM(self, vm_id, base_url, info)
+        return VM(self, vm_id, self._vm_base_url(info.provider, info.region, base_url), info)
 
     # ── Filesystems (org-scoped, control-plane) ─────────────────────────
     def list_filesystems(
@@ -691,6 +692,16 @@ class Arker:
     def _retry_delay(self, attempt: int, error: ArkerError | None = None) -> float:
         return _retry_delay(self._retry, attempt, error)
 
+    def _vm_base_url(self, provider: str | None, region: str | None, reached_through: str | None = None) -> str:
+        """Where a VM's calls go: its own region when the placement is known and
+        the client is not pinned, else the endpoint it was reached through (the
+        client's base URL by default). The same rule in every SDK;
+        tests/vm-endpoint-cases.json is the shared definition.
+        """
+        if not self._pinned and provider and region:
+            return _compute_base_url(provider, region)
+        return reached_through or self.base_url
+
 
 class VM:
     # Data fields - populated from fork/get/list/refresh; ``None`` on a bare
@@ -733,7 +744,7 @@ class VM:
     def refresh(self) -> VM:
         """Re-fetch this VM and return a fresh, fully-populated handle."""
         info = _vm_info(self._client._request("GET", _vm_path(self.id), base_url=self.base_url))
-        return VM(self._client, self.id, self.base_url, info)
+        return VM(self._client, self.id, self._client._vm_base_url(info.provider, info.region, self.base_url), info)
 
     def fork(self, **options: Any) -> VM:
         """Fork this VM and return its child."""
