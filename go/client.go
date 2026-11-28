@@ -188,7 +188,10 @@ func (c *Client) do(ctx context.Context, cl call) (int, error) {
 		}
 
 		apiErr := decodeError(status, raw)
-		if !retryable(apiErr) || attempt == c.retry.Attempts-1 || !c.backoff(ctx, attempt, apiErr) {
+		keyedForkBusy := cl.method == http.MethodPost && cl.path == "/v1/fork" && cl.key != "" &&
+			status == http.StatusConflict && apiErr.Code == "resource_busy" && apiErr.RetryAfter != nil &&
+			*apiErr.RetryAfter >= 0 && *apiErr.RetryAfter <= 4294967295 && math.Trunc(*apiErr.RetryAfter) == *apiErr.RetryAfter
+		if (!keyedForkBusy && !retryable(apiErr)) || attempt == c.retry.Attempts-1 || !c.backoff(ctx, attempt, apiErr) {
 			return status, apiErr
 		}
 		lastErr = apiErr
