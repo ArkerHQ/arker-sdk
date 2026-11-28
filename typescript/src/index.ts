@@ -1036,6 +1036,7 @@ export class VM {
   readonly provider?: Vm["provider"];
   readonly network?: Vm["network"];
   readonly resources?: Vm["resources"];
+  readonly resources_autoscaling?: Vm["resources_autoscaling"];
   readonly max_vcpus?: Vm["max_vcpus"];
   readonly max_memory_mib?: Vm["max_memory_mib"];
   readonly min_memory_mib?: Vm["min_memory_mib"];
@@ -1650,8 +1651,7 @@ export class VM {
   async update(
     request:
       | PatchVmRequest
-      | (ResourcesInput &
-          Pick<PatchVmRequest, "description" | "ssh_public_keys" | "policies" | "immutable">),
+      | (ResourcesInput & Omit<PatchVmRequest, "resources">),
   ): Promise<Vm> {
     const r = request as PatchVmRequest &
       ResourcesInput & { resources?: ResourcesInput | null };
@@ -1663,10 +1663,11 @@ export class VM {
     const body: PatchVmRequest = {
       description: r.description,
       resources,
+      resources_autoscaling: r.resources_autoscaling,
       ssh_public_keys: r.ssh_public_keys,
       policies: r.policies && withoutReadOnlyPolicyFields(r.policies),
       immutable: r.immutable,
-    };
+    } satisfies Record<keyof PatchVmRequest, unknown>;
     return this._client._request("PATCH", vmPath(this.id), body, this.baseUrl);
   }
 

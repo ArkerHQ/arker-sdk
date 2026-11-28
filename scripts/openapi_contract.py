@@ -109,6 +109,8 @@ def generate(contract: Path, output_root: Path) -> None:
             "--formatters",
             "black",
             "isort",
+            "--type-overrides",
+            '{"ResourcesAutoscalingUpdate":"arker._autoscaling.ResourcesAutoscalingUpdate"}',
             "--frozen-dataclasses",
             "--disable-timestamp",
             "--include-path-parameters",

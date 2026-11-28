@@ -373,6 +373,42 @@ async function testUpdateSendsTopLevelSshPublicKeys(): Promise<void> {
   assert.deepEqual(JSON.parse(fetch.calls[0]!.body!), { ssh_public_keys: [] });
 }
 
+async function testUpdateSendsResourceAutoscaling(): Promise<void> {
+  const fetch = new FakeFetch();
+  const isPatch = (method: string, url: string) =>
+    method === "PATCH" && url === "https://test.invalid/api/v1/vms/vm_1";
+  const vm = client(fetch).vm("vm_1");
+  const cpuRule = { min: 2, max: 8, target_utilization: 0.6 };
+  const diskRule = { max: 32768, target_utilization: 0.7 };
+
+  fetch.addJson(isPatch, 200, { vm_id: "vm_1" });
+  await vm.update({
+    resources: { vcpu: 4 },
+    resources_autoscaling: { vcpu: cpuRule, memory_mib: null },
+  });
+
+  fetch.addJson(isPatch, 200, { vm_id: "vm_1" });
+  await vm.update({
+    disk_mib: 16384,
+    resources_autoscaling: { vcpu: null, disk_mib: diskRule },
+  });
+
+  fetch.addJson(isPatch, 200, { vm_id: "vm_1" });
+  await vm.update({ memory_mib: 4096 });
+
+  assert.deepEqual(fetch.calls.map(({ body }) => JSON.parse(body!)), [
+    {
+      resources: { vcpu: 4 },
+      resources_autoscaling: { vcpu: cpuRule, memory_mib: null },
+    },
+    {
+      resources: { disk_mib: 16384 },
+      resources_autoscaling: { vcpu: null, disk_mib: diskRule },
+    },
+    { resources: { memory_mib: 4096 } },
+  ]);
+}
+
 async function testUpdateSendsPolicies(): Promise<void> {
   const vm = {
     vm_id: "vm_1",
@@ -1309,6 +1345,7 @@ await testForkOmitsUnconfiguredCapabilities();
 await testRemovedRunNetworkInputsFailBeforeRequests();
 await testUpdateSendsNoPool();
 await testUpdateSendsTopLevelSshPublicKeys();
+await testUpdateSendsResourceAutoscaling();
 await testUpdateSendsPolicies();
 await testNestedErrorWithoutOkStillParses();
 await testCompletedRunDecodesOutput();
